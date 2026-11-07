@@ -365,6 +365,7 @@ panel	k
 panel_brightness	k
 panel_gamma	k
 panel_gamma_log	k
+panel_sleep	k
 passcode_debug	u
 passcode_reset	k
 passcode_selftest	k
@@ -420,6 +421,8 @@ shub_ms	k
 shub_req_len	k
 shub_req_rpc	k
 shub_sensors	k
+sleep_cores	k
+sleep_cores_after	k
 small_cores	k
 small_cores_after	k
 soc_cmd_db	k

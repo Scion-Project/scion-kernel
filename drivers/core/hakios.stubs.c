@@ -225,6 +225,8 @@ void hakios_max98512_quiesce(void) {}
 #ifndef HAKIOS_S6E3HA8
 void hakios_s6e3ha8_init(void) {}
 bool hakios_s6e3ha8_blank(__unused int (*say)(const char *, ...)) { return false; }      /* "not blanked" */
+int hakios_s6e3ha8_power(bool on);
+int hakios_s6e3ha8_power(__unused bool on) { return ENODEV; }    /* no panel driver: the screen as iOS draws it */
 #endif
 
 #ifndef HAKIOS_EXYNOS_POWEROFF

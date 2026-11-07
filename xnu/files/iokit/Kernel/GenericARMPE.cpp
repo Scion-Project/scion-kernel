@@ -64,6 +64,8 @@ public:
 
 	static int cpuNumberOfNub(IOService * nub);
 	void run(void);
+	kern_return_t park(void);       /* patch 1517: off while the screen is (sleep_cores=) */
+	kern_return_t unpark(void);
 };
 
 OSDefineMetaClassAndStructors(GenericARMCPU, IOCPU);
@@ -123,6 +125,18 @@ GenericARMCPU::run(void)
 	processor_start(machProcessor);
 }
 
+kern_return_t
+GenericARMCPU::park(void)
+{
+	return processor_exit(machProcessor);
+}
+
+kern_return_t
+GenericARMCPU::unpark(void)
+{
+	return processor_start(machProcessor);
+}
+
 /* On the processor itself, with its interrupts off, when it joins (or rejoins) the scheduler. */
 void
 GenericARMCPU::initCPU(bool boot)
@@ -178,6 +192,131 @@ GenericARMCPU::getCPUName(void)
 	return OSSymbol::withCString(name);
 }
 
+/*
+ * Scion (patch 1517): the screen's off and on, as iOS asks for them (backboardd's power request to the display service,
+ * MiniIOMobileFramebuffer.cpp), and what is done about them. Each change is logged ("GenericARMPE: the display off").
+ * Boot-args, every one off by default (nothing but the log line happens without them):
+ *   panel_sleep=1      the panel to sleep and back (hakios_s6e3ha8_power(), drivers/display/panel/hakios.s6e3ha8.c; with
+ *                      panel=1 on the Galaxy S9; elsewhere a stub that says no)
+ *   sleep_cores=1      sleep_cores_after= seconds (default 10) after the screen went off, the cores of the performance
+ *                      cluster are taken off (processor_exit(): the scheduler lets them go, each switches itself off
+ *                      through PSCI CPU_OFF, and the firmware may power its cluster down once all of it is off); at the
+ *                      screen's on they are started again (processor_start(): PSCI CPU_ON, as at boot). 2: the
+ *                      efficiency cores too. Never the boot processor, nor the boot loader's own core (core0=1).
+ * Why: with the system's sleep refused (IOPMrootDomain, syssleep=), a screen-off phone stays awake with every core
+ * idling in WFI, which only gates the clock: a core taken off leaks nothing. The cores come back in the time a
+ * CPU_ON takes at boot (milliseconds); the screen-on does not wait for them.
+ */
+extern "C" int hakios_s6e3ha8_power(bool on);
+extern "C" bool psci_smp_cpu_is_loaders(int cpu);
+extern "C" uint32_t hakios_cpu_exit_mask;       /* osfmk/arm/cpu_common.c: the cores ml_cpu_can_exit() lets go */
+extern "C" void hakios_display_power(int on);
+
+static GenericARMCPU ** gCPUList;               /* GenericARMPE::start()'s cpus[], by cpu number */
+static uint32_t gPanelSleep, gSleepCores, gSleepCoresAfter = 10;
+static thread_call_t gSleepCoresCall;
+static volatile int gDisplayOn = -1;            /* -1: not said yet */
+static uint32_t gParked;                        /* the cores taken off (only gSleepCoresCall touches it) */
+
+static bool
+sleepCoreWanted(unsigned int number)
+{
+	const ml_topology_info_t * topology = ml_get_topology_info();
+
+	if (gCPUList == NULL || gCPUList[number] == NULL || number == (unsigned int)master_cpu ||
+	    psci_smp_cpu_is_loaders((int)number) || gCPUList[number]->getCPUState() != kIOCPUStateRunning) {
+		return false;
+	}
+	return gSleepCores >= 2 || topology->cpus[number].cluster_type == CLUSTER_TYPE_P;
+}
+
+static void
+sleepCoresWork(thread_call_param_t, thread_call_param_t)
+{
+	uint64_t t0;
+
+	if (gDisplayOn == 0) {
+		for (unsigned int number = 0; number < MAX_CPUS && number < 32 && gDisplayOn == 0; number++) {
+			if ((gParked & (1u << number)) || !sleepCoreWanted(number)) {
+				continue;
+			}
+			__atomic_fetch_or(&hakios_cpu_exit_mask, 1u << number, __ATOMIC_RELAXED);
+			t0 = mach_absolute_time();
+			kern_return_t kr = gCPUList[number]->park();
+			if (kr == KERN_SUCCESS) {
+				gParked |= 1u << number;
+			} else {
+				__atomic_fetch_and(&hakios_cpu_exit_mask, ~(1u << number), __ATOMIC_RELAXED);
+			}
+			absolutetime_to_nanoseconds(mach_absolute_time() - t0, &t0);
+			IOLog("GenericARMPE: sleep_cores: cpu %u %s (%d) in %llu us; %u processors running\n", number,
+			    kr == KERN_SUCCESS ? "taken off" : "NOT taken off", kr, t0 / 1000, processor_avail_count);
+		}
+	}
+	if (gDisplayOn != 0 && gParked != 0) {
+		for (unsigned int number = 0; number < MAX_CPUS && number < 32; number++) {
+			if (!(gParked & (1u << number))) {
+				continue;
+			}
+			t0 = mach_absolute_time();
+			__atomic_fetch_and(&hakios_cpu_exit_mask, ~(1u << number), __ATOMIC_RELAXED);
+			kern_return_t kr = gCPUList[number]->unpark();
+			if (kr == KERN_SUCCESS) {
+				gParked &= ~(1u << number);
+			}
+			absolutetime_to_nanoseconds(mach_absolute_time() - t0, &t0);
+			IOLog("GenericARMPE: sleep_cores: cpu %u %s (%d) in %llu us; %u processors running\n", number,
+			    kr == KERN_SUCCESS ? "started again" : "NOT started again", kr, t0 / 1000, processor_avail_count);
+		}
+	}
+}
+
+/* backboardd's power request (MiniIOMobileFramebuffer.cpp): 0 the screen off, anything else on */
+void
+hakios_display_power(int on)
+{
+	on = on != 0;
+	if (on == gDisplayOn) {
+		return;
+	}
+	gDisplayOn = on;
+	IOLog("GenericARMPE: the display %s (iOS's power request)%s%s\n", on ? "on" : "off",
+	    gPanelSleep ? "; panel_sleep=1" : "", gSleepCores ? "; sleep_cores=" : "");
+	if (gPanelSleep) {
+		int error = hakios_s6e3ha8_power(on);
+
+		if (error != 0) {
+			IOLog("GenericARMPE: panel_sleep: the panel says %d\n", error);
+		}
+	}
+	if (gSleepCoresCall != NULL) {
+		if (!on) {
+			uint64_t deadline;
+
+			clock_interval_to_deadline(gSleepCoresAfter, NSEC_PER_SEC, &deadline);
+			thread_call_enter_delayed(gSleepCoresCall, deadline);
+		} else {
+			thread_call_cancel(gSleepCoresCall);
+			thread_call_enter(gSleepCoresCall);
+		}
+	}
+}
+
+static void
+screenPowerInit(void)
+{
+	PE_parse_boot_argn("panel_sleep", &gPanelSleep, sizeof(gPanelSleep));
+	PE_parse_boot_argn("sleep_cores", &gSleepCores, sizeof(gSleepCores));
+	PE_parse_boot_argn("sleep_cores_after", &gSleepCoresAfter, sizeof(gSleepCoresAfter));
+	if (gSleepCores != 0 && ml_get_cpu_count() > 1) {
+		gSleepCoresCall = thread_call_allocate_with_options(sleepCoresWork, NULL, THREAD_CALL_PRIORITY_KERNEL,
+		    THREAD_CALL_OPTIONS_ONCE);
+		IOLog("GenericARMPE: sleep_cores=%u: %s taken off %u s after the screen goes off\n", gSleepCores,
+		    gSleepCores >= 2 ? "every core but the boot processor (and the loader's)" : "the performance cores",
+		    gSleepCoresAfter);
+	}
+}
+
 class GenericARMPE : public IODTPlatformExpert
 {
 	OSDeclareDefaultStructors(GenericARMPE);
@@ -223,6 +362,7 @@ GenericARMPE::start(IOService * provider)
 	 * and then start them, the boot processor (number master_cpu) first.
 	 */
 	static GenericARMCPU * cpus[MAX_CPUS];        /* (static: the slower cores may be started later, see below) */
+	gCPUList = cpus;
 	unsigned int count = 0;
 	OSIterator * iter = getChildIterator(gIOServicePlane);
 	if (iter != NULL) {
@@ -294,6 +434,8 @@ GenericARMPE::start(IOService * provider)
 			IOLog("GenericARMPE: %u of %u processors are running\n", processor_avail_count, count);
 		}
 	}
+
+	screenPowerInit();
 
 	/* BSD looks the platform expert up by class (IOSecureBSDRoot). */
 	registerService();
