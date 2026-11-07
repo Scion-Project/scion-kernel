@@ -1,0 +1,3 @@
+# The ios-26 base: Apple's xnu-12377.121.6 (ac9718fb1af6), pristine, then these patches in order (xnu/apply-series.sh).
+# Empty: Scion has no change of its own on this base yet. docs/two-bases.md says what goes here and in what order
+# (arch, then SoC, then OS, as UniXNU orders theirs), and why ios-on-pixel-10's kernel series cannot.
