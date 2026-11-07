@@ -42,6 +42,8 @@ static const struct platform platform_starlte = {
 	 */
 	.timer_hz = 26000000,
 	.fb_base = 0xCC000000,
+	/* the ALIVE GPIO block's GPA0 data register, pin 4: Volume Down (drivers/input/hakios.exynos_keys.c reads the same pin) */
+	.vol_down_reg = 0x14050000 + 0x020 + 0x04, .vol_down_bit = 4,
 	/*
 	 * Samsung's pstore (exynos-snapshot's log_pstore, 0xFED10000 + 32 KB), its second half: the pmsg zone, where the
 	 * WoA port for the S9+ kept its notes across restarts and read them back in TWRP. Reserved in this port's UEFI

@@ -15,6 +15,8 @@
  */
 #include "efi.h"
 #include "identity.h"         /* who Darwin shall think we are: from the iPhone's own device tree (mkidentity.py) */
+#include "scion_splash_logo.h"   /* Scion's boot screen (splash=1): the sprout, and the drawing the kernel shares (docs/boot-screen.md) */
+#include "../xnu/files/osfmk/console/scion_splash.h"
 
 /* ------------------------------------------------------------------------ */
 /* Fixed conventions shared with the boot shim, the packer and the kernel   */
@@ -185,6 +187,35 @@ static int screen_quiet;
  * What it was before the run, to go back to.
  */
 static int screen_quiet_before_run;
+
+/*
+ * Scion's boot screen (docs/boot-screen.md), boot-argument splash=1 in the payload's command line: the screen is the
+ * sprout and a progress line instead of the loader's text, which still goes to the log. -v, or Volume Down held while
+ * the loader starts (splash_start), gives the text back: the log is on the screen as before, and the kernel gets "-v".
+ * splash_wanted: asked for, and not undone by -v; splash_on: drawn; splash_forced_verbose: the key was held.
+ */
+static int splash_wanted;
+static int splash_on;
+static int splash_forced_verbose;
+static struct scion_splash splash;
+
+/* The screen is the text's again (an error, the key, no framebuffer to draw on, the run over). */
+static void
+splash_unquiet(void)
+{
+	screen_quiet = 0;
+	screen_quiet_before_run = 0;
+	splash_on = 0;
+}
+
+/* The progress line to `permille` of its length (the kernel carries on from 250). */
+static void
+splash_step(uint32_t permille)
+{
+	if (splash_on) {
+		scion_splash_bar(&splash, permille);
+	}
+}
 
 static void
 put_char(char c)
@@ -1482,7 +1513,8 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 			verbose |= starts_with(c, "-v") && (c[2] == ' ' || c[2] == 0) && (c == pi.cmdline || c[-1] == ' ');
 		}
 		ba->video.v_baseAddr = SCREEN.base;
-		ba->video.v_display = verbose ? 0 : 1;
+		verbose |= splash_forced_verbose;
+		ba->video.v_display = (verbose || splash_on) ? 0 : 1;   /* (the boot screen is the console's text mode, with the text taken: scion_splash.c) */
 		ba->video.v_rowBytes = SCREEN.stride;
 		ba->video.v_width = SCREEN.width;
 		ba->video.v_height = SCREEN.height;
@@ -1507,6 +1539,11 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	uint32_t n = 0;
 	for (const char *c = base_cmdline; *c && n < BOOT_LINE_LENGTH - 1; c++) {
 		ba->commandLine[n++] = *c;
+	}
+	if (splash_forced_verbose) {
+		for (const char *c = "-v "; *c && n < BOOT_LINE_LENGTH - 1; c++) {
+			ba->commandLine[n++] = *c;
+		}
 	}
 	/* one processor unless the payload asks for more (of two "cpus=" the kernel takes the first) */
 	if (!more_cores) {
@@ -1913,6 +1950,7 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	}
 	print("jumping to %x\n", entry_va + slide);
 	flush_log();
+	splash_step(250);
 	screen_quiet_before_run = screen_quiet;
 	screen_quiet = 1;               /* the screen is the kernel's now; the log still takes every line */
 	/* From here on the kernel feeds the watchdog (boot-arg hv_wdt_pet, see loader_return.c in XNU). */
@@ -1950,6 +1988,9 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 			int64_t status = run_on_other_cpu(kernel_mpidr, entry_va + slide, ba_pa, kernel_live, slide, kernel_budget);
 
 			screen_quiet = screen_quiet_before_run;
+			if (splash_on) {
+				splash_unquiet();   /* the run is over: whatever follows is for the screen */
+			}
 			wdt_set_ms(WDT_BITE_MS);
 			if (status != 0) {
 				/* a kernel that hung may have left its own transfer list in the controller */
@@ -1981,6 +2022,9 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 
 	/* --- the kernel came back ------------------------------------------- */
 	screen_quiet = screen_quiet_before_run;
+	if (splash_on) {
+		splash_unquiet();   /* the run is over: whatever follows is for the screen */
+	}
 	wdt_set_ms(WDT_BITE_MS);
 	hc_take_back("the kernel came back");   /* before anything here touches the storage */
 	if (block_enabled) {
@@ -2347,6 +2391,64 @@ payload_move(void)
 	}
 }
 
+/* The text of the payload's entry `name` (the command line is "cmdline"), or NULL: a look that changes and prints nothing. */
+static const char *
+payload_entry_text(const char *name)
+{
+	const struct payload_header *ph = (const struct payload_header *)payload_base;
+
+	if (ph->magic != PAYLOAD_MAGIC) {
+		return NULL;
+	}
+	const uint8_t *p = (const uint8_t *)(ph + 1), *pend = p + payload_walk_size(ph->size);
+	while (p + sizeof(struct payload_entry) <= pend) {
+		const struct payload_entry *e = (const struct payload_entry *)p;
+
+		if (e->name[0] == 0) {
+			break;
+		}
+		if ((uint64_t)e->size > (uint64_t)(pend - (p + sizeof(*e)))) {
+			break;
+		}
+		if (str_eq(e->name, name)) {
+			return (const char *)(p + sizeof(*e));
+		}
+		p += sizeof(*e) + ((e->size + 15) & ~15u);
+	}
+	return NULL;
+}
+
+/*
+ * splash=1, once the display is known: draw the ground, the sprout and the start of the line over what is on the
+ * screen, or, with Volume Down held (or nothing to draw on), leave the text on it. screen_quiet has held the text since
+ * efi_main's first lines.
+ */
+static void
+splash_start(void)
+{
+	if (SCREEN.base == 0 || SCREEN.width < 320 || SCREEN.height < 320 || SCREEN.stride < SCREEN.width * 4) {
+		splash_unquiet();
+		return;
+	}
+	if (PLAT->vol_down_reg != 0 && !((*(volatile uint32_t *)(uintptr_t)PLAT->vol_down_reg >> PLAT->vol_down_bit) & 1)) {
+		splash_forced_verbose = 1;
+		splash_unquiet();
+		print("splash: Volume Down is held: the log stays on the screen (the kernel is given -v)\n");
+		return;
+	}
+	if (SPLASH_LOGO_H * 1000 / SPLASH_LOGO_W != SPLASH_LOGO_HW) {
+		splash_unquiet();
+		print("splash: the sprout's proportions are not scion_splash.h's: no boot screen\n");
+		return;
+	}
+	scion_splash_layout(&splash, (volatile uint8_t *)(uintptr_t)SCREEN.base, SCREEN.width, SCREEN.height, SCREEN.stride,
+	    GOP != NULL && PLAT != &platform_qemu_virt && GOP->mode->info->pixel_format == 0, SPLASH_LOGO_HW);
+	scion_splash_background(&splash);
+	scion_splash_logo(&splash);
+	splash_on = 1;
+	splash_step(40);
+}
+
 /*
  * The version of the kernel in the payload (the entry kernel.ver, made by xnuloader/mkpayload.py from
  * tools/kernel-version.py), or NULL if the payload has none. A look at the payload that changes
@@ -2392,13 +2494,13 @@ print_banner(void)
 	const char *version = payload_kernel_version();
 
 	print("\n");
-	print("   #   #   ###   #   #  #####   ###    ####\n");
-	print("   #   #  #   #  #  #     #    #   #  #\n");
-	print("   #####  #####  ###      #    #   #   ###\n");
-	print("   #   #  #   #  #  #     #    #   #      #\n");
-	print("   #   #  #   #  #   #  #####   ###   ####\n");
+	print("    ###    ###  #####   ###   #   #\n");
+	print("   #      #   #   #    #   #  ##  #\n");
+	print("    ###   #       #    #   #  # # #\n");
+	print("       #  #   #   #    #   #  #  ##\n");
+	print("   ####    ###  #####   ###   #   #\n");
 	print("\n");
-	print("   hello hakios-kernel!\n");
+	print("   hello scion-kernel!\n");
 	print("   kernel.ver=%s\n", version ? version : "unknown");
 	print("\n");
 }
@@ -2417,6 +2519,26 @@ efi_main(efi_handle image, efi_system_table *st)
 	/* no payload in memory (nobody put one there): the volume this loader came from may have one, as a UEFI boot loader's does */
 	if (((const struct payload_header *)PAYLOAD_BASE)->magic != PAYLOAD_MAGIC) {
 		load_payload_from_volume();
+	}
+	{
+		/* splash=1 (and not -v): the text stays off the screen from the first line; the sprout is drawn when the display is known */
+		const char *early = payload_entry_text("cmdline");
+
+		int asked = 0, verbose = 0;
+
+		for (const char *c = early; c != NULL && *c; c++) {
+			if (c != early && c[-1] != ' ') {
+				continue;
+			}
+			asked |= starts_with(c, "splash=1") && (c[8] == ' ' || c[8] == 0);
+			verbose |= starts_with(c, "-v") && (c[2] == ' ' || c[2] == 0);
+		}
+		splash_wanted = asked && !verbose;
+		splash_on = 0;
+		splash_forced_verbose = 0;
+		if (splash_wanted) {
+			screen_quiet = 1;
+		}
 	}
 	print("== XNULOADER v3 ==\n");
 	print_banner();
@@ -2444,6 +2566,9 @@ efi_main(efi_handle image, efi_system_table *st)
 		if (PLAT == &platform_qemu_virt)
 			ramfb_phone_screen();
 		print("display %d x %d at %x\n", (uint64_t)SCREEN.width, (uint64_t)SCREEN.height, SCREEN.base);
+	}
+	if (splash_wanted) {
+		splash_start();
 	}
 	if (PLAT == &platform_qemu_virt) {
 		/*
@@ -2487,6 +2612,7 @@ efi_main(efi_handle image, efi_system_table *st)
 
 	install_exception_hook();
 	wdt_arm();
+	splash_step(80);
 
 	int have_payload = parse_payload(&pi, 0);
 	if (have_payload && platform_sibling(PLAT, pi.cmdline) != PLAT) {
@@ -2495,6 +2621,7 @@ efi_main(efi_handle image, efi_system_table *st)
 		    platform_sibling(PLAT, pi.cmdline)->name, PLAT->name);
 		PLAT = platform_sibling(PLAT, pi.cmdline);
 	}
+	splash_step(120);
 	exynos_wdt_start(have_payload ? pi.cmdline : "");   /* the Galaxy S9's hardware watchdog, and INFORM3 */
 	/*
 	 * The Galaxy S9: the payload out of the CP's region, which is then kept from UEFI and XNU. Here, under the watchdog

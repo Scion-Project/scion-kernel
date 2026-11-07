@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""The version string of the HakiOS kernel, made from VERSION, the active configuration and git.
+"""The version string of the Scion kernel, made from VERSION, the active configuration and git.
 
 usage: tools/kernel-version.py [--short | --name | --darwin | --release | --all]
                                [--config FILE] [--root DIR]
 
-  (none)    2.1.13-hakios-darwin22.5-sc7280-g1a2b3c4d[-dirty]   what goes under the banner as kernel.ver=
+  (none)    2.1.13-scion-darwin22.5-sc7280-g1a2b3c4d[-dirty]   what goes under the banner as kernel.ver=
   --short   2.1.13                                              VERSION.PATCHLEVEL.SUBLEVEL
-  --release 2.1.13-hakios                                       with EXTRAVERSION: what a tag is called (v2.1.13-hakios)
+  --release 2.1.13-scion                                       with EXTRAVERSION: what a tag is called (v2.1.13-scion)
   --name    Hello Darwin                                        the release's name
   --darwin  22.5.0 xnu-8796.121.2                               what it is built on
   --all     every part, one per line, for the build log
@@ -51,7 +51,7 @@ def read_version(root):
         if not values[key].isdigit():
             sys.exit("kernel-version: %s must be a number, got %r" % (key, values[key]))
     if values["EXTRAVERSION"] and not re.fullmatch(r"-[A-Za-z0-9._]+", values["EXTRAVERSION"]):
-        sys.exit("kernel-version: EXTRAVERSION is a dash and letters or digits (-hakios), got %r" % values["EXTRAVERSION"])
+        sys.exit("kernel-version: EXTRAVERSION is a dash and letters or digits (-scion), got %r" % values["EXTRAVERSION"])
     return values
 
 

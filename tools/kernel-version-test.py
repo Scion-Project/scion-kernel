@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tools/kernel-version.py: how the version string is made, and what it refuses.
 
-  the real VERSION file          -> 2.1.13-hakios-darwin22.5-g<8 hex>, in the form Android's kernels have
+  the real VERSION file          -> 2.1.13-scion-darwin22.5-g<8 hex>, in the form Android's kernels have
   a tracked file changed         -> "-dirty"; a new untracked file is not a change (as in Linux's setlocalversion)
   CONFIG_SOC in a .config        -> "-<soc>" between the Darwin and the commit
   HAKIOS_VERSION_SUFFIX          -> replaces the git part
@@ -52,10 +52,10 @@ try:
     git(repo, "commit", "-q", "-m", "x")
 
     full = run(repo)
-    check("the full string has the Android form", re.fullmatch(r"\d+\.\d+\.\d+-hakios-darwin22\.5-g[0-9a-f]{8}", full.stdout.strip()) is not None,
+    check("the full string has the Android form", re.fullmatch(r"\d+\.\d+\.\d+-scion-darwin22\.5-g[0-9a-f]{8}", full.stdout.strip()) is not None,
           full.stdout + full.stderr)
     check("--short is VERSION.PATCHLEVEL.SUBLEVEL", re.fullmatch(r"\d+\.\d+\.\d+", run(repo, "--short").stdout.strip()) is not None)
-    check("--release adds EXTRAVERSION", run(repo, "--release").stdout.strip() == run(repo, "--short").stdout.strip() + "-hakios")
+    check("--release adds EXTRAVERSION", run(repo, "--release").stdout.strip() == run(repo, "--short").stdout.strip() + "-scion")
     check("--name and --darwin", run(repo, "--name").stdout.strip() == "Hello Darwin" and
           run(repo, "--darwin").stdout.split() == ["22.5.0", "xnu-8796.121.2"])
     check("the string starts with the release", full.stdout.startswith(run(repo, "--release").stdout.strip() + "-darwin"))
@@ -69,7 +69,7 @@ try:
 
     open(os.path.join(repo, ".config"), "w").write('# a configuration\nCONFIG_SOC="sc7280"\nCONFIG_CPUS=8\n')
     check("CONFIG_SOC of .config goes between the Darwin and the commit",
-          re.fullmatch(r"\d+\.\d+\.\d+-hakios-darwin22\.5-sc7280-g[0-9a-f]{8}", run(repo).stdout.strip()) is not None, run(repo).stdout)
+          re.fullmatch(r"\d+\.\d+\.\d+-scion-darwin22\.5-sc7280-g[0-9a-f]{8}", run(repo).stdout.strip()) is not None, run(repo).stdout)
     other = os.path.join(work, "other.config")
     open(other, "w").write('CONFIG_SOC="sm8550"\n')
     check("--config names another configuration", "-sm8550-" in run(repo, "--config", other).stdout, run(repo, "--config", other).stdout)
@@ -96,7 +96,7 @@ try:
     good = open(os.path.join(ROOT, "VERSION")).read()
     r = with_version(good.replace("SUBLEVEL = 13", "SUBLEVEL = thirteen"))
     check("a SUBLEVEL that is not a number: refused", r.returncode != 0 and "SUBLEVEL" in r.stderr, r.stderr)
-    r = with_version(good.replace("EXTRAVERSION = -hakios", "EXTRAVERSION = hakios"))
+    r = with_version(good.replace("EXTRAVERSION = -scion", "EXTRAVERSION = scion"))
     check("an EXTRAVERSION without its dash: refused", r.returncode != 0 and "EXTRAVERSION" in r.stderr, r.stderr)
     r = with_version(good.replace("NAME = Hello Darwin\n", ""))
     check("a missing key: refused, and named", r.returncode != 0 and "NAME" in r.stderr, r.stderr)
