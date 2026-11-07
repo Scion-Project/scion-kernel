@@ -2,12 +2,14 @@
 # Save the kernel work as it is in the working tree, in the two forms apply.sh puts back:
 #   hakios.patch   the changes to Apple's files (against the tag the work sits on)
 #   files/          the files that are not in Apple's tree, at their paths
-# usage: xnu/export.sh [KERNEL-TREE]     (default: $XNU_SRC, else xnu-src/xnu-8796.121.2)
+# usage: xnu/export.sh [KERNEL-TREE]     (default: $XNU_SRC, else the OS profile's tree)
 # Run it before committing whenever the kernel tree has changed. Committed or not makes no
 # difference there: everything is compared with the base commit.
 set -e
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-SRC=${1:-${XNU_SRC:-$HERE/../xnu-src/xnu-8796.121.2}}
+[ "$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get base)" = xnu-8796 ] || {
+	echo "export.sh: hakios.patch and files/ are xnu-8796's; another base keeps its work as patches/<base>/ (docs/two-bases.md)" >&2; exit 1; }
+SRC=${1:-${XNU_SRC:-$HERE/../$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get src)}}
 BASE=c54f35ca767986246321eb901baf8f5ff7923f6a           # tag xnu-8796.121.2
 # never part of the work: build output and what editors, patch and python leave behind
 # nor what tools/hakios-config.py kernel writes for one configuration (the drivers' choice)

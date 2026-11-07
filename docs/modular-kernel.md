@@ -102,15 +102,18 @@ register sequences stays on the right side of that is a question for a lawyer. `
 
 ## OS profiles
 
-`profiles/<name>.conf` says what a build is for: XNU's tag and commit, the patches, the ADT, what user space expects. `OS_PROFILE` picks one, default
-`ios-16.5`. `xnu/apply.sh` takes the tag from it, and `tools/os-profile.py` fails the build for any profile not `real`. `ios-27` is named and fails:
+`profiles/<name>.conf` says what a build is for: XNU's tag and commit, the base and its series, the ADT, what user space expects. `OS_PROFILE` picks
+one, else the device's (`profile` in `device.conf`), default `ios-16.5`. `ios-26` (xnu-12377.121.6, arm64e, the Pixel 10 Pro's
+`devices/blazer`) is `experimental`: its pristine base applies and a build is attempted. [Two XNU bases](two-bases.md) is the design. `ios-27` is
+named and fails:
 
 ```
 $ OS_PROFILE=ios-27 make kernel
 os-profile: ios-27 is not-implemented: this tree has no kernel for xnu-12377.121.6 (arm64e). Only ios-16.5 builds; docs/modular-kernel.md has what is missing.
 ```
 
-Not in a profile yet: `xnu-src/xnu-8796.121.2` as a path in `tools/make-kernel.sh`, the `Makefile` and `xnu/export.sh`, and `tools/kernel-version.py`'s Darwin version. No compat layer exists,
+The tree, series, machine configuration and SDK now come from the profile (`tools/os-profile.py get src`, [Two XNU bases](two-bases.md)); not yet
+`tools/kernel-version.py`'s Darwin version and a few xnu-8796-only tools. No compat layer exists,
 because no difference between XNU versions has been established for any driver: it should be added only where one is.
 
 ### What iOS 27 needs

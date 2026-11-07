@@ -203,6 +203,16 @@ def soc_digest(top):
     return h.hexdigest()
 
 
+def profile_src(root):
+    """The OS profile's kernel tree, relative to the root (tools/os-profile.py get src; docs/two-bases.md)."""
+    try:
+        env = dict(os.environ, OS_PROFILE_QUIET="1")
+        return subprocess.check_output([sys.executable, os.path.join(root, "tools", "os-profile.py"), "get", "src"],
+                                       env=env, stderr=subprocess.DEVNULL, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return os.path.join("xnu-src", "xnu-8796.121.2")
+
+
 class Driver:
     def __init__(self, name, sub, where, origin=None):
         self.name, self.sub, self.where = name, sub, where
@@ -1051,7 +1061,7 @@ def cmd_kernel(a):
     bsd/dev/hakios.drivers.h. Files are written only when they change, so an unchanged choice rebuilds nothing."""
     if DRIVERS_ERROR:
         raise ConfigError(DRIVERS_ERROR)
-    tree = a.tree or os.environ.get("XNU_SRC") or os.path.join(a.root, "xnu-src", "xnu-8796.121.2")
+    tree = a.tree or os.environ.get("XNU_SRC") or os.path.join(a.root, profile_src(a.root))
     if not os.path.isfile(os.path.join(tree, "bsd", "conf", "files")):
         raise ConfigError("no kernel tree at %s (xnu/apply.sh makes it)" % tree)
     if os.path.isfile(a.config):
@@ -1147,7 +1157,7 @@ def main():
     p.add_argument("name")
     p.set_defaults(fn=cmd_complete)
     p = sub.add_parser("kernel", parents=[common], help="put the .config's choice of drivers into the kernel tree (make kernel runs it)")
-    p.add_argument("--tree", help="the kernel tree (default: $XNU_SRC, else xnu-src/xnu-8796.121.2)")
+    p.add_argument("--tree", help="the kernel tree (default: $XNU_SRC, else the OS profile's tree)")
     p.set_defaults(fn=cmd_kernel)
     sub.add_parser("external-files", parents=[common], help="the driver files of SoC and device repositories, and their place in the tree").set_defaults(fn=cmd_external)
     p = sub.add_parser("help", parents=[common], help="what a symbol means")

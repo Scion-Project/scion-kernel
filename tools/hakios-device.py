@@ -36,7 +36,7 @@ ROOT = os.path.dirname(HERE)
 STATES = ("works", "partial", "missing")
 AREAS = ("display", "touch", "buttons", "cpu", "gpu", "storage", "audio", "battery", "haptic", "camera", "torch", "wifi",
          "bluetooth", "cellular", "network", "thermal", "usb", "sensors")
-DEVICE_KEYS = {"title", "vendor", "soc", "defconfig", "firmware", "maintainer", "status", "repository", "revision", "path"}
+DEVICE_KEYS = {"title", "vendor", "soc", "defconfig", "firmware", "maintainer", "status", "repository", "revision", "path", "profile"}
 SOC_KEYS = {"title", "vendor", "cores", "gpu", "maintainer", "repository", "revision", "path", "source", "block"}
 
 

@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
-"""The OS profile a build is for: profiles/<name>.conf, chosen by OS_PROFILE (default ios-16.5).
+"""The OS profile a build is for: profiles/<name>.conf. docs/two-bases.md says how profiles, XNU bases and devices fit together.
 
-  tools/os-profile.py get KEY     a key's value (xnu_tag, xnu_commit, ...); fails if the profile is not implemented
-  tools/os-profile.py require     fails with the reason if the profile is not implemented
+  tools/os-profile.py get KEY     a key's value (xnu_tag, xnu_commit, base, ...); fails if the profile does not build
+  tools/os-profile.py get src     the kernel tree the profile builds in: xnu-src/<xnu_tag>
+  tools/os-profile.py get series  the base's patch series directory: patches/<base>
+  tools/os-profile.py require     fails with the reason if the profile does not build
+  tools/os-profile.py name        the profile chosen (see below)
   tools/os-profile.py list        every profile and its status
+  tools/os-profile.py for-device NAME   write .os-profile from devices/NAME/device.conf's `profile` line, or remove it
+
+The profile is OS_PROFILE if it is set, else the one the active configuration's device names (the file .os-profile, which
+`make NAME_defconfig` writes from devices/NAME/device.conf's `profile` line), else ios-16.5.
+
+status: real (builds, and has booted on a phone), experimental (the base and its series are there, nothing of it has booted:
+a build says so on stderr), not-implemented (fails).
 """
 import os
 import re
@@ -11,7 +21,8 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT = "ios-16.5"
-KEYS = {"status", "arch", "darwin", "xnu_tag", "xnu_commit", "patches", "adt", "userland"}
+KEYS = {"status", "arch", "darwin", "xnu_tag", "xnu_commit", "base", "machine", "sdk", "hfs", "patches", "adt", "userland"}
+STATUSES = ("real", "experimental", "not-implemented")
 
 
 def read(name):
@@ -28,28 +39,75 @@ def read(name):
     missing = KEYS - set(fields)
     if missing:
         sys.exit("os-profile: %s lacks %s" % (path, ", ".join(sorted(missing))))
+    if fields["status"] not in STATUSES:
+        sys.exit("os-profile: %s: status %s is not one of %s" % (path, fields["status"], ", ".join(STATUSES)))
+    fields["src"] = os.path.join("xnu-src", fields["xnu_tag"])
+    fields["series"] = os.path.join("patches", fields["base"])
     return fields
 
 
 def require(name, fields):
-    if fields["status"] != "real":
-        sys.exit("os-profile: %s is %s: this tree has no kernel for %s (%s). Only ios-16.5 builds; docs/modular-kernel.md has what is missing."
-                 % (name, fields["status"], fields["xnu_tag"], fields["arch"]))
+    if fields["status"] == "real":
+        return
+    if fields["status"] == "experimental":
+        if not os.environ.get("OS_PROFILE_QUIET"):
+            sys.stderr.write("os-profile: %s is experimental: %s (%s) with patches/%s; nothing built from it has booted (docs/two-bases.md)\n"
+                             % (name, fields["xnu_tag"], fields["arch"], fields["base"]))
+        return
+    sys.exit("os-profile: %s is %s: this tree has no kernel for %s (%s). Only ios-16.5 builds; docs/modular-kernel.md has what is missing."
+             % (name, fields["status"], fields["xnu_tag"], fields["arch"]))
+
+
+def chosen():
+    name = os.environ.get("OS_PROFILE")
+    if not name:
+        mark = os.path.join(ROOT, ".os-profile")
+        if os.path.isfile(mark):
+            name = open(mark, encoding="utf-8").read().strip()
+    name = name or DEFAULT
+    if not re.fullmatch(r"[a-z0-9.-]+", name):
+        sys.exit("os-profile: bad name %r" % name)
+    return name
+
+
+def for_device(device):
+    """`make NAME_defconfig` calls this: the device's profile (device.conf: `\tprofile NAME`) becomes the default."""
+    mark = os.path.join(ROOT, ".os-profile")
+    conf = os.path.join(ROOT, "devices", device, "device.conf")
+    profile = None
+    if os.path.isfile(conf):
+        for line in open(conf, encoding="utf-8"):
+            words = line.split()
+            if line.startswith("\t") and len(words) == 2 and words[0] == "profile":
+                profile = words[1]
+    if profile:
+        read(profile)
+        with open(mark, "w", encoding="utf-8") as f:
+            f.write(profile + "\n")
+        print("os-profile: %s builds for %s (.os-profile)" % (device, profile))
+    elif os.path.exists(mark):
+        os.remove(mark)
 
 
 def main():
-    name = os.environ.get("OS_PROFILE") or DEFAULT
-    if not re.fullmatch(r"[a-z0-9.-]+", name):
-        sys.exit("os-profile: bad name %r" % name)
+    name = chosen()
     command = sys.argv[1] if len(sys.argv) > 1 else "list"
     if command == "list":
         for conf in sorted(os.listdir(os.path.join(ROOT, "profiles"))):
-            print("%-10s %s" % (conf[:-5], read(conf[:-5])["status"]))
+            if conf.endswith(".conf"):
+                f = read(conf[:-5])
+                print("%-10s %-16s %-6s %s" % (conf[:-5], f["status"], f["arch"], f["xnu_tag"]))
+    elif command == "for-device" and len(sys.argv) == 3:
+        for_device(sys.argv[2])
+    elif command == "name":
+        print(name)
     elif command == "require":
         require(name, read(name))
     elif command == "get" and len(sys.argv) == 3:
         fields = read(name)
         require(name, fields)
+        if sys.argv[2] not in fields:
+            sys.exit("os-profile: no key %s" % sys.argv[2])
         print(fields[sys.argv[2]])
     else:
         sys.exit(__doc__)
