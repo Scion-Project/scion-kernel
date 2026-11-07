@@ -76,5 +76,5 @@ Not supported: cellular, the rear cameras, and Apple's services (activation, App
   list them in [boot-args.md](boot-args.md).
 - [docs/devices/starlte.md](devices/starlte.md) is generated from the pinned `scion-starlte` revision. It shows the
   S9's parts as of that revision until `devices/manifest.conf` is bumped and `tools/docs-gen.py` is run again.
-- The Samsung audio firmware in `scion-starlte/firmware/audio/` and the FocalTech touch firmware header have
+- The S9's vendor firmware is no longer in `scion-starlte` (`tools/fetch-firmware.sh` fetches it); the FocalTech touch firmware header has
   redistribution terms still marked "to verify" (THIRD_PARTY_LICENSES.md).
