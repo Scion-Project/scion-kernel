@@ -10,22 +10,3 @@ diff --git a/osfmk/arm/machine_routines.h b/osfmk/arm/machine_routines.h
  
  unsigned int ml_get_cpu_number_local(void);
  
-diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
---- a/osfmk/arm64/start.s
-+++ b/osfmk/arm64/start.s
-@@ -169,6 +169,15 @@
- 	// (generic boards: some number their cores in Affinity1 and leave Affinity0 at zero;
- 	// a cpu data's phys id is both fields, as the device tree's "reg" has them)
- 	and		x0, x15, #0xFFFF					// CPU number in Affinity0, cluster ID in Affinity1
-+	// HakiOS (patch 1504): a device tree numbering the cores one affinity field lower than an MT MPIDR
-+	// does (the Galaxy S9's A55s: 0x81000200 is its core 2), as ml_phys_id_from_mpidr()
-+	adrp	x2, EXT(ml_mpidr_mt_aff1)@page
-+	add		x2, x2, EXT(ml_mpidr_mt_aff1)@pageoff
-+	ldr		w2, [x2]
-+	cbz		w2, Lmpidr_numbered
-+	tbz		x15, #24, Lmpidr_numbered
-+	ubfx	x0, x15, #8, #16
-+Lmpidr_numbered:
- #else
- 	and		x0, x15, #0xFF						// CPU number is in MPIDR Affinity Level 0
- #endif
