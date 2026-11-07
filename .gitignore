@@ -140,3 +140,5 @@ __pycache__/
 
 # Android platform-tools for xl on a Mac (tools/macos-bin/README.md): not part of the repository
 /tools/macos-bin/platform-tools
+# the device's OS profile, written by make NAME_defconfig (tools/os-profile.py for-device)
+/.os-profile

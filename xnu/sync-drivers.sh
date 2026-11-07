@@ -2,11 +2,11 @@
 # Copy the drivers that were edited in drivers/ into the kernel tree, so that `make kernel` builds what is in
 # the repository. A driver is copied only when the file in drivers/ is NEWER than the one in the tree: a driver
 # that was edited in the tree (and not yet exported with xnu/export.sh) is never overwritten by an old copy.
-# usage: xnu/sync-drivers.sh [KERNEL-TREE]       (default: $XNU_SRC, else xnu-src/xnu-8796.121.2)
+# usage: xnu/sync-drivers.sh [KERNEL-TREE]       (default: $XNU_SRC, else the OS profile's tree)
 # prints one line per file it copied, and "drivers: in step" when there was nothing to do.
 set -e
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-TREE=${1:-${XNU_SRC:-$HERE/../xnu-src/xnu-8796.121.2}}
+TREE=${1:-${XNU_SRC:-$HERE/../$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get src)}}
 [ -d "$TREE" ] || { echo "sync-drivers: no kernel tree at $TREE (xnu/apply.sh makes it)" >&2; exit 1; }
 [ -f "$HERE/../drivers/map" ] || { echo "sync-drivers: no drivers/map" >&2; exit 1; }
 copied=0

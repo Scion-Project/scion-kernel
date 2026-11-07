@@ -1,17 +1,20 @@
 #!/bin/bash
 # Get Apple's XNU sources (the release that Darwin userland 16.5 was built from) and put the HakiOS
 # work on top of them: hakios.patch changes Apple's files, files/ holds the new ones.
-# usage: xnu/apply.sh [DIR]              (default: $XNU_SRC, else xnu-src/xnu-8796.121.2 next to this directory)
+# usage: xnu/apply.sh [DIR]              (default: $XNU_SRC, else the OS profile's tree: xnu-src/<xnu_tag> next to this directory)
+# A profile on another XNU base than xnu-8796 has no hakios.patch: its tree is the base's series, by xnu/apply-series.sh.
 # env:   XNU_URL   where to fetch from (default: Apple's repository on GitHub; an existing clone
 #                  that has the tag will do: XNU_URL=file:///path/to/xnu)
 # The result is a git tree on the branch "hakios" with the work uncommitted, which is how
 # xnu/export.sh expects to find it. A directory that already exists is left alone.
 set -e
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-DIR=${1:-${XNU_SRC:-$HERE/../xnu-src/xnu-8796.121.2}}
+python3 "$HERE/../tools/os-profile.py" require || exit 1
+[ "$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get base)" = xnu-8796 ] || exec "$HERE/apply-series.sh" "$@"
+DIR=${1:-${XNU_SRC:-$HERE/../$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get src)}}
 URL=${XNU_URL:-https://github.com/apple-oss-distributions/xnu.git}
-TAG=$(python3 "$HERE/../tools/os-profile.py" get xnu_tag)
-BASE=$(python3 "$HERE/../tools/os-profile.py" get xnu_commit)
+TAG=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_tag)
+BASE=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_commit)
 
 [ -e "$DIR" ] && { echo "apply.sh: $DIR already exists; not touching it" >&2; exit 1; }
 [ -s "$HERE/hakios.patch" ] && [ -d "$HERE/files" ] || { echo "apply.sh: no hakios.patch and files/ in $HERE" >&2; exit 1; }
