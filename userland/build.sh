@@ -96,9 +96,12 @@
 #                                   mounted). Not beside GL=1: the two do not fit the 64 MB the loader takes with
 #                                   the kernel. adsp=1 needs none of it: the system image has the firmware in /fw.
 #                      MODEM=1      stage checked local MPSS firmware from ../fw-modem in system.apfs /fw.
-#                      DEVICE=NAME  with the firmware a device's own repository carries, devices/NAME/firmware/
-#                                   (every file but its READMEs), in fw/: DEVICE=starlte for the Galaxy S9's audio
-#                                   (ABOX's calliope images, DSM; devices/starlte/firmware/audio/README.md).
+#                      DEVICE=NAME  with the firmware of a device's own repository, devices/NAME/firmware/
+#                                   (every file but its READMEs and SHA256SUMS), in fw/: DEVICE=starlte for the Galaxy S9's
+#                                   audio, Wi-Fi, Bluetooth and sensor hub (ABOX's calliope images, DSM ...). The vendor's
+#                                   files are not in the repository, only their sums: devices/NAME/tools/fetch-firmware.sh
+#                                   makes them complete first (FIRMWARE_FROM=DIR: from a directory of your own, else the
+#                                   public sources it pins; devices/starlte/firmware/audio/README.md).
 #                                   This does not start the modem; the XNU MPSS driver is still required.
 #   system.apfs      the system image, the root filesystem (the resident RAM disk, /dev/md0), an
 #                    APFS container: the part of Darwin userland 16.5 chosen by ../sysimage/select-system.py at
@@ -789,13 +792,19 @@ if [ -n "$ADSP" ] && [ -f ../fw-audio/adsp.mdt ]; then
 	mkdir -p root/fw
 	install -m 0644 ../fw-audio/adsp.mdt ../fw-audio/adsp.b0[2-9] ../fw-audio/adsp.b[1-9][0-9] root/fw/
 fi
-# ... and with DEVICE=NAME what a device's repository carries itself, devices/NAME/firmware/: there the project keeps
-# the vendor's files in the repository (the S9's ABOX firmware), so nothing has to be pulled from the phone first
+# ... and with DEVICE=NAME the firmware of a device's repository, devices/NAME/firmware/: the vendor's files are not kept
+# there (a public repository does not carry Samsung's and Broadcom's binaries), only their sums; the device's own
+# tools/fetch-firmware.sh makes the directory complete -- from FIRMWARE_FROM=DIR, a directory of your own, else from the
+# public sources it pins -- and stops this build with what to do if a file cannot be had or is not the pinned one
 if [ -n "$DEVICE" ]; then
 	[ -d ../devices/$DEVICE/firmware ] || { echo "build.sh: DEVICE=$DEVICE: no devices/$DEVICE/firmware (python3 tools/hakios-device.py sync $DEVICE)" >&2; exit 1; }
+	if [ -x ../devices/$DEVICE/tools/fetch-firmware.sh ]; then
+		../devices/$DEVICE/tools/fetch-firmware.sh ${FIRMWARE_FROM:+--from "$FIRMWARE_FROM"} || {
+			echo "build.sh: DEVICE=$DEVICE: devices/$DEVICE/tools/fetch-firmware.sh did not make firmware/ complete (see above; FIRMWARE_FROM=DIR)" >&2; exit 1; }
+	fi
 	mkdir -p root/fw
-	find ../devices/$DEVICE/firmware -type f ! -name 'README*' -exec install -m 0644 {} root/fw/ \;
-	echo "build.sh: fw/: $(find ../devices/$DEVICE/firmware -type f ! -name 'README*' | wc -l | tr -d ' ') files from devices/$DEVICE/firmware"
+	find ../devices/$DEVICE/firmware -type f ! -name 'README*' ! -name SHA256SUMS -exec install -m 0644 {} root/fw/ \;
+	echo "build.sh: fw/: $(find ../devices/$DEVICE/firmware -type f ! -name 'README*' ! -name SHA256SUMS | wc -l | tr -d ' ') files from devices/$DEVICE/firmware"
 fi
 # Firmware that is not there is otherwise silent at build time and speaks only much later, deep in a
 # device log -- "adreno: THE GPU IS NOT STARTED: the small image has no fw/a660_gmu.bin" cost a phone
