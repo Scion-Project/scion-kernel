@@ -38,6 +38,8 @@ struct hakios_touch {
 #ifdef KERNEL
 /* For drivers; not from interrupt context. */
 void hakios_touch_post(uint32_t type, uint32_t finger, uint32_t x, uint32_t y);
+/* The same for a sample taken at mach_absolute_time() `when` (0 = now), e.g. the host's own time of a touch. */
+void hakios_touch_post_at(uint32_t type, uint32_t finger, uint32_t x, uint32_t y, uint64_t when);
 void hakios_input_init(void);
 void hakios_virtio_input_init(void);   /* boot-arg virtio_input=1: QEMU's virtio pointer and keyboard */
 void hakios_goodix_init(void);         /* boot-arg touchscreen=1: the phone's Goodix or FocalTech touch screen */

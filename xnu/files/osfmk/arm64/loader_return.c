@@ -11,19 +11,23 @@
  *
  * Only valid while the kernel does not drive hardware that UEFI also uses.
  */
+#include <stdarg.h>
 #include <mach/mach_types.h>
 #include <machine/atomic.h>
 #include <kern/cpu_number.h>
 #include <kern/debug.h>
+#include <kern/misc_protos.h>
 #include <kern/startup.h>
 #include <kern/thread_call.h>
 #include <kern/clock.h>
 #include <arm/cpu_internal.h>
 #include <arm/machine_routines.h>
+#include <arm/machine_routines.h>
 #include <arm64/psci_smp.h>
 #include <arm64/proc_reg.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/arm64/board_config.h>
+#include <pexpert/arm/protos.h>
 #include <vm/vm_page.h>
 #include <vm/vm_compressor.h>
 
@@ -66,6 +70,7 @@ extern void hakios_exynos_iris_quiesce(void);
 extern void hakios_s2mpb02_torch_quiesce(void);
 extern void hakios_exynos_pcie_quiesce(void);
 extern void hakios_ufs_quiesce(void);
+extern void hakios_usb_gadget_quiesce(void);  /* drivers/usb/hakios.dwc3.c: the rest of the log out over USB, then the controller stopped */
 extern void hakios_var_save_on_return(void);   /* drivers/storage/ufs/hakios.ufs.c: the data volume into the flash */
 void loader_checkpoint(uint64_t n);
 
@@ -92,6 +97,43 @@ static char     loader_log_scratch[LOADER_LOG_RING];
 static uint32_t loader_log_lock;
 
 static void loader_log_put_locked(char c);
+
+/*
+ * A second reader of every character the log gets, as it gets it: the USB gadget driver's (drivers/usb/hakios.dwc3.c),
+ * which streams the log to a host. Called under the lock, interrupts off: it only copies the character.
+ */
+static void (*volatile loader_log_tap)(char c);
+
+uint32_t loader_log_tap_set(void (*tap)(char c), void (*history)(const char *text, uint32_t len));
+
+/*
+ * Install (or with NULL remove) the tap. history, if given, first gets what the log has so far from its start (the part
+ * kept as it was, the first LOADER_LOG_HEAD bytes), under the same lock, so that nothing is missed or sent twice.
+ * Returns the log's length at that moment.
+ */
+uint32_t
+loader_log_tap_set(void (*tap)(char c), void (*history)(const char *text, uint32_t len))
+{
+	uint64_t daif;
+	bool locked = false;
+	uint32_t len;
+
+	daif = __builtin_arm_rsr64("DAIF");
+	__builtin_arm_wsr("DAIFSet", DAIFSC_IRQF | DAIFSC_FIQF);
+	for (uint32_t tries = 0; !locked && tries < 10000000; tries++) {
+		locked = os_atomic_cmpxchg(&loader_log_lock, 0, 1, acquire);
+	}
+	len = loader_log_len;
+	if (history != NULL) {
+		history(loader_log, len < LOADER_LOG_HEAD || loader_log_linear || !loader_log_wrapped ? len : LOADER_LOG_HEAD);
+	}
+	loader_log_tap = tap;
+	if (locked) {
+		os_atomic_store(&loader_log_lock, 0, release);
+	}
+	__builtin_arm_wsr64("DAIF", daif);
+	return len;
+}
 
 void
 loader_log_putc(char c)
@@ -142,9 +184,41 @@ loader_log_line(const char *line)
 	__builtin_arm_wsr64("DAIF", daif);
 }
 
+/*
+ * esslog (Galaxy S9): every character of the log also into Samsung's exynos-snapshot kernel log buffer
+ * (log_kernel, PA 0xFDA10000, 2 MB; header at ess_setup 0xFDA00000, last write position at +0x200), so that
+ * after a restart TWRP's kernel offers this run's whole log as /proc/last_kmsg (drivers/trace/exynos-ss.c,
+ * drivers/staging/samsung/sec_debug_last_kmsg.c). boot-arg esslog=1.
+ */
+#define ESSLOG_HDR_PA   0xFDA00000ULL
+#define ESSLOG_BUF_PA   0xFDA10000ULL
+#define ESSLOG_SIZE     (2u * 1024 * 1024)
+#define ESSLOG_MAGIC    0x0000000a6c6c7546ULL
+static volatile uint8_t *esslog_hdr, *esslog_buf;
+static uint32_t esslog_at;
+static void
+esslog_put(char c)
+{
+	esslog_buf[esslog_at++] = (uint8_t)c;
+	if (esslog_at >= ESSLOG_SIZE - 8) {
+		*(volatile uint64_t *)(esslog_buf + ESSLOG_SIZE - 8) = ESSLOG_MAGIC;
+		esslog_at = 0;
+	}
+	if (c == '\n') {
+		*(volatile uint32_t *)(esslog_hdr + 0x200) = (uint32_t)(ESSLOG_BUF_PA + esslog_at);
+	}
+}
 static void
 loader_log_put_locked(char c)
 {
+	void (*tap)(char) = loader_log_tap;
+
+	if (tap != NULL) {
+		tap(c);
+	}
+	if (esslog_buf != NULL) {
+		esslog_put(c);
+	}
 	if (loader_log_linear || loader_log_len < LOADER_LOG_HEAD) {
 		if (loader_log_len < LOADER_LOG_SIZE) {
 			loader_log[loader_log_len++] = c;
@@ -335,10 +409,151 @@ struct msgbuf {
 extern struct msgbuf *msgbufp;
 
 static void
+loader_log_hex(uint64_t v)
+{
+	loader_log_putc('0');
+	loader_log_putc('x');
+	for (int shift = 60; shift >= 0; shift -= 4) {
+		loader_log_putc("0123456789abcdef"[(v >> shift) & 0xf]);
+	}
+}
+
+static void
 loader_log_puts(const char *s)
 {
 	for (; *s; s++) {
 		loader_log_putc(*s);
+	}
+}
+
+/*
+ * A new phone's first runs, said in full in the log the loader gets back. A panic's own text, the registers of the
+ * last exception and the calls that led to it are always written here: before arm_vm_init there is no panic buffer,
+ * and on a phone without a serial port such a panic otherwise comes back as nothing but loader_return()'s caller.
+ * Boot-arg early_log=1 adds every kprintf from PE_init_platform on (the drivers' and the VM's bring-up lines, which
+ * no console shows that early) and what the kernel takes the processors to be.
+ */
+bool loader_early_log;
+
+void loader_early_log_init(void);
+void loader_log_vprintf(const char *fmt, va_list *ap);
+void loader_log_panic(const char *fmt, va_list *ap, unsigned long caller);
+void loader_log_cpu_facts(void);
+extern uint32_t ml_mpidr_mt_aff1;
+
+void
+loader_early_log_init(void)
+{
+	uint32_t on = 0;
+
+	if (PE_parse_boot_argn("early_log", &on, sizeof(on)) && on != 0) {
+		loader_early_log = true;
+	}
+}
+
+void
+loader_log_vprintf(const char *fmt, va_list *ap)
+{
+	va_list copy;
+
+	va_copy(copy, *ap);
+	_doprnt(fmt, &copy, loader_log_putc, 16);
+	va_end(copy);
+}
+
+static void
+loader_log_printf(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	_doprnt(fmt, &ap, loader_log_putc, 16);
+	va_end(ap);
+}
+
+static void
+loader_log_frame(uint64_t pc)
+{
+	loader_log_puts("  ");
+	loader_log_hex(pc);
+	if (vm_kernel_slide != 0) {
+		loader_log_puts(" unslid ");
+		loader_log_hex(pc - vm_kernel_slide);
+	}
+	loader_log_putc('\n');
+}
+
+/* Called first thing by panic_trap_to_debugger() (patch 1503), on whichever processor panicked */
+void
+loader_log_panic(const char *fmt, va_list *ap, unsigned long caller)
+{
+	static uint32_t panics;
+	uint64_t *fp = __builtin_frame_address(0);
+
+	if (os_atomic_inc(&panics, relaxed) > 2) {
+		return;                 /* a panic inside the panic, over and over: the first two say enough */
+	}
+	loader_log_puts("\n--- panic on MPIDR ");
+	loader_log_hex(__builtin_arm_rsr64("MPIDR_EL1") & 0xffffff);
+	loader_log_puts(": ");
+	if (fmt != NULL && ap != NULL) {
+		loader_log_vprintf(fmt, ap);
+	} else if (fmt != NULL) {
+		loader_log_puts(fmt);
+	}
+	loader_log_puts("\n--- the last exception: ESR_EL1 ");
+	loader_log_hex(__builtin_arm_rsr64("ESR_EL1"));
+	loader_log_puts(" FAR_EL1 ");
+	loader_log_hex(__builtin_arm_rsr64("FAR_EL1"));
+	loader_log_puts(" ELR_EL1 ");
+	loader_log_hex(__builtin_arm_rsr64("ELR_EL1"));
+	loader_log_puts("\n--- panic() called from\n");
+	loader_log_frame(caller);
+	loader_log_puts("--- frames (nm on the unstripped kernel names them)\n");
+	/* the frame records: [fp] the caller's fp, [fp + 8] the return address; on the stack, each above the last */
+	for (int i = 0; i < 32; i++) {
+		uint64_t *next;
+
+		if (fp == NULL || ((uintptr_t)fp & 0xf) != 0 || (uintptr_t)fp < VM_MIN_KERNEL_AND_KEXT_ADDRESS) {
+			break;
+		}
+		loader_log_frame(fp[1]);
+		next = (uint64_t *)fp[0];
+		if (next <= fp || (uintptr_t)next - (uintptr_t)fp > 64 * 1024) {
+			break;
+		}
+		fp = next;
+	}
+	loader_log_puts("---\n");
+}
+
+/* early_log: right after ml_parse_cpu_topology(), what the kernel will match each processor's MPIDR against */
+void
+loader_log_cpu_facts(void)
+{
+	const ml_topology_info_t *t = ml_get_topology_info();
+	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1");
+
+	if (!loader_early_log) {
+		return;
+	}
+	loader_log_printf("\nearly_log: MPIDR %llx MIDR %llx CurrentEL %llu CLIDR %llx CTR %llx ID_AA64PFR0 %llx "
+	    "ID_AA64MMFR0 %llx ID_AA64ISAR0 %llx\n", mpidr, __builtin_arm_rsr64("MIDR_EL1"),
+	    (__builtin_arm_rsr64("CurrentEL") >> 2) & 3, __builtin_arm_rsr64("CLIDR_EL1"), __builtin_arm_rsr64("CTR_EL0"),
+	    __builtin_arm_rsr64("ID_AA64PFR0_EL1"), __builtin_arm_rsr64("ID_AA64MMFR0_EL1"),
+	    __builtin_arm_rsr64("ID_AA64ISAR0_EL1"));
+	if (t == NULL || t->cpus == NULL) {
+		loader_log_puts("early_log: no topology\n");
+		return;
+	}
+	loader_log_printf("early_log: topology: %u cpus (max id %u), %u clusters; boot cpu id %d phys %x; "
+	    "this processor by its MPIDR: phys %x, cpu %d%s\n", t->num_cpus, t->max_cpu_id, t->num_clusters,
+	    t->boot_cpu != NULL ? (int)t->boot_cpu->cpu_id : -1, t->boot_cpu != NULL ? t->boot_cpu->phys_id : 0,
+	    ml_phys_id_from_mpidr(mpidr), ml_get_cpu_number(ml_phys_id_from_mpidr(mpidr)),
+	    ml_mpidr_mt_aff1 ? " (MT: the device tree numbers the cores one affinity field lower)" : "");
+	for (unsigned i = 0; i < t->num_cpus; i++) {
+		loader_log_printf("early_log:   cpu %u phys %x cluster %u type %d\n", t->cpus[i].cpu_id,
+		    t->cpus[i].phys_id, t->cpus[i].cluster_id, (int)t->cpus[i].cluster_type);
 	}
 }
 
@@ -365,6 +580,70 @@ loader_log_append_msgbuf(void)
 			}
 		}
 	}
+}
+
+/*
+ * No loader to return to (avfboot under crosvm/AVF leaves the return slot 0): end the machine
+ * through PSCI instead, so that the VM stops and its owner sees it stop. A reboot asks for
+ * SYSTEM_RESET, a halt or a panic for SYSTEM_OFF; a panic's first line is said once more on the
+ * console just before, so that it is the last thing there. boot-arg avf_exit=0: stay, as before.
+ */
+static bool loader_exit_reset;
+
+void
+loader_exit_wanted(bool reset)
+{
+	loader_exit_reset = reset;
+}
+
+static void
+avf_console_puts(const char *s, const char *end)
+{
+	for (; *s && (end == NULL || s < end); s++) {
+		if (*s == '\n') {
+			uart_putc('\r');
+		}
+		uart_putc(*s);
+	}
+}
+
+static void
+loader_exit_without_loader(void)
+{
+	uint32_t stay_on = 1;
+	const char *panic_line = NULL, *line_end = NULL;
+
+	if (loader_stub_slot[1] != 0) {
+		return;                         /* a loader is there; it just would not have us back */
+	}
+	if (PE_parse_boot_argn("avf_exit", &stay_on, sizeof(stay_on)) && stay_on == 0) {
+		return;
+	}
+	/* the panic's own first line, from the panic buffer */
+	if (debug_buf_base != NULL && debug_buf_ptr > debug_buf_base &&
+	    (size_t)(debug_buf_ptr - debug_buf_base) < 256 * 1024) {
+		for (const char *c = debug_buf_base; c + 6 <= debug_buf_ptr; c++) {
+			if (__builtin_memcmp(c, "panic(", 6) == 0) {
+				panic_line = c;
+				for (line_end = c; line_end < debug_buf_ptr && *line_end != '\n' && *line_end; line_end++) {
+				}
+				break;
+			}
+		}
+	}
+	if (panic_line != NULL) {
+		avf_console_puts("\navf: kernel panic: ", NULL);
+		avf_console_puts(panic_line, line_end);
+		avf_console_puts("\navf: powering off (PSCI SYSTEM_OFF)\n", NULL);
+		(void)psci_system_off(false);
+	} else if (loader_exit_reset) {
+		avf_console_puts("\navf: reboot (PSCI SYSTEM_RESET)\n", NULL);
+		(void)psci_system_off(true);
+	} else {
+		avf_console_puts("\navf: halt (PSCI SYSTEM_OFF)\n", NULL);
+		(void)psci_system_off(false);
+	}
+	avf_console_puts("avf: the firmware refused to end the machine\n", NULL);
 }
 
 void
@@ -401,6 +680,19 @@ loader_return(void)
 	 * never happens. Append the buffer so the loader gets it either way.
 	 */
 	loader_log_linearize();
+	/*
+	 * Who asked for the return: on a new phone a kernel that came back before its message buffer existed said nothing
+	 * else. Unslid by vm_kernel_slide, nm on the unstripped kernel names the function.
+	 */
+	{
+		uint64_t caller = (uint64_t)__builtin_return_address(0);
+
+		loader_log_puts("\n--- loader_return() from ");
+		loader_log_hex(caller);
+		loader_log_puts(", unslid ");
+		loader_log_hex(caller - vm_kernel_slide);
+		loader_log_puts(" ---\n");
+	}
 	if (!loader_return_entered) {
 		loader_log_append_msgbuf();
 	}
@@ -411,13 +703,32 @@ loader_return(void)
 			loader_log_putc(*c);
 		}
 	}
+	hakios_usb_gadget_quiesce();   /* last: the panic text above goes out over USB too, before the controller stops */
 	loader_jump(0, 0);
+	loader_exit_without_loader();
 }
 
-/* Bring-up aid: stop here if the loader asked for checkpoint n. */
+/*
+ * Bring-up aid: stop here if the loader asked for checkpoint n. Every checkpoint passed is also written to the log the
+ * loader gets back ("[c10][c11]..."), so a kernel that ends before its first line still says how far it came.
+ */
 void
 loader_checkpoint(uint64_t n)
 {
+	char digits[20];
+	uint64_t v = n;
+	int i = 0;
+
+	do {
+		digits[i++] = (char)('0' + v % 10);
+		v /= 10;
+	} while (v != 0 && i < (int)sizeof(digits));
+	loader_log_putc('[');
+	loader_log_putc('c');
+	while (i > 0) {
+		loader_log_putc(digits[--i]);
+	}
+	loader_log_putc(']');
 	if (loader_stub_slot[2] == n) {
 		loader_jump(2, n);
 	}
@@ -609,3 +920,45 @@ hv_wdt_pet_init(void)
 	hv_wdt_pet(NULL, NULL);
 }
 STARTUP(EARLY_BOOT, STARTUP_RANK_LAST, hv_wdt_pet_init);
+
+void hakios_esslog_start(void);
+void
+hakios_esslog_start(void)
+{
+	uint32_t on = 0, len;
+	uint64_t daif;
+	bool locked = false;
+	volatile uint8_t *hdr, *buf;
+
+	if (esslog_buf != NULL || !PE_parse_boot_argn("esslog", &on, sizeof(on)) || on == 0) {
+		return;
+	}
+	hdr = (volatile uint8_t *)ml_io_map(ESSLOG_HDR_PA, 0x1000);
+	buf = (volatile uint8_t *)ml_io_map(ESSLOG_BUF_PA, ESSLOG_SIZE);     /* uncached: a hard hang must not lose what sat in a write-combining buffer */
+	if (hdr == NULL || buf == NULL) {
+		printf("esslog: could not map\n");
+		return;
+	}
+	*(volatile uint64_t *)(buf + ESSLOG_SIZE - 8) = 0;
+	daif = __builtin_arm_rsr64("DAIF");
+	__builtin_arm_wsr("DAIFSet", DAIFSC_IRQF | DAIFSC_FIQF);
+	for (uint32_t tries = 0; !locked && tries < 10000000; tries++) {
+		locked = os_atomic_cmpxchg(&loader_log_lock, 0, 1, acquire);
+	}
+	len = loader_log_len < LOADER_LOG_HEAD || loader_log_linear || !loader_log_wrapped ? loader_log_len : LOADER_LOG_HEAD;
+	if (len > ESSLOG_SIZE - 64) {
+		len = ESSLOG_SIZE - 64;
+	}
+	for (uint32_t i = 0; i < len; i++) {
+		buf[i] = (uint8_t)loader_log[i];
+	}
+	esslog_at = len;
+	esslog_hdr = hdr;
+	*(volatile uint32_t *)(hdr + 0x200) = (uint32_t)(ESSLOG_BUF_PA + esslog_at);
+	esslog_buf = buf;
+	if (locked) {
+		os_atomic_store(&loader_log_lock, 0, release);
+	}
+	__builtin_arm_wsr64("DAIF", daif);
+	printf("esslog: the log goes to exynos-snapshot's log_kernel too (%u bytes so far): /proc/last_kmsg in TWRP\n", len);
+}

@@ -8,7 +8,7 @@ This is a catalogue of what exists and who reads it, not a manual. What an argum
 
 Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl kern.bootargs`).
 
-## GPU and display (108)
+## GPU and display (109)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -114,6 +114,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `rec_secs` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_SECS` |  |
 | `rec_start` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_START` |  |
 | `rec_step` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_STEP` |  |
+| `scfb.addr` | K | `MiniIOMobileFramebuffer.cpp`, `hakios.scfb_battery.c` | `CONFIG_SCFB_ADDR` |  |
 | `surf_clear` | K | `MiniIOSurface.cpp` | `CONFIG_SURF_CLEAR` |  |
 | `surf_wrap` | K | `MiniIOSurface.cpp` | `CONFIG_SURF_WRAP` |  |
 | `surftrace` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE` |  |
@@ -121,11 +122,12 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `touch_lat` | KU | `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
 | `vblur` | U | `eagl.c` | `CONFIG_VBLUR` |  |
 
-## Security stand-ins (1)
+## Security stand-ins (2)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `privs` | K | `kern_minimac.c` | `CONFIG_PRIVS` |  |
+| `security` | K | `kern_minimac.c` | `CONFIG_SECURITY` |  |
 
 ## Wi-Fi (49)
 
@@ -503,19 +505,22 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `tmu_stop` | K | `hakios.exynos_tmu.c` | `CONFIG_TMU_STOP` |  |
 | `tmu_ungate` | K | `hakios.exynos_tmu.c` | `CONFIG_TMU_UNGATE` |  |
 
-## CPU, memory and boot (23)
+## CPU, memory and boot (26)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `applog` | K | `(patch)` | `CONFIG_APPLOG` |  |
 | `applog_name` | K | `(patch)` | `CONFIG_APPLOG_NAME` |  |
+| `avf_exit` | K | `loader_return.c` | `CONFIG_AVF_EXIT` |  |
 | `bootcpu` | KL | `loader.c`, `loader_return.c` | `CONFIG_BOOTCPU` |  |
 | `cpufreq` | K | `hakios.cpufreq.c` | `CONFIG_CPUFREQ` |  |
 | `cpuload` | K | `hakios.cpufreq.c` | `CONFIG_CPULOAD` |  |
 | `ddr` | K | `hakios.cpufreq.c` | `CONFIG_DDR` |  |
 | `ddr_rest` | K | `hakios.cpufreq.c` | `CONFIG_DDR_REST` |  |
 | `ddr_vote` | K | `hakios.cpufreq.c` | `CONFIG_DDR_VOTE` |  |
+| `early_log` | K | `loader_return.c` | `CONFIG_EARLY_LOG` |  |
 | `epoch` | K | `GenericARMPE.cpp` |  | xl (the host's clock) |
+| `esslog` | K | `loader_return.c` | `CONFIG_ESSLOG` |  |
 | `hv_wdt_pet` | K | `loader_return.c` |  | the loader, when it has armed the watchdog (the runner also passes it) |
 | `loader_return_after` | KL | `loader.c`, `loader_return.c` |  | xl (XL_SECS) |
 | `machine_name` | K | `GenericARMPE.cpp` | `CONFIG_MACHINE_NAME` |  |
@@ -548,7 +553,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `core0` | KL | `1513-psci-loader-core.patch`, `loader.c` | `CONFIG_CORE0` |  |
+| `core0` | KL | `loader.c`, `psci_smp.c` | `CONFIG_CORE0` |  |
 | `core1` | L | `loader.c` | `CONFIG_CORE1` |  |
 | `cpumask` | L | `loader.c` | `CONFIG_CPUMASK` |  |
 | `cpus` | L | `loader.c` | `CONFIG_CPUS` |  |
@@ -561,12 +566,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (110)
+## User space (105)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `autounlock` | U | `inject_sb.c` | `CONFIG_AUTOUNLOCK` |  |
-| `avf_exit` | K | `1001-avf-psci-system-off.patch` | `CONFIG_AVF_EXIT` |  |
 | `brightness_bridge` | U | `inject_sb.c` | `CONFIG_BRIGHTNESS_BRIDGE` |  |
 | `bt` | K | `hakios.bcm4361_bt.c`, `hakios.bt.c` | `CONFIG_BT` |  |
 | `bt_addr` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_ADDR` |  |
@@ -597,8 +601,6 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cpufreq_gov_log` | K | `hakios.exynos_cpufreq.c` | `CONFIG_CPUFREQ_GOV_LOG` |  |
 | `cpufreq_gov_ms` | K | `hakios.exynos_cpufreq.c` | `CONFIG_CPUFREQ_GOV_MS` |  |
 | `cs_relax_platform_task_ports` | K | `1002-avf-security-level.patch` | `CONFIG_CS_RELAX_PLATFORM_TASK_PORTS` |  |
-| `early_log` | K | `1503-early-log-and-panic.patch` | `CONFIG_EARLY_LOG` |  |
-| `esslog` | K | `1507-esslog-exynos-snapshot.patch`, `1509-m3-diag-and-pan-off.patch` | `CONFIG_ESSLOG` |  |
 | `fb_psr` | K | `hakios.exynos_dpu.c` | `CONFIG_FB_PSR` |  |
 | `fp_s9` | K | `hakios.exynos_iris.c` | `CONFIG_FP_S9` |  |
 | `gl` | U | `inject.c`, `inject_sb.c` | `CONFIG_GL` |  |
@@ -632,9 +634,9 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `keystore_real` | K | `MiniAppleKeyStore.cpp` | `CONFIG_KEYSTORE_REAL` |  |
 | `lga_dpu` | K | `hakios.lga_dpu.c` | `CONFIG_LGA_DPU` |  |
 | `lga_kick` | K | `hakios.lga_dpu.c` | `CONFIG_LGA_KICK` |  |
-| `m3_diag` | K | `1509-m3-diag-and-pan-off.patch` | `CONFIG_M3_DIAG` |  |
-| `m3_flush` | K | `1509-m3-diag-and-pan-off.patch` | `CONFIG_M3_FLUSH` |  |
-| `m3_ids` | K | `1509-m3-diag-and-pan-off.patch` | `CONFIG_M3_IDS` |  |
+| `m3_diag` | K | `psci_smp.c` | `CONFIG_M3_DIAG` |  |
+| `m3_flush` | K | `psci_smp.c` | `CONFIG_M3_FLUSH` |  |
+| `m3_ids` | K | `psci_smp.c` | `CONFIG_M3_IDS` |  |
 | `m3_prep` | K | `1510-isa-floor.patch`, `1511-m3-user-cache-pou.patch`, `hakios.exynos_m3.c` | `CONFIG_M3_PREP` |  |
 | `mc_ce` | K | `mc_ce.c` | `CONFIG_MC_CE` |  |
 | `md0` | K | `1101-virtio-disk-as-md0.patch` | `CONFIG_MD0` |  |
@@ -654,12 +656,10 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `rtc_pmic` | K | `hakios.s2mps18_rtc.c` | `CONFIG_RTC_PMIC` |  |
 | `sb_delay` | U | `inject_sb.c` |  | xl (XL_SB_DELAY) |
 | `sb_fps` | U | `inject_sb.c` | `CONFIG_SB_FPS` |  |
-| `scfb.addr` | K | `1200-avf-scfb-display.patch`, `1202-virtio-gpu-2d.patch`, `hakios.scfb_battery.c` | `CONFIG_SCFB_ADDR` |  |
 | `scgpu.addr` | K | `hakios.vgpu3d_xnu.c` | `CONFIG_SCGPU_ADDR` |  |
 | `scgpu.size` | K | `hakios.vgpu3d_xnu.c` | `CONFIG_SCGPU_SIZE` |  |
 | `scsnd.addr` | K | `hakios.scsnd.c` | `CONFIG_SCSND_ADDR` |  |
 | `scsnd.size` | K | `hakios.scsnd.c` | `CONFIG_SCSND_SIZE` |  |
-| `security` | K | `1002-avf-security-level.patch` | `CONFIG_SECURITY` |  |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
 | `system_apfs` | U | `init.c` | `CONFIG_SYSTEM_APFS` |  |
 | `tee_probe` | K | `hakios.exynos_tee.c` | `CONFIG_TEE_PROBE` |  |

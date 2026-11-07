@@ -42,7 +42,128 @@ extern struct vc_info vinfo;            /* the boot framebuffer, as the text con
 
 #include "MiniIOSurface.h"
 
+extern "C" void hakios_vgpu3d_display_surface(uint32_t sid);       /* bsd/dev/hakios.vgpu3d_xnu.c */
+extern "C" bool hakios_vgpu3d_host_owns(uint32_t sid);
+
 extern "C" void hakios_tl(const char * format, ...) __printflike(1, 2);
+extern "C" int hakios_panel_brightness(int level);       /* drivers/display/panel/hakios.backlight.cpp: 0 if a panel driver took it, else ENODEV */
+extern "C" void hakios_backlight_publish(IOService * display);  /* the same: AppleARMBacklight, with boot-arg backlight= */
+
+/*
+ * Scion shared framebuffer (SCFB), for the Android Virtualization Framework: crosvm has no ramfb,
+ * and an ordinary app cannot take crosvm's virtio-gpu display. Instead the app lends the VM a
+ * slice of RAM that it maps too (an ashmem region crosvm maps as guest memory), and the boot
+ * framebuffer is in it. avfboot (avf/shim) finds it in the kernel parameters
+ * scfb.addr=PA scfb.size=N scfb.w=W scfb.h=H, keeps it out of the kernel's memory, writes the
+ * header below and points boot_args' video at buffer 0. Here, every frame that has been drawn
+ * into the panel's memory is published: frame_seq goes up, and the app copies the buffer to its
+ * screen. There is one buffer, drawn in place (the layers of a swap only redraw what they cover),
+ * so it is guarded like a seqlock: before drawing we wait while the app is copying
+ * (host_reading, 4 ms at most) and set drawing; the app waits while drawing is set and copies
+ * again if a frame began meanwhile. No half-drawn frame reaches the screen. The header layout is
+ * the app's (display/SCFB.md in scion-avf); only the fields used are named here.
+ */
+#define SCFB_MAGIC              0x42464353u     /* "SCFB" */
+#define SCFB_F_READY            1u              /* the header is valid */
+#define SCFB_F_POLL             2u              /* nothing publishes frames yet: copy now and then */
+#define SCFB_F_DAMAGE           4u              /* dirty[] is exact: an empty rectangle means nothing changed */
+struct scfb_header {
+	uint32_t        magic, version;
+	uint32_t        width, height;
+	uint32_t        stride, format;
+	uint32_t        buf_offset[2];
+	uint32_t        nbufs, flags;
+	uint32_t        front;
+	uint32_t        drawing;                /* 1 while a frame is drawn into the buffer (seqlock with host_reading) */
+	uint64_t        frame_seq;              /* frames published */
+	uint64_t        input_seq;              /* (input reports consumed: not known here, 0) */
+	uint64_t        guest_ns;               /* when the frame was published */
+	uint32_t        dirty[4];               /* x, y, width, height that changed */
+	uint64_t        host_seq;               /* the app: last frame copied */
+	uint64_t        host_reading;
+	uint64_t        host_ns;
+};
+/*
+ * virtio-gpu 2D (bsd/dev/hakios.vgpu.c): the panel when the loader left no framebuffer, e.g.
+ * QEMU with -device virtio-gpu-pci and no ramfb. Each frame is then sent with hakios_vgpu_flush.
+ */
+extern "C" int hakios_vgpu_display(void ** fb, uint32_t * width, uint32_t * height, uint32_t * stride);
+extern "C" int hakios_vgpu_flush(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+static bool gVGPU;
+
+static TUNABLE(uint64_t, gSCFBAddr, "scfb.addr", 0);
+static volatile struct scfb_header * gSCFB;
+extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+
+static void
+scfbAttach(void)
+{
+	volatile struct scfb_header * h;
+
+	if (gSCFBAddr == 0) {
+		return;
+	}
+	h = (volatile struct scfb_header *) ml_io_map((vm_offset_t) gSCFBAddr, PAGE_SIZE);
+	if (h == NULL || h->magic != SCFB_MAGIC) {
+		IOLog("MiniIOMobileFramebuffer: no shared framebuffer header at 0x%llx\n", gSCFBAddr);
+		return;
+	}
+	IOLog("MiniIOMobileFramebuffer: shared framebuffer at 0x%llx: %ux%u, %u bytes a row, format 0x%x, app at frame %llu\n",
+	    gSCFBAddr, h->width, h->height, h->stride, h->format, h->host_seq);
+	gSCFB = h;
+}
+
+/* A frame is about to be drawn into the panel's memory: wait for the app to finish copying. */
+static void
+scfbBeginDraw(void)
+{
+	volatile struct scfb_header * h = gSCFB;
+	uint64_t deadline;
+
+	if (h == NULL) {
+		return;
+	}
+	clock_interval_to_deadline(4, NSEC_PER_MSEC, &deadline);
+	for (;;) {
+		while (h->host_reading != 0 && mach_absolute_time() < deadline) {
+		}
+		h->drawing = 1;
+		__builtin_arm_dsb(0xb);
+		if (h->host_reading == 0 || mach_absolute_time() >= deadline) {
+			break;
+		}
+		h->drawing = 0;                 /* both at once: the app goes first */
+		__builtin_arm_dsb(0xb);
+	}
+}
+
+/*
+ * The frame is in the panel's memory: tell the app what changed. exact: the rectangle is the
+ * whole change (empty when nothing did), as the shadow comparison in drawRows finds it.
+ */
+static void
+scfbPublish(uint32_t x, uint32_t y, uint32_t width, uint32_t height, bool exact)
+{
+	volatile struct scfb_header * h = gSCFB;
+	uint64_t nanos;
+
+	if (h == NULL) {
+		return;
+	}
+	__builtin_arm_dsb(0xf);                 /* (SY) the frame's write-combined stores are out */
+	absolutetime_to_nanoseconds(mach_absolute_time(), &nanos);
+	h->dirty[0] = x;
+	h->dirty[1] = y;
+	h->dirty[2] = width;
+	h->dirty[3] = height;
+	h->guest_ns = nanos;
+	h->front = 0;
+	__builtin_arm_dmb(0xb);
+	h->drawing = 0;
+	h->frame_seq = h->frame_seq + 1;
+	h->flags = SCFB_F_READY | (exact ? SCFB_F_DAMAGE : 0);   /* from now on every frame says so itself */
+	__builtin_arm_dsb(0xb);
+}
 
 /* IOConnectCallMethod selectors of the framebuffer user client (Darwin userland 16.5) */
 enum {
@@ -513,6 +634,7 @@ class IOMobileFramebuffer : public IOService
 	OSDeclareDefaultStructors(IOMobileFramebuffer);
 
 public:
+	virtual IOReturn setProperties(OSObject * properties) APPLE_KEXT_OVERRIDE;
 	IOLock *        fLock;
 	uint8_t *       fBase;                  /* the boot framebuffer: the panel */
 	uint32_t        fPanelWidth, fPanelHeight, fRowBytes;
@@ -524,6 +646,15 @@ public:
 	uint32_t        fSwapsShown;
 	uint32_t        fLayersShown;           /* which layers the last swap had a surface in */
 	bool            fGraphics;              /* the text console has been told to stop */
+	/*
+	 * With the shared framebuffer (SCFB): a cached copy of what the panel's memory holds. drawRows
+	 * compares each new row with it and writes only what differs to both, so the app is told
+	 * exactly what changed (and reads of the write-combined panel are never needed). Each thread
+	 * keeps its own bounds and folds them into fDamage* once per share of rows.
+	 */
+	uint32_t *      fShadow;
+	bool            fShadowStale;           /* the panel was drawn without it (text console): rewrite all */
+	uint32_t        fDamageX0, fDamageY0, fDamageX1, fDamageY1;     /* inclusive; X0 > X1: nothing */
 	/*
 	 * A frame goes to the panel when the GPU is done with it: a thread of ours waits for that
 	 * and copies it there, and whoever made the frame is back at the next one meanwhile. One
@@ -640,6 +771,7 @@ public:
 	void reportFrameTimes(void);
 	void drawLayer(MiniIOSurface * s, const int32_t * src, const int32_t * dst);
 	void drawRows(const struct RowJob * job, int32_t y0, int32_t y1, uint32_t * blendRow);
+	void damage(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1);
 	static void helperMain(void * self, wait_result_t result);
 	/* the scaling shared out (fb_threads): fThreads drawers, the presenter and fThreads - 1 helpers */
 	unsigned        fThreads;
@@ -813,6 +945,78 @@ IOMobileFramebuffer::publishModes(void)
 	OSSafeReleaseNULL(color);
 }
 
+/*
+ * What iOS sets on the display service -- its brightness, among other things, on a phone whose panel this kernel can
+ * dim: hakios_panel_brightness() (drivers/display/panel/hakios.backlight.cpp) hands it to the panel driver that registered there,
+ * the Galaxy S9's (drivers/display/panel/hakios.s6e3ha8.c); with none, ENODEV. Which key iOS 16's CoreBrightness uses for an
+ * OLED iPhone's display is not known here yet (boot-arg backlight= publishes AppleARMBacklight as well, to find out
+ * whether it is that service iOS sets instead): the first calls are said in the log, key by key, with the
+ * value of a number, and a key named "brightness" (any case) with a number from 0 to 1 or to 255 is taken as the
+ * brightness. Nothing is kept in the registry, and what is not a brightness is refused as IOService refuses it.
+ */
+static bool
+is_brightness(const char * key)
+{
+	static const char want[] = "brightness";
+
+	for (unsigned i = 0; i < sizeof(want); i++) {
+		char c = key[i];
+
+		if (c >= 'A' && c <= 'Z') {
+			c = (char)(c - 'A' + 'a');
+		}
+		if (c != want[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+IOReturn
+IOMobileFramebuffer::setProperties(OSObject * properties)
+{
+	OSDictionary * dict = OSDynamicCast(OSDictionary, properties);
+	OSCollectionIterator * keys;
+	OSObject * next;
+	static unsigned said;
+	char who[32] = "?";
+	bool taken = false;
+
+	if (dict == NULL) {
+		return kIOReturnBadArgument;
+	}
+	keys = OSCollectionIterator::withCollection(dict);
+	if (keys == NULL) {
+		return kIOReturnNoMemory;
+	}
+	proc_selfname(who, sizeof(who));
+	while ((next = keys->getNextObject()) != NULL) {
+		const OSSymbol * key = OSDynamicCast(OSSymbol, next);
+		OSNumber * number = key ? OSDynamicCast(OSNumber, dict->getObject(key)) : NULL;
+
+		if (key == NULL) {
+			continue;
+		}
+		if (said < 64) {
+			said++;
+			if (number != NULL) {
+				IOLog("IOMobileFramebuffer: %s sets %s = %llu\n", who, key->getCStringNoCopy(), number->unsigned64BitValue());
+			} else {
+				IOLog("IOMobileFramebuffer: %s sets %s (%s)\n", who, key->getCStringNoCopy(),
+				    dict->getObject(key) ? dict->getObject(key)->getMetaClass()->getClassName() : "?");
+			}
+		}
+		if (number != NULL && is_brightness(key->getCStringNoCopy())) {
+			uint64_t value = number->unsigned64BitValue();
+
+			/* (refused, as before, where no panel driver takes it: every other phone) */
+			taken = hakios_panel_brightness(value <= 1 ? (int)(value * 255) : value > 255 ? 255 : (int)value) == 0;
+		}
+	}
+	keys->release();
+	return taken ? kIOReturnSuccess : kIOReturnUnsupported;
+}
+
 bool
 IOMobileFramebuffer::start(IOService * provider)
 {
@@ -821,10 +1025,17 @@ IOMobileFramebuffer::start(IOService * provider)
 	if (!IOService::start(provider)) {
 		return false;
 	}
+	void * vgpuFB = NULL;
+	uint32_t vgpuWidth = 0, vgpuHeight = 0, vgpuStride = 0;
+
 	if (vinfo.v_baseaddr == 0 || vinfo.v_width == 0 || vinfo.v_height == 0 || vinfo.v_depth != 32) {
-		IOLog("MiniIOMobileFramebuffer: no usable boot framebuffer (%ux%u, depth %u)\n", vinfo.v_width, vinfo.v_height,
-		    vinfo.v_depth);
-		return false;
+		if (hakios_vgpu_display(&vgpuFB, &vgpuWidth, &vgpuHeight, &vgpuStride) != 0) {
+			IOLog("MiniIOMobileFramebuffer: no usable boot framebuffer (%ux%u, depth %u), and no virtio-gpu\n",
+			    vinfo.v_width, vinfo.v_height, vinfo.v_depth);
+			return false;
+		}
+		gVGPU = true;
+		IOLog("MiniIOMobileFramebuffer: the panel is virtio-gpu's scanout, %ux%u\n", vgpuWidth, vgpuHeight);
 	}
 	if (gMeasure && kernel_thread_start(measurePanel, NULL, &thread) == KERN_SUCCESS) {
 		thread_deallocate(thread);
@@ -847,10 +1058,10 @@ IOMobileFramebuffer::start(IOService * provider)
 		thread_set_thread_name(thread, "frames to the panel: a helper");
 		thread_deallocate(thread);
 	}
-	fBase = (uint8_t *) vinfo.v_baseaddr;
-	fPanelWidth = vinfo.v_width;
-	fPanelHeight = vinfo.v_height;
-	fRowBytes = vinfo.v_rowbytes;
+	fBase = gVGPU ? (uint8_t *) vgpuFB : (uint8_t *) vinfo.v_baseaddr;
+	fPanelWidth = gVGPU ? vgpuWidth : vinfo.v_width;
+	fPanelHeight = gVGPU ? vgpuHeight : vinfo.v_height;
+	fRowBytes = gVGPU ? vgpuStride : vinfo.v_rowbytes;
 	chooseDisplaySize();
 	if (gFBScale != 0 && gFBScale != kFBDefaultScale) {
 		static const char * const places[][2] = { { "/chosen", "display-scale" }, { "/product", "artwork-scale-factor" } };
@@ -879,6 +1090,14 @@ IOMobileFramebuffer::start(IOService * provider)
 		}
 	}
 	fColumn = IONewZero(uint32_t, fPanelWidth);
+	scfbAttach();
+	if (gSCFB != NULL) {
+		fShadow = (uint32_t *) IOMalloc((size_t) fPanelWidth * fPanelHeight * 4);
+		fShadowStale = true;
+		if (fShadow == NULL) {
+			IOLog("MiniIOMobileFramebuffer: no memory for the shadow of the panel: every frame is published whole\n");
+		}
+	}
 	fColumnWeight = IONewZero(uint16_t, fPanelWidth);
 	fDiff = gDiff != 0;
 	fDiffLeft = fDiffTop = ~0u;
@@ -941,6 +1160,7 @@ IOMobileFramebuffer::start(IOService * provider)
 	publishModes();
 	setName("disp0");
 	registerService();
+	hakios_backlight_publish(this);
 	return true;
 }
 
@@ -1089,6 +1309,7 @@ struct RowJob {
 	int32_t         sx, sy, sw, sh, px0, py0, px1, py1, cx0, cx1;
 	int32_t         ry0, ry1;       /* the rows of the rectangle that are on the panel: all that is looked at, whatever its size */
 	bool            filter, unscaled;
+	bool force;              /* SCFB: write every row whole (the shadow does not match the panel) */
 };
 
 void
@@ -1099,6 +1320,7 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 	int32_t sx = job->sx, sy = job->sy, sw = job->sw, sh = job->sh;
 	int32_t px0 = job->px0, py0 = job->py0, px1 = job->px1, py1 = job->py1, cx0 = job->cx0, cx1 = job->cx1;
 	bool filter = job->filter;
+	uint32_t dx0 = ~0u, dy0 = ~0u, dx1 = 0, dy1 = 0;        /* what this share changed */
 
 	for (int32_t y = y0; y < y1; y++) {
 		const uint32_t * from;
@@ -1108,6 +1330,31 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 			continue;
 		}
 		to = (uint32_t *) (fBase + (size_t) y * fRowBytes);
+		if (fShadow != NULL && job->unscaled) {
+			/* the changed span of the row, by the shadow; only that goes to the panel */
+			const uint32_t * row = (const uint32_t *) (pixels + (size_t) (sy + y - py0) * stride + (size_t) sx * 4);
+			uint32_t * shadow = fShadow + (size_t) y * fPanelWidth + px0;
+			int32_t a = 0, b = sw - 1;
+
+			if (!job->force) {
+				while (a < sw && shadow[a] == row[a]) {
+					a++;
+				}
+				if (a == sw) {
+					continue;
+				}
+				while (b > a && shadow[b] == row[b]) {
+					b--;
+				}
+			}
+			memcpy(shadow + a, row + a, (size_t) (b - a + 1) * 4);
+			memcpy(to + px0 + a, row + a, (size_t) (b - a + 1) * 4);
+			dx0 = (uint32_t) (px0 + a) < dx0 ? (uint32_t) (px0 + a) : dx0;
+			dx1 = (uint32_t) (px0 + b) > dx1 ? (uint32_t) (px0 + b) : dx1;
+			dy0 = (uint32_t) y < dy0 ? (uint32_t) y : dy0;
+			dy1 = (uint32_t) y;
+			continue;
+		}
 		if (job->unscaled) {
 			/* not scaled at all */
 			memcpy(to + px0, pixels + (size_t) (sy + y - py0) * stride + (size_t) sx * 4, (size_t) sw * 4);
@@ -1135,6 +1382,36 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 			}
 		} else {
 			from = (const uint32_t *) (pixels + (size_t) (sy + (int64_t) (y - py0) * sh / (py1 - py0)) * stride);
+		}
+		if (fShadow != NULL) {
+			/* scaled: pixel by pixel against the shadow, only changes written to the panel */
+			uint32_t * shadow = fShadow + (size_t) y * fPanelWidth;
+			int32_t a = -1, b = -1;
+
+			for (int32_t x = cx0; x < cx1; x++) {
+				uint32_t c = fColumn[x], value;
+
+				if (filter) {
+					uint32_t w = fColumnWeight[x], p = from[c];
+
+					value = w == 0 || p == from[c + 1] ? p : blend(p, from[c + 1], w);
+				} else {
+					value = from[c];
+				}
+				if (job->force || shadow[x] != value) {
+					shadow[x] = value;
+					to[x] = value;
+					a = a < 0 ? x : a;
+					b = x;
+				}
+			}
+			if (a >= 0) {
+				dx0 = (uint32_t) a < dx0 ? (uint32_t) a : dx0;
+				dx1 = (uint32_t) b > dx1 ? (uint32_t) b : dx1;
+				dy0 = (uint32_t) y < dy0 ? (uint32_t) y : dy0;
+				dy1 = (uint32_t) y;
+			}
+			continue;
 		}
 		if (fDiff) {
 			for (int32_t x = cx0; x < cx1; x++) {
@@ -1166,6 +1443,37 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 			}
 		}
 	}
+	if (dx0 <= dx1) {
+		damage(dx0, dy0, dx1, dy1);
+	}
+}
+
+/* Folds a share's changed bounds into the frame's (shares run on several threads at once). */
+static inline void
+atomicMin(uint32_t * p, uint32_t v)
+{
+	uint32_t old = __atomic_load_n(p, __ATOMIC_RELAXED);
+
+	while (v < old && !__atomic_compare_exchange_n(p, &old, v, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+	}
+}
+
+static inline void
+atomicMax(uint32_t * p, uint32_t v)
+{
+	uint32_t old = __atomic_load_n(p, __ATOMIC_RELAXED);
+
+	while (v > old && !__atomic_compare_exchange_n(p, &old, v, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+	}
+}
+
+void
+IOMobileFramebuffer::damage(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1)
+{
+	atomicMin(&fDamageX0, x0);
+	atomicMin(&fDamageY0, y0);
+	atomicMax(&fDamageX1, x1);
+	atomicMax(&fDamageY1, y1);
 }
 
 /* A helper of the scaling (fb_threads): waits for rows to do, does them, says so. */
@@ -1327,6 +1635,7 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 	job.ry1 = py1 > (int32_t) fPanelHeight ? (int32_t) fPanelHeight : py1;
 	job.filter = filter;
 	job.unscaled = px1 - px0 == sw && py1 - py0 == sh && px0 >= 0 && (uint32_t) px1 <= fPanelWidth;
+	job.force = fShadowStale;
 	if (fThreads <= 1 || fDiff || fHelpersStarted + 1 < fThreads) {
 		drawRows(&job, job.ry0, job.ry1, fBlendRow);
 		return;
@@ -1457,6 +1766,10 @@ IOMobileFramebuffer::present(const uint8_t * swap)
 		uint32_t sid = swapWord(swap, SWAP_SURFACE(layer));
 
 		fSwapSurfaces[slot][layer] = sid != 0 ? MiniIOSurfaceCopy(sid) : NULL;
+		if (sid != 0) {
+			/* (SCGPU: a frame drawn into this surface is shown by the host itself: bsd/dev/hakios.vgpu3d_xnu.c) */
+			hakios_vgpu3d_display_surface(sid);
+		}
 	}
 	fSwapsWaiting++;
 	IOLockWakeup(fSwapLock, fSwap, true);
@@ -2361,6 +2674,10 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 	bool report;
 
 	for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
+		/* (a surface the host shows itself is never waited for, nor drawn here: see below) */
+		if (hakios_vgpu3d_host_owns(swapWord(swap, SWAP_SURFACE(layer)))) {
+			continue;
+		}
 		if (surfaces[layer] != NULL && !MiniIOSurfaceDrawn(surfaces[layer], SWAP_GPU_MS)) {
 			IOLog("MiniIOMobileFramebuffer: swap %u: the GPU is not done with surface %u after %u ms; shown as it is\n",
 			    swapWord(swap, SWAP_ID), swapWord(swap, SWAP_SURFACE(layer)), SWAP_GPU_MS);
@@ -2449,6 +2766,9 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		    swapWord(swap, SWAP_ID), fSwapsShown, swapWord(swap, SWAP_SURFACE(0)), swapWord(swap, SWAP_SURFACE(1)),
 		    swapWord(swap, SWAP_SURFACE(2)), swapWord(swap, SWAP_SURFACE(3)), set, swapWord(swap, SWAP_LAYERS_CLEARED));
 	}
+	scfbBeginDraw();
+	fDamageX0 = fDamageY0 = ~0u;
+	fDamageX1 = fDamageY1 = 0;
 	for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
 		uint32_t sid = swapWord(swap, SWAP_SURFACE(layer));
 		int32_t src[4], dst[4];
@@ -2468,6 +2788,10 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 				for (uint32_t y = 0; y < fPanelHeight; y++) {
 					bzero(fBase + (size_t) y * fRowBytes, (size_t) fPanelWidth * 4);
 				}
+				if (fShadow != NULL) {
+					bzero(fShadow, (size_t) fPanelWidth * fPanelHeight * 4);
+				}
+				damage(0, 0, fPanelWidth - 1, fPanelHeight - 1);
 			}
 			continue;
 		}
@@ -2491,6 +2815,14 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 				fGraphics = true;
 				PE_initialize_console(NULL, kPEGraphicsMode);
 			}
+			/*
+			 * SCGPU: the frame in this surface went from the GPU straight to the app's window
+			 * (rcFBPost, bsd/dev/hakios.vgpu3d_xnu.c); its memory here is stale, and copying it
+			 * to the panel would only cost the milliseconds the next swap waits for.
+			 */
+			if (hakios_vgpu3d_host_owns(sid)) {
+				continue;
+			}
 			drawLayer(s, src, dst);
 			if (layer == 0) {
 				recorded = s;   /* (recorded once the frame is in the panel's memory: see below) */
@@ -2498,6 +2830,24 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		}
 	}
 	drawn = mach_absolute_time();
+	if (fShadow != NULL) {
+		/* exactly what changed; an empty rectangle when nothing did */
+		bool any = fDamageX0 <= fDamageX1;
+
+		if (fShadowStale) {
+			/* the first picture after the text console: all of it, as before */
+			scfbPublish(0, 0, fPanelWidth, fPanelHeight, false);
+		} else {
+			scfbPublish(any ? fDamageX0 : 0, any ? fDamageY0 : 0, any ? fDamageX1 - fDamageX0 + 1 : 0,
+			    any ? fDamageY1 - fDamageY0 + 1 : 0, true);
+		}
+		fShadowStale = false;
+	} else {
+		scfbPublish(0, 0, fPanelWidth, fPanelHeight, false);
+	}
+	if (gVGPU) {
+		hakios_vgpu_flush(0, 0, fPanelWidth, fPanelHeight);
+	}
 	if (recorded != NULL) {
 		record(recorded);
 	}
