@@ -37,6 +37,15 @@
  *   4  read the chip's revision, the gauge and the charger once
  *   5  report every 5 seconds (the default)
  *
+ * Boot-arg max77705_diag=1 (read-only, off by default): for the charging and the power measurements, at step 4 and with
+ * every 5-minute line, the charger's own state as it is, raw: CHG_INT_OK and DETAILS_00-03 (0xB2-0xB6) and CNFG_00-14
+ * (0xB7-0xC5), with what the Android driver names in them (CNFG_00 [3:0] the mode, bit 4 WDTEN, the charger's watchdog;
+ * DETAILS_00 [6:5] CHGIN_DTLS, 3 a valid input; DETAILS_01 [3:0] CHG_DTLS, [6:4] BAT_DTLS; DETAILS_02 [3:0] BYP_DTLS;
+ * CNFG_02 [5:0] the fast-charge current, 50 mA a step; CNFG_09 [6:0] the input's limit). 0xB0 (CHG_INT) is not read:
+ * reading it clears it. Boot-arg max77705_fg_s=S (5 to 600, read-only): a short gauge line every S seconds (rounded to
+ * the 5 s poll) with AvgCurrent (0x0B) and QH (0x4D, the raw coulomb counter, to difference) besides Current,
+ * for a drain measured over minutes rather than read off a percentage.
+ *
  * Boot-arg max77705_ipclk=MHz: the HSI2C's input clock, if step 1 says it is not the 200 MHz Android sets (the device
  * tree's default-clk); the bus's timing is worked out from it. (CMGP's mux, +0x1018 bit 0, picks the RCO oscillator at
  * 0 and CMGP's bus clock at 1; the divider is +0x1814 [3:0].)
@@ -72,10 +81,14 @@
 #define FG_REPSOC       0x06
 #define FG_VCELL        0x09
 #define FG_CURRENT      0x0A
+#define FG_AVGCURRENT   0x0B
+#define FG_QH           0x4D
 #define FG_CYCLES       0x17
 #define FG_FULLCAPREP   0x35
 #define CHG_INT_OK      0xB2
 #define CHG_DTLS_01     0xB4
+#define CHG_DIAG_FIRST  0xB2            /* CHG_INT_OK: max77705_diag reads from here (not 0xB0, CHG_INT: read clears) */
+#define CHG_DIAG_LAST   0xC5            /* CNFG_14 */
 
 
 #define ADC_PA          EXYNOS_ADC_PA
@@ -601,8 +614,6 @@ static unsigned buzzes, capped;
 static uint64_t
 now_us(void)
 {
-	uint64_t ns;
-
 	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
 	return ns / NSEC_PER_USEC;
 }
@@ -801,6 +812,57 @@ haptic_start(void)
 	}
 }
 
+/*
+ * max77705_diag=1: the charger's registers 0xB2-0xC5, raw, in one line, and what they say (only reads; see the top of
+ * this file). A register that does not answer reads "--".
+ */
+static uint32_t chg_diag;
+static uint32_t fg_ticks;               /* max77705_fg_s, in 5 s polls (0: off) */
+
+static void
+chg_diag_say(const char *when)
+{
+	uint8_t r[CHG_DIAG_LAST - CHG_DIAG_FIRST + 1];
+	bool got[sizeof(r)];
+	char line[3 * sizeof(r) + 1];
+	size_t at = 0;
+
+	for (unsigned i = 0; i < sizeof(r); i++) {
+		got[i] = read8(CHARGER, (uint8_t)(CHG_DIAG_FIRST + i), &r[i]) == 0;
+		at += (size_t)snprintf(line + at, sizeof(line) - at, got[i] ? " %02x" : " --", r[i]);
+	}
+	say("max77705: charger %s: 0xb2-0xc5:%s\n", when, line);
+#define CHG_R(reg)      (got[(reg) - CHG_DIAG_FIRST] ? (int)r[(reg) - CHG_DIAG_FIRST] : -1)
+	say("max77705: charger %s: CNFG_00 mode %#x WDTEN %d; CHGIN_DTLS %d; CHG_DTLS %#x BAT_DTLS %d; BYP_DTLS %#x; "
+	    "fast charge %d mA; input limit code %#x (CNFG_09)\n", when,
+	    CHG_R(0xB7) < 0 ? -1 : CHG_R(0xB7) & 0xf, CHG_R(0xB7) < 0 ? -1 : CHG_R(0xB7) >> 4 & 1,
+	    CHG_R(0xB3) < 0 ? -1 : CHG_R(0xB3) >> 5 & 3,
+	    CHG_R(0xB4) < 0 ? -1 : CHG_R(0xB4) & 0xf, CHG_R(0xB4) < 0 ? -1 : CHG_R(0xB4) >> 4 & 7,
+	    CHG_R(0xB5) < 0 ? -1 : CHG_R(0xB5) & 0xf,
+	    CHG_R(0xB9) < 0 ? -1 : (CHG_R(0xB9) & 0x3f) * 50, CHG_R(0xC0) < 0 ? -1 : CHG_R(0xC0) & 0x7f);
+#undef CHG_R
+}
+
+/* max77705_fg_s=S: the gauge's short line (only reads) */
+static void
+fg_short_say(void)
+{
+	uint16_t soc, cap, qh;
+	int16_t current, avg;
+	uint64_t ns;
+
+	if (read16(GAUGE, FG_REPSOC, &soc) || read16(GAUGE, FG_REPCAP, &cap) || read16(GAUGE, FG_CURRENT, (uint16_t *)&current) ||
+	    read16(GAUGE, FG_AVGCURRENT, (uint16_t *)&avg) || read16(GAUGE, FG_QH, &qh)) {
+		say("max77705: fg: a read failed (%x)\n", bus.last_error);
+		return;
+	}
+	/* 312.5 uA a count for the currents; QH raw (the gauge's own coulomb count, its scale not taken as known here) */
+	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
+	say("max77705: fg: t %llu s, %u.%02u%%, %u mAh, current %d mA, avg %d mA, QH %u\n", ns / NSEC_PER_SEC,
+	    (unsigned)soc * 100 / 256 / 100, (unsigned)soc * 100 / 256 % 100, cap, (int)current * 3125 / 10000,
+	    (int)avg * 3125 / 10000, qh);
+}
+
 static void
 battery_thread(void *arg, __unused wait_result_t result)
 {
@@ -853,6 +915,10 @@ battery_thread(void *arg, __unused wait_result_t result)
 	} else {
 		say_state("now", &b);
 	}
+	(void)PE_parse_boot_argn("max77705_diag", &chg_diag, sizeof(chg_diag));
+	if (chg_diag) {
+		chg_diag_say("now");
+	}
 	{
 		/*
 		 * max77705_usbsw=1: the USB-C switch's D+/D- to the AP's USB (Samsung's com_to_usb_ap: the MUIC at 0x25, opcode
@@ -883,12 +949,27 @@ battery_thread(void *arg, __unused wait_result_t result)
 		}
 	}
 	say("max77705: step 5: reporting every %u s\n", POLL_MS / 1000);
+	{
+		uint32_t fg_s = 0;
+
+		(void)PE_parse_boot_argn("max77705_fg_s", &fg_s, sizeof(fg_s));
+		fg_ticks = fg_s >= 5 && fg_s <= 600 ? (fg_s + POLL_MS / 2000) / (POLL_MS / 1000) : 0;
+		if (fg_ticks != 0) {
+			say("max77705: fg: a short gauge line every %u s (max77705_fg_s)\n", fg_ticks * (POLL_MS / 1000));
+		}
+	}
 	for (unsigned tick = 0;; tick++) {
 		if (battery_read(&b)) {
 			failed = 0;
 			hakios_battery_report(&b);
 			if (tick % 60 == 0) {
 				say_state("every 5 minutes", &b);
+				if (chg_diag) {
+					chg_diag_say("every 5 minutes");
+				}
+			}
+			if (fg_ticks != 0 && tick % fg_ticks == 0) {
+				fg_short_say();
 			}
 		} else if (++failed == 10) {
 			say("max77705: 10 reads in a row have failed (%x); still trying\n", bus.last_error);
