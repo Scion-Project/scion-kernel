@@ -46,6 +46,7 @@ extern "C" void hakios_vgpu3d_display_surface(uint32_t sid);       /* bsd/dev/ha
 extern "C" bool hakios_vgpu3d_host_owns(uint32_t sid);
 
 extern "C" void hakios_tl(const char * format, ...) __printflike(1, 2);
+extern "C" void hakios_display_power(int on);   /* GenericARMPE.cpp (patch 1517) */
 extern "C" int hakios_panel_brightness(int level);       /* drivers/display/panel/hakios.backlight.cpp: 0 if a panel driver took it, else ENODEV */
 extern "C" void hakios_backlight_publish(IOService * display);  /* the same: AppleARMBacklight, with boot-arg backlight= */
 
@@ -3190,8 +3191,17 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
 	case kFBMethodSwapSignal:
 	case kFBMethodSwapCancel:
 	case kFBMethodSwapCancelAll:
-	case kFBMethodRequestPowerChange:
 	case kFBMethodChangeFrameInfo:
+		return kIOReturnSuccess;
+	case kFBMethodRequestPowerChange:
+		/*
+		 * Scion (patch 1517): backboardd's display power, one scalar (seen at boot: 1, 0, 1). Handed to the platform
+		 * expert (GenericARMPE.cpp, hakios_display_power()), which logs each change and, with panel_sleep= or
+		 * sleep_cores=, acts on it; without them nothing more happens than before.
+		 */
+		if (args->scalarInputCount > 0) {
+			hakios_display_power(in[0] != 0);
+		}
 		return kIOReturnSuccess;
 
 	case kFBMethodNotifications:                    /* in: callback (0 = off), its argument, type, 0 */
