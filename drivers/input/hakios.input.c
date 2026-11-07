@@ -313,6 +313,7 @@ hakios_input_init(void)
 	hakios_s6e3ha8_init();
 	hakios_s2mpb02_torch_init();
 	hakios_exynos_abox_init();
+	hakios_exynos_mfc_init();
 	hakios_battery_init();
 	hakios_scfb_battery_init();
 	hakios_max77705_init();

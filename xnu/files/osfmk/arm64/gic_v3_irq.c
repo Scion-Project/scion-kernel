@@ -528,7 +528,7 @@ gic_v2_cpu_init(int cpu)
 		/* (a GIC with a single CPU interface may say nothing: it is the only one) */
 		target = 1;
 	}
-	gic_v2_phys[cpu] = (uint32_t)(__builtin_arm_rsr64("MPIDR_EL1") & 0xffff);
+	gic_v2_phys[cpu] = ml_phys_id_from_mpidr(__builtin_arm_rsr64("MPIDR_EL1"));    /* as phys_id has it (patch 1504) */
 
 	if (ml_get_cpu_count() > 1) {
 		uint32_t sgis = (1u << GIC_SGI_SIGNAL) | (1u << GIC_SGI_STOP);
