@@ -538,6 +538,23 @@ psci_smp_start_cpu(int cpu)
 		}
 	}
 	psci_smp_diag_before(cpu, phys_id);
+	if (os_atomic_load(&psci_smp_started, relaxed) & (1u << cpu)) {
+		/*
+		 * Scion (patch 1517): a start again, of a core taken off (sleep_cores=, GenericARMPE.cpp). It was let go as soon as
+		 * it said so (cpu_sleep()), before its own CPU_OFF: CPU_ON now would be "already on". Wait, at most 100 ms, for
+		 * the firmware to say it is off.
+		 */
+		int64_t affinity = -1;
+		uint64_t until;
+
+		clock_interval_to_deadline(100, NSEC_PER_MSEC, &until);
+		while ((affinity = psci_call(PSCI_AFFINITY_INFO, phys_id, 0, 0)) != PSCI_AFFINITY_OFF && affinity >= 0 &&
+		    mach_absolute_time() < until) {
+			delay_for_interval(1, NSEC_PER_MSEC);
+		}
+		psci_smp_step("psci: cpu %d: started again; AFFINITY_INFO %lld after %llu us\n", cpu, affinity,
+		    psci_smp_us(mach_absolute_time() - t1));
+	}
 	status = psci_call(PSCI_CPU_ON, phys_id, entry, 0);
 	if (hakios_m3_park) {
 		volatile uint64_t *slot = (volatile uint64_t *)ml_io_map(0xFDA10000 + 32 * ((phys_id >> 8) & 0xf), 0x1000);
@@ -607,6 +624,16 @@ psci_smp_start_cpu(int cpu)
 		    stage >= PSCI_SMP_CPU_IN_KERNEL ? "it got as far as arm_init_cpu()" : "no sign of it since the firmware took the request");
 	}
 	return KERN_FAILURE;
+}
+
+/* Scion (patch 1517): true for the boot loader's own core (core0=1), which is never to be taken off (sleep_cores=) */
+bool psci_smp_cpu_is_loaders(int cpu);
+bool
+psci_smp_cpu_is_loaders(int cpu)
+{
+	cpu_data_t *cdp = cpu >= 0 && cpu < MAX_CPUS ? cpu_datap(cpu) : NULL;
+
+	return cdp != NULL && loader_core_box.mpidr != ~0ULL && cdp->cpu_phys_id == (uint32_t)loader_core_box.mpidr;
 }
 
 /* ---- patch 1513: the boot loader's core ---- */

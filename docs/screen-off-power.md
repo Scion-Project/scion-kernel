@@ -17,7 +17,7 @@ Status: **built, not yet run on a phone** (7 November). Everything here is behin
   behaviour). Its power cost with and without a reader is still to be measured.
 - **Modem**: parked (not started), nothing to do.
 
-## What this adds (patch 1517, `drivers/display/panel/hakios.s6e3ha8.c`)
+## What this adds (`GenericARMPE.cpp`, `MiniIOMobileFramebuffer.cpp`, `gic_v3_irq.c`, `psci_smp.c`, patch 1517, `hakios.s6e3ha8.c`)
 
 | Boot-arg | Default | What it does |
 |---|---|---|
@@ -25,10 +25,13 @@ Status: **built, not yet run on a phone** (7 November). Everything here is behin
 | `panel_sleep=1` | off | with `panel=1`: screen off sends display-off (28) and sleep-in (10) between the level-1 key, as Samsung's display-off and exit sequences do; screen on sends sleep-out (11), the last brightness again, display-on (29). The supplies stay on, so the panel keeps what the boot loader set it to (DSC, PPS, TE): whether it all survives a sleep-in is the first thing the phone run shows |
 | `sleep_cores=1` | off | `sleep_cores_after=` seconds (10) after the screen went off, the performance cores are taken off with `processor_exit()` (each ends in PSCI `CPU_OFF`; with all four off the firmware may power the cluster down); at screen-on they are started again with `processor_start()` (PSCI `CPU_ON`, the boot's path). `sleep_cores=2`: the efficiency cores too. Never the boot processor, never the loader's core (`core0=1`) |
 
-Kernel pieces of `sleep_cores=` (all in patch 1517): `ml_cpu_can_exit()` (`osfmk/arm/cpu_common.c`) allows exactly the
+Kernel pieces of `sleep_cores=` (patch 1517 for Apple's `cpu_common.c` and `cpu.c`; our own files for the rest): `ml_cpu_can_exit()` (`osfmk/arm/cpu_common.c`) allows exactly the
 cores whose bit GenericARMPE has set in `hakios_cpu_exit_mask` (without `sleep_cores=` it stays 0 and `processor_exit()`
 is refused as before); `cpu_sleep()` (`osfmk/arm64/cpu.c`) sets the sleep token that `cpu_exit_wait()` waits for, which
-only Apple's path set; `psci_smp_start_cpu()` waits for `AFFINITY_INFO` to say "off" before a second `CPU_ON` of a core.
+only Apple's path set; `psci_smp_start_cpu()` waits for `AFFINITY_INFO` to say "off" before a second `CPU_ON` of a core;
+`gic_v3_spi_move()` routes the core's device interrupts to the boot processor before it goes (an SPI is routed to the core
+that attached it), and the core's GIC state is forgotten at its shutdown so that `gic_v3_irq_cpu_init()` sets it up again
+at its return.
 
 ## How to measure (read-only)
 
