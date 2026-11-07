@@ -79,6 +79,7 @@ __pycache__/
 /xnu-deps/*
 !/xnu-deps/setup.sh
 !/xnu-deps/gen-iig-stubs.py
+!/xnu-deps/av-extend.py
 !/xnu-deps/hostinc/
 # ... but not Apple's Mach-O headers in it: setup.sh copies them from the kernel tree
 /xnu-deps/hostinc/mach-o/loader.h

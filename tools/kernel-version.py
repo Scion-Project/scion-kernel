@@ -8,13 +8,15 @@ usage: tools/kernel-version.py [--short | --name | --darwin | --release | --all]
   --short   2.1.13                                              VERSION.PATCHLEVEL.SUBLEVEL
   --release 2.1.13-hakios                                       with EXTRAVERSION: what a tag is called (v2.1.13-hakios)
   --name    Hello Darwin                                        the release's name
-  --darwin  22.5.0 xnu-8796.121.2                               what it is built on
+  --darwin  22.5.0 xnu-8796.121.2                               what it is built on: the OS profile's (below)
   --all     every part, one per line, for the build log
 
 The parts of the full string, in the order Android's kernels give theirs:
   VERSION.PATCHLEVEL.SUBLEVEL  from the file VERSION
   EXTRAVERSION                 ... likewise
-  -darwin<major>.<minor>       the Darwin it is built on (DARWIN in VERSION)
+  -darwin<major>.<minor>       the Darwin it is built on: the OS profile's `darwin` and `xnu_tag` (profiles/*.conf,
+                               tools/os-profile.py: ios-16.5's are 22.5.0 and xnu-8796.121.2, ios-26's 25.5.0 and
+                               xnu-12377.121.6); DARWIN and XNU in VERSION where there is no profile to read
   -<soc>                       CONFIG_SOC of the active configuration, if there is one (`make redwood_defconfig`)
   -g<commit>[-dirty]           git: the commit, and "-dirty" if a tracked file differs from it
 
@@ -53,6 +55,22 @@ def read_version(root):
     if values["EXTRAVERSION"] and not re.fullmatch(r"-[A-Za-z0-9._]+", values["EXTRAVERSION"]):
         sys.exit("kernel-version: EXTRAVERSION is a dash and letters or digits (-hakios), got %r" % values["EXTRAVERSION"])
     return values
+
+
+def profile_darwin(root, values):
+    """(darwin, xnu) of the OS profile the build is for (OS_PROFILE, .os-profile, else ios-16.5: tools/os-profile.py), or
+    VERSION's DARWIN and XNU when the tree has no profiles or the profile does not build."""
+    tool = os.path.join(root, "tools", "os-profile.py")
+    if os.path.isfile(tool):
+        env = dict(os.environ, OS_PROFILE_QUIET="1")
+        try:
+            got = [subprocess.run([sys.executable, tool, "get", key], capture_output=True, text=True, env=env)
+                   for key in ("darwin", "xnu_tag")]
+        except OSError:
+            got = []
+        if got and all(g.returncode == 0 and g.stdout.strip() for g in got):
+            return got[0].stdout.strip(), got[1].stdout.strip()
+    return values["DARWIN"], values["XNU"]
 
 
 def config_soc(path):
@@ -95,6 +113,7 @@ def main():
     v = read_version(root)
     short = "%s.%s.%s" % (v["VERSION"], v["PATCHLEVEL"], v["SUBLEVEL"])
     release = short + v["EXTRAVERSION"]
+    v["DARWIN"], v["XNU"] = profile_darwin(root, v)
     darwin = "-darwin" + ".".join(v["DARWIN"].split(".")[:2])
     soc = config_soc(args.config or os.path.join(root, ".config"))
     suffix = os.environ.get("HAKIOS_VERSION_SUFFIX")

@@ -47,7 +47,8 @@ fi
 # what was edited in drivers/ goes into the kernel tree first (only what is newer than the tree's copy), and then the
 # drivers the .config builds (CONFIG_HAKIOS_*; every driver when there is no .config): docs/drivers-config.md
 python3 tools/os-profile.py require || exit 1
-if [ -d "$SRC" ] && [ "$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get base)" = xnu-8796 ]; then
+# (on a base whose series has the place for them: xnu/apply-series.sh)
+if [ -d "$SRC" ] && grep -qF "# HakiOS drivers: made by tools/hakios-config.py kernel" "$SRC/bsd/conf/files"; then
 	xnu/sync-drivers.sh "$SRC" || exit 1
 	python3 tools/hakios-config.py kernel --tree "$SRC" || exit 1
 fi

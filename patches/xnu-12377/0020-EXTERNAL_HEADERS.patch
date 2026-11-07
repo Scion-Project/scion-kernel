@@ -1,0 +1,49 @@
+diff --git a/EXTERNAL_HEADERS/CodeSignature/Entitlements.h b/EXTERNAL_HEADERS/CodeSignature/Entitlements.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d841161aa189b8f8415908340cff62db94b80fb3
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CodeSignature/Entitlements.h
+@@ -0,0 +1,13 @@
++/*
++ * Scion: stand-in for CodeSignature/Entitlements.h, which Apple's open-source XNU includes but does not ship.
++ * bsd/kern/kern_exec.c needs the names of the four browser-engine entitlements, as Apple documents them.
++ */
++#ifndef SCION_CODESIGNATURE_ENTITLEMENTS_H
++#define SCION_CODESIGNATURE_ENTITLEMENTS_H
++
++#define kCSWebBrowserHostEntitlement       "com.apple.developer.web-browser-engine.host"
++#define kCSWebBrowserGPUEntitlement        "com.apple.developer.web-browser-engine.rendering"
++#define kCSWebBrowserNetworkEntitlement    "com.apple.developer.web-browser-engine.networking"
++#define kCSWebBrowserWebContentEntitlement "com.apple.developer.web-browser-engine.webcontent"
++
++#endif /* SCION_CODESIGNATURE_ENTITLEMENTS_H */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/API.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/API.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..5cbeba3929059527dc2fd7f56cf7c48ec3ecbcbf
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/API.h
+@@ -0,0 +1,11 @@
++/*
++ * Scion: stand-in for CoreEntitlements' V2 interface header, which Apple's open-source XNU names but does not ship.
++ * The kernel only holds these as pointers it passes through (libkern/libkern/amfi/amfi.h): opaque types are enough.
++ */
++#ifndef SCION_COREENTITLEMENTS_V2_API_H
++#define SCION_COREENTITLEMENTS_V2_API_H
++
++typedef struct CEKernelAPI CEKernelAPI_t;
++typedef struct CEContext CEContext_t;
++
++#endif /* SCION_COREENTITLEMENTS_V2_API_H */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/Kernel.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/Kernel.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5bd1666253f9040bfa09ac54650f288c1517f18
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/Kernel.h
+@@ -0,0 +1,7 @@
++/* Scion: stand-in for CoreEntitlements' V2 kernel header (see V2/API.h). */
++#ifndef SCION_COREENTITLEMENTS_V2_KERNEL_H
++#define SCION_COREENTITLEMENTS_V2_KERNEL_H
++
++#include <CoreEntitlements/V2/API.h>
++
++#endif /* SCION_COREENTITLEMENTS_V2_KERNEL_H */

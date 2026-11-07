@@ -8,7 +8,8 @@
                       missing, a number out of range, a bad hex or string, a command line that cannot fit
   drivers             CONFIG_HAKIOS_* from drivers/*/conf: built in unless a configuration says otherwise; `is not set` leaves one
                       out; a driver without one it requires, and an argument only a left-out driver reads, are refused; `kernel`
-                      writes the choice into a kernel tree where XNU's config reads it, and writes nothing when nothing changed
+                      writes the choice into a kernel tree where XNU's config reads it, and writes nothing when nothing changed;
+                      a tree of another XNU base (ios-26) gets only the drivers whose `bases` name it
   workflow            merge over an existing .config; `is not set` in a fragment switches off; savedefconfig round-trips;
                       --config and --root work after the command as well as before it
 """
@@ -313,6 +314,18 @@ try:
         f.write("# CONFIG_HAKIOS_ADSP is not set\n")
     r = run("kernel", "--tree", tree, "--config", bad)
     check("kernel: refuses a choice a driver's requires breaks", r.returncode != 0 and "requires CONFIG_HAKIOS_ADSP" in r.stdout, r.stdout + r.stderr)
+    # a tree of another XNU base gets only the drivers whose conf names that base in `bases` (xnu-8796 when it names none)
+    r = subprocess.run([sys.executable, TOOL, "--root", ROOT, "kernel", "--tree", tree, "--config", nog], capture_output=True, text=True,
+                       env=dict(os.environ, OS_PROFILE="ios-26", OS_PROFILE_QUIET="1"))
+    master = open(os.path.join(tree, "config/MASTER.hakios")).read()
+    files = open(os.path.join(tree, "bsd/conf/files")).read()
+    block = files.split(hc.FILES_BEGIN)[1].split(hc.FILES_END)[0]
+    on_12377 = [d.name.lower() for d in hc.DRIVERS if "xnu-12377" in d.bases]
+    check("kernel on xnu-12377 (ios-26): only the drivers whose `bases` name it, and it says which it left out",
+          r.returncode == 0 and all(("hakios_" + n) in master for n in on_12377) and (" hakios_buttons " in master) == ("buttons" in on_12377) and
+          ("hakios_buttons" in block) == ("buttons" in on_12377) and "not built on xnu-12377" in r.stdout and
+          files.startswith("bsd/dev/a.c standard\n" + hc.FILES_BEGIN) and files.rstrip().endswith("bsd/dev/z.c standard"),
+          r.stdout + r.stderr + master + files)
 
     # help, show, list
     r = run("help", "gpu")

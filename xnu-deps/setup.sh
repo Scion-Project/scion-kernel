@@ -22,6 +22,14 @@
 #                                                   to the cctools (next to our own wrappers)
 #   sdk/iPhoneOS16.5.xnu.sdk                        the theos SDK (as links) plus usr/local: what
 #                                                   Apple's internal SDK has and the public one lacks
+#
+# The OS profile's XNU base (tools/os-profile.py, docs/two-bases.md) decides the SDK and the releases of
+# the sources that go into it. For xnu-8796 (ios-16.5) it is all of the above. For a later base (xnu-12377:
+# ios-26, profile sdk 26) the kernel's SDK is sdk/iPhoneOS26.xnu.sdk, made of links to an iPhoneOS SDK of 26
+# or later (on macOS Xcode's, on Linux $THEOS/sdks/iPhoneOS26*.sdk, which theos/sdks does not have: bring
+# your own), plus usr/local from AvailabilityVersions-157.2 and libdispatch-1542.100.32. Public
+# AvailabilityVersions stops at iOS 17.3 and macOS 14.3; the versions after those are added to its version
+# list from the SDK's own AvailabilityVersions.h (docs/two-bases.md).
 set -e -o pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$HERE/../xnu-env.sh"
@@ -29,6 +37,7 @@ cd "$XNUDEPS"
 JOBS=${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 CCTOOLS=$THEOS/toolchain/linux/iphone/bin
 DARWIN_SDK=$THEOS/sdks/iPhoneOS16.5.sdk
+BASE=$(_scion_profile base xnu-8796)
 MACOS_SDK_URL=https://github.com/joseluisq/macosx-sdks/releases/download/13.3/MacOSX13.3.sdk.tar.xz
 
 log() { echo "setup: $*"; }
@@ -103,6 +112,17 @@ stage1() {
 	[ -z "$missing" ] || die "not installed:$missing"
 	[ -x "$CCTOOLS/ld" ] || die "no cctools in $CCTOOLS: install theos with its Linux toolchain (or set THEOS)"
 	[ -d "$DARWIN_SDK/usr/include" ] || die "no $DARWIN_SDK (the SDKs of github.com/theos/sdks go to \$THEOS/sdks)"
+	# the SDK the kernel's is made of: theos' 16.5 for xnu-8796, else an iPhoneOS SDK of the profile's release or later
+	local base_sdk=$DARWIN_SDK
+	if [ "$BASE" != xnu-8796 ]; then
+		if [ "$XNU_HOST_OS" = Darwin ]; then
+			base_sdk=$(/usr/bin/xcrun --sdk iphoneos --show-sdk-path 2>/dev/null) || die "Xcode has no iPhoneOS SDK"
+		else
+			base_sdk=$(ls -d "$THEOS/sdks/iPhoneOS$XNU_SDK_VERSION"*.sdk 2>/dev/null | tail -1)
+		fi
+		[ -d "$base_sdk/usr/include" ] ||
+			die "$BASE needs an iPhoneOS $XNU_SDK_VERSION (or later) SDK: Xcode's on macOS, \$THEOS/sdks/iPhoneOS$XNU_SDK_VERSION*.sdk on Linux"
+	fi
 
 	# --- sources -------------------------------------------------------------------------------
 	fetch AvailabilityVersions https://github.com/apple-oss-distributions/AvailabilityVersions.git \
@@ -111,6 +131,15 @@ stage1() {
 		a641558f447659d90ad002ef0ee6f0212273fbfc        # libdispatch-1415.100.11
 	fetch libpthread https://github.com/apple-oss-distributions/libpthread.git \
 		a6c70ca0e544347a0377babf748f831577ec24f9        # libpthread-514.100.2
+	# a later base: the releases of the same projects that go with iOS 26
+	local av=AvailabilityVersions dispatch=libdispatch
+	if [ "$BASE" != xnu-8796 ]; then
+		av=AvailabilityVersions-157 dispatch=libdispatch-1542
+		fetch $av https://github.com/apple-oss-distributions/AvailabilityVersions.git \
+			149b1777f3e8c2133042d8e188f72e3adf6a7110        # AvailabilityVersions-157.2
+		fetch $dispatch https://github.com/apple-oss-distributions/libdispatch.git \
+			701f4d1a24ae9c6863901bbbb22624b7d1b87321        # libdispatch-1542.100.32
+	fi
 	fetch mm_bootstrap_cmds https://github.com/markmentovai/bootstrap_cmds \
 		f337e600741638896fb6056ce87c6479f74b89a3        # cross_platform/bootstrap_cmds-138
 	fetch tcsh https://github.com/tcsh-org/tcsh.git b7db07931546178c4cb2542b5fc850c483628ed5
@@ -123,6 +152,16 @@ stage1() {
 		curl -L --fail --retry 3 -s -o macos-sdk.tar.xz "$MACOS_SDK_URL" || die "download failed: $MACOS_SDK_URL"
 		local wild=--wildcards; [ "$XNU_HOST_OS" = Darwin ] && wild=        # bsdtar: patterns as they are
 		tar -xJf macos-sdk.tar.xz $wild '*MacOSX13.3.sdk/System/Library/Frameworks/Kernel.framework*' ||
+			die "cannot unpack the macOS SDK"
+		rm -f macos-sdk.tar.xz
+	fi
+
+	# a later base on Linux: the same, from the macOS SDK of its XNU family (on macOS, Xcode's own iig makes them)
+	if [ "$BASE" != xnu-8796 ] && [ "$XNU_HOST_OS" != Darwin ] &&
+		[ ! -d MacOSX26.1.sdk/System/Library/Frameworks/Kernel.framework/Headers/DriverKit ]; then
+		log "downloading the macOS 26.1 SDK for its DriverKit headers"
+		curl -L --fail --retry 3 -s -o macos-sdk.tar.xz "${MACOS_SDK_URL//13.3/26.1}" || die "download failed"
+		tar -xJf macos-sdk.tar.xz --wildcards '*MacOSX26.1.sdk/System/Library/Frameworks/Kernel.framework*' ||
 			die "cannot unpack the macOS SDK"
 		rm -f macos-sdk.tar.xz
 	fi
@@ -188,18 +227,27 @@ stage1() {
 	# The makefiles ask xcrun (ours: host/bin/xcrun) for an SDK and a platform directory.
 	mkdir -p sdk/Platforms/iPhoneOS.platform
 	if [ ! -d "$XNU_SDK_PATH/usr/include" ]; then
-		log "making the SDK: links to $DARWIN_SDK"
+		log "making the SDK: links to $base_sdk"
 		rm -rf "$XNU_SDK_PATH"
-		linktree "$(cd "$DARWIN_SDK" && pwd -P)" "$XNU_SDK_PATH"
+		linktree "$(cd "$base_sdk" && pwd -P)" "$XNU_SDK_PATH"
 	fi
 	local sdk_local=$XNU_SDK_PATH/usr/local
 	mkdir -p $sdk_local/include/kernel/os $sdk_local/include/os $sdk_local/lib/kernel $sdk_local/libexec
-	update $sdk_local/libexec/availability.pl < AvailabilityVersions/availability.pl
+	if [ "$BASE" = xnu-8796 ]; then
+		update $sdk_local/libexec/availability.pl < AvailabilityVersions/availability.pl
+	else
+		# AvailabilityVersions 157: availability.pl runs "availability" (Python), which reads availability.dsl next to it
+		update $sdk_local/libexec/availability.pl < $av/availability.pl
+		update $sdk_local/libexec/availability < $av/availability
+		chmod +x $sdk_local/libexec/availability
+		python3 "$HERE/av-extend.py" $av/availability.dsl "$base_sdk/usr/include/AvailabilityVersions.h" |
+			update $sdk_local/libexec/availability.dsl
+	fi
 	[ -x $sdk_local/libexec/availability.pl ] || chmod +x $sdk_local/libexec/availability.pl
 	# the kernel's half of a private libdispatch header (unifdef exits with 1 when it removed something)
-	{ host/bin/unifdef -DOS_FIREHOSE_SPI=1 -DKERNEL=1 libdispatch/os/firehose_buffer_private.h || [ $? -eq 1 ]; } |
+	{ host/bin/unifdef -DOS_FIREHOSE_SPI=1 -DKERNEL=1 $dispatch/os/firehose_buffer_private.h || [ $? -eq 1 ]; } |
 		update $sdk_local/include/kernel/os/firehose_buffer_private.h
-	update $sdk_local/include/kernel/os/firehose_types.defs < libdispatch/src/firehose/firehose_types.defs
+	update $sdk_local/include/kernel/os/firehose_types.defs < $dispatch/src/firehose/firehose_types.defs
 	log "stage 1 done"
 }
 
@@ -212,13 +260,24 @@ stage2() {
 	[ -f "$XNU_SRC/makedefs/MakeInc.def" ] || die "no kernel tree in $XNU_SRC (xnu/apply.sh makes it)"
 	[ -x host/bin/migcom ] && [ -d "$XNU_SDK_PATH/usr/local/lib/kernel" ] || die "stage 1 has not been done"
 	local lib=$XNU_SDK_PATH/usr/local/lib/kernel hdrs=$XNU_SRC/BUILD/obj/EXPORT_HDRS file
+	# xnu-8796: arm64, libdispatch-1415, and the pthread kext as a library. A later base: the profile's arch (arm64e) and
+	# machine, libdispatch-1542; its pthread support is in the kernel itself, so there is no library to make
+	# (and no XNU_KERNEL_PRIVATE at all: xnu-12377's headers test it with #ifdef in places, so "=0" would mean on)
+	local arch=arm64 board=ARM64_BOARD_CONFIG_BCM2837 dispatch=libdispatch pthread=$lib/libpthread_kext.a xkp=-DXNU_KERNEL_PRIVATE=0
+	if [ "$BASE" != xnu-8796 ]; then
+		arch=$XNU_ARCH_STRING board=ARM64_BOARD_CONFIG_$(_scion_profile machine VMAPPLE) dispatch=libdispatch-1542 pthread= xkp=
+		# outside XNU_KERNEL_PRIVATE its headers want TargetConditionals.h (Kernel.framework has it): the SDK's, on its own
+		mkdir -p build/firehose/inc
+		link "$XNU_SDK_PATH/usr/include/TargetConditionals.h" build/firehose/inc/TargetConditionals.h
+		xkp=-Ibuild/firehose/inc
+	fi
 	# three Mach-O headers for the build tools the kernel build compiles for this machine (SETUP/)
 	mkdir -p hostinc/mach-o
 	for file in loader.h nlist.h fat.h; do
 		[ -f hostinc/mach-o/$file ] || cp "$XNU_SRC/EXTERNAL_HEADERS/mach-o/$file" hostinc/mach-o/
 	done
-	if [ -n "$REBUILD_LIBS" ]; then rm -f $lib/libfirehose_kernel.a $lib/libpthread_kext.a; fi
-	if [ -f $lib/libfirehose_kernel.a ] && [ -f $lib/libpthread_kext.a ]; then
+	if [ -n "$REBUILD_LIBS" ]; then rm -f $lib/libfirehose_kernel.a $pthread; fi
+	if [ -f $lib/libfirehose_kernel.a ] && { [ -z "$pthread" ] || [ -f $pthread ]; }; then
 		log "stage 2: nothing to do"
 		return 0
 	fi
@@ -228,18 +287,18 @@ stage2() {
 	if [ ! -f $lib/libfirehose_kernel.a ]; then
 		log "building libfirehose_kernel.a"
 		mkdir -p build/firehose
-		xnu-clang -arch arm64 -c -Os -mkernel -nostdinc -fno-builtin \
-			-DKERNEL=1 -DKERNEL_PRIVATE=1 -DXNU_KERNEL_PRIVATE=0 -DPRIVATE=1 -D__DARWIN_64_BIT_INO_T=1 \
+		xnu-clang -arch $arch -c -Os -mkernel -nostdinc -fno-builtin \
+			-DKERNEL=1 -DKERNEL_PRIVATE=1 $xkp -DPRIVATE=1 -D__DARWIN_64_BIT_INO_T=1 \
 			-DDISPATCH_USE_DTRACE=0 -DOS_ATOMIC_CONFIG_MEMORY_ORDER_DEPENDENCY=1 \
-			-DOS_ATOMIC_CONFIG_STARVATION_FREE_ONLY=0 -DOS_FIREHOSE_SPI=1 -DARM64_BOARD_CONFIG_BCM2837 \
-			-Ilibdispatch -Ilibdispatch/src -Ilibdispatch/src/firehose \
+			-DOS_ATOMIC_CONFIG_STARVATION_FREE_ONLY=0 -DOS_FIREHOSE_SPI=1 -D$board \
+			-I$dispatch -I$dispatch/src -I$dispatch/src/firehose \
 			-I$hdrs/osfmk -I$hdrs/bsd -I$hdrs/libkern -I$hdrs/pexpert -I$hdrs/iokit -I$hdrs/security \
 			-I$XNU_SRC/libkern/firehose -I$hdrs/libkern/os -I$XNU_SRC/EXTERNAL_HEADERS \
 			-I$XNU_SDK_PATH/usr/local/include/kernel \
-			-o build/firehose/firehose_buffer.o libdispatch/src/firehose/firehose_buffer.c
+			-o build/firehose/firehose_buffer.o $dispatch/src/firehose/firehose_buffer.c
 		libtool -static -o $lib/libfirehose_kernel.a build/firehose/firehose_buffer.o
 	fi
-	if [ ! -f $lib/libpthread_kext.a ]; then
+	if [ -n "$pthread" ] && [ ! -f $pthread ]; then
 		log "building libpthread_kext.a"
 		build/pthread/build.sh
 	fi
