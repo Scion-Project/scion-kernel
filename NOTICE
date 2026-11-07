@@ -1,5 +1,12 @@
-Third-party components in or used by HakiOS
+Third-party components in or used by Scion's kernel (a fork of HakiOS)
 (full table with origins and status: THIRD_PARTY_LICENSES.md; compliance notes: COMPLIANCE.md)
+
+Where this tree comes from:
+
+- HakiOS (github.com/oosexgang/hakios-xnu-kernel and its sibling repositories, by the HakiOS authors): Scion's kernel is a fork of
+  it. The tree, the XNU patch, the loader, user space, tools and device layer started there; "Copyright (c) 2025-2026 the HakiOS
+  authors" in LICENSE covers that work, under the licences by directory that LICENSE sets out. Scion's changes are under the same
+  licences. The HakiOS authors' notices stay in the files they belong to.
 
 In the repository:
 
@@ -33,6 +40,18 @@ In the repository:
 - the Galaxy S9's Wi-Fi driver: Linux's brcmfmac and brcmutil (ISC), of the same pinned release, are fetched by
   tools/mk-brcmfmac.sh, patched with wifi/lx/brcmfmac/patches/ (ISC, as the files it changes) and built on the same
   layer (wifi/lx/brcmfmac, MIT); only the layer and the patch are here.
+
+- the community Galaxy S9+ port (danstronics/ios-s9plus-exynos, a Scion-based port; its LICENSE: MIT for its own layer, "the HakiOS
+  authors"): xnu/files/bsd/sys/hakios.touch_queue.h and tools/touch-queue-test.c are from its core/drivers/input, and the
+  touch_coalesce argument in drivers/input/hakios.input.c is that behaviour; tools/mesa/panfrost-mapping-cache.patch is its
+  baseline-support/panfrost-cache-mapping.patch (a patch to Mesa 25.0.7: Mesa's licence applies to the lines it adds). Each file's
+  header names the source. docs/star2lte-absorb.md says what else of it was read and left. Nothing Apple's or the vendor's.
+- Mesa: tools/mesa/*.patch are patches to Mesa (MIT, per-file licences), applied by tools/mk-mesa.sh to the Mesa a build fetches;
+  only the patches are here, and each is under the licence of the file it changes.
+- Android boot image header (xnuloader/chooser.h, CHOOSER=1): the format is AOSP's bootimg.h (Apache-2.0); the parser is written
+  from the format, no AOSP code is copied. The flattened device tree edit is written from the Devicetree Specification.
+- Facts, not code, from the Starbite loader for the Galaxy S9 (GPL-2.0-only): the GPA0 key register and bit, and the three RAM
+  addresses of the Android handoff, in xnuloader/chooser.h and chooser.c. None of its code or text is here.
 
 - AdrenoMetal (UniXNU, "NativeMetal contributors"), userland/src/metalvk/NativeBridgeMetalFrontend.* and
   tools/metal/bridge/NativeMetal*: MIT, see LICENSE.AdrenoMetal beside them; the Metal-on-Vulkan plug-in (METAL=vk).
