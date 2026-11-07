@@ -68,6 +68,7 @@ __pycache__/
 !/userland/src/
 !/userland/libmini/
 !/userland/var/
+!/userland/webclips/
 !/userland/bluetool/
 
 /sysimage/*
