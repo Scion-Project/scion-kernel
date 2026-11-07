@@ -614,6 +614,8 @@ static unsigned buzzes, capped;
 static uint64_t
 now_us(void)
 {
+	uint64_t ns;
+
 	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
 	return ns / NSEC_PER_USEC;
 }
