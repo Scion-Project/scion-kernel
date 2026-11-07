@@ -28,6 +28,7 @@
 
 #include <IOKit/IOKitLib.h>
 
+#define HAKIOS_DRM_DEVICES 1           /* (xf86drm.h: the device list is this file's to give) */
 #include "xf86drm.h"
 #include "drm-uapi/panfrost_drm.h"
 
@@ -59,11 +60,58 @@ static const struct service *opened;
 static io_connect_t connection;
 static int connection_fd = -1;
 
+static int noop_call(unsigned number, void *data, size_t size);
+static void *noop_map(uint32_t handle);
+
+/* HAKIOS_DRM_NOOP=1: no kernel, a made-up Mali-G72 in this process (xf86drm.h; the end of this file) */
+int
+hakios_drm_noop(void)
+{
+	static int noop = -1;
+
+	if (noop < 0) {
+		const char *v = getenv("HAKIOS_DRM_NOOP");
+		noop = v != NULL && v[0] != '\0' && strcmp(v, "0") != 0;
+	}
+	return noop;
+}
+
+/* The connection to the service of the driver asked for, made once in a process: 0, or -1. */
+static int
+open_service(const struct service *wanted)
+{
+	io_service_t service;
+
+	if (wanted == NULL || (opened != NULL && opened != wanted)) {
+		return -1;
+	}
+	if (connection_fd >= 0) {
+		return 0;
+	}
+	if (hakios_drm_noop()) {
+		if (wanted != PANFROST) {
+			return -1;
+		}
+	} else {
+		service = IOServiceGetMatchingService(0, IOServiceMatching(wanted->service));
+		if (service == 0) {
+			return -1;
+		}
+		if (IOServiceOpen(service, mach_task_self(), 0, &connection) != 0) {
+			IOObjectRelease(service);
+			return -1;
+		}
+		IOObjectRelease(service);
+	}
+	opened = wanted;
+	connection_fd = open("/dev/null", O_RDWR);
+	return 0;
+}
+
 int
 drmOpenWithType(const char *name, const char *busid, int type)
 {
 	const struct service *wanted = NULL;
-	io_service_t service;
 
 	(void)busid;
 	(void)type;
@@ -72,23 +120,9 @@ drmOpenWithType(const char *name, const char *busid, int type)
 			wanted = &services[i];
 		}
 	}
-	if (wanted == NULL || (opened != NULL && opened != wanted)) {
+	if (open_service(wanted) != 0) {
 		return -1;
 	}
-	if (connection_fd >= 0) {
-		return dup(connection_fd);
-	}
-	service = IOServiceGetMatchingService(0, IOServiceMatching(wanted->service));
-	if (service == 0) {
-		return -1;
-	}
-	if (IOServiceOpen(service, mach_task_self(), 0, &connection) != 0) {
-		IOObjectRelease(service);
-		return -1;
-	}
-	IOObjectRelease(service);
-	opened = wanted;
-	connection_fd = open("/dev/null", O_RDWR);
 	return dup(connection_fd);
 }
 
@@ -96,7 +130,12 @@ static int
 call(unsigned number, void *data, size_t size)
 {
 	size_t returned = size;
-	kern_return_t result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
+	kern_return_t result;
+
+	if (hakios_drm_noop()) {
+		return noop_call(number, data, size);
+	}
+	result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
 
 	switch (result) {
 	case 0:
@@ -216,6 +255,10 @@ hakios_drm_map(int fd, uint32_t handle, uint64_t size)
 
 	(void)fd;
 	(void)size;
+	if (hakios_drm_noop()) {
+		void *memory = noop_map(handle);
+		return memory != NULL ? memory : (void *)-1;
+	}
 	/*
 	 * Linux gives freedreno and panfrost their buffers write-combined, with no cache of this
 	 * processor's between the program and the memory the GPU sees. So do the kernel's drivers
@@ -231,6 +274,9 @@ void
 hakios_drm_unmap(int fd, uint32_t handle, void *address)
 {
 	(void)fd;
+	if (hakios_drm_noop()) {
+		return;                 /* (the memory goes with the buffer: GEM_CLOSE) */
+	}
 	IOConnectUnmapMemory64(connection, handle, mach_task_self(), (mach_vm_address_t)(uintptr_t)address);
 }
 
@@ -608,3 +654,294 @@ NONE(drmSyncobjTimelineWait, __attribute__((unused)) int fd, __attribute__((unus
 NONE(drmSyncobjTransfer, __attribute__((unused)) int fd, __attribute__((unused)) uint32_t dst_handle,
     __attribute__((unused)) uint64_t dst_point, __attribute__((unused)) uint32_t src_handle,
     __attribute__((unused)) uint64_t src_point, __attribute__((unused)) uint32_t flags)
+NONE(drmSyncobjTimelineSignal, __attribute__((unused)) int fd, __attribute__((unused)) const uint32_t *handles,
+    __attribute__((unused)) uint64_t *points, __attribute__((unused)) uint32_t count)
+NONE(drmSyncobjQuery, __attribute__((unused)) int fd, __attribute__((unused)) uint32_t *handles,
+    __attribute__((unused)) uint64_t *points, __attribute__((unused)) uint32_t count)
+NONE(drmSyncobjQuery2, __attribute__((unused)) int fd, __attribute__((unused)) uint32_t *handles,
+    __attribute__((unused)) uint64_t *points, __attribute__((unused)) uint32_t count,
+    __attribute__((unused)) uint32_t flags)
+
+/*
+ * Signalled by the CPU: no job to wait for, as a sync object made signalled (0). Vulkan's common
+ * code calls this for vkSignalSemaphore and for fences and semaphores it signals itself.
+ */
+int
+drmSyncobjSignal(int fd, const uint32_t *handles, uint32_t count)
+{
+	uint64_t *fence;
+
+	(void)fd;
+	if (opened != PANFROST) {
+		return none();
+	}
+	pthread_mutex_lock(&lock);
+	for (uint32_t i = 0; i < count; i++) {
+		if ((fence = syncobj(handles[i])) == NULL) {
+			pthread_mutex_unlock(&lock);
+			errno = EINVAL;
+			return -1;
+		}
+	}
+	for (uint32_t i = 0; i < count; i++) {
+		*syncobj(handles[i]) = 0;
+	}
+	pthread_mutex_unlock(&lock);
+	return 0;
+}
+
+/* ---- the devices there are (xf86drm.h) ------------------------------------------------------- */
+
+static drmDevicePtr
+mali_device(void)
+{
+	drmDevicePtr device;
+
+	/* one allocation: the device, its node table, its bus and device information, the strings */
+	size_t size = sizeof(*device) + DRM_NODE_MAX * sizeof(char *) + sizeof(drmPlatformBusInfo) +
+	    sizeof(drmPlatformDeviceInfo) + 2 * sizeof(char *) + sizeof("/dev/null") + sizeof("arm,mali-bifrost");
+	char *p = calloc(1, size);
+
+	if (p == NULL) {
+		return NULL;
+	}
+	device = (drmDevicePtr)(void *)p;
+	p += sizeof(*device);
+	device->nodes = (char **)(void *)p;
+	p += DRM_NODE_MAX * sizeof(char *);
+	device->businfo.platform = (drmPlatformBusInfoPtr)(void *)p;
+	p += sizeof(drmPlatformBusInfo);
+	device->deviceinfo.platform = (drmPlatformDeviceInfoPtr)(void *)p;
+	p += sizeof(drmPlatformDeviceInfo);
+	device->deviceinfo.platform->compatible = (char **)(void *)p;
+	p += 2 * sizeof(char *);
+	device->nodes[DRM_NODE_RENDER] = strcpy(p, "/dev/null");
+	p += sizeof("/dev/null");
+	device->deviceinfo.platform->compatible[0] = strcpy(p, "arm,mali-bifrost");
+	strcpy(device->businfo.platform->fullname, "/mali@17500000");
+	device->available_nodes = 1 << DRM_NODE_RENDER;
+	device->bustype = DRM_BUS_PLATFORM;
+	return device;
+}
+
+/*
+ * The Mali, when HakiosMali is there (or HAKIOS_DRM_NOOP is set), and nothing else: the Adreno's
+ * service speaks msm, which no Vulkan driver here opens by enumeration. With devices NULL, how many
+ * there are, as libdrm.
+ */
+int
+drmGetDevices2(uint32_t flags, drmDevicePtr devices[], int max_devices)
+{
+	(void)flags;
+	if (open_service(PANFROST) != 0) {
+		return 0;
+	}
+	if (devices == NULL) {
+		return 1;
+	}
+	if (max_devices < 1) {
+		return 0;
+	}
+	if ((devices[0] = mali_device()) == NULL) {
+		return -ENOMEM;
+	}
+	return 1;
+}
+
+int
+drmGetDevices(drmDevicePtr devices[], int max_devices)
+{
+	return drmGetDevices2(0, devices, max_devices);
+}
+
+int
+drmGetDevice2(int fd, uint32_t flags, drmDevicePtr *device)
+{
+	(void)fd;
+	(void)flags;
+	if (opened != PANFROST) {
+		return -ENODEV;
+	}
+	return (*device = mali_device()) != NULL ? 0 : -ENOMEM;
+}
+
+void
+drmFreeDevice(drmDevicePtr *device)
+{
+	if (device != NULL) {
+		free(*device);
+		*device = NULL;
+	}
+}
+
+/* there is one device: two descriptions of a device are the same one when both are there */
+int
+drmDevicesEqual(drmDevicePtr a, drmDevicePtr b)
+{
+	return a != NULL && b != NULL && a->bustype == b->bustype;
+}
+
+void
+drmFreeDevices(drmDevicePtr devices[], int count)
+{
+	for (int i = 0; devices != NULL && i < count; i++) {
+		drmFreeDevice(&devices[i]);
+	}
+}
+
+/* ---- HAKIOS_DRM_NOOP: a Mali-G72 that runs nothing ------------------------------------------- */
+
+/*
+ * What HakiosMali answers, made up in this process (see hakios_drm_noop() in xf86drm.h). The
+ * parameters are those of tools/mali-drmshim/hakios_mali_shim.c, the Linux drm-shim check of the
+ * same GPU, where each value and the reason for it is written down: a Mali-G72 MP18 as the S9's
+ * (GPU_ID 0x6221). Buffers are this process's memory at made-up GPU addresses between 32 MB and
+ * 4 GB, as the kernel's are (drivers/gpu/mali/hakios.mali_va.h); a job is done as soon as it is
+ * given, and none is run.
+ */
+static struct noop_buffer {
+	void *memory;
+	uint64_t size, address;
+} *noop_buffers;
+static uint32_t noop_count;
+static uint64_t noop_next = 32ull << 20;
+static uint64_t noop_jobs;
+
+static void *
+noop_map(uint32_t handle)
+{
+	void *memory = NULL;
+
+	pthread_mutex_lock(&lock);
+	if (handle != 0 && handle <= noop_count) {
+		memory = noop_buffers[handle - 1].memory;
+	}
+	pthread_mutex_unlock(&lock);
+	return memory;
+}
+
+static int
+noop_param(struct drm_panfrost_get_param *param)
+{
+	static const struct {
+		uint32_t param;
+		uint64_t value;
+	} g72[] = {
+		{ DRM_PANFROST_PARAM_GPU_PROD_ID, 0x6221 },
+		{ DRM_PANFROST_PARAM_GPU_REVISION, 0x0030 },
+		{ DRM_PANFROST_PARAM_SHADER_PRESENT, 0x3ffff },
+		{ DRM_PANFROST_PARAM_TILER_PRESENT, 0x1 },
+		{ DRM_PANFROST_PARAM_L2_PRESENT, 0x1 },
+		{ DRM_PANFROST_PARAM_AS_PRESENT, 0xff },
+		{ DRM_PANFROST_PARAM_JS_PRESENT, 0x7 },
+		{ DRM_PANFROST_PARAM_L2_FEATURES, 0x07120206 },
+		{ DRM_PANFROST_PARAM_TILER_FEATURES, 0x809 },
+		{ DRM_PANFROST_PARAM_MEM_FEATURES, 0x1 },
+		{ DRM_PANFROST_PARAM_MMU_FEATURES, 0x2830 },
+		{ DRM_PANFROST_PARAM_MAX_THREADS, 384 },
+		{ DRM_PANFROST_PARAM_THREAD_MAX_WORKGROUP_SZ, 384 },
+		{ DRM_PANFROST_PARAM_THREAD_MAX_BARRIER_SZ, 384 },
+		{ DRM_PANFROST_PARAM_COHERENCY_FEATURES, 0x1 },
+		{ DRM_PANFROST_PARAM_TEXTURE_FEATURES0, 0xffffffff },
+		{ DRM_PANFROST_PARAM_TEXTURE_FEATURES1, 0xffffffff },
+		{ DRM_PANFROST_PARAM_TEXTURE_FEATURES2, 0xffffffff },
+		{ DRM_PANFROST_PARAM_TEXTURE_FEATURES3, 0xffffffff },
+		{ DRM_PANFROST_PARAM_NR_CORE_GROUPS, 1 },
+		{ DRM_PANFROST_PARAM_THREAD_TLS_ALLOC, 384 },
+	};
+
+	param->value = 0;               /* the rest (stack, core features, thread features, AFBC): 0 */
+	if (param->param >= DRM_PANFROST_PARAM_JS_FEATURES0 && param->param <= DRM_PANFROST_PARAM_JS_FEATURES15) {
+		param->value = param->param - DRM_PANFROST_PARAM_JS_FEATURES0 < 3 ? 0x20e : 0;
+	}
+	for (size_t i = 0; i < sizeof(g72) / sizeof(g72[0]); i++) {
+		if (g72[i].param == param->param) {
+			param->value = g72[i].value;
+		}
+	}
+	return 0;
+}
+
+static int
+noop_call(unsigned number, void *data, size_t size)
+{
+	int error = 0;
+
+	(void)size;
+	pthread_mutex_lock(&lock);
+	switch (number) {
+	case DRM_COMMAND_BASE + DRM_PANFROST_GET_PARAM:
+		error = noop_param(data);
+		break;
+	case DRM_COMMAND_BASE + DRM_PANFROST_CREATE_BO: {
+		struct drm_panfrost_create_bo *create = data;
+		uint64_t length = (create->size + 4095) & ~4095ull;
+		struct noop_buffer *grown;
+		void *memory;
+
+		if (length == 0 || noop_next + length > (4ull << 30) ||
+		    (memory = calloc(1, (size_t)length)) == NULL) {
+			error = ENOMEM;
+			break;
+		}
+		grown = realloc(noop_buffers, (noop_count + 1) * sizeof(*grown));
+		if (grown == NULL) {
+			free(memory);
+			error = ENOMEM;
+			break;
+		}
+		noop_buffers = grown;
+		/* code is kept off 16 MB lines (hakios.mali_va.h): every buffer starts on a 2 MB line here */
+		noop_buffers[noop_count] = (struct noop_buffer){ memory, length, noop_next };
+		create->handle = ++noop_count;
+		create->offset = noop_next;
+		noop_next = (noop_next + length + (2ull << 20) - 1) & ~((2ull << 20) - 1);
+		break;
+	}
+	case DRM_COMMAND_BASE + DRM_PANFROST_MMAP_BO: {
+		struct drm_panfrost_mmap_bo *map = data;
+
+		map->offset = (uint64_t)map->handle << 12;
+		break;
+	}
+	case DRM_COMMAND_BASE + DRM_PANFROST_GET_BO_OFFSET: {
+		struct drm_panfrost_get_bo_offset *offset = data;
+
+		if (offset->handle == 0 || offset->handle > noop_count) {
+			error = EINVAL;
+		} else {
+			offset->offset = noop_buffers[offset->handle - 1].address;
+		}
+		break;
+	}
+	case DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT: {
+		struct drm_panfrost_submit *submit = data;
+
+		submit->jc = ++noop_jobs;       /* (submit() above puts the chain back) */
+		break;
+	}
+	case DRM_COMMAND_BASE + DRM_PANFROST_MADVISE: {
+		struct drm_panfrost_madvise *madvise = data;
+
+		madvise->retained = 1;
+		break;
+	}
+	case 0x09: {                         /* DRM_IOCTL_GEM_CLOSE */
+		struct drm_gem_close *close = data;
+
+		if (close->handle != 0 && close->handle <= noop_count) {
+			free(noop_buffers[close->handle - 1].memory);
+			noop_buffers[close->handle - 1].memory = NULL;
+		}
+		break;
+	}
+	case DRM_COMMAND_BASE + DRM_PANFROST_WAIT_BO:
+	case HAKIOS_MALI_WAIT:
+		break;                          /* every job is done */
+	default:
+		error = ENOSYS;                 /* IOSurfaces (0x7e), performance counters */
+		break;
+	}
+	pthread_mutex_unlock(&lock);
+	return error;
+}

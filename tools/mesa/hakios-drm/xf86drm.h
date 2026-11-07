@@ -91,4 +91,83 @@ struct hakios_drm_surface {
 };
 int hakios_drm_surface(int fd, struct hakios_drm_surface *surface);
 
+/*
+ * (Declared only where Mesa is built with this file as its libdrm, HAVE_LIBDRM -- the PanVK build,
+ * tools/mesa/panvk/panvk-darwin.patch -- and in hakios.drm.c itself: elsewhere Mesa's util/libdrm.h
+ * declares its own stand-ins for these types, and the two must not meet in one file.)
+ *
+ * The devices there are, for a driver that looks for its GPU among them rather than opening it by
+ * name: Mesa's Vulkan drivers (PanVK: vk_instance.c's enumeration, panvk_physical_device.c). There is
+ * at most one here, the Mali, and it is a "platform" device (not on a bus) with a render node only,
+ * whose path is a file that means nothing (/dev/null), as drmOpenWithType()'s descriptor is.
+ * drmGetDevices2() opens the connection to the service on the way, so that drmGetVersion() on the
+ * descriptor the driver then open()s answers as it does after drmOpenWithType().
+ */
+#if defined(HAVE_LIBDRM) || defined(HAKIOS_DRM_DEVICES)
+#define DRM_NODE_CONTROL        1
+#define DRM_NODE_MAX            3
+#define DRM_BUS_PCI             0
+#define DRM_BUS_USB             1
+#define DRM_BUS_PLATFORM        2
+#define DRM_BUS_HOST1X          3
+#define DRM_PLATFORM_DEVICE_NAME_LEN 512
+
+typedef struct _drmPlatformBusInfo {
+	char fullname[DRM_PLATFORM_DEVICE_NAME_LEN];
+} drmPlatformBusInfo, *drmPlatformBusInfoPtr;
+
+typedef struct _drmPlatformDeviceInfo {
+	char **compatible;
+} drmPlatformDeviceInfo, *drmPlatformDeviceInfoPtr;
+
+/* (PCI's, for the code that compares a device's bus address; never filled in here) */
+typedef struct _drmPciBusInfo {
+	uint16_t domain;
+	uint8_t bus, dev, func;
+} drmPciBusInfo, *drmPciBusInfoPtr;
+
+typedef struct _drmPciDeviceInfo {
+	uint16_t vendor_id, device_id, subvendor_id, subdevice_id;
+	uint8_t revision_id;
+} drmPciDeviceInfo, *drmPciDeviceInfoPtr;
+
+typedef struct _drmDevice {
+	char **nodes;                   /* DRM_NODE_MAX of them; only DRM_NODE_RENDER is there */
+	int available_nodes;            /* 1 << DRM_NODE_RENDER */
+	int bustype;                    /* DRM_BUS_PLATFORM */
+	union {
+		drmPciBusInfoPtr pci;
+		drmPlatformBusInfoPtr platform;
+	} businfo;
+	union {
+		drmPciDeviceInfoPtr pci;
+		drmPlatformDeviceInfoPtr platform;
+	} deviceinfo;
+} drmDevice, *drmDevicePtr;
+
+int drmDevicesEqual(drmDevicePtr a, drmDevicePtr b);
+
+int drmGetDevices2(uint32_t flags, drmDevicePtr devices[], int max_devices);
+int drmGetDevices(drmDevicePtr devices[], int max_devices);
+void drmFreeDevices(drmDevicePtr devices[], int count);
+int drmGetDevice2(int fd, uint32_t flags, drmDevicePtr *device);
+void drmFreeDevice(drmDevicePtr *device);
+#endif
+
+/* signalled now, by the CPU (vkSignalSemaphore, a fence given to no queue); and timelines' values */
+int drmSyncobjSignal(int fd, const uint32_t *handles, uint32_t count);
+int drmSyncobjTimelineSignal(int fd, const uint32_t *handles, uint64_t *points, uint32_t count);
+int drmSyncobjQuery(int fd, uint32_t *handles, uint64_t *points, uint32_t count);
+int drmSyncobjQuery2(int fd, uint32_t *handles, uint64_t *points, uint32_t count, uint32_t flags);
+
+/*
+ * Not libdrm's: with HAKIOS_DRM_NOOP=1 in the environment, no kernel at all. The service is not
+ * looked for; a Mali-G72 is made up in this process (its parameters as the S9's, buffers in this
+ * process's memory, every job "done" the moment it is given, none run). For running a driver on a
+ * machine without the GPU, as Mesa's drm-shim does on Linux: everything up to the GPU itself (device
+ * creation, the shader compiler, command building, submission) is gone through, and nothing a job
+ * would write is ever written. 1 when this process has it on.
+ */
+int hakios_drm_noop(void);
+
 #endif
