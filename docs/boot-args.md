@@ -507,12 +507,10 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `tmu_stop` | K | `hakios.exynos_tmu.c` | `CONFIG_TMU_STOP` |  |
 | `tmu_ungate` | K | `hakios.exynos_tmu.c` | `CONFIG_TMU_UNGATE` |  |
 
-## CPU, memory and boot (26)
+## CPU, memory and boot (21)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `applog` | K | `(patch)` | `CONFIG_APPLOG` |  |
-| `applog_name` | K | `(patch)` | `CONFIG_APPLOG_NAME` |  |
 | `avf_exit` | K | `loader_return.c` | `CONFIG_AVF_EXIT` |  |
 | `bootcpu` | KL | `loader.c`, `loader_return.c` | `CONFIG_BOOTCPU` |  |
 | `cpufreq` | K | `hakios.cpufreq.c` | `CONFIG_CPUFREQ` |  |
@@ -534,16 +532,14 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `small_cores` | K | `(patch)` | `CONFIG_SMALL_CORES` |  |
 | `small_cores_after` | K | `GenericARMPE.cpp` | `CONFIG_SMALL_CORES_AFTER` |  |
 | `syssleep` | K | `(patch)` | `CONFIG_SYSSLEEP` |  |
-| `systrace` | K | `(patch)`, `user_exception_trace.c` | `CONFIG_SYSTRACE` |  |
-| `systrace_name` | K | `(patch)` | `CONFIG_SYSTRACE_NAME` |  |
-| `xpcproxy_idversion` | K | `(patch)` | `CONFIG_XPCPROXY_IDVERSION` |  |
 
-## Debugging (8)
+## Debugging (9)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `ksample` | K | `user_exception_trace.c` | `CONFIG_KSAMPLE` |  |
 | `ksample_us` | K | `user_exception_trace.c` | `CONFIG_KSAMPLE_US` |  |
+| `systrace` | K | `hakios.exec.c`, `hakios.systrace.c`, `user_exception_trace.c` | `CONFIG_SYSTRACE` |  |
 | `ustacks` | K | `user_exception_trace.c` | `CONFIG_USTACKS` |  |
 | `ustacks_at` | K | `user_exception_trace.c` | `CONFIG_USTACKS_AT` |  |
 | `ustacks_count` | K | `user_exception_trace.c` | `CONFIG_USTACKS_COUNT` |  |
@@ -568,10 +564,12 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (105)
+## User space (109)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `applog` | K | `hakios.exec.c` | `CONFIG_APPLOG` |  |
+| `applog_name` | K | `hakios.exec.c` | `CONFIG_APPLOG_NAME` |  |
 | `autounlock` | U | `inject_sb.c` | `CONFIG_AUTOUNLOCK` |  |
 | `brightness_bridge` | U | `inject_sb.c` | `CONFIG_BRIGHTNESS_BRIDGE` |  |
 | `bt` | K | `hakios.bcm4361_bt.c`, `hakios.bt.c` | `CONFIG_BT` |  |
@@ -664,6 +662,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `scsnd.size` | K | `hakios.scsnd.c` | `CONFIG_SCSND_SIZE` |  |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
 | `system_apfs` | U | `init.c` | `CONFIG_SYSTEM_APFS` |  |
+| `systrace_name` | K | `hakios.systrace.c` | `CONFIG_SYSTRACE_NAME` |  |
 | `tee_probe` | K | `hakios.exynos_tee.c` | `CONFIG_TEE_PROBE` |  |
 | `touch_fault` | U | `inject.c` | `CONFIG_TOUCH_FAULT` |  |
 | `ucache_trap` | K | `1511-m3-user-cache-pou.patch` | `CONFIG_UCACHE_TRAP` |  |
@@ -677,3 +676,4 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `virtio_poll` | K | `hakios.virtio.c` | `CONFIG_VIRTIO_POLL` |  |
 | `wallpaper_freeze` | U | `inject_sb.c` | `CONFIG_WALLPAPER_FREEZE` |  |
 | `wdt` | L | `wdt_exynos.c` | `CONFIG_WDT` |  |
+| `xpcproxy_idversion` | K | `hakios.exec.c` | `CONFIG_XPCPROXY_IDVERSION` |  |
