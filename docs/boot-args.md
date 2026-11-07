@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **585 arguments**: 515 read by the kernel, 22 by the loader, 63 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **584 arguments**: 514 read by the kernel, 22 by the loader, 63 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
@@ -507,7 +507,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `tmu_stop` | K | `hakios.exynos_tmu.c` | `CONFIG_TMU_STOP` |  |
 | `tmu_ungate` | K | `hakios.exynos_tmu.c` | `CONFIG_TMU_UNGATE` |  |
 
-## CPU, memory and boot (21)
+## CPU, memory and boot (22)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -525,6 +525,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `loader_return_after` | KL | `loader.c`, `loader_return.c` |  | xl (XL_SECS) |
 | `machine_name` | K | `GenericARMPE.cpp` | `CONFIG_MACHINE_NAME` |  |
 | `membench` | K | `hakios.cpufreq.c` | `CONFIG_MEMBENCH` |  |
+| `pan` | K | `(patch)` | `CONFIG_PAN` |  |
 | `rd` | KL | `(patch)`, `1100-virtio-pci-transport.patch`, `loader.c` | `CONFIG_RD` |  |
 | `regtrace` | K | `(patch)` | `CONFIG_REGTRACE` |  |
 | `return_cpu` | K | `loader_return.c` | `CONFIG_RETURN_CPU` |  |
@@ -555,7 +556,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `core1` | L | `loader.c` | `CONFIG_CORE1` |  |
 | `cpumask` | L | `loader.c` | `CONFIG_CPUMASK` |  |
 | `cpus` | L | `loader.c` | `CONFIG_CPUS` |  |
-| `extra_ram` | KL | `1512-arm-extra-ram.patch`, `loader.c` | `CONFIG_EXTRA_RAM` |  |
+| `extra_ram` | KL | `hakios_extra_ram.h`, `loader.c` | `CONFIG_EXTRA_RAM` |  |
 | `gamut` | L | `loader.c` | `CONFIG_GAMUT` |  |
 | `loader_platform` | L | `loader.c` | `CONFIG_LOADER_PLATFORM` |  |
 | `mfc` | KL | `hakios.exynos_mfc.c`, `loader.c` | `CONFIG_MFC` |  |
@@ -564,7 +565,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (109)
+## User space (107)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -620,7 +621,6 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `gov_wake` | K | `hakios.exynos_cpufreq.c` | `CONFIG_GOV_WAKE` |  |
 | `gpu3d` | K | `hakios.vgpu3d_xnu.c` | `CONFIG_GPU3D` |  |
 | `gpu3d_size` | K | `hakios.vgpu3d_xnu.c` | `CONFIG_GPU3D_SIZE` |  |
-| `immediate_NMI` | K | `1509-m3-diag-and-pan-off.patch` | `CONFIG_IMMEDIATE_NMI` |  |
 | `ioaes` | K | `MiniIOAESAccelerator.cpp` | `CONFIG_IOAES` |  |
 | `iris_s9` | K | `hakios.exynos_iris.c` | `CONFIG_IRIS_S9` |  |
 | `iris_s9_exp` | K | `hakios.exynos_iris.c` | `CONFIG_IRIS_S9_EXP` |  |
@@ -628,7 +628,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `iris_s9_ispdiv` | K | `hakios.exynos_iris.c` | `CONFIG_IRIS_S9_ISPDIV` |  |
 | `iris_s9_ms` | K | `hakios.exynos_iris.c` | `CONFIG_IRIS_S9_MS` |  |
 | `iris_s9_smc` | K | `hakios.exynos_iris.c` | `CONFIG_IRIS_S9_SMC` |  |
-| `isa_floor` | K | `1510-isa-floor.patch` | `CONFIG_ISA_FLOOR` |  |
+| `isa_floor` | K | `hakios_commpage.h` | `CONFIG_ISA_FLOOR` |  |
 | `keystore_entcheck` | K | `MiniAppleKeyStore.cpp` | `CONFIG_KEYSTORE_ENTCHECK` |  |
 | `keystore_kdf_kib` | K | `MiniAppleKeyStore.cpp` | `CONFIG_KEYSTORE_KDF_KIB` |  |
 | `keystore_real` | K | `MiniAppleKeyStore.cpp` | `CONFIG_KEYSTORE_REAL` |  |
@@ -637,7 +637,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `m3_diag` | K | `psci_smp.c` | `CONFIG_M3_DIAG` |  |
 | `m3_flush` | K | `psci_smp.c` | `CONFIG_M3_FLUSH` |  |
 | `m3_ids` | K | `psci_smp.c` | `CONFIG_M3_IDS` |  |
-| `m3_prep` | K | `1510-isa-floor.patch`, `1511-m3-user-cache-pou.patch`, `hakios.exynos_m3.c` | `CONFIG_M3_PREP` |  |
+| `m3_prep` | K | `hakios.exynos_m3.c`, `hakios_arm_init.h`, `hakios_commpage.h` | `CONFIG_M3_PREP` |  |
 | `mc_ce` | K | `mc_ce.c` | `CONFIG_MC_CE` |  |
 | `md0` | K | `1101-virtio-disk-as-md0.patch` | `CONFIG_MD0` |  |
 | `metal_profile` | U | `hakiosmetal_air.m` | `CONFIG_METAL_PROFILE` |  |
@@ -646,7 +646,6 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `mfc_irq` | K | `hakios.exynos_mfc.c` | `CONFIG_MFC_IRQ` |  |
 | `mfc_mif_khz` | K | `hakios.exynos_mfc.c` | `CONFIG_MFC_MIF_KHZ` |  |
 | `mfc_zc` | K | `hakios.exynos_mfc.c` | `CONFIG_MFC_ZC` |  |
-| `pan` | K | `1509-m3-diag-and-pan-off.patch` | `CONFIG_PAN` |  |
 | `passcode_debug` | U | `passcoded.m` | `CONFIG_PASSCODE_DEBUG` |  |
 | `passcode_reset` | K | `MiniAppleKeyStore.cpp` | `CONFIG_PASSCODE_RESET` |  |
 | `passcode_selftest` | K | `MiniAppleKeyStore.cpp` | `CONFIG_PASSCODE_SELFTEST` |  |
@@ -665,7 +664,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `systrace_name` | K | `hakios.systrace.c` | `CONFIG_SYSTRACE_NAME` |  |
 | `tee_probe` | K | `hakios.exynos_tee.c` | `CONFIG_TEE_PROBE` |  |
 | `touch_fault` | U | `inject.c` | `CONFIG_TOUCH_FAULT` |  |
-| `ucache_trap` | K | `1511-m3-user-cache-pou.patch` | `CONFIG_UCACHE_TRAP` |  |
+| `ucache_trap` | K | `hakios_arm_init.h` | `CONFIG_UCACHE_TRAP` |  |
 | `var_hfs` | U | `init.c` | `CONFIG_VAR_HFS` |  |
 | `var_seed` | U | `init.c` | `CONFIG_VAR_SEED` |  |
 | `var_store` | U | `init.c` | `CONFIG_VAR_STORE` |  |
