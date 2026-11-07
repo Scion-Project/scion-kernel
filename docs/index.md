@@ -28,7 +28,7 @@ The table is made from the devices' own `device.conf`: [all devices](devices/ind
 | Lock screen, home screen, the stock apps | yes | yes (slow: the CPU is emulated) |
 | Touch, buttons | yes | yes (the mouse and the keyboard) |
 | GPU (OpenGL ES through Mesa) | yes | no |
-| Metal | partly: a device that Metal loads (seen in QEMU); buffers and libraries written, checked on a Mac only; nothing drawn ([plan](metal-plan.md)) | partly, the same |
+| Metal | partly: a device that Metal loads (seen in QEMU); buffers and libraries written, checked on a Mac only; nothing drawn ([plan](metal-plan.md); on the S9 through PanVK: [metal.md](metal.md)) | partly, the same |
 | Wi-Fi | yes | yes (virtio-net) |
 | Sound, microphone | yes | sound only (virtio) |
 | Cameras, vibration | yes | no |

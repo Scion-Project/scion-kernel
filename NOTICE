@@ -47,6 +47,8 @@ Fetched at build time, never committed:
   user's own phone (devices/redwood/pull-firmware.sh).
 - lzfse (Apple, BSD-3-Clause), built by xnuloader/mkidentity.sh when no LZFSE decoder is installed.
 - Mesa (for GL=1 images), Procursus and Sileo packages (tools/mk-jb.sh): their own licenses.
+- Mesa's PanVK (Mesa 25.0.7, MIT), for PANVK_DIR= images: fetched by tools/mk-panvk.sh, patched with tools/mesa/*.patch
+  and tools/mesa/panvk/*.patch (Mesa's licence applies to the lines those add) and built into libvulkan_panfrost.dylib.
 - metal2vulkan (github.com/steelbrain/metal2vulkan; GPL-2.0-or-later OR LGPL-3.0-or-later), for METAL=vk images:
   fetched and patched by tools/metal/mk-metal2vulkan.sh and built only into libmetal2vulkan.dylib, a library of its own
   that the plug-in links and that can be replaced. None of its code is in this repository's files but our changes to it,
