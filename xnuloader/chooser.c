@@ -46,17 +46,31 @@ chooser_volup_held(void)
 	}
 }
 
+/* what chooser_take holds: given back if Android does not start, so the iOS boot sees the memory map it always saw */
+static struct { uint64_t pa, pages; } chooser_held[3];
+static unsigned chooser_nheld;
+
 /* pages for [pa, pa + bytes): exactly there, or not at all */
 static int
 chooser_take(uint64_t pa, uint64_t bytes, const char *what)
 {
-	uint64_t a = pa;
+	uint64_t a = pa, pages = (bytes + 0xfff) >> 12;
 
-	if (EFI_ERROR(BS->allocate_pages(2 /* AllocateAddress */, 2 /* EfiLoaderData */, (bytes + 0xfff) >> 12, &a))) {
+	if (chooser_nheld >= 3 || EFI_ERROR(BS->allocate_pages(2 /* AllocateAddress */, 2 /* EfiLoaderData */, pages, &a))) {
 		print("Scion chooser: %s: %x is not free in this firmware's map\n", what, pa);
 		return 0;
 	}
+	chooser_held[chooser_nheld].pa = pa, chooser_held[chooser_nheld++].pages = pages;
 	return 1;
+}
+
+static void
+chooser_release(void)
+{
+	while (chooser_nheld > 0) {
+		chooser_nheld--;
+		BS->free_pages(chooser_held[chooser_nheld].pa, chooser_held[chooser_nheld].pages);
+	}
 }
 
 /* read bytes of the partition from its byte offset into pa; the sizes are rounded up to whole blocks */
@@ -196,6 +210,7 @@ chooser_run(void)
 	print("\n   S C I O N   hold Volume Up for Android, else iOS\n\n");
 	if (chooser_volup_held()) {
 		chooser_android();
+		chooser_release();
 		print("Scion chooser: Android did not start, booting iOS\n");
 	} else {
 		print("Scion chooser: iOS\n");
