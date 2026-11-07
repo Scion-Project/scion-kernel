@@ -1,0 +1,214 @@
+panvk: build Mesa's Vulkan driver for the Mali on Darwin (iOS and macOS), over src/hakios-drm
+
+Applied by tools/mk-panvk.sh only, after tools/mesa/*.patch, to Mesa 25.0.7 (Mesa's own licence,
+MIT, applies to the lines it adds). Written for Scion; no other project's patch was used.
+  - meson.build: the libdrm stand-in (src/hakios-drm) for PanVK as well, and HAVE_LIBDRM with it,
+    so that vk_instance.c lists the devices hakios.drm.c's drmGetDevices2() gives (the Mali).
+  - src/panfrost/vulkan/meson.build: Mach-O has no undefined weak symbols resolving to NULL at
+    static link time; the entrypoint tables' weak references are left to dyld (-undefined
+    dynamic_lookup), which binds a weak reference it cannot find to NULL. mk-panvk.sh refuses the
+    library if anything but a weak reference is left so.
+  - panvk_instance.c: Mach-O has no GNU build-id; the image's LC_UUID stands in for it.
+  - panvk_physical_device.c: no <sys/sysinfo.h> or <sys/sysmacros.h>; total memory from
+    os_get_total_physical_memory().
+  - vk_image.h/.c: drm_format_mod (VK_EXT_image_drm_format_modifier, which PanVK uses for its
+    own tiling choices) on Apple as on Linux and the BSDs.
+
+--- a/meson.build
++++ b/meson.build
+@@ -1716,7 +1716,7 @@
+   # dependencies (such as vk-runtime) linking to it
+   dep_libdrm = null_dep
+ endif
+-if host_machine.system() == 'darwin' and (with_gallium_freedreno or with_gallium_panfrost)
++if host_machine.system() == 'darwin' and (with_gallium_freedreno or with_gallium_panfrost or with_panfrost_vk)
+   # No DRM on this system: freedreno's requests go to the kernel's driver through a stand-in
+   # for libdrm (src/hakios-drm, put there by Darwin on redwood's tools/mk-mesa.sh; its one
+   # source file is built with freedreno's drm layer, src/freedreno/drm, or, without freedreno,
+@@ -1725,6 +1725,12 @@
+     include_directories : include_directories('src/hakios-drm'),
+     link_args : ['-framework', 'IOKit', '-framework', 'CoreFoundation'],
+   )
++  if with_panfrost_vk
++    # PanVK finds its GPU among the devices libdrm lists (vk_instance.c), which util/libdrm.h
++    # answers with "none" unless there is a libdrm: here the stand-in is one
++    # (tools/mesa/panvk/panvk-darwin.patch in Scion's repository)
++    pre_args += '-DHAVE_LIBDRM'
++  endif
+ elif dep_libdrm.found()
+   pre_args += '-DHAVE_LIBDRM'
+   if with_dri_platform == 'drm' and with_dri
+--- a/src/panfrost/vulkan/meson.build
++++ b/src/panfrost/vulkan/meson.build
+@@ -34,6 +34,15 @@
+   depend_files: u_trace_py,
+ )
+ 
++# Mach-O has no undefined weak symbols that resolve to NULL at static link time, which the
++# entrypoint tables rely on (vk_entrypoints_gen.py, --weak): they are left to dyld, which binds a
++# weak reference it cannot find to NULL, as ELF does. tools/mk-panvk.sh (Scion) refuses a library
++# where anything but a weak reference is left so.
++panvk_darwin_link_args = []
++if host_machine.system() == 'darwin'
++  panvk_darwin_link_args = ['-Wl,-undefined,dynamic_lookup']
++endif
++
+ libpanvk_files = files(
+   'panvk_buffer.c',
+   'panvk_cmd_pool.c',
+@@ -202,7 +211,7 @@
+     idep_mesautil,
+   ],
+   c_args : [no_override_init_args, panvk_flags],
+-  link_args : [ld_args_bsymbolic, ld_args_gc_sections, ld_args_build_id],
++  link_args : [ld_args_bsymbolic, ld_args_gc_sections, ld_args_build_id, panvk_darwin_link_args],
+   install : true,
+ )
+ 
+--- a/src/panfrost/vulkan/panvk_instance.c
++++ b/src/panfrost/vulkan/panvk_instance.c
+@@ -143,7 +143,38 @@
+    const VkAllocationCallbacks *vkalloc = allocator->priv;
+ 
+    return vk_free(vkalloc, data);
++}
++
++#ifdef __APPLE__
++#include <dlfcn.h>
++#include <mach-o/loader.h>
++
++/* The LC_UUID of the image this code is in, as the first 16 of 20 bytes (the rest zero). */
++static bool
++panvk_darwin_build_id(uint8_t sha[SHA1_DIGEST_LENGTH])
++{
++   Dl_info info;
++
++   memset(sha, 0, SHA1_DIGEST_LENGTH);
++   if (!dladdr((const void *)panvk_darwin_build_id, &info) || !info.dli_fbase)
++      return false;
++
++   const struct mach_header_64 *mh = info.dli_fbase;
++   if (mh->magic != MH_MAGIC_64)
++      return false;
++
++   const uint8_t *lc = (const uint8_t *)(mh + 1);
++   for (uint32_t i = 0; i < mh->ncmds; i++) {
++      const struct load_command *cmd = (const struct load_command *)lc;
++      if (cmd->cmd == LC_UUID) {
++         memcpy(sha, ((const struct uuid_command *)cmd)->uuid, 16);
++         return true;
++      }
++      lc += cmd->cmdsize;
++   }
++   return false;
+ }
++#endif
+ 
+ VKAPI_ATTR VkResult VKAPI_CALL
+ panvk_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
+@@ -155,6 +186,14 @@
+ 
+    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
+ 
++#ifdef __APPLE__
++   /* Mach-O has no GNU build-id note: the image's LC_UUID stands in for it */
++   uint8_t build_sha[SHA1_DIGEST_LENGTH];
++   if (!panvk_darwin_build_id(build_sha)) {
++      return panvk_errorf(NULL, VK_ERROR_INITIALIZATION_FAILED,
++                          "Failed to find the image's LC_UUID");
++   }
++#else
+    const struct build_id_note *note =
+       build_id_find_nhdr_for_addr(panvk_CreateInstance);
+    if (!note) {
+@@ -167,6 +206,7 @@
+       return panvk_errorf(NULL, VK_ERROR_INITIALIZATION_FAILED,
+                           "build-id too short.  It needs to be a SHA");
+    }
++#endif
+ 
+    pAllocator = pAllocator ?: vk_default_allocator();
+    instance = vk_zalloc(pAllocator, sizeof(*instance), 8,
+@@ -206,7 +246,11 @@
+    VG(VALGRIND_CREATE_MEMPOOL(instance, 0, false));
+ 
+    STATIC_ASSERT(sizeof(instance->driver_build_sha) == SHA1_DIGEST_LENGTH);
++#ifdef __APPLE__
++   memcpy(instance->driver_build_sha, build_sha, SHA1_DIGEST_LENGTH);
++#else
+    memcpy(instance->driver_build_sha, build_id_data(note), SHA1_DIGEST_LENGTH);
++#endif
+ 
+    *pInstance = panvk_instance_to_handle(instance);
+ 
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -10,8 +10,12 @@
+  */
+ 
+ #include <sys/stat.h>
++#ifdef __APPLE__
++#include "util/os_misc.h"
++#else
+ #include <sys/sysinfo.h>
+ #include <sys/sysmacros.h>
++#endif
+ 
+ #include "util/disk_cache.h"
+ #include "git_sha1.h"
+@@ -1085,10 +1089,15 @@
+ static uint64_t
+ get_system_heap_size()
+ {
++#ifdef __APPLE__
++   uint64_t total_ram = 0;
++   os_get_total_physical_memory(&total_ram);
++#else
+    struct sysinfo info;
+    sysinfo(&info);
+ 
+    uint64_t total_ram = (uint64_t)info.totalram * info.mem_unit;
++#endif
+ 
+    /* We don't want to burn too much ram with the GPU.  If the user has 4GiB
+     * or less, we use at most half.  If they have more than 4GiB, we use 3/4.
+--- a/src/vulkan/runtime/vk_image.h
++++ b/src/vulkan/runtime/vk_image.h
+@@ -75,7 +75,7 @@
+    /* wsi_image_create_info::scanout */
+    bool wsi_legacy_scanout;
+ 
+-#if DETECT_OS_LINUX || DETECT_OS_BSD
++#if DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_APPLE
+    /* VK_EXT_drm_format_modifier
+     *
+     * Initialized by vk_image_create/init() to DRM_FORMAT_MOD_INVALID.  It's
+--- a/src/vulkan/runtime/vk_image.c
++++ b/src/vulkan/runtime/vk_image.c
+@@ -23,7 +23,7 @@
+ 
+ #include "vk_image.h"
+ 
+-#if DETECT_OS_LINUX || DETECT_OS_BSD
++#if DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_APPLE
+ #include <drm-uapi/drm_fourcc.h>
+ #endif
+ 
+@@ -96,7 +96,7 @@
+       vk_find_struct_const(pCreateInfo->pNext, WSI_IMAGE_CREATE_INFO_MESA);
+    image->wsi_legacy_scanout = wsi_info && wsi_info->scanout;
+ 
+-#if DETECT_OS_LINUX || DETECT_OS_BSD
++#if DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_APPLE
+    image->drm_format_mod = ((1ULL << 56) - 1) /* DRM_FORMAT_MOD_INVALID */;
+ #endif
+ 
+@@ -168,7 +168,7 @@
+    vk_object_free(device, alloc, image);
+ }
+ 
+-#if DETECT_OS_LINUX || DETECT_OS_BSD
++#if DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_APPLE
+ VKAPI_ATTR VkResult VKAPI_CALL
+ vk_common_GetImageDrmFormatModifierPropertiesEXT(UNUSED VkDevice device,
+                                                  VkImage _image,
