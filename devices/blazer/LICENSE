@@ -1,0 +1,5 @@
+Files in devices/blazer/ written for Scion: MIT License (the same terms as the repository's tools, LICENSE).
+
+devices/blazer/carried/: from ios-on-pixel-10 by TheAndersMadsen (imported privately as Scion-Project/scion-blazer), each file
+under the MIT licence its header names, used in Scion with the author's permission and with credit kept (NOTICE). The MIT
+notice that applies is in carried/exit_trace/LICENSE ("Copyright (c) 2026 hackios contributors", as the source states it).

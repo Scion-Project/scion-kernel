@@ -11,6 +11,7 @@ This supersedes the summary in `NOTICE`, which stays as the short, canonical lis
 | Component | Path | Origin | License | Notes |
 |---|---|---|---|---|
 | XNU modifications | `xnu/hakios.patch`, `xnu/files/`, `drivers/` | derivative of Apple XNU | APSL 2.0 (`LICENSE.APSL`) | base tag `xnu-8796.121.2`, fetched by `xnu/apply.sh` |
+| ios-on-pixel-10 (TheAndersMadsen) | `devices/blazer/carried/` | its author's own kernel-side files, from Scion-Project/scion-blazer at `f04fd1f` | MIT (by each file's header; `devices/blazer/carried/exit_trace/LICENSE`) | used with the author's permission, credit kept; not built. Its third-party parts are not here: `docs/two-bases.md` |
 | libdeflate | `xnu/files/bsd/miscfs/apfs/libdeflate/` | Eric Biggers | MIT | see its `COPYING` |
 | libzbitmap | `xnu/files/bsd/miscfs/apfs/libzbitmap/`, `xnu-deps/build/lzbitmap/` | Corellium LLC (port of eafer/libzbitmap) | GPL-2.0+ OR MIT | used under MIT |
 | Monocypher 4.0.2 | `xnu/files/osfmk/minicrypto/third_party/monocypher.{c,h}` | Loup Vaillant and others, [monocypher.org](https://monocypher.org) (unchanged) | CC0-1.0 or BSD-2-Clause | Argon2id for the key store; see `third_party/README.md` |
