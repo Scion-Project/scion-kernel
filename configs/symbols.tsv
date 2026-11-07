@@ -69,7 +69,7 @@ APFS_WRITE_PATH	arg	apfs_write_path	Storage and APFS	k	hakios.apfs_check.c	the f
 APPLOG	arg	applog	CPU, memory and boot	k	(patch)	
 APPLOG_NAME	arg	applog_name	CPU, memory and boot	k	(patch)	
 AUTOUNLOCK	arg	autounlock	User space	u	inject_sb.c	
-AVF_EXIT	arg	avf_exit	User space	k	1001-avf-psci-system-off.patch	
+AVF_EXIT	arg	avf_exit	CPU, memory and boot	k	loader_return.c	
 BACKLIGHT	arg	backlight	GPU and display	k	hakios.backlight.cpp	
 BATTERY	arg	battery	Audio and battery	kl	hakios.adsp.c,hakios.battery.c,hakios.scfb_battery.c,loader.c	
 BATTMGR	arg	battmgr	Audio and battery	k	hakios.adsp.c	every property once, for the log (which number is which on this phone's firmware)
@@ -130,7 +130,7 @@ CC_FADE	arg	cc_fade	User space	u	inject_sb.c
 COHTEST	arg	cohtest	User space	k	hakios.exynos_m3.c	is the big cluster in the same coherency domain as the A55s once it is started? (off by default)
 COHTEST_DELAY	arg	cohtest_delay	User space	k	hakios.exynos_m3.c	
 CONSOLE_QUIET	arg	console_quiet	User space	k	1003-avf-console-quiet.patch	
-CORE0	arg	core0	Loader	kl	1513-psci-loader-core.patch,loader.c	the kernel's box for this core (above), if it has one, and only with a kernel on another core to watch
+CORE0	arg	core0	Loader	kl	loader.c,psci_smp.c	the kernel's box for this core (above), if it has one, and only with a kernel on another core to watch
 CORE1	arg	core1	Loader	l	loader.c	core 1, which S-Boot uses for its own display work, listed for the kernel all the same
 CPUFREQ_GOV	arg	cpufreq_gov	User space	k	hakios.exynos_cpufreq.c	run it (0, or none: the fixed rates of cpufreq_lit= and cpufreq_big=)
 CPUFREQ_GOV_BIG_MAX	arg	cpufreq_gov_big_max	User space	k	hakios.exynos_cpufreq.c	
@@ -151,8 +151,8 @@ DDR	arg	ddr	CPU, memory and boot	k	hakios.cpufreq.c	the memory's bus clock manag
 DDR_REST	arg	ddr_rest	CPU, memory and boot	k	hakios.cpufreq.c	
 DDR_VOTE	arg	ddr_vote	CPU, memory and boot	k	hakios.cpufreq.c	
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
-EARLY_LOG	arg	early_log	User space	k	1503-early-log-and-panic.patch	
-ESSLOG	arg	esslog	User space	k	1507-esslog-exynos-snapshot.patch,1509-m3-diag-and-pan-off.patch	
+EARLY_LOG	arg	early_log	CPU, memory and boot	k	loader_return.c	right after ml_parse_cpu_topology(), what the kernel will match each processor's MPIDR against
+ESSLOG	arg	esslog	CPU, memory and boot	k	loader_return.c	
 EXTRA_RAM	arg	extra_ram	Loader	kl	1512-arm-extra-ram.patch,loader.c	
 EXYNOS_KEYS	arg	exynos_keys	Touch and buttons	k	hakios.exynos_keys.c	
 FB_BEAT	arg	fb_beat	GPU and display	k	MiniIOMobileFramebuffer.cpp	
@@ -260,9 +260,9 @@ KSAMPLE_US	arg	ksample_us	Debugging	k	user_exception_trace.c
 LGA_DPU	arg	lga_dpu	User space	k	hakios.lga_dpu.c	
 LGA_KICK	arg	lga_kick	User space	k	hakios.lga_dpu.c	
 LOADER_PLATFORM	arg	loader_platform	Loader	l	loader.c	
-M3_DIAG	arg	m3_diag	User space	k	1509-m3-diag-and-pan-off.patch	
-M3_FLUSH	arg	m3_flush	User space	k	1509-m3-diag-and-pan-off.patch	
-M3_IDS	arg	m3_ids	User space	k	1509-m3-diag-and-pan-off.patch	
+M3_DIAG	arg	m3_diag	User space	k	psci_smp.c	
+M3_FLUSH	arg	m3_flush	User space	k	psci_smp.c	
+M3_IDS	arg	m3_ids	User space	k	psci_smp.c	
 M3_PREP	arg	m3_prep	User space	k	1510-isa-floor.patch,1511-m3-user-cache-pou.patch,hakios.exynos_m3.c	
 MACHINE_NAME	arg	machine_name	CPU, memory and boot	k	GenericARMPE.cpp	
 MALI	arg	mali	GPU and display	k	hakios.mali.c	run the first N steps (9: all, then serve)
@@ -379,12 +379,12 @@ SCCAM_H	arg	sccam.h	Cameras	k	hakios.camera.c
 SCCAM_SIZE	arg	sccam.size	Cameras	k	hakios.camera.c	
 SCCAM_TURN	arg	sccam.turn	Cameras	k	hakios.camera.c	turn the back camera's (1) or the front camera's (2) frames half round
 SCCAM_W	arg	sccam.w	Cameras	k	hakios.camera.c	
-SCFB_ADDR	arg	scfb.addr	User space	k	1200-avf-scfb-display.patch,1202-virtio-gpu-2d.patch,hakios.scfb_battery.c	
+SCFB_ADDR	arg	scfb.addr	GPU and display	k	MiniIOMobileFramebuffer.cpp,hakios.scfb_battery.c	
 SCGPU_ADDR	arg	scgpu.addr	User space	k	hakios.vgpu3d_xnu.c	
 SCGPU_SIZE	arg	scgpu.size	User space	k	hakios.vgpu3d_xnu.c	
 SCSND_ADDR	arg	scsnd.addr	User space	k	hakios.scsnd.c	
 SCSND_SIZE	arg	scsnd.size	User space	k	hakios.scsnd.c	
-SECURITY	arg	security	User space	k	1002-avf-security-level.patch	
+SECURITY	arg	security	Security stand-ins	k	kern_minimac.c	
 SERIAL	arg	serial	Loader	l	loader.c	
 SHUB	arg	shub	Sensors	k	hakios.ssp.c	
 SHUB_CHUB_ON	arg	shub_chub_on	Sensors	k	hakios.ssp.c	at step 2, power the CHUB domain on if step 1 found it off, using the PMU's chub_on sequence
