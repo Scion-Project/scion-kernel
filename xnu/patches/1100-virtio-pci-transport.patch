@@ -56,49 +56,6 @@ index 29978e9..6953948 100644
  //
  //	Now check if we are trying to root on a memory device
  //
-diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
-index 3ee150b..f192350 100644
---- a/pexpert/arm/pe_serial.c
-+++ b/pexpert/arm/pe_serial.c
-@@ -762,6 +762,27 @@ register_serial_functions(struct pe_serial_functions *fns)
- 	gPESF = fns;
- }
- 
-+/*
-+ * A virtio console (port 0 of the first virtio-console device, over virtio-pci or
-+ * virtio-mmio): bsd/dev/hakios.virtio_console.c. For virtual machines without a UART.
-+ */
-+extern bool hakios_vcon_probe(bool other);
-+extern void hakios_vcon_init(void);
-+extern unsigned int hakios_vcon_transmit_ready(void);
-+extern void hakios_vcon_transmit_data(uint8_t c);
-+extern unsigned int hakios_vcon_receive_ready(void);
-+extern uint8_t hakios_vcon_receive_data(void);
-+
-+SECURITY_READ_ONLY_LATE(static struct pe_serial_functions) virtio_console_serial_functions =
-+{
-+	.init = hakios_vcon_init,
-+	.transmit_ready = hakios_vcon_transmit_ready,
-+	.transmit_data = hakios_vcon_transmit_data,
-+	.receive_ready = hakios_vcon_receive_ready,
-+	.receive_data = hakios_vcon_receive_data,
-+	.device = SERIAL_VIRTIO_CONSOLE
-+};
-+
- #if HIBERNATION
- /**
-  * Transitions the serial driver into a mode that can be run in the hibernation
-@@ -972,6 +993,10 @@ serial_init(void)
- 	}
- #endif /* APPLE_UART */
- 
-+	if (hakios_vcon_probe(gPESF != NULL)) {
-+		register_serial_functions(&virtio_console_serial_functions);
-+	}
-+
- 	if (gPESF == NULL) {
- 		return 0;
- 	}
 diff --git a/pexpert/pexpert/arm/protos.h b/pexpert/pexpert/arm/protos.h
 index 404b50b..9799b05 100644
 --- a/pexpert/pexpert/arm/protos.h
