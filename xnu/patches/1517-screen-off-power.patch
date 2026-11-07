@@ -79,20 +79,28 @@ diff --git a/osfmk/arm64/gic_v3_irq.c b/osfmk/arm64/gic_v3_irq.c
  void gic_v3_irq_signal(uint32_t phys_id);
  void gic_v3_irq_signal_stop(uint32_t phys_id);
  
-@@ -451,6 +454,23 @@
+@@ -451,6 +454,31 @@
  }
  
  /*
-+ * Scion (patch 1517): this core is switching itself off, and may be started again in this same run (sleep_cores=):
-+ * forget that its interface was set up, so that gic_v3_irq_cpu_init() sets it up again then rather than returning at
-+ * once (a core started so would take no interrupt, not even the timer's or a signal). Its bit in the target lists
-+ * gone, nobody signals it meanwhile.
++ * Scion (patch 1517): this core is switching itself off and will be started again in this same run, because
++ * sleep_cores= is taking it off (its bit is set in hakios_cpu_exit_mask, GenericARMPE.cpp). Forget that its interface
++ * was set up, so that gic_v3_irq_cpu_init() sets it up again at its start rather than returning at once (a core started
++ * so would take no interrupt, not even the timer's or a signal). Its target bit gone, nobody signals it while it is
++ * off. Any other core's shutdown is for the rest of the run, and is left as it was.
 + */
 +static void
 +gic_v3_irq_cpu_forget(void)
 +{
 +	int cpu = cpu_number();
 +
++#if defined(GENERIC_PSCI_SMP)
++	extern uint32_t hakios_cpu_exit_mask;   /* osfmk/arm/cpu_common.c: the cores sleep_cores= takes off */
++
++	if (cpu < 0 || cpu >= 32 || !(*(volatile uint32_t *)&hakios_cpu_exit_mask & (1u << cpu))) {
++		return;                         /* any other core's shutdown is for the rest of the run: as before */
++	}
++#endif
 +	if (cpu >= 0 && cpu < MAX_CPUS) {
 +		os_atomic_store(&gic_v2_target[cpu], 0, release);
 +		gicr_cpu_base[cpu] = 0;
@@ -103,7 +111,7 @@ diff --git a/osfmk/arm64/gic_v3_irq.c b/osfmk/arm64/gic_v3_irq.c
   * This processor is leaving for good: the firmware is about to be asked to switch it off
   * (psci_smp_cpu_off(), and the boot processor in the loader's stub when the kernel has a core of
   * its own). Nothing may be left that could interrupt it. The redistributor outlives the core, and
-@@ -474,6 +494,7 @@
+@@ -474,6 +502,7 @@
  		gic_write32(gicd_base + GICD_ICPENDR(0), 0xffffffffu);
  		gic_write32(gicd_base + GICD_ICACTIVER(0), 0xffffffffu);
  		gic_write32(gicc_base + GICC_CTLR, gic_read32(gicc_base + GICC_CTLR) & ~GICC_CTLR_ENABLE);
@@ -111,7 +119,7 @@ diff --git a/osfmk/arm64/gic_v3_irq.c b/osfmk/arm64/gic_v3_irq.c
  		return;
  	}
  	gicr = gicr_cpu_base[cpu_number()];
-@@ -484,6 +505,50 @@
+@@ -484,6 +513,50 @@
  	}
  	__builtin_arm_wsr64("ICC_IGRPEN1_EL1", 0);
  	__builtin_arm_isb(ISB_SY);
@@ -162,7 +170,7 @@ diff --git a/osfmk/arm64/gic_v3_irq.c b/osfmk/arm64/gic_v3_irq.c
  }
  
  static vm_offset_t
-@@ -622,7 +687,12 @@
+@@ -622,7 +695,12 @@
  	__builtin_arm_isb(ISB_SY);
  
  	gicr = gicr_cpu_base[cpu] = gic_find_redistributor();
