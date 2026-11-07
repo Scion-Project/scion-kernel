@@ -5,8 +5,8 @@
  * hakios_battery_report() (drivers/power/hakios.battery.c). Only with boot-arg max77705=1: every address below belongs
  * to this phone.
  *
- * THIS DRIVER ONLY READS THE CHIP. The MAX77705 is the phone's charger: a wrong write there changes how the battery is
- * charged. Nothing is written to it, not even the latches its interrupt handler would clear on Android (the interrupt
+ * THIS DRIVER ONLY READS THE CHIP, with one exception that is off by default (max77705_wdt=1, below). The MAX77705 is the
+ * phone's charger: a wrong write there changes how the battery is charged. Nothing else is written to it, not even the latches its interrupt handler would clear on Android (the interrupt
  * registers are not read at all: reading them clears them). What is written is the bus's own: the clock gates of
  * CMGP's USI03, its mode word, the controller (drivers/soc/exynos/hakios.exynos_hsi2c.c).
  *
@@ -45,6 +45,15 @@
  * reading it clears it. Boot-arg max77705_fg_s=S (5 to 600, read-only): a short gauge line every S seconds (rounded to
  * the 5 s poll) with AvgCurrent (0x0B) and QH (0x4D, the raw coulomb counter, to difference) besides Current,
  * for a drain measured over minutes rather than read off a percentage.
+ *
+ * Boot-arg max77705_wdt=1 (off by default; the one write to the charger, given its go by the phone's owner on 7 November):
+ * the charger's watchdog kicked, as Samsung's driver kicks it at every health poll (max77705_chg_set_wdtmr_kick()). On
+ * this kernel the charger was seen to stop charging within five minutes of every boot on USB ("charging" at about 1 A,
+ * then "on a charger, not charging" for the rest of the run): S-Boot leaves the watchdog on (CNFG_00 0xB7 bit 4, WDTEN)
+ * and Android's driver keeps it fed; nothing here did. Every 30 s, and only while CNFG_00 reads WDTEN set: CNFG_06 (0xBD)
+ * read, its bits [1:0] (WDTCLR) set to 01, the rest as read, written back. Nothing else: not WDTEN, not a current, a
+ * voltage, CHGPROT or the mode. Kicked rather than switched off, the watchdog still stops the charging if this kernel
+ * hangs. The log: the first kick with both registers, then a count with every 5-minute line.
  *
  * Boot-arg max77705_ipclk=MHz: the HSI2C's input clock, if step 1 says it is not the 200 MHz Android sets (the device
  * tree's default-clk); the bus's timing is worked out from it. (CMGP's mux, +0x1018 bit 0, picks the RCO oscillator at
@@ -87,6 +96,12 @@
 #define FG_FULLCAPREP   0x35
 #define CHG_INT_OK      0xB2
 #define CHG_DTLS_01     0xB4
+#define CHG_CNFG_00     0xB7            /* bit 4 WDTEN: the charger's watchdog on */
+#define CHG_CNFG_06     0xBD            /* [1:0] WDTCLR: 01 kicks the watchdog (max77705_wdt=1) */
+#define CHG_WDTEN       (1u << 4)
+#define CHG_WDTCLR_MASK 0x03u
+#define CHG_WDTCLR      0x01u
+#define WDT_KICK_POLLS  6               /* every 30 s at the 5 s poll */
 #define CHG_DIAG_FIRST  0xB2            /* CHG_INT_OK: max77705_diag reads from here (not 0xB0, CHG_INT: read clears) */
 #define CHG_DIAG_LAST   0xC5            /* CNFG_14 */
 
@@ -845,6 +860,53 @@ chg_diag_say(const char *when)
 #undef CHG_R
 }
 
+/*
+ * max77705_wdt=1: the charger's watchdog kicked, only while it is on (see the top of this file). The one write this driver
+ * makes to the charger: CNFG_06's two WDTCLR bits, the rest of it as read.
+ */
+static uint32_t chg_wdt, wdt_kicks, wdt_skipped, wdt_failed;
+
+static uint32_t
+charger_write(uint8_t reg, uint8_t value)
+{
+	uint8_t b[2] = { reg, value };
+	uint32_t error;
+
+	lck_mtx_lock(bus_lock);
+	error = hakios_hsi2c_message(&bus, CHARGER, false, b, 2, true);
+	lck_mtx_unlock(bus_lock);
+	return error;
+}
+
+static void
+chg_wdt_kick(void)
+{
+	uint8_t cnfg00, cnfg06, kick;
+	uint32_t error;
+
+	if (read8(CHARGER, CHG_CNFG_00, &cnfg00) != 0 || read8(CHARGER, CHG_CNFG_06, &cnfg06) != 0) {
+		wdt_failed++;
+		return;
+	}
+	if (!(cnfg00 & CHG_WDTEN)) {
+		if (wdt_skipped++ == 0) {
+			say("max77705: wdt: CNFG_00 %#x: the watchdog is off, nothing to kick (asked again every 30 s)\n", cnfg00);
+		}
+		return;
+	}
+	kick = (uint8_t)((cnfg06 & ~CHG_WDTCLR_MASK) | CHG_WDTCLR);
+	error = charger_write(CHG_CNFG_06, kick);
+	if (error != 0) {
+		wdt_failed++;
+	} else {
+		wdt_kicks++;
+	}
+	if (wdt_kicks + wdt_failed == 1) {
+		say("max77705: wdt: CNFG_00 %#x (WDTEN on); CNFG_06 %#x written %#x: %s (%x)\n", cnfg00, cnfg06, kick,
+		    error ? "FAILED" : "kicked", error);
+	}
+}
+
 /* max77705_fg_s=S: the gauge's short line (only reads) */
 static void
 fg_short_say(void)
@@ -956,11 +1018,19 @@ battery_thread(void *arg, __unused wait_result_t result)
 
 		(void)PE_parse_boot_argn("max77705_fg_s", &fg_s, sizeof(fg_s));
 		fg_ticks = fg_s >= 5 && fg_s <= 600 ? (fg_s + POLL_MS / 2000) / (POLL_MS / 1000) : 0;
+		(void)PE_parse_boot_argn("max77705_wdt", &chg_wdt, sizeof(chg_wdt));
+		if (chg_wdt) {
+			say("max77705: wdt: the charger's watchdog kicked every %u s while it is on (max77705_wdt=1)\n",
+			    WDT_KICK_POLLS * (POLL_MS / 1000));
+		}
 		if (fg_ticks != 0) {
 			say("max77705: fg: a short gauge line every %u s (max77705_fg_s)\n", fg_ticks * (POLL_MS / 1000));
 		}
 	}
 	for (unsigned tick = 0;; tick++) {
+		if (chg_wdt && tick % WDT_KICK_POLLS == 0) {
+			chg_wdt_kick();
+		}
 		if (battery_read(&b)) {
 			failed = 0;
 			hakios_battery_report(&b);
@@ -968,6 +1038,9 @@ battery_thread(void *arg, __unused wait_result_t result)
 				say_state("every 5 minutes", &b);
 				if (chg_diag) {
 					chg_diag_say("every 5 minutes");
+				}
+				if (chg_wdt) {
+					say("max77705: wdt: %u kicks, %u with the watchdog off, %u failed\n", wdt_kicks, wdt_skipped, wdt_failed);
 				}
 			}
 			if (fg_ticks != 0 && tick % fg_ticks == 0) {
