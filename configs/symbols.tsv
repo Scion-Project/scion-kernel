@@ -276,6 +276,8 @@ MALI_NAP_US	arg	mali_nap_us	GPU and display	k	hakios.mali.c	poll interval for a 
 MALI_PLL	arg	mali_pll	GPU and display	k	hakios.mali.c	leave PLL_G3D as the boot set it; the step stops if it is not running
 MALI_TRACE	arg	mali_trace	GPU and display	k	hakios.mali.c	one line per job: "tl: j SEQ f|v q QUEUED b BEGAN e ENDED", in microseconds
 MAX77705	arg	max77705	Audio and battery	k	hakios.max77705.c	
+MAX77705_DIAG	arg	max77705_diag	Audio and battery	k	hakios.max77705.c	
+MAX77705_FG_S	arg	max77705_fg_s	Audio and battery	k	hakios.max77705.c	the gauge's short line (only reads)
 MAX77705_HAPTIC	arg	max77705_haptic	Audio and battery	k	hakios.max77705.c	
 MAX77705_IPCLK	arg	max77705_ipclk	Audio and battery	k	hakios.max77705.c	
 MAX77705_STEPS	arg	max77705_steps	Audio and battery	k	hakios.max77705.c	
