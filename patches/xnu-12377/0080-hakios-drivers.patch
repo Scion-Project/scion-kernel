@@ -1,0 +1,178 @@
+diff --git a/SETUP/config/doconf b/SETUP/config/doconf
+index 296699b38ac9892323066758dedae7b0fa5d9a07..859ad17bec92178dbba8041e890555650ba68975 100755
+--- a/SETUP/config/doconf
++++ b/SETUP/config/doconf
+@@ -197,6 +197,13 @@ if ($?beverbose) then
+     echo MASTER_CPU=$MASTER_CPU
+ endif
+ 
++# Scion: the drivers a configuration builds (CONFIG_HAKIOS_*), as tools/hakios-config.py kernel writes them: a list
++# HAKIOS_DRIVERS of attributes, which the configurations of the machine's MASTER include, and an `options` line for each
++set MASTER_HAKIOS = /dev/null
++if (-f ${MASTER_DIR}/MASTER.hakios) then
++    set MASTER_HAKIOS = ${MASTER_DIR}/MASTER.hakios
++endif
++
+ foreach SYS ($argv)
+     set SYSID=${SYS}_${ID}
+     set SYSCONF=$OBJDIR/config.$SYSID
+@@ -206,8 +213,8 @@ foreach SYS ($argv)
+     endif
+     echo +$SYS \
+     | \
+-    cat $MASTER $MASTER_CPU - \
+-        $MASTER $MASTER_CPU \
++    cat $MASTER $MASTER_CPU $MASTER_HAKIOS - \
++        $MASTER $MASTER_CPU $MASTER_HAKIOS \
+     | \
+     unifdef -t -DPLATFORM_${PLATFORM} -DCPU_$cpu -DSOC_CONFIG_${SOC_CONFIG} -DSYS_${SYS} $DEF_AVP $DEF_SEED $DEF_EXCLAVES $DEF_SPTM $DEF_BUILD $DEF_TAG - \
+     | \
+diff --git a/bsd/conf/Makefile b/bsd/conf/Makefile
+index d6dceb5298c29be523e67ff96428e1adc5eb6784..78c189638857465c0630b9d672397c8552aa348c 100644
+--- a/bsd/conf/Makefile
++++ b/bsd/conf/Makefile
+@@ -16,6 +16,8 @@ endif
+ MASTERCONFDIR = $(SRCROOT)/config
+ DOCONFDEPS = $(addprefix $(MASTERCONFDIR)/, MASTER MASTER.$(DOCONF_ARCH_CONFIG_LC)) \
+ 	$(addprefix $(SOURCE)/, Makefile.template Makefile.$(DOCONF_ARCH_CONFIG_LC) files files.$(DOCONF_ARCH_CONFIG_LC))
++# Scion: the drivers' choice (tools/hakios-config.py kernel); a new choice makes the configuration again
++DOCONFDEPS += $(wildcard $(MASTERCONFDIR)/MASTER.hakios)
+ 
+ ifneq (,$(wildcard $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)))
+ DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 60d8aa6148d8355049d5a9175cbc2e1dd42f9705..5f583f5b066c3e78bbcde055cff769832ed9665d 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -108,6 +108,8 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
+ bsd/dev/unix_startup.c			standard
+ 
+ bsd/dev/monotonic.c         optional config_cpu_counters
++# HakiOS drivers: made by tools/hakios-config.py kernel from drivers/*/conf. Edit those, not these lines.
++# end of the HakiOS drivers
+ 
+ bsd/libkern/crc32.c			standard
+ bsd/libkern/random.c			standard
+diff --git a/config/MASTER.arm64.vmapple b/config/MASTER.arm64.vmapple
+index cedfd1442d7ab0f9c6d2a573d6d2eea08f3b9e72..a7d0db45f2c46f7fe574429f6bea60a28f2fac2b 100644
+--- a/config/MASTER.arm64.vmapple
++++ b/config/MASTER.arm64.vmapple
+@@ -106,10 +106,10 @@
+ #  SECURITY_DEV =     [ SECURITY_BASE config_setuid config_kas_info ]
+ #  SECURITY_DEBUG =   [ SECURITY_BASE config_setuid config_kas_info ]
+ #  BASE =           [ MULTIPATH VPN ]
+-#  RELEASE =        [ BASE KERNEL_RELEASE BSD_RELEASE FILESYS_RELEASE             SKYWALK_RELEASE NETWORKING_RELEASE PF_RELEASE IOKIT_RELEASE LIBKERN_RELEASE PERF_DBG_RELEASE MACH_RELEASE SCHED_RELEASE VM_RELEASE SECURITY_RELEASE ]
+-#  DEVELOPMENT =    [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     PF_DEV     IOKIT_DEV     LIBKERN_DEV     PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     SECURITY_DEV     ]
+-#  DEBUG =          [ BASE KERNEL_DEBUG   BSD_DEBUG   FILESYS_DEBUG   SKYWALK_DEBUG   NETWORKING_DEBUG   PF_DEBUG   IOKIT_DEBUG   LIBKERN_DEBUG   PERF_DBG_DEBUG   MACH_DEBUG   SCHED_DEBUG   VM_DEBUG   SECURITY_DEBUG   ]
+-#  KASAN =          [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     PF_DEV     IOKIT_DEV     LIBKERN_DEV     PERF_DBG_KASAN   MACH_DEV     SCHED_DEV     VM_KASAN   SECURITY_DEV     ]
++#  RELEASE =        [ BASE KERNEL_RELEASE BSD_RELEASE FILESYS_RELEASE             SKYWALK_RELEASE NETWORKING_RELEASE PF_RELEASE IOKIT_RELEASE LIBKERN_RELEASE PERF_DBG_RELEASE MACH_RELEASE SCHED_RELEASE VM_RELEASE SECURITY_RELEASE HAKIOS_DRIVERS ]
++#  DEVELOPMENT =    [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     PF_DEV     IOKIT_DEV     LIBKERN_DEV     PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     SECURITY_DEV     HAKIOS_DRIVERS ]
++#  DEBUG =          [ BASE KERNEL_DEBUG   BSD_DEBUG   FILESYS_DEBUG   SKYWALK_DEBUG   NETWORKING_DEBUG   PF_DEBUG   IOKIT_DEBUG   LIBKERN_DEBUG   PERF_DBG_DEBUG   MACH_DEBUG   SCHED_DEBUG   VM_DEBUG   SECURITY_DEBUG   HAKIOS_DRIVERS ]
++#  KASAN =          [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     PF_DEV     IOKIT_DEV     LIBKERN_DEV     PERF_DBG_KASAN   MACH_DEV     SCHED_DEV     VM_KASAN   SECURITY_DEV     HAKIOS_DRIVERS ]
+ #  SPTM =           [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     PF_DEV     IOKIT_DEV     LIBKERN_DEV     PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     SECURITY_DEV     ]
+ #
+ ######################################################################
+diff --git a/iokit/conf/Makefile b/iokit/conf/Makefile
+index 61146d568c766157e9672349b8590a3ca433092f..822bbdf28e18cd514b55c5e4d9088ec40cbc9e7e 100644
+--- a/iokit/conf/Makefile
++++ b/iokit/conf/Makefile
+@@ -16,6 +16,8 @@ endif
+ MASTERCONFDIR = $(SRCROOT)/config
+ DOCONFDEPS = $(addprefix $(MASTERCONFDIR)/, MASTER MASTER.$(DOCONF_ARCH_CONFIG_LC)) \
+ 	$(addprefix $(SOURCE)/, Makefile.template Makefile.$(DOCONF_ARCH_CONFIG_LC) files files.$(DOCONF_ARCH_CONFIG_LC))
++# Scion: the drivers' choice (tools/hakios-config.py kernel); a new choice makes the configuration again
++DOCONFDEPS += $(wildcard $(MASTERCONFDIR)/MASTER.hakios)
+ ifneq (,$(wildcard $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)))
+ DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
+ endif
+diff --git a/iokit/conf/files b/iokit/conf/files
+index c72c690d7c74bc0c7ac2549e20f6d195dfce9ffd..280d3221435efc408beccc5b22d5432ce98d21f5 100644
+--- a/iokit/conf/files
++++ b/iokit/conf/files
+@@ -80,6 +80,8 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
+ iokit/Kernel/IOGuardPageMemoryDescriptor.cpp		optional iokitcpp
+ 
+ iokit/Kernel/IOPlatformExpert.cpp			optional iokitcpp
++# HakiOS drivers: made by tools/hakios-config.py kernel from drivers/*/conf. Edit those, not these lines.
++# end of the HakiOS drivers
+ iokit/Kernel/IOPlatformIO.cpp				optional iokitcpp
+ 
+ iokit/Kernel/IOCPU.cpp					optional iokitcpp
+diff --git a/libkern/conf/Makefile b/libkern/conf/Makefile
+index d6dceb5298c29be523e67ff96428e1adc5eb6784..78c189638857465c0630b9d672397c8552aa348c 100644
+--- a/libkern/conf/Makefile
++++ b/libkern/conf/Makefile
+@@ -16,6 +16,8 @@ endif
+ MASTERCONFDIR = $(SRCROOT)/config
+ DOCONFDEPS = $(addprefix $(MASTERCONFDIR)/, MASTER MASTER.$(DOCONF_ARCH_CONFIG_LC)) \
+ 	$(addprefix $(SOURCE)/, Makefile.template Makefile.$(DOCONF_ARCH_CONFIG_LC) files files.$(DOCONF_ARCH_CONFIG_LC))
++# Scion: the drivers' choice (tools/hakios-config.py kernel); a new choice makes the configuration again
++DOCONFDEPS += $(wildcard $(MASTERCONFDIR)/MASTER.hakios)
+ 
+ ifneq (,$(wildcard $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)))
+ DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
+diff --git a/libsa/conf/Makefile b/libsa/conf/Makefile
+index d6dceb5298c29be523e67ff96428e1adc5eb6784..78c189638857465c0630b9d672397c8552aa348c 100644
+--- a/libsa/conf/Makefile
++++ b/libsa/conf/Makefile
+@@ -16,6 +16,8 @@ endif
+ MASTERCONFDIR = $(SRCROOT)/config
+ DOCONFDEPS = $(addprefix $(MASTERCONFDIR)/, MASTER MASTER.$(DOCONF_ARCH_CONFIG_LC)) \
+ 	$(addprefix $(SOURCE)/, Makefile.template Makefile.$(DOCONF_ARCH_CONFIG_LC) files files.$(DOCONF_ARCH_CONFIG_LC))
++# Scion: the drivers' choice (tools/hakios-config.py kernel); a new choice makes the configuration again
++DOCONFDEPS += $(wildcard $(MASTERCONFDIR)/MASTER.hakios)
+ 
+ ifneq (,$(wildcard $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)))
+ DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
+diff --git a/osfmk/conf/Makefile b/osfmk/conf/Makefile
+index d6dceb5298c29be523e67ff96428e1adc5eb6784..78c189638857465c0630b9d672397c8552aa348c 100644
+--- a/osfmk/conf/Makefile
++++ b/osfmk/conf/Makefile
+@@ -16,6 +16,8 @@ endif
+ MASTERCONFDIR = $(SRCROOT)/config
+ DOCONFDEPS = $(addprefix $(MASTERCONFDIR)/, MASTER MASTER.$(DOCONF_ARCH_CONFIG_LC)) \
+ 	$(addprefix $(SOURCE)/, Makefile.template Makefile.$(DOCONF_ARCH_CONFIG_LC) files files.$(DOCONF_ARCH_CONFIG_LC))
++# Scion: the drivers' choice (tools/hakios-config.py kernel); a new choice makes the configuration again
++DOCONFDEPS += $(wildcard $(MASTERCONFDIR)/MASTER.hakios)
+ 
+ ifneq (,$(wildcard $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)))
+ DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
+diff --git a/pexpert/conf/Makefile b/pexpert/conf/Makefile
+index d6dceb5298c29be523e67ff96428e1adc5eb6784..78c189638857465c0630b9d672397c8552aa348c 100644
+--- a/pexpert/conf/Makefile
++++ b/pexpert/conf/Makefile
+@@ -16,6 +16,8 @@ endif
+ MASTERCONFDIR = $(SRCROOT)/config
+ DOCONFDEPS = $(addprefix $(MASTERCONFDIR)/, MASTER MASTER.$(DOCONF_ARCH_CONFIG_LC)) \
+ 	$(addprefix $(SOURCE)/, Makefile.template Makefile.$(DOCONF_ARCH_CONFIG_LC) files files.$(DOCONF_ARCH_CONFIG_LC))
++# Scion: the drivers' choice (tools/hakios-config.py kernel); a new choice makes the configuration again
++DOCONFDEPS += $(wildcard $(MASTERCONFDIR)/MASTER.hakios)
+ 
+ ifneq (,$(wildcard $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)))
+ DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
+diff --git a/san/conf/Makefile b/san/conf/Makefile
+index d6dceb5298c29be523e67ff96428e1adc5eb6784..78c189638857465c0630b9d672397c8552aa348c 100644
+--- a/san/conf/Makefile
++++ b/san/conf/Makefile
+@@ -16,6 +16,8 @@ endif
+ MASTERCONFDIR = $(SRCROOT)/config
+ DOCONFDEPS = $(addprefix $(MASTERCONFDIR)/, MASTER MASTER.$(DOCONF_ARCH_CONFIG_LC)) \
+ 	$(addprefix $(SOURCE)/, Makefile.template Makefile.$(DOCONF_ARCH_CONFIG_LC) files files.$(DOCONF_ARCH_CONFIG_LC))
++# Scion: the drivers' choice (tools/hakios-config.py kernel); a new choice makes the configuration again
++DOCONFDEPS += $(wildcard $(MASTERCONFDIR)/MASTER.hakios)
+ 
+ ifneq (,$(wildcard $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)))
+ DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
+diff --git a/security/conf/Makefile b/security/conf/Makefile
+index d6dceb5298c29be523e67ff96428e1adc5eb6784..78c189638857465c0630b9d672397c8552aa348c 100644
+--- a/security/conf/Makefile
++++ b/security/conf/Makefile
+@@ -16,6 +16,8 @@ endif
+ MASTERCONFDIR = $(SRCROOT)/config
+ DOCONFDEPS = $(addprefix $(MASTERCONFDIR)/, MASTER MASTER.$(DOCONF_ARCH_CONFIG_LC)) \
+ 	$(addprefix $(SOURCE)/, Makefile.template Makefile.$(DOCONF_ARCH_CONFIG_LC) files files.$(DOCONF_ARCH_CONFIG_LC))
++# Scion: the drivers' choice (tools/hakios-config.py kernel); a new choice makes the configuration again
++DOCONFDEPS += $(wildcard $(MASTERCONFDIR)/MASTER.hakios)
+ 
+ ifneq (,$(wildcard $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)))
+ DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)

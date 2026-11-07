@@ -213,11 +213,25 @@ def profile_src(root):
         return os.path.join("xnu-src", "xnu-8796.121.2")
 
 
+def profile_base(root):
+    """The OS profile's XNU base (tools/os-profile.py get base; docs/two-bases.md): which drivers go into the kernel tree."""
+    try:
+        env = dict(os.environ, OS_PROFILE_QUIET="1")
+        return subprocess.check_output([sys.executable, os.path.join(root, "tools", "os-profile.py"), "get", "base"],
+                                       env=env, stderr=subprocess.DEVNULL, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return DEFAULT_BASE
+
+
+DEFAULT_BASE = "xnu-8796"       # the base a driver or standard file is built on when its conf names none (`bases`)
+
+
 class Driver:
     def __init__(self, name, sub, where, origin=None):
         self.name, self.sub, self.where = name, sub, where
         self.origin = origin                # the SoC or device repository it comes from; None: this one's drivers/
         self.files, self.requires, self.default, self.help = [], [], "y", ""
+        self.bases = [DEFAULT_BASE]
 
     def source(self, path):
         """Where a file of it is kept: drivers/<subsystem>/<name>, in this repository or in its own."""
@@ -232,6 +246,11 @@ class Driver:
         return "hakios_" + self.name.lower()
 
 
+class Standard(tuple):
+    """A `standard` file: (path, XNU options, subsystem, help), and .bases, the XNU bases it is built on."""
+    bases = (DEFAULT_BASE,)
+
+
 def load_drivers(root):
     """([Driver], [(path, tags, subsystem, help)]) from drivers/*/conf: the drivers that can be left out, and the "standard"
     files every kernel has. The format (docs/drivers-config.md):
@@ -241,6 +260,7 @@ def load_drivers(root):
             file <path in the XNU tree> [<XNU option>...]       one of its files (an iokit .cpp also wants iokitcpp)
             requires <NAME>...                                  drivers it cannot be built without
             default y|n                                         what a configuration that does not name it gets (y)
+            bases <base>...                                     the XNU bases it builds on (xnu-8796); `standard` takes it too
             help <text>                                         what it is; more lines of help go on
     """
     drivers, standard, seen_files = [], [], {}
@@ -285,8 +305,17 @@ def load_drivers(root):
                     else:
                         block[3] = (block[3] + " " + rest).strip()
                     continue
+                if key == "bases" and len(words) >= 2:
+                    bad = [b for b in words[1:] if not re.fullmatch(r"xnu-[0-9]+", b)]
+                    if bad:
+                        raise ConfigError("%s: %s is not an XNU base (xnu-8796, xnu-12377, ...)" % (where, bad[0]))
+                    if isinstance(block, Driver):
+                        block.bases = words[1:]
+                    else:
+                        block.append(words[1:])
+                    continue
                 if not isinstance(block, Driver):
-                    raise ConfigError("%s: a `standard` file takes only `help` lines, got %r" % (where, key))
+                    raise ConfigError("%s: a `standard` file takes only `bases` and `help` lines, got %r" % (where, key))
                 if key == "file" and len(words) >= 2:
                     block.files.append((words[1], words[2:]))
                     files = [words[1]]
@@ -297,7 +326,8 @@ def load_drivers(root):
                     block.default = words[1]
                     continue
                 else:
-                    raise ConfigError("%s: want file PATH, requires NAME..., default y|n or help TEXT, got %r" % (where, line.strip()))
+                    raise ConfigError("%s: want file PATH, requires NAME..., default y|n, bases BASE... or help TEXT, got %r" %
+                                      (where, line.strip()))
             for f in files:
                 if not f.startswith(("bsd/dev/hakios.", "iokit/Kernel/hakios.")) or not f.endswith((".c", ".cpp")):
                     raise ConfigError("%s: %s is not a hakios.*.c or .cpp of bsd/dev/ or iokit/Kernel/" % (where, f))
@@ -316,7 +346,13 @@ def load_drivers(root):
                 close = difflib.get_close_matches(r, names, n=1)
                 raise ConfigError("%s: %s requires %s, which no drivers/*/conf declares%s" % (
                     d.where, d.name, r, " (did you mean %s?)" % close[0] if close else ""))
-    return drivers, [tuple(s) for s in standard]
+    out = []
+    for s in standard:
+        st = Standard(s[:4])
+        if len(s) > 4:
+            st.bases = tuple(s[4])
+        out.append(st)
+    return drivers, out
 
 
 def driver_symbols(drivers):
@@ -948,14 +984,18 @@ GENERATED_IN_TREE = ("config/MASTER.hakios", "bsd/dev/hakios.drivers.h")     # m
 USES_OPTION = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef|elif)\b.*\bHAKIOS_[A-Z][A-Z0-9_]*", re.M)
 
 
-def files_block(component):
-    """The lines of bsd/conf/files or iokit/conf/files for every hakios file of that component: `standard`, or
-    `optional hakios_<driver>` (and the file's own XNU options; config(8) builds a file whose options are all on)."""
+def files_block(component, base=DEFAULT_BASE):
+    """The lines of bsd/conf/files or iokit/conf/files for every hakios file of that component that is built on `base`:
+    `standard`, or `optional hakios_<driver>` (and the file's own XNU options; config(8) builds a file whose options are all
+    on)."""
     lines = [FILES_BEGIN]
-    for path, tags, _sub, _help in STANDARD:
-        if path.startswith(component + "/"):
+    for st in STANDARD:
+        path, tags, _sub, _help = st
+        if path.startswith(component + "/") and base in st.bases:
             lines.append("%-40s %s" % (path, "optional " + " ".join(tags) if tags else "standard"))
     for d in DRIVERS:
+        if base not in d.bases:
+            continue
         for path, tags in d.files:
             if path.startswith(component + "/"):
                 lines.append("%-40s optional %s" % (path, " ".join([d.tag] + tags)))
@@ -980,12 +1020,15 @@ def put_block(text, block):
 
 def master_hakios(built, sources):
     """config/MASTER.hakios: the configuration's choice, in doconf's terms. HAKIOS_DRIVERS is a list of attributes that the
-    kernel configurations of MASTER.arm64.bcm2837 include; an `options` line is taken when its attribute is in the list."""
-    on = [d.tag for d in DRIVERS if built[d.symbol]]
+    kernel configurations of the machine's MASTER (MASTER.arm64.bcm2837 on xnu-8796) include; an `options` line is taken
+    when its attribute is in the list. `built` has only the drivers of the tree's base (on_base)."""
+    on = [d.tag for d in DRIVERS if built.get(d.symbol)]
     lines = ["#", "# The HakiOS drivers of this build, made by tools/hakios-config.py kernel from %s." % sources,
              "# Not part of the patch: xnu/export.sh leaves it out, and every `make kernel` makes it again.", "#",
              "#  HAKIOS_DRIVERS = [ %s ]" % " ".join(on), "#"]
     for d in DRIVERS:
+        if d.symbol not in built:
+            continue
         what = re.sub(r"[#<>]", "", d.help)        # doconf reads the last `# <attribute>` of a line: nothing in the comment may look like it
         lines.append("options\t\t%-24s # %-48s # <%s>" % (d.symbol, what[:48].rsplit(" ", 1)[0] if len(what) > 48 else what, d.tag))
     return "\n".join(lines) + "\n"
@@ -1000,7 +1043,7 @@ def soc_header(root, soc):
 
 
 def drivers_header(built, sources, device="", soc="", builtin_args=()):
-    on = [d.name.lower() for d in DRIVERS if built[d.symbol]]
+    on = [d.name.lower() for d in DRIVERS if built.get(d.symbol)]
     return ("/* The drivers this kernel is built with: made by tools/hakios-config.py kernel from %s. Not part of the patch. */\n"
             "#define HAKIOS_DRIVERS_LIST     \"%s\"\n#define HAKIOS_DRIVERS_COUNT    %d\n#define HAKIOS_DRIVERS_CONFIG   \"%s\"\n"
             "#define HAKIOS_DEVICE           \"%s\"\n#define HAKIOS_BUILTIN_ARGS     \"%s\"\n" %
@@ -1072,12 +1115,15 @@ def cmd_kernel(a):
     if problems:
         report(problems)
         return 1
-    built = drivers_built(config)
+    base = profile_base(a.root)
+    # only the drivers built on the tree's base go into it (drivers/*/conf: `bases`); the others are as if left out
+    elsewhere = [d.name.lower() for d in DRIVERS if base not in d.bases]
+    built = {sym: on for sym, on in drivers_built(config).items() if base in DRIVER_BY_SYMBOL[sym].bases}
     changed = []
     for component in ("bsd", "iokit"):
         path = os.path.join(tree, component, "conf", "files")
         try:
-            text = put_block(open(path, encoding="utf-8").read(), files_block(component))
+            text = put_block(open(path, encoding="utf-8").read(), files_block(component, base))
         except ConfigError as e:
             raise ConfigError("%s/conf/files: %s" % (component, e))
         if write_if_changed(path, text):
@@ -1090,10 +1136,12 @@ def cmd_kernel(a):
                                                                                          split_builtin(config, check(config)[1])[1])):
         changed.append("bsd/dev/hakios.drivers.h")
     removed = stale_objects(tree) if choice_changed and os.path.isdir(os.path.join(tree, "BUILD", "obj")) else 0
-    on = [d.name.lower() for d in DRIVERS if built[d.symbol]]
-    off = [d.name.lower() for d in DRIVERS if not built[d.symbol]]
+    on = [d.name.lower() for d in DRIVERS if built.get(d.symbol)]
+    off = [d.name.lower() for d in DRIVERS if d.symbol in built and not built[d.symbol]]
     print("hakios-config: kernel: %d of %d drivers built in, from %s%s" % (len(on), len(DRIVERS), sources,
           "; left out: " + " ".join(off) if off else ""))
+    if elsewhere:
+        print("hakios-config: kernel: not built on %s (drivers/*/conf: bases): %s" % (base, " ".join(elsewhere)))
     if changed:
         print("hakios-config: kernel: %s written%s" % (", ".join(changed), "; %d objects to be built again" % removed if removed else ""))
     return 0
