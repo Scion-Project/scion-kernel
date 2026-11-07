@@ -210,6 +210,7 @@ GenericARMCPU::getCPUName(void)
 extern "C" int hakios_s6e3ha8_power(bool on);
 extern "C" bool psci_smp_cpu_is_loaders(int cpu);
 extern "C" uint32_t hakios_cpu_exit_mask;       /* osfmk/arm/cpu_common.c: the cores ml_cpu_can_exit() lets go */
+extern "C" uint32_t gic_v3_spi_move(int from_cpu, int to_cpu);  /* osfmk/arm64/gic_v3_irq.c: its devices' interrupts */
 extern "C" void hakios_display_power(int on);
 
 static GenericARMCPU ** gCPUList;               /* GenericARMPE::start()'s cpus[], by cpu number */
@@ -242,6 +243,8 @@ sleepCoresWork(thread_call_param_t, thread_call_param_t)
 			}
 			__atomic_fetch_or(&hakios_cpu_exit_mask, 1u << number, __ATOMIC_RELAXED);
 			t0 = mach_absolute_time();
+			/* first its devices' interrupts to the boot processor, which never goes */
+			uint32_t moved = gic_v3_spi_move((int)number, master_cpu);
 			kern_return_t kr = gCPUList[number]->park();
 			if (kr == KERN_SUCCESS) {
 				gParked |= 1u << number;
@@ -249,8 +252,9 @@ sleepCoresWork(thread_call_param_t, thread_call_param_t)
 				__atomic_fetch_and(&hakios_cpu_exit_mask, ~(1u << number), __ATOMIC_RELAXED);
 			}
 			absolutetime_to_nanoseconds(mach_absolute_time() - t0, &t0);
-			IOLog("GenericARMPE: sleep_cores: cpu %u %s (%d) in %llu us; %u processors running\n", number,
-			    kr == KERN_SUCCESS ? "taken off" : "NOT taken off", kr, t0 / 1000, processor_avail_count);
+			IOLog("GenericARMPE: sleep_cores: cpu %u %s (%d) in %llu us, %u of its interrupts to cpu %d first; "
+			    "%u processors running\n", number, kr == KERN_SUCCESS ? "taken off" : "NOT taken off", kr, t0 / 1000, moved,
+			    master_cpu, processor_avail_count);
 		}
 	}
 	if (gDisplayOn != 0 && gParked != 0) {
