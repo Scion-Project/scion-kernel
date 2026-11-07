@@ -71,17 +71,37 @@ The plan, in order, each step on its own:
 Built on the Mac mini on 7 November 2026 (Xcode 27.2):
 
 - **ios-16.5, starlte:** built from this branch and from main with the same version suffix; every object compared (below).
-- **ios-26, blazer:** see "The xnu-12377 build" below for how far it gets.
+- **ios-26, blazer:** Apple's tree is fetched and the (empty) series applied; XNU's own configuration step and `build_setup` pass;
+  the build stops at the exported headers, on DriverKit's `.iig` files (below).
 
 ### The S9 stays the same
 
 Both trees were applied from scratch and built with `HAKIOS_VERSION_SUFFIX` fixed, `make starlte_defconfig`, `make kernel`,
-`-j4`. The SHA-256 of every `.o` under `BUILD/obj` is compared, and the kernels byte for byte. The result is in the pull request
-that brought this page.
+`-j4`. The SHA-256 of every `.o` under `BUILD/obj` is compared, and the kernels byte for byte: 993 of 994 objects are the same
+bytes; the one that differs is `version.o`, which holds the build's date; the kernels differ in 24 bytes, the 16 of `LC_UUID`
+and 8 of the build time in the two copies of the version string. The pull request that brought this page has the hashes.
 
 ### The xnu-12377 build
 
-Recorded in the pull request that brought this page: the command, the first error, and why it stops there.
+`make blazer_defconfig && make kernel` on the Mac mini (Xcode 27.2), 7 November 2026, in order of what had to be done:
+
+1. `xnu/apply.sh` hands over to `xnu/apply-series.sh`: Apple's tag is fetched at `ac9718fb1af6`, the empty series applies, the
+   107 driver files are copied in and left out of the configuration.
+2. XNU 12377 reads its own version from the SDK's `System.kext`, which no public SDK has: `xnu-env.sh` now gives it
+   `RC_DARWIN_KERNEL_VERSION` from the profile's tag.
+3. It calls `/usr/bin/xcrun` by path (8796 called `xcrun`), so it bypassed `xnu-deps/host/bin/xcrun` and resolved Xcode's SDK:
+   `xnu-build.sh` passes `XCRUN=xcrun` on a base other than xnu-8796.
+4. The SDK: no iPhoneOS 26 SDK is set up by `xnu-deps/setup.sh`. For this run an overlay of Xcode's `iPhoneOS27.2.sdk` with
+   the 16.5 overlay's `usr/local` (Apple's `availability.pl` and headers, which the public SDK lacks) was made by hand in
+   `xnu-deps/sdk/iPhoneOS26.xnu.sdk`, and `XNU_SDK_PATH` pointed at it. Not in git; `setup.sh` should make it, with
+   AvailabilityVersions at a release that knows iOS 26.
+5. **Stop:** `build_exporthdrs_mi` in `iokit/DriverKit`: `iig shim: no pre-generated header for IOExtensiblePaniclog`.
+   `xnu-deps`' `iig` is a shim that serves headers generated for xnu-8796's DriverKit classes (`xnu-deps/gen-iig-stubs.py`);
+   12377 has classes 8796 did not. Next: generate them for 12377's `.iig` files, then the build goes on to compile Apple's
+   files for `VMAPPLE`, arm64e, with nothing of Scion's in them.
+
+So xnu-12377 is fetched and configured by this tree but not compiled. After it compiles, the series starts (`patches/xnu-12377`):
+the Tensor G5 platform, written fresh (gaps, below).
 
 ## ios-on-pixel-10: what Scion may take
 

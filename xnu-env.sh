@@ -21,6 +21,8 @@ export XNU_ARCH_STRING=${XNU_ARCH_STRING:-$(_scion_profile arch arm64)}
 if [ "$(_scion_profile base xnu-8796)" != xnu-8796 ]; then
 	_t=$(_scion_profile xnu_tag xnu-0)
 	export RC_DARWIN_KERNEL_VERSION=${RC_DARWIN_KERNEL_VERSION:-${_t#xnu-}}
+	# and it calls /usr/bin/xcrun by its path, where xnu-8796 called xcrun: ours (xnu-deps/host/bin) answers with our SDK
+	export XNU_MAKE_ARGS="XCRUN=xcrun"
 fi
 export XNU_SDK_VERSION=${XNU_SDK_VERSION:-$(_scion_profile sdk 16.5)}
 export XNU_SDK_PATH=${XNU_SDK_PATH:-$XNUDEPS/sdk/iPhoneOS$XNU_SDK_VERSION.xnu.sdk}
