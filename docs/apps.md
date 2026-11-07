@@ -88,9 +88,18 @@ xcodebuild -scheme Wikipedia -configuration Release -destination 'generic/platfo
     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" IPHONEOS_DEPLOYMENT_TARGET=16.5 build
 ```
 
-The project says 17.6; the override to 16.5 is the experiment: whether an app written for 17.6 compiles and links for the S9's 16.5 when the
-SDK is newer. The result is in the report that came with this change (it was still building when this page was written); a build that
-finishes is not a build that runs, and none of it has been on a phone.
+The project says 17.6; the override to 16.5 is the experiment: whether an app written for 17.6 builds for the S9's 16.5 when the SDK is newer.
+
+**Result of the 16.5 build (7 November, about 15 minutes on a busy machine): it fails to compile.** `WMFComponents`, Wikipedia's SwiftUI layer,
+calls iOS 17 APIs without a fallback: 110 errors in 36 Swift files, 15 or so distinct calls (`onChange(of:initial:_:)` 60 times, then
+`contentMargins`, `scrollTargetLayout`, `scrollTargetBehavior`, `scrollPosition(id:anchor:)`, `listSectionSpacing`, `searchable(text:isPresented:...)`,
+`containerRelativeFrame`, `registerForTraitChanges`, `UITraitVerticalSizeClass`). Nothing after that target was compiled. So for the S9 the app would need
+a fork with `if #available` fallbacks or a hand-written replacement of each call in 36 files: possible, not small, and each fix is a behaviour change nobody has
+run. A lower deployment target is not a switch you can flip; this is the same for the other iOS 17 and 18 apps in the table. The log is
+`pilot/build1.log` on the mini (`~/s9/agents/scion-apps/`).
+
+The second build is the same command with the project's own deployment target (17.6), to find out whether the unsigned build path works at all, which is what
+the phones with iOS 26 need. Its result is in the report that came with this change; a build that finishes is not an app that runs, and none of it has been on a phone.
 
 ## 3. Push without Apple's push service
 
