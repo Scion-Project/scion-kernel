@@ -29,8 +29,10 @@ In the repository:
   prebuilt/SILICIUM_UEFI.fd and BootShim.bin are built from Mu-Silicium with the port's changes
   (BSD-2-Clause, BSD-2-Clause-Patent); the UEFI image carries Project Silicium's Carbon Hypervisor
   (Hyp.bin, GPL-2.0, source at github.com/Project-Silicium/Carbon-Hypervisor); prebuilt/mkbootimg.py is
-  AOSP's (Apache 2.0). firmware/audio/ holds Samsung's audio firmware binaries, unchanged from the
-  LineageOS vendor trees: the vendor's, redistribution terms "to verify" (THIRD_PARTY_LICENSES.md).
+  AOSP's (Apache 2.0). The S9's vendor firmware (Samsung's audio, Broadcom's Wi-Fi,
+  Bluetooth and sensor hub) is not in any Scion repository since 7 Nov 2026: devices/starlte keeps only its sha256 sums and
+  tools/fetch-firmware.sh, which fetches it from the user's own copy or the public LineageOS vendor trees; the vendor's,
+  redistribution terms "to verify" (THIRD_PARTY_LICENSES.md).
 
 - the FocalTech touch firmware, drivers/input/touch/hakios.focaltech_fw.h: the touch vendor's;
   generated from a device blob, redistribution terms "to verify" (THIRD_PARTY_LICENSES.md).
