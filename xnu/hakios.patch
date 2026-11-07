@@ -119,62 +119,19 @@ index 4b83160780c3..8997af1f0e1b 100644
  include $(MakeInc_rule)
  include $(MakeInc_dir)
 diff --git a/bsd/conf/files b/bsd/conf/files
-index 44274016a4cf..27cccab98c8e 100644
+index 44274016a4cf..088c4232762f 100644
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -109,6 +109,51 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
+@@ -109,6 +109,8 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
  bsd/dev/unix_startup.c			standard
  
  bsd/dev/monotonic.c optional monotonic
 +# HakiOS drivers: made by tools/hakios-config.py kernel from drivers/*/conf. Edit those, not these lines.
-+bsd/dev/hakios.audio.c                   standard
-+bsd/dev/hakios.version.c                 standard
-+bsd/dev/hakios.platform.c                standard
-+bsd/dev/hakios.stubs.c                   standard
-+bsd/dev/hakios.input.c                   standard
-+bsd/dev/hakios.net.c                     standard
-+bsd/dev/hakios.image.c                   standard
-+bsd/dev/hakios.sparse.c                  standard
-+bsd/dev/hakios.apfs_check.c              optional apfs
-+bsd/dev/hakios.adsp.c                    optional hakios_adsp
-+bsd/dev/hakios.speaker.c                 optional hakios_speaker
-+bsd/dev/hakios.sound.c                   optional hakios_sound
-+bsd/dev/hakios.guard.c                   optional hakios_sound
-+bsd/dev/hakios.mic.c                     optional hakios_mic
-+bsd/dev/hakios.virtio_sound.c            optional hakios_virtio_sound
-+bsd/dev/hakios.bt.c                      optional hakios_bt
-+bsd/dev/hakios.camera.c                  optional hakios_camera
-+bsd/dev/hakios.torch.c                   optional hakios_torch
-+bsd/dev/hakios.socinfo.c                 optional hakios_socinfo
-+bsd/dev/hakios.adreno.c                  optional hakios_adreno
-+bsd/dev/hakios.haptic.c                  optional hakios_haptic
-+bsd/dev/hakios.virtio_input.c            optional hakios_virtio_input
-+bsd/dev/hakios.goodix.c                  optional hakios_goodix
-+bsd/dev/hakios.buttons.c                 optional hakios_buttons
-+bsd/dev/hakios.qmi.c                     optional hakios_qmi
-+bsd/dev/hakios.mpss.c                    optional hakios_modem
-+bsd/dev/hakios.cell.c                    optional hakios_modem
-+bsd/dev/hakios.nas.c                     optional hakios_modem
-+bsd/dev/hakios.ipa.c                     optional hakios_modem
-+bsd/dev/hakios.virtio_net.c              optional hakios_virtio_net
-+bsd/dev/hakios.battery.c                 optional hakios_battery
-+bsd/dev/hakios.cpufreq.c                 optional hakios_cpufreq
-+bsd/dev/hakios.thermal.c                 optional hakios_thermal
-+bsd/dev/hakios.pmic.c                    optional hakios_pmic
-+bsd/dev/hakios.battguard.c               optional hakios_battguard
-+bsd/dev/hakios.ufs.c                     optional hakios_ufs
-+bsd/dev/hakios.ufshc.c                   optional hakios_ufs
-+bsd/dev/hakios.virtio_blk.c              optional hakios_virtio_blk
-+bsd/dev/hakios.wifi.c                    optional hakios_wifi
-+bsd/dev/hakios.wlfw.c                    optional hakios_wifi
-+bsd/dev/hakios.lx.c                      optional hakios_wifi
-+bsd/dev/hakios.sta.c                     optional hakios_wifi
-+bsd/dev/hakios.apple80211.c              optional hakios_wifi
 +# end of the HakiOS drivers
  bsd/dev/dev_perfmon.c optional config_perfmon
  
  bsd/libkern/crc32.c			standard
-@@ -155,6 +200,52 @@ bsd/miscfs/devfs/devfs_vfsops.c		optional devfs
+@@ -155,6 +157,52 @@ bsd/miscfs/devfs/devfs_vfsops.c		optional devfs
  bsd/miscfs/mockfs/mockfs_fsnode.c	optional mockfs
  bsd/miscfs/mockfs/mockfs_vfsops.c	optional mockfs
  bsd/miscfs/mockfs/mockfs_vnops.c	optional mockfs
@@ -227,7 +184,7 @@ index 44274016a4cf..27cccab98c8e 100644
  
  bsd/miscfs/routefs/routefs_ops.c	optional routefs
  
-@@ -361,6 +452,7 @@ bsd/security/audit/audit_syscalls.c		standard
+@@ -361,6 +409,7 @@ bsd/security/audit/audit_syscalls.c		standard
  bsd/security/audit/audit_worker.c		optional config_audit
  
  bsd/pthread/pthread_shims.c		standard
@@ -235,7 +192,7 @@ index 44274016a4cf..27cccab98c8e 100644
  bsd/pthread/pthread_priority.c		standard
  bsd/pthread/pthread_workqueue.c		standard
  
-@@ -383,6 +475,7 @@ bsd/kern/kern_debug.c			standard
+@@ -383,6 +432,7 @@ bsd/kern/kern_debug.c			standard
  bsd/kern/kern_symfile.c			standard
  bsd/kern/kern_descrip.c			standard
  bsd/kern/kern_guarded.c			standard
@@ -1900,10 +1857,10 @@ index 83259ebf9835..8864e5c7cc41 100644
  DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
  endif
 diff --git a/iokit/conf/files b/iokit/conf/files
-index 5fb0a52062e0..7cfee3142b5b 100644
+index 5fb0a52062e0..332ed8dc090e 100644
 --- a/iokit/conf/files
 +++ b/iokit/conf/files
-@@ -79,6 +79,18 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
+@@ -79,6 +79,14 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
  iokit/Kernel/IOGuardPageMemoryDescriptor.cpp		optional iokitcpp
  
  iokit/Kernel/IOPlatformExpert.cpp			optional iokitcpp
@@ -1911,10 +1868,6 @@ index 5fb0a52062e0..7cfee3142b5b 100644
 +iokit/Kernel/MiniIOSurface.cpp			optional iokitcpp
 +iokit/Kernel/MiniIOMobileFramebuffer.cpp		optional iokitcpp
 +# HakiOS drivers: made by tools/hakios-config.py kernel from drivers/*/conf. Edit those, not these lines.
-+iokit/Kernel/hakios.stubs.cpp            optional iokitcpp
-+iokit/Kernel/hakios.gpu.cpp              optional hakios_adreno iokitcpp
-+iokit/Kernel/hakios.battery.cpp          optional hakios_battery iokitcpp
-+iokit/Kernel/hakios.wlan.cpp             optional hakios_wifi iokitcpp
 +# end of the HakiOS drivers
 +iokit/Kernel/MiniAppleKeyStore.cpp			optional iokitcpp
 +iokit/Kernel/MiniIONetworkStack.cpp			optional iokitcpp
