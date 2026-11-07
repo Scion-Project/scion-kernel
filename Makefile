@@ -76,7 +76,7 @@ soc-status:
 	python3 tools/soc-check.py --status
 
 kernel:
-	[ -d xnu-src/xnu-8796.121.2 ] || xnu/apply.sh
+	[ -d "$$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get src)" ] || xnu/apply.sh
 	[ -e xnu-deps/host/bin/ld64 ] || xnu-deps/setup.sh
 	tools/make-kernel.sh -j$(JOBS)
 
@@ -146,6 +146,7 @@ devices:
 
 %_defconfig:
 	tools/hakios-config.py defconfig $* $(FRAGMENTS)
+	python3 tools/os-profile.py for-device $*
 
 %.config:
 	tools/hakios-config.py merge $*
@@ -160,4 +161,4 @@ prebuilt:
 	tools/update-prebuilt.sh
 
 clean:
-	rm -rf xnu-src/xnu-8796.121.2/BUILD xnuloader/loader.obj xnuloader/loader.efi userland/root.apfs userland/system.apfs userland/obj
+	rm -rf "$$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get src || echo xnu-src/none)/BUILD" xnuloader/loader.obj xnuloader/loader.efi userland/root.apfs userland/system.apfs userland/obj

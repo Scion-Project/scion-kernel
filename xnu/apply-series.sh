@@ -1,20 +1,24 @@
 #!/bin/bash
 # Get Apple's XNU sources (the release that Darwin userland 16.5 was built from) and put the HakiOS
 # work on top of them: hakios.patch changes Apple's files, files/ holds the new ones.
-# usage: xnu/apply-series.sh [DIR]              (default: $XNU_SRC, else xnu-src/xnu-8796.121.2 next to this directory)
+# usage: xnu/apply-series.sh [DIR]              (default: $XNU_SRC, else the OS profile's tree: xnu-src/<xnu_tag> next to this directory)
+# The series is the profile's base's: patches/<base>/series (patches/xnu-8796 for ios-16.5, patches/xnu-12377 for ios-26).
 # env:   XNU_URL   where to fetch from (default: Apple's repository on GitHub; an existing clone
 #                  that has the tag will do: XNU_URL=file:///path/to/xnu)
 # The result is a git tree on the branch "hakios" with the work uncommitted, which is how
 # xnu/export.sh expects to find it. A directory that already exists is left alone.
 set -e
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-DIR=${1:-${XNU_SRC:-$HERE/../xnu-src/xnu-8796.121.2}}
+python3 "$HERE/../tools/os-profile.py" require || exit 1
+DIR=${1:-${XNU_SRC:-$HERE/../$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get src)}}
 URL=${XNU_URL:-https://github.com/apple-oss-distributions/xnu.git}
-TAG=$(python3 "$HERE/../tools/os-profile.py" get xnu_tag)
-BASE=$(python3 "$HERE/../tools/os-profile.py" get xnu_commit)
+TAG=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_tag)
+BASE=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_commit)
 
 [ -e "$DIR" ] && { echo "apply.sh: $DIR already exists; not touching it" >&2; exit 1; }
-SERIES=$HERE/../patches/xnu-8796
+BASEID=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get base)
+HFS=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get hfs)
+SERIES=$HERE/../patches/$BASEID
 [ -s "$SERIES/series" ] || { echo "apply-series.sh: no $SERIES/series" >&2; exit 1; }
 [ -f "$HERE/../drivers/map" ] || { echo "apply.sh: no drivers/map next to xnu/ (the drivers are in drivers/)" >&2; exit 1; }
 mkdir -p "$(dirname "$DIR")"
@@ -31,7 +35,7 @@ grep -v '^#' "$SERIES/series" | while read -r p; do
 	git apply --whitespace=nowarn "$SERIES/$p" || { echo "apply-series.sh: $p does not apply" >&2; exit 1; }
 done
 # HFS Plus (the data volume): Apple's release, fetched like XNU, and this port's changes over it
-"$HERE/hfs/hfs.sh" put "$DIR"
+if [ "$HFS" = yes ]; then "$HERE/hfs/hfs.sh" put "$DIR"; fi
 # the drivers are kept by subsystem (drivers/<subsystem>/), not at their place in Apple's tree: drivers/map says where
 # each one goes, one line per file: "<subsystem> <path in the tree>"
 NDRIVERS=0
@@ -52,5 +56,11 @@ if [ -s "$SERIES/9000-driver-fixups.patch" ]; then git apply --whitespace=nowarn
 # which of them are built is the configuration's (drivers/*/conf, CONFIG_HAKIOS_*): put into the tree as XNU reads it.
 # What that writes is made again for every build, so it is kept out of the work that xnu/export.sh saves.
 printf '%s\n' config/MASTER.hakios bsd/dev/hakios.drivers.h >> .git/info/exclude
-python3 "$HERE/../tools/hakios-config.py" kernel --tree "$DIR"
+# Only xnu-8796's series wires the drivers into XNU's configuration so far; on another base they are copied in, not built
+# (docs/two-bases.md: the per-base shims come first).
+if [ "$BASEID" = xnu-8796 ]; then
+	python3 "$HERE/../tools/hakios-config.py" kernel --tree "$DIR"
+else
+	echo "apply-series.sh: $BASEID: the drivers are in the tree but not in its configuration (docs/two-bases.md)"
+fi
 echo "apply-series.sh: $DIR: $TAG + the series + $NDRIVERS drivers"

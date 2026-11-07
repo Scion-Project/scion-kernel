@@ -13,7 +13,11 @@
 # pass. So this accepts exactly the failures that belong to those symbol-set steps, and any other make
 # target that fails (a compile, a link) fails the build. Then the kernel file must exist.
 cd "$(dirname "$0")/.." || exit 1
-KERNEL=${KERNEL:-xnu-src/xnu-8796.121.2/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837}
+# the kernel tree and machine configuration are the OS profile's (profiles/*.conf, docs/two-bases.md)
+SRC=$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get src 2>/dev/null || echo xnu-src/xnu-8796.121.2)
+MACHINE=${MACHINE:-$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get machine 2>/dev/null || echo BCM2837)}
+export MACHINE
+KERNEL=${KERNEL:-$SRC/BUILD/obj/DEVELOPMENT_ARM64_$MACHINE/mach.development.$(echo "$MACHINE" | tr '[:upper:]' '[:lower:]')}
 
 # the make targets that failed, less the ones that are the symbol-set steps and the targets that only
 # stand above them (config_all and the recursion into config/, and the top-level `all`). GNU make 4 names the makefile's line
@@ -43,10 +47,11 @@ fi
 # what was edited in drivers/ goes into the kernel tree first (only what is newer than the tree's copy), and then the
 # drivers the .config builds (CONFIG_HAKIOS_*; every driver when there is no .config): docs/drivers-config.md
 python3 tools/os-profile.py require || exit 1
-if [ -d xnu-src/xnu-8796.121.2 ]; then
-	xnu/sync-drivers.sh xnu-src/xnu-8796.121.2 || exit 1
-	python3 tools/hakios-config.py kernel --tree xnu-src/xnu-8796.121.2 || exit 1
+if [ -d "$SRC" ] && [ "$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get base)" = xnu-8796 ]; then
+	xnu/sync-drivers.sh "$SRC" || exit 1
+	python3 tools/hakios-config.py kernel --tree "$SRC" || exit 1
 fi
+export XNU_SRC=${XNU_SRC:-$PWD/$SRC}
 log=${KERNEL_LOG:-xnu-build.log}
 ./xnu-build.sh -k "$@" 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}

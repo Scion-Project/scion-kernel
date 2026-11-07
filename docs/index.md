@@ -15,6 +15,7 @@ Where to start:
 - [U-Boot](u-boot.md): the loader started by U-Boot instead of Silicium's UEFI, from RAM, with nothing of the vendor's.
 - [Reference](reference/drivers.md): every driver, configuration symbol and boot argument, made from the source.
 - [A modular kernel](modular-kernel.md): how this tree maps onto UniXNU's layers, what is ours in XNU, OS profiles.
+- [Two XNU bases](two-bases.md): xnu-8796 (iOS 16.5) and xnu-12377 (iOS 26) in one tree; the profile, series and device layout; what may be taken from ios-on-pixel-10.
 - [The real key store](keystore.md): `keystore_real=1`, off by default: the keychain's keys under the passcode, what that does and does not protect from, and what it costs.
 - [The passcode](passcode.md): Settings' passcode and the lock screen, on a key store with no Secure Enclave (it locks the
   screen, it does not encrypt), and how to get back in (`passcode_reset=1`).
