@@ -18,7 +18,11 @@ In the repository:
 - SoftwareAES (UniXNU, ArmVirtPlatform contributors), github.com/UniXNU/SoftwareAES at 4a45326da5c2:
   xnu/files/iokit/Kernel/MiniIOAESAccelerator.cpp is a port of it, under BSD-2-Clause-Patent (notice in the file).
 - UniXNU (github.com/UniXNU/UniXNU, BSD-2-Clause-Patent): patches/xnu-12377/0090, the PAC keys in the architectural
-  registers on a non-Apple CPU, follows the design of its native-pac-keys.patch; no UniXNU code is copied.
+  registers on a non-Apple CPU, follows the design of its native-pac-keys.patch; no UniXNU code is copied there. Patches
+  0096 (PAR_EL1 ISB), 0097 (64-bit physical address in the pmap's page-data sync) and 0098 (arm64 processes with the PAC keys
+  off, behind SCION_NATIVE_PAC) are UniXNU's own small patches (native-at-par-sync, zzx-pmap-sync-64bit-pa,
+  native-pac-arm64-user-jop and a hunk of native-pac-keys, at a9ec98c and f65660d/a11553a, by their contributors), taken with
+  their notice, patches/xnu-12377/LICENSE.UniXNU, under BSD-2-Clause-Patent; 0098's macro name is ours.
 - mkbootimg.py (Android Open Source Project), devices/redwood/prebuilt/mkbootimg.py: Apache License 2.0.
 - Mu-Silicium / Project Mu (Project Silicium, Microsoft and contributors): devices/redwood/uefi/ holds a
   patch and files against it; their license applies to the derived parts (BSD-2-Clause-Patent).
@@ -60,6 +64,13 @@ In the repository:
 - AdrenoMetal (UniXNU, "NativeMetal contributors"), userland/src/metalvk/NativeBridgeMetalFrontend.* and
   tools/metal/bridge/NativeMetal*: MIT, see LICENSE.AdrenoMetal beside them; the Metal-on-Vulkan plug-in (METAL=vk).
 
+- patches to Mesa, tools/mesa/*.patch, and the libdrm stand-in tools/mesa/hakios-drm/: Mesa's and X.Org's MIT terms.
+- patches to UniXNU's AdrenoMetal, tools/m2v/adrenometal-ios16.patch: MIT, Copyright (c) 2026 NativeMetal contributors.
+- a patch to steelbrain's metal2vulkan, tools/m2v/metal2vulkan-hakios.patch: GPL-2.0-or-later OR LGPL-3.0-or-later, as the code it
+  changes, not MIT.
+- userland/src/HakiosMetalCA.m: begun from vcvkk's plug-in (github.com/vcvkk/darwin-redwood, branch hakios-workspace, at eb9fdf5),
+  with this tree's changes. That origin's license is "to verify" (THIRD_PARTY_LICENSES.md).
+
 Fetched at build time, never committed:
 
 - the Darwin userland 16.5 IPSW (Apple): the user space of the system image; the user gets it and
@@ -69,7 +80,15 @@ Fetched at build time, never committed:
 - the phone's firmware (GPU, Wi-Fi, audio DSP, modem, haptics, cameras): the vendor's, pulled from the
   user's own phone (devices/redwood/pull-firmware.sh).
 - lzfse (Apple, BSD-3-Clause), built by xnuloader/mkidentity.sh when no LZFSE decoder is installed.
-- Mesa (for GL=1 images), Procursus and Sileo packages (tools/mk-jb.sh): their own licenses.
+- Mesa (for GL=1 images; Turnip for TURNIP=1, tools/mk-turnip.sh), Procursus and Sileo packages (tools/mk-jb.sh): their own licenses.
+- hakios-metal (oosexgang, MIT), in hakios-metal/ of this tree with its own LICENSE and NOTICE, built by `make ios` there and
+  linked by userland/build.sh METAL_PLUGIN=ca (HAKIOS_METAL= names another copy).
+- for M2V=1, by tools/mk-m2v.sh, at pinned revisions: UniXNU's AdrenoMetal 243d63c (MIT, Copyright (c) 2026 NativeMetal contributors);
+  steelbrain's metal2vulkan 624bab3 (GPL-2.0-or-later OR LGPL-3.0-or-later) with AdrenoMetal's 30 patches; the Rust crates of its
+  Cargo.lock (MIT, Apache-2.0, ISC, Unlicense: their own licenses). None of it is in prebuilt/. A binary that statically links that
+  runtime has obligations, which are "to verify" before any distribution (THIRD_PARTY_LICENSES.md, COMPLIANCE.md).
+- QuartzCore's default.metallib for the window server's Metal (tools/ca-metallib.py): Apple's; what you supply from your own Mac or IPSW,
+  on your machine, never committed.
 - metal2vulkan (github.com/steelbrain/metal2vulkan; GPL-2.0-or-later OR LGPL-3.0-or-later), for METAL=vk images:
   fetched and patched by tools/metal/mk-metal2vulkan.sh and built only into libmetal2vulkan.dylib, a library of its own
   that the plug-in links and that can be replaced. None of its code is in this repository's files but our changes to it,

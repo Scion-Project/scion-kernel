@@ -82,7 +82,7 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 
 | Driver | Files | Requires | Boot arguments | crownlte | frankel | qemu | redwood | star2lte | starlte | |
 |---|---|---|---|---|---|---|---|---|---|
-| **`HAKIOS_ADRENO`**<br>the Adreno 642L of the SC7280 woken step by step (adreno=N), and HakiosGPU, the IOKit service Mesa and the window server draw through (gpu=1, adreno_keep=1). Needs the GPU's firmware from the phone (fw-gpu/) | `hakios.adreno.c`<br>`hakios.gpu.cpp` |  | `adreno=`, `adreno_blind=`, `adreno_dirty=`, `adreno_fine=`, `adreno_keep=`, `adreno_only=`, `adreno_pause=`, `adreno_return=` and 12 more |  |  |  | built |  |  | |
+| **`HAKIOS_ADRENO`**<br>the Adreno 642L of the SC7280 woken step by step (adreno=N), and HakiosGPU, the IOKit service Mesa, Metal and the window server draw through (gpu=1, adreno_keep=1; docs/reference/metal.md). Needs the GPU's firmware from the phone (fw-gpu/) | `hakios.adreno.c`<br>`hakios.gpu.cpp` |  | `adreno=`, `adreno_blind=`, `adreno_dirty=`, `adreno_fine=`, `adreno_keep=`, `adreno_only=`, `adreno_pause=`, `adreno_return=` and 12 more |  |  |  | built |  |  | |
 | **`HAKIOS_MALI`**<br>the Galaxy S9's Mali-G72 MP18 (Exynos 9810) brought up step by step (mali=N, 9 for all), and HakiosMali, the IOKit service Mesa's panfrost draws through; mali_gov=1 sets its clock (260, 455, 572 MHz) after its load and the G3D's temperature. HakiOS's Mali-G52 driver of the Infinix Hot 20, ported | `hakios.mali.c`<br>`hakios.mali.cpp` | `HAKIOS_EXYNOS_ACPM` | `mali=`, `mali_acpm=`, `mali_fastmap=`, `mali_flush=`, `mali_gov=`, `mali_gov_frame=`, `mali_mhz=`, `mali_nap_us=` and 2 more | built |  |  | built | built | built | |
 
 ## haptic

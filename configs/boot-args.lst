@@ -100,6 +100,8 @@ bt_vendor	k
 bt_vendor_part	k
 buttons	k
 buttons_steps	k
+ca_metallib	u
+ca_prof	u
 ca_vbl	u
 caenv	u
 cam	kl
@@ -164,6 +166,7 @@ epoch	k
 esslog	k
 extra_ram	kl
 exynos_keys	k
+fb_beam	k
 fb_beat	k
 fb_ca_hz	k
 fb_diff	k
@@ -188,7 +191,7 @@ fbheight	k
 fbscale	k
 fbsubtype	k
 fbtrace	k
-fbwidth	k
+fbwidth	ku
 fp_s9	k
 fps_log	k
 gamut	l
@@ -274,6 +277,7 @@ lga_dpu	k
 lga_kick	k
 loader_platform	l
 loader_return_after	kl
+m2v_utrace	u
 m3_diag	k
 m3_flush	k
 m3_ids	k
@@ -302,7 +306,19 @@ mc_ce	k
 md0	k
 membench	k
 metal	ku
+metal_all	u
+metal_defer	u
+metal_dump	u
+metal_fps	u
+metal_gmem	u
+metal_gmem_draws	u
+metal_gmem_off	u
+metal_luma_boost	u
+metal_m2v	u
 metal_profile	u
+metal_skip	u
+metal_trace	u
+metal_watch	u
 mfc	kl
 mfc_fw_part	k
 mfc_int_khz	k
@@ -480,6 +496,7 @@ touch_poll_us	k
 touch_rate	k
 touch_spi_hz	k
 touchscreen	k
+tu_debug	u
 ucache_trap	k
 ufs	kl
 ufs_bench	k
@@ -507,6 +524,7 @@ ufs_probe	l
 ufs_shared_pa	k
 ufs_write	kl
 ufs_write_guid	l
+ui_lite	u
 usb_gadget	k
 usb_gadget_clk	k
 usb_gadget_crlf	k
@@ -539,6 +557,7 @@ virtio_net_ssid	k
 virtio_net_wifi	k
 virtio_poll	k
 virtio_sound	k
+wallpaper_cache	u
 wallpaper_freeze	u
 wdt	l
 wifi	ku

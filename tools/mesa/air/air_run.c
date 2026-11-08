@@ -19,6 +19,8 @@
  * (osmesa_create_gpu_screen), and nothing else about it changes.
  *
  * usage: air_run FILE[.metallib] [FUNCTION]
+ *        air_run --library FILE.metallib FUNCTION      one air.visible function, wrapped
+ *        air_run --stitch "f(in0); g(n0)" FILE.metallib   a graph of them, stitched
  */
 
 #include <stdio.h>
@@ -56,7 +58,7 @@
 #include <mach-o/dyld.h>
 #include <signal.h>
 /* <sys/ucontext.h>, not <ucontext.h>: the latter refuses to be included
- * without _XOPEN_SOURCE on the Darwin SDK, and userland/src/inject.c takes the
+ * without _XOPEN_SOURCE on the iOS SDK, and userland/src/inject.c takes the
  * same route for the same reason.
  */
 #include <sys/ucontext.h>
@@ -105,7 +107,7 @@ texel_value(unsigned slot, unsigned x, unsigned y, unsigned z, float out[4])
  * print the fault before dying. These two functions are userland/src/inject.c's
  * say_the_fault()/watch_for_faults() (branch sileo2, 6683521), with the slide
  * taken from this program's own image rather than from the shared cache, since
- * the pc of interest is in air_run or in libOSMesa and not in Darwin.
+ * the pc of interest is in air_run or in libOSMesa and not in iOS.
  */
 static void
 say_the_fault(int signal_number, siginfo_t *info, void *context_in)
@@ -156,6 +158,9 @@ static void watch_for_faults(void) {}
 
 /* set by --library: the fill below is then floats, for the reason given there */
 static bool library_fill = false;
+
+/* set by --stitch: a function-stitching graph, as air_stitch.c reads it */
+static const char *stitch_text = NULL;
 
 /* set by --zero: every buffer the shader reads is zeroed instead of patterned.
  *
@@ -400,6 +405,22 @@ type_size_vec4(const struct glsl_type *type, bool bindless)
 static void
 finalize_for_gallium(nir_shader *nir, struct pipe_screen *screen)
 {
+   /* Does this screen's own backend lower I/O from the variables? softpipe's
+    * does -- its shader state is built by nir_to_tgsi, which calls nir_lower_io
+    * with this very mask and this very flag -- and ir3's does not.
+    *
+    * Gated on the screen's NAME, as the scratch block at the end of this
+    * function is and for the same reason: there is no pipe cap that says "this
+    * driver lowers I/O itself". PIPE_SHADER_CAP_SUPPORTED_IRS cannot stand in
+    * for one, because freedreno advertises TGSI too (through tgsi_to_nir, which
+    * is the other direction), and get_compiler_options returns a
+    * nir_shader_compiler_options with no field for it. So the name is what
+    * there is, and naming it is honest where inferring it from a cap that means
+    * something else would not be.
+    */
+   const bool backend_lowers_io =
+      screen->get_name && !strcmp(screen->get_name(screen), "softpipe");
+
    /* A fragment shader's [[position]]: the frontend hands it over as a system-value
     * variable, because that is the one form both of these drivers can be served from
     * (the long version is beside air.position in air_to_nir.c). freedreno sets
@@ -460,9 +481,91 @@ finalize_for_gallium(nir_shader *nir, struct pipe_screen *screen)
     * "compiles through ir3" column comes from, passes this flag already
     * (tools/mesa/air-ir3.patch): the tool was lowering correctly while the two harnesses
     * that actually draw were not.
+    *
+    * ... and it is skipped entirely for a backend that lowers I/O itself, which
+    * is what made this harness unable to draw a fragment shader that reads a
+    * varying. nir_to_tgsi lowers I/O a SECOND time, from the variables, with
+    * the same mask, the same flag and a type_size that is type_size_vec4 word
+    * for word -- and it opens with
+    * nir_remove_dead_variables(nir_var_shader_in). Lowering here first leaves a
+    * shader whose inputs are intrinsics and whose input variables are held up
+    * by nothing but the orphaned deref_var instructions nir_lower_io does not
+    * delete; the scratch block below then runs nir_opt_dce, those go, ntt
+    * deletes the variables, and ntt_setup_inputs sizes input_index_map by the
+    * driver_locations of the variables that are left -- none. The
+    * load_interpolated_input this pass already emitted then swizzles a
+    * TGSI_FILE_NULL register and tgsi_ureg asserts, before any format, texture
+    * or sampler is reached.
+    *
+    * That abort was read as softpipe's limit in two places (pixfmtcheck's 30
+    * SAMPLED cases, metalcheck's draw sweep) and it is this file's. Counted:
+    * 134 of the corpus's 400 fragment entry points have an input variable on
+    * this screen -- 125 read a [[stage_in]] varying and nine read only
+    * [[position]], which the block above turns into one -- and 87 of them are
+    * QuartzCore's, the library every pixel of the screen is drawn with. Two of
+    * the 134 drew before this and both drew the WRONG pixel: the register
+    * ntt swizzled was whatever the heap held under a zero-length
+    * input_index_map, so the abort was the loud outcome and not the only one.
+    * air_metal.c runs the same passes without the dce and draws those shaders
+    * through the same softpipe, which is what said the limit was not softpipe's.
+    *
+    * Not lowering is preferred over keeping the derefs alive past the dce
+    * because it leaves ONE lowering of I/O in the pipeline instead of one and a
+    * half: ntt also runs nir_lower_indirect_derefs(nir_var_shader_in) before it
+    * lowers, which is a no-op on a shader whose derefs are already gone and is
+    * there because ureg splits input declarations to elements.
     */
-   NIR_PASS(_, nir, nir_lower_io, nir_var_shader_in | nir_var_shader_out,
-            type_size_vec4, nir_lower_io_use_interpolated_input_intrinsics);
+   if (!backend_lowers_io)
+      NIR_PASS(_, nir, nir_lower_io, nir_var_shader_in | nir_var_shader_out,
+               type_size_vec4, nir_lower_io_use_interpolated_input_intrinsics);
+
+   /* SCRATCH, for a screen that has none.
+    *
+    * An `alloca` becomes load_scratch and store_scratch, which ir3 compiles
+    * and nir_to_tgsi has no case for at all: softpipe printed
+    * "Unknown intrinsic: @store_scratch" and then asserted inside ureg_swizzle
+    * on the undefined register it had made nothing for.
+    *
+    * WHAT IT ACTUALLY UNLOCKS, measured and not assumed: tools/air/callptr.ll,
+    * which is the whole reason it is here -- a shader with an alloca in it and
+    * nothing else nir_to_tgsi lacks, so LLVM on this machine and this draw can
+    * be compared and they agree on all four lanes. It does NOT make Apple's own
+    * RenderBox modules draw here: all fourteen of the ones that hand a shape
+    * function a `ptr` still refuse on softpipe, now for a reason that has
+    * nothing to do with scratch (`u2u32` from 16 bits asserts `src_64` in
+    * ntt_emit_alu, and these shaders are full of halves). The scratch is off
+    * the list of reasons; the list is not empty.
+    *
+    * nir_lower_scratch_to_var puts the whole scratch space back into one local
+    * variable, which nir_lower_vars_to_ssa then turns into ordinary values.
+    * That is sound exactly where this harness runs it: one invocation per
+    * fragment, no addresses taken across a call (nir_inline_functions has
+    * already folded every callee in), and nothing else reading the space.
+    *
+    * Gated on the screen by NAME and not run unconditionally, because the
+    * point of this harness is to put the SAME NIR through two drivers: doing
+    * it for ir3 as well would mean the Adreno column measured a shader with
+    * the scratch lowered away, which is not the shader the phone runs. There
+    * is no pipe cap that says "this driver has no scratch", so the name is
+    * what there is, and it is named here rather than guessed at from a cap
+    * that means something else.
+    *
+    * The nir_opt_dce at the end of this block is the pass that used to orphan
+    * every [[stage_in]] variable, and it is kept: with I/O left unlowered above
+    * for exactly the screens this block runs on, a load_deref still references
+    * each one, so there is nothing dead to remove. That is a coupling between
+    * two gates that test the same screen for different reasons, and the thing
+    * that would notice it coming apart is a test rather than a comment --
+    * tools/air/pixfmtcheck.py's last case draws one of Apple's varying-reading
+    * shaders and fails if the abort comes back.
+    */
+   if (screen->get_name && !strcmp(screen->get_name(screen), "softpipe")) {
+      NIR_PASS(_, nir, nir_lower_scratch_to_var);
+      NIR_PASS(_, nir, nir_split_var_copies);
+      NIR_PASS(_, nir, nir_lower_var_copies);
+      NIR_PASS(_, nir, nir_lower_vars_to_ssa);
+      NIR_PASS(_, nir, nir_opt_dce);
+   }
 }
 
 /* -- compute ---------------------------------------------------------------
@@ -672,20 +775,186 @@ print_own_sampler(unsigned slot, const struct air_sampler_state *a, bool compare
    static const char *const addr[] = { "clamp_to_zero", "clamp_to_edge", "repeat",
                                        "mirrored_repeat", "clamp_to_border" };
    static const char *const filt[] = { "nearest", "linear", "bicubic" };
+   static const char *const mip[] = { "none", "nearest", "linear" };
    /* Metal's compare_func, in its own order: `none` at 0 and `never` at 8, which is
     * the value Apple's default carries (docs/air.md 3.3).
     */
    static const char *const cmp[] = { "none", "less", "less_equal", "greater",
                                       "greater_equal", "equal", "not_equal", "always",
                                       "never" };
-   printf("air_run: sampler %u is the shader's own: %s/%s filtering, %s addressing, "
-          "%s coordinates, compare_func::%s%s\n", slot,
+   printf("air_run: sampler %u is the shader's own: %s/%s filtering, mip %s, %s "
+          "addressing, %s coordinates, compare_func::%s%s\n", slot,
           filt[a->mag_filter % ARRAY_SIZE(filt)], filt[a->min_filter % ARRAY_SIZE(filt)],
+          mip[a->mip_filter % ARRAY_SIZE(mip)],
           addr[a->address[0] % ARRAY_SIZE(addr)],
           a->pixel_coord ? "pixel" : "normalized",
           a->compare_func < ARRAY_SIZE(cmp) ? cmp[a->compare_func] : "?",
           compares ? " APPLIED (a shadow sample reads this slot)"
                    : " not read (nothing samples this slot with a comparison)");
+}
+
+/*
+ * THE PACKED 16-BIT PROBE: one known word, both directions, on whatever screen this is.
+ *
+ * air_metal.c has to decide which pipe_format each of Metal's four packed 16-bit names
+ * means, and that decision has two halves. Which Metal name goes with which Gallium name
+ * is Apple's convention and only Apple's own compositor can settle it. Where the fields
+ * of a given GALLIUM name actually land is a fact about the driver and the hardware, and
+ * that is what this measures -- on the Adreno, which is the only place it matters and
+ * the one place `air_metal_test --pixel-formats` cannot run, because that program is not
+ * on the device and air_run is.
+ *
+ * TWO FLAGS AND NOT ONE, because a round trip measures nothing. Sampling a packed
+ * texture and rendering into a packed target of the same format is unpack then pack with
+ * the same layout, which is the identity whatever that layout is: it would catch a read
+ * path disagreeing with a write path and could never catch both being wrong together.
+ * So the two directions are separate runs with a known value at the end that is NOT
+ * packed:
+ *
+ *   --packed16 FORMAT 0xWORD   every texel of the bound texture is that 16-bit word,
+ *                              with one field set; the target is the ordinary float one,
+ *                              so the four numbers printed say which CHANNEL the field
+ *                              became. The SAMPLED direction.
+ *   --packed16-rt FORMAT       the colour target is that packed format and the shader
+ *                              supplies the colour, so the word printed says which FIELD
+ *                              each channel became. The WRITTEN direction, and it wants
+ *                              a module whose output is a constant -- four floats could
+ *                              not show it, because they would have come back out
+ *                              through the same unpacking the write used.
+ *
+ * FORMAT is one of the eight Gallium names the two readings of Metal's four can mean. A
+ * name and not a number, so the job line says which layout it is asking about and a
+ * reader needs nothing else.
+ */
+static const struct { const char *name; enum pipe_format fmt; } packed16_names[] = {
+   { "R5G6B5_UNORM",   PIPE_FORMAT_R5G6B5_UNORM },
+   { "B5G6R5_UNORM",   PIPE_FORMAT_B5G6R5_UNORM },
+   { "A1R5G5B5_UNORM", PIPE_FORMAT_A1R5G5B5_UNORM },
+   { "A1B5G5R5_UNORM", PIPE_FORMAT_A1B5G5R5_UNORM },
+   { "R5G5B5A1_UNORM", PIPE_FORMAT_R5G5B5A1_UNORM },
+   { "B5G5R5A1_UNORM", PIPE_FORMAT_B5G5R5A1_UNORM },
+   { "A4R4G4B4_UNORM", PIPE_FORMAT_A4R4G4B4_UNORM },
+   { "A4B4G4R4_UNORM", PIPE_FORMAT_A4B4G4R4_UNORM },
+   /* the control, and the census is why it is here: the window server makes a
+    * BGRA8 texture of exactly the shape it makes the packed one
+    */
+   { "B8G8R8A8_UNORM", PIPE_FORMAT_B8G8R8A8_UNORM },
+};
+static enum pipe_format packed16_fmt = PIPE_FORMAT_NONE;   /* the sampled texture */
+static enum pipe_format packed16_rt = PIPE_FORMAT_NONE;    /* ... or the colour target */
+static enum pipe_format miplevel_fmt = PIPE_FORMAT_NONE;   /* ... or a mip pyramid */
+/*
+ * --clear: what a framebuffer fetch will read, PER RENDER TARGET.
+ *
+ * Softpipe's TGSI interpreter has no FBFETCH at all, so the only driver here that
+ * can answer a fetch is the one on the phone -- and there, a fetch in a single
+ * draw reads what the clear put down. Chosen numbers turn that into a
+ * measurement: a shader that hands the fetch back must return the clear, and
+ * zero is then distinguishable from a fetch that read nothing.
+ *
+ * Per target and not one colour for all of them, because the question that
+ * matters is WHICH ATTACHMENT was read. The window server's own passes carry two
+ * colour attachments and mask one of them off entirely; a fetch that read the
+ * other one would be invisible if both held the same numbers.
+ */
+#define MAX_CLEARS 8
+static bool halftex;
+static union pipe_color_union clear_colour[MAX_CLEARS];
+static unsigned clear_count;
+static bool clear_given;
+static const char *packed16_name;
+static unsigned packed16_word;
+
+/*
+ * THE MIP PYRAMID, at the shape the window server actually asks for.
+ *
+ * The texture census of a whole boot (userland/src/redwoodmetal.m's texture line)
+ * found exactly ONE packed texture in the entire system: MTLPixelFormatBGR5A1Unorm,
+ * 2D, shaderRead|renderTarget, TEN MIP LEVELS, 776x24. Nothing else packed is ever
+ * created -- not formats 40, 41 or 42, and SpringBoard asks for none at all. So a
+ * probe on a single-level 4x4 texture is a probe of something the system does not
+ * have, and a mip chain is where a two-byte format differs most from the
+ * four-byte one everything else uses.
+ *
+ * AND THE SAME CENSUS CARRIES ITS OWN CONTROL: a format 80 (BGRA8Unorm) texture of
+ * the IDENTICAL shape -- type 2, usage 0x5, mips 10, 776x24. One logical object in
+ * two formats. Run through this probe, BGRA8 is the line that says whether a
+ * 776x24 pyramid works at all on this GPU, so a failure confined to the packed
+ * formats cannot be blamed on the shape, the usage, the level count or the
+ * harness.
+ *
+ * THE LEVEL IS IN THE VALUE, which is this harness's rule everywhere else: level L
+ * is filled with a texel whose four channels are the binary code of L + 1, each
+ * channel either all-ones or all-zeros. Three things follow. A sample that read
+ * the wrong level names the level it actually read, rather than merely
+ * disagreeing. Every expectation is exactly 0.0 or exactly 1.0 whatever the field
+ * widths are -- a 5-bit field at 9/31 would not be, and an expectation needing a
+ * tolerance cannot tell a near miss from a hit. And L + 1 RATHER THAN L, so that
+ * no level's code is zero: with L the first level would read 0 0 0 0, which is
+ * also what an unwritten level and an untouched allocation read, and the one
+ * outcome this is built to catch would have been indistinguishable from the
+ * healthy one.
+ */
+/*
+ * --halftex: a 256x1 RGBA16Float lookup table, written as RAW HALF BIT PATTERNS.
+ *
+ * CoreAnimation's gradient shader -- axial_shading_frag_lpf, 47 NIR instructions
+ * and one air.sample_texture_2d -- does nothing but sample a table of this exact
+ * shape and write the result, and the census found it: format 115, 2D, 256x1,
+ * shaderRead only, so the 256 entries are built on the CPU and uploaded. That
+ * upload path's half conversion has never been measured here.
+ *
+ * THE WORDS ARE CHOSEN AS INTEGERS AND WRITTEN AS INTEGERS, with no float-to-half
+ * conversion anywhere in this program, because a test that samples a table it
+ * also converted would pass with both halves wrong. The expectation is decoded
+ * from the same integers by a different implementation of binary16 on the host,
+ * so the two sides share nothing but the bit patterns.
+ *
+ * Texel i carries four patterns chosen to span what binary16 can be and nothing
+ * it cannot:
+ *
+ *   r  (i << 7) & 0x7bff   a NORMAL of rising exponent; masked so the exponent
+ *                          never reaches 31, which would be an infinity or a NaN
+ *   g  r | 0x8000          the same magnitude NEGATIVE, so a sign dropped shows
+ *   b  i                   a DENORMAL for every i, and exactly zero at i = 0
+ *   a  0x3c00              exactly 1.0, so one channel is a constant a wrong
+ *                          channel order cannot hide in
+ */
+#define HALFTEX_W 256
+
+static void
+halftex_texel(unsigned i, uint16_t out[4])
+{
+   out[0] = (uint16_t)((i << 7) & 0x7bff);
+   out[1] = (uint16_t)(out[0] | 0x8000);
+   out[2] = (uint16_t)i;
+   out[3] = 0x3c00;
+}
+
+#define MIPTEX_W 776
+#define MIPTEX_H 24
+#define MIPTEX_LEVELS 10
+
+static void
+miplevel_texel(unsigned level, float out[4])
+{
+   for (unsigned c = 0; c < 4; c++)
+      out[c] = ((level + 1) >> c) & 1 ? 1.0f : 0.0f;
+}
+
+static enum pipe_format
+packed16_by_name(const char *want, const char **name)
+{
+   for (unsigned i = 0; i < ARRAY_SIZE(packed16_names); i++)
+      if (!strcmp(want, packed16_names[i].name)) {
+         *name = packed16_names[i].name;
+         return packed16_names[i].fmt;
+      }
+   fprintf(stderr, "air_run: --packed16 wants one of these names:");
+   for (unsigned i = 0; i < ARRAY_SIZE(packed16_names); i++)
+      fprintf(stderr, " %s", packed16_names[i].name);
+   fprintf(stderr, "\n");
+   return PIPE_FORMAT_NONE;
 }
 
 /* The depth texel a shadow sample reads, which is the only pattern that fits.
@@ -1316,6 +1585,60 @@ dispatch_kernel(struct pipe_screen *screen, const struct air_shader_info *info,
    return 0;
 }
 
+/* -- function constant values ---------------------------------------------
+ *
+ * --fc INDEX=VALUE supplies one function constant, and it exists because
+ * nothing in this tree ever supplied one. air_module_function_constants()
+ * registers every constant a module declares with its index and leaves
+ * air_constant_value.bits at zero, so air.is_function_constant_defined folds
+ * to true and every load yields zero -- for a constant whose global is an
+ * `externally_initialized ... undef` in section "air.fc_initializer" there is
+ * no default to fall back on, and zero is then not a default but a value this
+ * compiler invented. 34 of RenderBox's 47 modules declare such a constant and
+ * 25 of them derive their resource interface and their control flow from it in
+ * an "air.static_init" constructor, so zero picks one arbitrary specialization
+ * out of a state machine and the picture cannot say which.
+ *
+ * An index the module does not declare is refused rather than ignored: an
+ * option that silently sets nothing would make every run agree with every
+ * other one for the wrong reason.
+ */
+/* 64 and not 32, which is the number the corpus asks for rather than a round
+ * one: fixed_frag_lph_cph and fixed_frag_lph_cpf declare 58 function constants
+ * each, so the old array could not carry one pipeline's worth of them and the
+ * refusal was "more than 32 function constants" -- on the module this matters
+ * for most. The same bound is RW_MAX_CONSTANTS in air_metal.h, raised to 64
+ * for the same reason.
+ */
+static struct {
+   unsigned index;
+   uint64_t bits;
+} fc_set[64];
+static unsigned num_fc_set;
+
+static bool
+apply_fc_values(struct air_constant_value *fc, unsigned num_fc)
+{
+   for (unsigned i = 0; i < num_fc_set; i++) {
+      unsigned j;
+      for (j = 0; j < num_fc; j++) {
+         if (fc[j].index == fc_set[i].index) {
+            fc[j].bits = fc_set[i].bits;
+            fc[j].supplied = true;
+            printf("air_run: function constant %u = 0x%llx\n", fc_set[i].index,
+                   (unsigned long long)fc_set[i].bits);
+            break;
+         }
+      }
+      if (j == num_fc) {
+         fprintf(stderr, "air_run: this module declares no function constant %u"
+                         " (it declares %u)\n", fc_set[i].index, num_fc);
+         return false;
+      }
+   }
+   return true;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1333,7 +1656,7 @@ main(int argc, char **argv)
     */
    bool want_library = false;
    /* --buffer FILE is AIR_RUN_BUFFER as an argument, and it exists because the
-    * device has no shell to set one with. Darwin 16.5's own root carries no sh at
+    * device has no shell to set one with. iOS 16.5's own root carries no sh at
     * all -- /bin holds df and ps -- and the job list that runs this is read by
     * our init, which splits a line on blanks and has no notion of a variable
     * (userland/src/init.c, run_command). So a generated suite whose every
@@ -1354,10 +1677,68 @@ main(int argc, char **argv)
          ones_fill = true;
          argv++;
          argc--;
+      } else if (!strcmp(argv[1], "--packed16") && argc > 3) {
+         packed16_fmt = packed16_by_name(argv[2], &packed16_name);
+         if (packed16_fmt == PIPE_FORMAT_NONE)
+            return 2;
+         packed16_word = (unsigned)strtoul(argv[3], NULL, 0) & 0xffff;
+         argv += 3;
+         argc -= 3;
+      } else if (!strcmp(argv[1], "--clear") && argc > 2) {
+         /* R,G,B,A for target 0, then ':' and four more for target 1, and so on.
+          * A colon and not a semicolon: these reach the phone as job lines, and
+          * the init that reads them splits on blanks and promises nothing about
+          * shell syntax -- a separator that a shell WOULD have meant something by
+          * is one nobody can be sure about by reading the line.
+          */
+         const char *spec = argv[2];
+         clear_count = 0;
+         while (spec && *spec && clear_count < MAX_CLEARS) {
+            float c[4] = { 0, 0, 0, 0 };
+            if (sscanf(spec, "%f,%f,%f,%f", &c[0], &c[1], &c[2], &c[3]) != 4) {
+               fprintf(stderr, "air_run: --clear wants R,G,B,A per target, ':' between "
+                               "targets\n");
+               return 2;
+            }
+            for (unsigned i = 0; i < 4; i++)
+               clear_colour[clear_count].f[i] = c[i];
+            clear_count++;
+            const char *sep = strchr(spec, ':');
+            spec = sep ? sep + 1 : NULL;
+         }
+         clear_given = true;
+         argv += 2;
+         argc -= 2;
+      } else if (!strcmp(argv[1], "--halftex")) {
+         halftex = true;
+         argv++;
+         argc--;
+      } else if (!strcmp(argv[1], "--miplevels") && argc > 2) {
+         miplevel_fmt = packed16_by_name(argv[2], &packed16_name);
+         if (miplevel_fmt == PIPE_FORMAT_NONE)
+            return 2;
+         argv += 2;
+         argc -= 2;
+      } else if (!strcmp(argv[1], "--packed16-rt") && argc > 2) {
+         packed16_rt = packed16_by_name(argv[2], &packed16_name);
+         if (packed16_rt == PIPE_FORMAT_NONE)
+            return 2;
+         argv += 2;
+         argc -= 2;
       } else if (!strcmp(argv[1], "--library")) {
          want_library = library_fill = true;
          argv++;
          argc--;
+      } else if (!strcmp(argv[1], "--stitch") && argc > 2) {
+         /* A graph of air.visible functions, dispatched as one kernel. The
+          * argument buffer is filled the wrapper's way for the same reason the
+          * stitched entry point reads the wrapper's slots: a one-node graph
+          * then has to write exactly what --library writes for that function.
+          */
+         stitch_text = argv[2];
+         library_fill = true;
+         argv += 2;
+         argc -= 2;
       } else if (!strcmp(argv[1], "--block") && argc > 2) {
          unsigned x = 0, y = 0, z = 0;
 
@@ -1366,6 +1747,25 @@ main(int argc, char **argv)
             return 2;
          }
          block[0] = x, block[1] = y, block[2] = z;
+         argv += 2;
+         argc -= 2;
+      } else if (!strcmp(argv[1], "--fc") && argc > 2) {
+         unsigned idx = 0;
+         uint64_t val = 0;
+
+         if (sscanf(argv[2], "%u=0x%llx", &idx, (unsigned long long *)&val) != 2 &&
+             sscanf(argv[2], "%u=%llu", &idx, (unsigned long long *)&val) != 2) {
+            fprintf(stderr, "air_run: --fc wants INDEX=VALUE, decimal or 0x\n");
+            return 2;
+         }
+         if (num_fc_set >= ARRAY_SIZE(fc_set)) {
+            fprintf(stderr, "air_run: more than %u function constants\n",
+                    (unsigned)ARRAY_SIZE(fc_set));
+            return 2;
+         }
+         fc_set[num_fc_set].index = idx;
+         fc_set[num_fc_set].bits = val;
+         num_fc_set++;
          argv += 2;
          argc -= 2;
       } else if (!strcmp(argv[1], "--buffer") && argc > 2) {
@@ -1380,6 +1780,7 @@ main(int argc, char **argv)
    if (argc < 2) {
       fprintf(stderr, "usage: air_run [--disasm] [--library] [--block X,Y,Z] "
                       "[--buffer FILE | --buffer N@OFF=HEX] "
+                      "[--fc INDEX=VALUE] "
                       "[--zero | --ones] FILE[.metallib] [FUNCTION]\n");
       return 2;
    }
@@ -1408,6 +1809,27 @@ main(int argc, char **argv)
    size_t bitcode_size = size;
    const char *want = argc > 2 ? argv[2] : NULL;
    const char *name = argv[1];
+
+   /* A stitched graph is still handed to air_to_nir as one module plus the
+    * graph, and that module is the OUTPUT node's: its own visible function is
+    * one node like any other.
+    */
+   const struct air_stitch_graph *graph = NULL;
+   struct air_stitch_function *stitch_fns = NULL;
+   unsigned num_stitch_fns = 0;
+   if (stitch_text) {
+      char why[256] = { 0 };
+      graph = air_stitch_parse(ctx, stitch_text, why, sizeof(why));
+      if (graph)
+         num_stitch_fns = air_stitch_functions_of(ctx, graph, data, size, &stitch_fns,
+                                                  why, sizeof(why));
+      if (!graph || !num_stitch_fns) {
+         fprintf(stderr, "air_run: --stitch: %s\n", why[0] ? why : "no functions");
+         return 2;
+      }
+      want = graph->nodes[graph->output_node].function;
+   }
+
    if (size >= 4 && !memcmp(data, "MTLB", 4)) {
       struct air_metallib lib;
       const char *err;
@@ -1489,8 +1911,13 @@ main(int argc, char **argv)
    /* the shader */
    struct air_constant_value *fc;
    unsigned num_fc = air_module_function_constants(ctx, bitcode, bitcode_size, &fc);
+   if (!apply_fc_values(fc, num_fc))
+      return 1;
    struct air_to_nir_options air_options = { .constants = fc, .num_constants = num_fc,
-                                            .library_wrapper = want_library };
+                                            .library_wrapper = want_library,
+                                            .stitch = graph,
+                                            .stitch_functions = stitch_fns,
+                                            .num_stitch_functions = num_stitch_fns };
    struct air_shader_info info;
    const char *err;
    nir_shader *fs = air_to_nir(ctx, bitcode, bitcode_size, NULL, &air_options, options,
@@ -1514,6 +1941,10 @@ main(int argc, char **argv)
    enum pipe_format rt_format = PIPE_FORMAT_R32G32B32A32_FLOAT;
    bool rt_is_float = true;
    bool rt_is_half = false;
+   /* --packed16 renders INTO the same format it sampled, which is the written half of
+    * the probe: the pixel is packed back into 16 bits by the GPU and read out raw.
+    */
+   bool rt_is_packed16 = packed16_rt != PIPE_FORMAT_NONE;
    /* Which attachment to read back: the lowest one the shader writes, not
     * target 0. clearFragment04 writes FRAG_RESULT_DATA1 alone, and target 0
     * then holds the clear colour -- a correct result that looks exactly like
@@ -1568,6 +1999,11 @@ main(int argc, char **argv)
          rt_is_float = true;
       }
    }
+   if (rt_is_packed16) {
+      rt_format = packed16_rt;
+      rt_is_float = false;
+      rt_is_half = false;
+   }
    if (read_rt == ~0u) {
       fprintf(stderr, "air_run: %s writes no colour attachment\n", name);
       return 1;
@@ -1615,10 +2051,25 @@ main(int argc, char **argv)
     * VALUE a discarding shader leaves in the framebuffer, and that is a
     * question for the phone.
     */
-   if (fs->info.fs.uses_discard) {
-      fprintf(stderr, "air_run: %s discards fragments, and this screen's TGSI "
+   /*
+    * On SOFTPIPE only, and that qualification is the whole point of the comment above:
+    * "ir3 has both instructions and compiles these, so what is open is the VALUE a
+    * discarding shader leaves in the framebuffer, and that is a question for the phone."
+    * The gate was written without it and asked only whether the module discards, so on
+    * the phone -- where the question was supposed to be answered -- fifteen of
+    * RenderBox's forty-seven modules were refused for a limitation of a screen that was
+    * not in use. `mask_color_fragment` is one of them, and it is what draws a widget.
+    *
+    * A refusal that names the wrong wall reads as principled when it is merely absent,
+    * which is the defect this file's own log line demonstrated: it printed "this screen's
+    * TGSI interpreter" over a run whose every line said "on Adreno 7c+ Gen 3".
+    */
+   if (fs->info.fs.uses_discard && screen->get_name &&
+       !strcmp(screen->get_name(screen), "softpipe")) {
+      fprintf(stderr, "air_run: %s discards fragments, and THIS screen's TGSI "
                       "interpreter has no DEMOTE case at all (tgsi_exec.c), so it is "
-                      "not run rather than run against the wrong thing\n", name);
+                      "not run rather than run against the wrong thing. On the Adreno "
+                      "it runs: ir3 has the instruction\n", name);
       return 1;
    }
 
@@ -1752,7 +2203,21 @@ main(int argc, char **argv)
    });
    pipe->bind_rasterizer_state(pipe, rast);
 
-   /* every constant buffer the shader reads, filled with the pattern */
+   /* Every buffer the shader reads, filled with the pattern.
+    *
+    * A `constant` buffer and a `device` buffer are TWO BINDINGS and not one.
+    * The frontend translates a load from the first into load_ubo and from the
+    * second into load_ssbo (docs/air.md section 3), and this path used to bind
+    * both with set_constant_buffer -- so a draw whose shader reads a device
+    * buffer read ZEROS, and read them silently: the pixel came back, four
+    * numbers wide, with nothing anywhere saying a binding had been missed. The
+    * compute path above has always bound the two separately; only the draw path
+    * had them confused. Found by tools/air/callptr.ll, whose last two lanes are
+    * a device buffer and whose first two are not, so the picture said which
+    * binding was wrong rather than that something was.
+    */
+   struct pipe_shader_buffer fsb[32] = { 0 };
+   unsigned num_fs_ssbo = 0;
    for (unsigned i = 0; i < info.num_resources; i++) {
       const struct air_resource *r = &info.resources[i];
       if (r->kind != AIR_RESOURCE_CONSTANT_BUFFER && r->kind != AIR_RESOURCE_DEVICE_BUFFER)
@@ -1760,13 +2225,29 @@ main(int argc, char **argv)
       unsigned bytes = r->size ? r->size : 256;
       uint8_t *bits = malloc(bytes);
       unsigned from_file = fill_buffer(r->index, bits, bytes);
-      struct pipe_resource *buf = pipe_buffer_create(screen, PIPE_BIND_CONSTANT_BUFFER,
-                                                     PIPE_USAGE_DEFAULT, bytes);
+      bool device = r->kind == AIR_RESOURCE_DEVICE_BUFFER;
+      struct pipe_resource *buf =
+         pipe_buffer_create(screen,
+                            device ? PIPE_BIND_SHADER_BUFFER : PIPE_BIND_CONSTANT_BUFFER,
+                            PIPE_USAGE_DEFAULT, bytes);
       pipe_buffer_write(pipe, buf, 0, bytes, bits);
-      pipe->set_constant_buffer(pipe, PIPE_SHADER_FRAGMENT, r->index, false,
-                                &(struct pipe_constant_buffer){
-                                   .buffer = buf, .buffer_size = bytes,
-                                });
+      if (device) {
+         if (r->index < ARRAY_SIZE(fsb)) {
+            fsb[r->index].buffer = buf;
+            fsb[r->index].buffer_size = bytes;
+            num_fs_ssbo = MAX2(num_fs_ssbo, r->index + 1);
+         } else {
+            fprintf(stderr, "air_run: %s binds a device buffer at %u, past the %zu this "
+                            "path keeps room for\n", name, r->index, ARRAY_SIZE(fsb));
+            free(bits);
+            return 1;
+         }
+      } else {
+         pipe->set_constant_buffer(pipe, PIPE_SHADER_FRAGMENT, r->index, false,
+                                   &(struct pipe_constant_buffer){
+                                      .buffer = buf, .buffer_size = bytes,
+                                   });
+      }
       if (from_file)
          printf("air_run: %s buffer at index %u, %u bytes, %u of them from "
                 "AIR_RUN_BUFFER\n",
@@ -1778,6 +2259,8 @@ main(int argc, char **argv)
                 r->index, bytes);
       free(bits);
    }
+   if (num_fs_ssbo)
+      pipe->set_shader_buffers(pipe, PIPE_SHADER_FRAGMENT, 0, num_fs_ssbo, fsb, 0);
 
    /* every sampled texture the shader declares, and a sampler for it */
    unsigned num_tex = 0;
@@ -1851,6 +2334,24 @@ main(int argc, char **argv)
        * a shadow sample's result is a comparison and not a texel, so the element type
        * the instruction carries says nothing about the texture's format.
        */
+      if (halftex) {
+         if (dim != GLSL_SAMPLER_DIM_2D || is_array) {
+            fprintf(stderr, "air_run: --halftex binds a 2D table and %s samples "
+                            "something else\n", name);
+            return 1;
+         }
+         tex_format = PIPE_FORMAT_R16G16B16A16_FLOAT;
+         tex_is_float = true;
+      }
+      if (packed16_fmt != PIPE_FORMAT_NONE || miplevel_fmt != PIPE_FORMAT_NONE) {
+         if (dim != GLSL_SAMPLER_DIM_2D || is_array) {
+            fprintf(stderr, "air_run: --packed16 and --miplevels sample a 2D texture "
+                            "and %s is not one\n", name);
+            return 1;
+         }
+         tex_format = packed16_fmt != PIPE_FORMAT_NONE ? packed16_fmt : miplevel_fmt;
+         tex_is_float = true;
+      }
       if (shadow) {
          if (dim != GLSL_SAMPLER_DIM_2D || is_array) {
             fprintf(stderr, "air_run: %s compares against a texture this harness makes no "
@@ -1906,12 +2407,81 @@ main(int argc, char **argv)
          .array_size = is_array ? slices : 1,
          .bind = PIPE_BIND_SAMPLER_VIEW,
       };
+      if (halftex) {
+         ttempl.width0 = HALFTEX_W;
+         ttempl.height0 = 1;
+      }
+      if (miplevel_fmt != PIPE_FORMAT_NONE) {
+         /* the shape the census found, not this harness's 4x4: a two-byte format
+          * differs from a four-byte one most in how its levels are laid out, and
+          * 776x24 is where the window server asks for it
+          */
+         ttempl.width0 = MIPTEX_W;
+         ttempl.height0 = MIPTEX_H;
+         ttempl.last_level = MIPTEX_LEVELS - 1;
+         ttempl.bind |= PIPE_BIND_RENDER_TARGET;
+      }
       struct pipe_box box = { .width = TEX_SIZE, .height = height, .depth = slices };
       struct pipe_resource *texes[PIPE_MAX_SAMPLERS] = { 0 };
       for (unsigned slot = 0; slot < num_tex && slot < PIPE_MAX_SAMPLERS; slot++) {
          float texels[TEX_SIZE * TEX_SIZE * TEX_SIZE * 4];
          int32_t itexels[TEX_SIZE * TEX_SIZE * TEX_SIZE * 4];
          texes[slot] = screen->resource_create(screen, &ttempl);
+         if (halftex) {
+            uint16_t words[HALFTEX_W * 4];
+            for (unsigned i = 0; i < HALFTEX_W; i++)
+               halftex_texel(i, &words[i * 4]);
+            struct pipe_box hb = { .width = HALFTEX_W, .height = 1, .depth = 1 };
+            pipe->texture_subdata(pipe, texes[slot], 0, PIPE_MAP_WRITE, &hb, words,
+                                  HALFTEX_W * 4 * sizeof(uint16_t),
+                                  HALFTEX_W * 4 * sizeof(uint16_t));
+            printf("air_run: %ux1 r16g16b16a16_float table, texel i holding the half "
+                   "BIT PATTERNS ((i<<7)&0x7bff, that|0x8000, i, 0x3c00) written as "
+                   "integers -- no float-to-half conversion anywhere in this program\n",
+                   HALFTEX_W);
+            continue;
+         }
+         if (miplevel_fmt != PIPE_FORMAT_NONE) {
+            /* every level filled with the binary code of its own number, packed
+             * through util_format so the harness never writes bits by hand
+             */
+            for (unsigned lv = 0; lv < MIPTEX_LEVELS; lv++) {
+               unsigned w = MAX2(1u, MIPTEX_W >> lv), h = MAX2(1u, MIPTEX_H >> lv);
+               unsigned texel = util_format_get_blocksize(tex_format);
+               uint8_t *rows = calloc((size_t)w * h, texel);
+               float v[4];
+               miplevel_texel(lv, v);
+               /* ONE texel packed and then repeated. util_format_pack_rgba reads w
+                * TEXELS from its source, not one -- handing it a single colour and a
+                * width of 776 reads 776 texels out of a four-float array, which is
+                * how the first version of this segfaulted.
+                */
+               uint8_t one[16] = { 0 };
+               util_format_pack_rgba(tex_format, one, v, 1);
+               for (size_t k = 0; k < (size_t)w * h; k++)
+                  memcpy(rows + k * texel, one, texel);
+               struct pipe_box lb = { .width = w, .height = h, .depth = 1 };
+               pipe->texture_subdata(pipe, texes[slot], lv, PIPE_MAP_WRITE, &lb, rows,
+                                     w * texel, (size_t)w * h * texel);
+               free(rows);
+            }
+            printf("air_run: %ux%u %s pyramid, %u levels, level L filled with the "
+                   "binary code of L (r=bit0 g=bit1 b=bit2 a=bit3)\n", MIPTEX_W,
+                   MIPTEX_H, util_format_short_name(tex_format), MIPTEX_LEVELS);
+            continue;
+         }
+         if (packed16_fmt != PIPE_FORMAT_NONE) {
+            /* one 16-bit word in every texel, so no coordinate, filter or address
+             * mode can change which channel answers
+             */
+            uint16_t words[TEX_SIZE * TEX_SIZE];
+            for (unsigned k = 0; k < TEX_SIZE * TEX_SIZE; k++)
+               words[k] = (uint16_t)packed16_word;
+            pipe->texture_subdata(pipe, texes[slot], 0, PIPE_MAP_WRITE, &box, words,
+                                  TEX_SIZE * sizeof(uint16_t),
+                                  TEX_SIZE * TEX_SIZE * sizeof(uint16_t));
+            continue;
+         }
          if (shadow) {
             /* one float per texel, not four, and a depth row is a quarter as wide */
             for (unsigned y = 0; y < TEX_SIZE; y++)
@@ -1964,7 +2534,12 @@ main(int argc, char **argv)
 
       float want[4];
       texel_value(0, TEX_X, TEX_Y, tex_z, want);
-      if (shadow)
+      if (miplevel_fmt != PIPE_FORMAT_NONE)
+         printf("air_run: %u texture%s bound: %ux%u %s, %u mip levels, level L holding "
+                "the binary code of L+1 -- so the four numbers below NAME the level "
+                "that answered, and 0 0 0 0 is no level at all\n", num_tex, num_tex == 1 ? "" : "s",
+                MIPTEX_W, MIPTEX_H, util_format_short_name(tex_format), MIPTEX_LEVELS);
+      else if (shadow)
          printf("air_run: %u DEPTH texture%s bound: %ux%u %s, texel (x,y) = (x + 4y)/16, "
                 "because a shadow sample of a colour texture is undefined and the Adreno "
                 "answers it with the texel\n", num_tex, num_tex == 1 ? "" : "s",
@@ -1975,7 +2550,8 @@ main(int argc, char **argv)
              num_tex, num_tex == 1 ? "" : "s", TEX_SIZE, height, slices,
              util_format_short_name(tex_format),
              is_array ? " array (z is the layer)" : "");
-      if (!shadow)
+      if (!shadow && miplevel_fmt == PIPE_FORMAT_NONE &&
+          packed16_fmt == PIPE_FORMAT_NONE)
          printf("air_run: expected %.9g %.9g %.9g %.9g  (the centre of texel %u,%u,%u "
                 "sampled once)\n", (double)want[0], (double)want[1], (double)want[2],
                 (double)want[3], TEX_X, TEX_Y, tex_z);
@@ -2023,8 +2599,27 @@ main(int argc, char **argv)
    });
    pipe->bind_fs_state(pipe, fs_cso);
 
+   /* The clear colour is the PREVIOUS CONTENT of the attachment, and that is the
+    * only thing on this machine a framebuffer fetch can read: softpipe's TGSI
+    * interpreter has no FBFETCH at all, so the only driver here that can answer is
+    * the one on the phone, and there a fetch in a single draw reads what the clear
+    * put down. --clear turns the one number a fetch could return into a number
+    * CHOSEN, so a shader that returns the fetch unchanged is distinguishable from
+    * one that returns zero, which is what a fetch that read nothing returns.
+    */
    union pipe_color_union clear = { .ui = { 0, 0, 0, 0 } };
-   pipe->clear(pipe, PIPE_CLEAR_COLOR, NULL, &clear, 0.0, 0);
+   if (!clear_given) {
+      pipe->clear(pipe, PIPE_CLEAR_COLOR, NULL, &clear, 0.0, 0);
+   } else {
+      for (unsigned i = 0; i < num_rt; i++) {
+         const union pipe_color_union *c =
+            &clear_colour[MIN2(i, clear_count - 1)];
+         pipe->clear_render_target(pipe, fb.cbufs[i], c, 0, 0, WIDTH, HEIGHT, false);
+         printf("air_run: render target %u cleared to %.9g %.9g %.9g %.9g, which is "
+                "what a framebuffer fetch of it in this draw will read\n", i,
+                (double)c->f[0], (double)c->f[1], (double)c->f[2], (double)c->f[3]);
+      }
+   }
 
    struct pipe_draw_info draw = {
       .mode = MESA_PRIM_TRIANGLE_STRIP, .index_bounds_valid = true,
@@ -2056,6 +2651,18 @@ main(int argc, char **argv)
           want_disasm ? ", ir3's instructions are above" : "");
    printf("air_run: the pixel at (0, 0) of render target %u came back as:\n",
           read_rt);
+   if (rt_is_packed16) {
+      printf("air_run: packed16-rt %s: the shader's colour came back as the word "
+             "0x%04x\n", packed16_name, ((uint16_t *)pix)[0]);
+      pipe->texture_unmap(pipe, xfer);
+      printf("air_run: drew %ux%u into %s, %u render target%s\n", WIDTH, HEIGHT,
+             util_format_short_name(rt_format), num_rt, num_rt == 1 ? "" : "s");
+      pipe->destroy(pipe);
+      screen->destroy(screen);
+      ralloc_free(ctx);
+      glsl_type_singleton_decref();
+      return 0;
+   }
    for (unsigned c = 0; c < 4; c++) {
       if (rt_is_half)
          printf("  %.9g\n", (double)_mesa_half_to_float(((uint16_t *)pix)[c]));

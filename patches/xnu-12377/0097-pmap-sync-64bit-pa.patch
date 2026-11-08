@@ -1,0 +1,35 @@
+pmap_sync_page_data_phys and its twin: pp << PAGE_SHIFT is a 32-bit shift and drops the high bits of a physical address at or above 4 GiB (the S9's DRAM starts at 0x880000000), which phystokv() then rejects; ptoa() widens first.
+A fix to Apple's xnu (APSL 2.0 like this series), taken from UniXNU's patches/xnu-12377/zzx-pmap-sync-64bit-pa.patch (github.com/UniXNU/UniXNU, BSD-2-Clause-Patent, pinned at a9ec98c, 8 November 2026).
+xnu-8796 already widens (`(vm_offset_t) pp << PAGE_SHIFT`), so this is for the ios-26 base only.
+Their licence notice: patches/xnu-12377/LICENSE.UniXNU.
+
+diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
+index 2507221..eac82ee 100644
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -7244,7 +7244,9 @@ void
+ pmap_sync_page_attributes_phys(
+ 	ppnum_t pp)
+ {
+-	flush_dcache((vm_offset_t) (pp << PAGE_SHIFT), PAGE_SIZE, TRUE);
++	/* ptoa() widens before the shift: pp << PAGE_SHIFT is a 32-bit shift and drops the high bits of physical
++	 * addresses at or above 4 GiB (all of DRAM on boards whose memory starts there), which phystokv() then rejects. */
++	flush_dcache((vm_offset_t) ptoa(pp), PAGE_SIZE, TRUE);
+ }
+ 
+ #if CONFIG_COREDUMP
+diff --git a/osfmk/arm64/sptm/pmap/pmap.c b/osfmk/arm64/sptm/pmap/pmap.c
+index 3622ef2..54faef4 100644
+--- a/osfmk/arm64/sptm/pmap/pmap.c
++++ b/osfmk/arm64/sptm/pmap/pmap.c
+@@ -7568,7 +7568,9 @@ void
+ pmap_sync_page_attributes_phys(
+ 	ppnum_t pp)
+ {
+-	flush_dcache((vm_offset_t) (pp << PAGE_SHIFT), PAGE_SIZE, TRUE);
++	/* ptoa() widens before the shift: pp << PAGE_SHIFT is a 32-bit shift and drops the high bits of physical
++	 * addresses at or above 4 GiB (all of DRAM on boards whose memory starts there), which phystokv() then rejects. */
++	flush_dcache((vm_offset_t) ptoa(pp), PAGE_SIZE, TRUE);
+ }
+ 
+ #if CONFIG_COREDUMP

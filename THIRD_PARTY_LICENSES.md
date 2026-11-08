@@ -16,9 +16,14 @@ This supersedes the summary in `NOTICE`, which stays as the short, canonical lis
 | Monocypher 4.0.2 | `xnu/files/osfmk/minicrypto/third_party/monocypher.{c,h}` | Loup Vaillant and others, [monocypher.org](https://monocypher.org) (unchanged) | CC0-1.0 or BSD-2-Clause | Argon2id for the key store; see `third_party/README.md` |
 | BearSSL `aes_ct64` | `xnu/files/osfmk/minicrypto/third_party/bearssl_*` | Thomas Pornin, [bearssl.org](https://bearssl.org), commit 7bea48e5e850 (only the include line changed; `bearssl_inner.h` is cut down from its `inner.h`) | MIT | constant-time AES for the key store |
 | SoftwareAES (UniXNU) | `xnu/files/iokit/Kernel/MiniIOAESAccelerator.cpp` | ArmVirtPlatform contributors, github.com/UniXNU/SoftwareAES at `4a45326da5c2` | BSD-2-Clause-Patent | the whole file is under it; its notice is in the file's head |
+| UniXNU's xnu-12377 fixes | `patches/xnu-12377/0096-at-par-sync.patch`, `0097-pmap-sync-64bit-pa.patch`, `0098-native-pac-user-jop.patch` | UniXNU contributors, github.com/UniXNU/UniXNU at `a9ec98c` (commits `f65660d`, `a11553a`) | BSD-2-Clause-Patent for their lines; APSL 2.0 as patches to Apple's XNU | notice in `patches/xnu-12377/LICENSE.UniXNU`; each patch's head says what is theirs |
 | LinuxKPI / Linux headers | `wifi/lx/include/linux/`, `wifi/lx/include/net/` | Linux / FreeBSD LinuxKPI | GPL-2.0 (Linux) / BSD-2-Clause (FreeBSD) | small compatibility headers; see each file's notice |
 | brcmfmac patch | `wifi/lx/brcmfmac/patches/` | changes to Linux's brcmfmac (Broadcom) | ISC | the BCM4361's IDs, RAM base and firmware names, and two lines where the kernel's `brcmfmac=N` stops; its context lines are brcmfmac's |
 | Linux DRM shim | `tools/mesa/hakios-drm/`, `xf86drm.h` | Linux / X.Org | MIT | build-time shim for Mesa |
+| Mesa patches | `tools/mesa/*.patch` (`turnip-darwin.patch` among them) | changes to Mesa, HakiOS | MIT (Mesa's terms for the files they change) | patches only; Mesa itself is fetched |
+| AdrenoMetal patch | `tools/m2v/adrenometal-ios16.patch` | changes to UniXNU/AdrenoMetal, HakiOS | MIT, Copyright (c) 2026 NativeMetal contributors | patch only; the source is fetched. `tools/m2v/ios16-compat.h` is our own, MIT |
+| metal2vulkan patch | `tools/m2v/metal2vulkan-hakios.patch` | changes to steelbrain/metal2vulkan, HakiOS | GPL-2.0-or-later OR LGPL-3.0-or-later, as the code it changes; **not MIT** | patch only, and its context lines are their code. The file carries no notice of its own: **to verify** that this is enough |
+| The window server's Metal plug-in | `userland/src/HakiosMetalCA.m` | begun from vcvkk's `userland/src/HakiosMetal.m` (github.com/vcvkk/darwin-redwood, branch hakios-workspace, at eb9fdf5), with this tree's changes | **to verify**: that repository states no license (read 2026-11-04); this tree's changes are MIT | not in `prebuilt/` |
 | AIR / Metal-library tooling | `tools/mesa/air/` | HakiOS (Darwin on redwood contributors) | MIT | our own; LLVM bitcode layout is a published format |
 | gfxstream Vulkan guest patch | `tools/gfxstream/vk/mesa-gfxstream-scion.patch` | changes to Mesa's `src/gfxstream` (Google / AOSP) | MIT | applied by `tools/gfxstream/mk-vk.sh`; `tools/gfxstream/vk/scion/` is our own (MIT) |
 | AdrenoMetal (Metal frontend and C-ABI bridge) | `userland/src/metalvk/NativeBridgeMetalFrontend.{mm,h}`, `tools/metal/bridge/NativeMetal{Objects,Bridge}.{rs,h}` | UniXNU, github.com/UniXNU/AdrenoMetal at `ce5e19e33e05` ("NativeMetal contributors") | MIT (`LICENSE.AdrenoMetal` beside each) | copied with the notice; Scion's changes marked `Scion:`; METAL=vk only |
@@ -47,8 +52,26 @@ This supersedes the summary in `NOTICE`, which stays as the short, canonical lis
 | gfxstream (codegen descriptions; host renderer for the Scion app) | `tools/gfxstream/fetch.sh`, `mk-host-android.sh` | Google | Apache-2.0 (some MIT) |
 | metal2vulkan (runtime, translator, AIR reader; METAL=vk images) | `tools/metal/mk-metal2vulkan.sh` (github.com/steelbrain/metal2vulkan at `720ef1ce9ae2`, with AdrenoMetal's patches and ours in `tools/metal/m2v/`) | Anees Iqbal | GPL-2.0-or-later OR LGPL-3.0-or-later; only ever in its own `libmetal2vulkan.dylib`, which can be replaced |
 | Rust toolchain and crates (ash, libc, sha2, serde ...) | `tools/metal/mk-metal2vulkan.sh` (rustup into `xnu-deps/rust`, crates.io) | the Rust project, crate authors | MIT / Apache-2.0 |
+| Turnip, Mesa's Vulkan driver (TURNIP=1) | `tools/mk-turnip.sh`, in `tools/mk-mesa.sh`'s tree | Mesa project, 25.0.7 | MIT and others |
+| hakios-metal (METAL_PLUGIN=ca) | `hakios-metal/` in this tree, `userland/build.sh` | [oosexgang/hakios-metal](https://github.com/oosexgang/hakios-metal) | MIT |
+| AdrenoMetal's frontend and bridge (M2V=1) | `tools/mk-m2v.sh`, pinned at `243d63c` | [UniXNU/AdrenoMetal](https://github.com/UniXNU/AdrenoMetal) | MIT, Copyright (c) 2026 NativeMetal contributors |
+| metal2vulkan (M2V=1) | `tools/mk-m2v.sh`, pinned at `624bab3`, with AdrenoMetal's 30 patches | [steelbrain/metal2vulkan](https://github.com/steelbrain/metal2vulkan) | `GPL-2.0-or-later OR LGPL-3.0-or-later`, the user's choice (its `LICENSE`) |
+| Rust crates of that build (M2V=1) | `cargo`, by `tools/mk-m2v.sh`; `xnu-deps/build/m2v/bridge/Cargo.lock` | crates.io: ash, libc, libloading, sha2 and their dependencies, 34 packages | those read: MIT OR Apache-2.0 (22), MIT (3), ISC (1), Unlicense OR MIT (1); the 7 not found in the local registry (proc-macro2, quote, serde, serde_derive, syn, unicode-ident, windows-link): **to verify** |
+| Rust's standard library (M2V=1) | the Rust 1.98 toolchain, target `aarch64-apple-ios` | the Rust project | MIT OR Apache-2.0 |
+| QuartzCore's `default.metallib` for the window server's Metal | `tools/ca-metallib.py`, from your own Mac or a later system's IPSW (`CA_QC_METALLIB=`) | Apple | Apple's: user supplies; the result stays on your machine and is never committed |
 | Procursus / Sileo packages | `tools/mk-jb.sh` | Procursus team | their own licenses |
 | Phone firmware (GPU, Wi-Fi, DSP, modem, haptics, cameras) | `devices/redwood/pull-firmware.sh` | Qualcomm / Xiaomi | vendor's — user's own device |
+
+## A binary built with `M2V=1`: to verify
+
+`userland/build.sh TURNIP=1 M2V=1` links `libadreno_metal_bridge.a`, which holds the metal2vulkan runtime (`GPL-2.0-or-later OR
+LGPL-3.0-or-later`), statically into the Metal plug-in (`HakiosMetal`) and into `m2v_test`, beside AdrenoMetal's frontend (MIT), the plug-in's
+own code and hakios-metal. Whoever distributes such a binary takes on that license's obligations for it, whichever of the two is chosen: under
+the LGPL, among others, a recipient's ability to relink against a changed library; under the GPL, the whole binary's source under compatible
+terms. What exactly that requires here, and whether the parts in the row above marked **to verify** allow it, is **to verify**, and has not
+been settled. Until it is, no such binary is distributed: nothing of it is in `prebuilt/` (`prebuilt/userland` has no `HakiosMetal`), and you
+fetch and build it yourself, on your machine. `libvulkan_freedreno.dylib` (Turnip) is a separate library, loaded at run time, under Mesa's terms.
+
 
 ## Read for reference, not copied
 
