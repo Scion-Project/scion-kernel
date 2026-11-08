@@ -36,6 +36,11 @@
 /* The kernel's virtual base. iOS kernels link __TEXT at 0xFFFFFFF007004000, macOS ones (VMAPPLE)
  * at 0xFFFFFE0007004000: both KERNEL_LINK_OFFSET + 16 KB above their base. */
 static uint64_t KERNEL_VIRT_BASE = KERNEL_VIRT_BASE_IOS;
+/* An arm64e kernel is xnu-12377 (OS profile ios-26); xnu-8796 kernels (HakiOS) are arm64. What only xnu-12377 needs
+ * (a 256-byte seed, /defaults/serial-device and the UART's phandle) is given to it alone, so an arm64 kernel gets the
+ * same device tree as before. */
+static int kernel_arm64e;
+#define CPU_SUBTYPE_ARM64E	2u
 #define KERNEL_LINK_OFFSET	0x03000000ULL
 #define UART0_PHANDLE		0x5c0100u	/* AAPL,phandle of /arm-io/uart0 */
 #define BASE_ALIGN		0x02000000ULL	/* 32 MB: L2 block with 16K pages */
@@ -683,6 +688,7 @@ void avfboot_main(uint64_t fdt_pa)
 			entry_va = ((const uint64_t *)((const uint8_t *)lc + 16))[32];
 		}
 	}
+	kernel_arm64e = (mh->cpusubtype & 0xFFu) == CPU_SUBTYPE_ARM64E;
 	if (entry_va && (vm_lo >> 40) == 0xFFFFFEULL)	/* a macOS-linked kernel (VMAPPLE) */
 		KERNEL_VIRT_BASE = (vm_lo - KERNEL_LINK_OFFSET) & ~(BASE_ALIGN - 1);
 	if (vm_lo < KERNEL_VIRT_BASE + KERNEL_LINK_OFFSET || !entry_va)
@@ -881,8 +887,9 @@ void avfboot_main(uint64_t fdt_pa)
 	/* io_base: non-zero (XNU takes 0 for "no SoC") and below crosvm's UART at 0x3f8 */
 	uint64_t io_base = 0x100, io_size = 0x40000000 - io_base;
 	uint64_t ranges[3] = { 0, io_base, io_size };
-	uint8_t seed[256];	/* xnu-12377 asks for 256 bytes (prng_random.c), xnu-8796 for fewer */
-	for (unsigned i = 0; i < sizeof(seed); i++)
+	uint8_t seed[256];	/* xnu-12377 asks for 256 bytes (prng_random.c); xnu-8796 got 64 and keeps getting them */
+	const unsigned seed_len = kernel_arm64e ? 256 : 64;
+	for (unsigned i = 0; i < seed_len; i++)
 		seed[i] = (uint8_t)(rsr("cntvct_el0") >> (i & 7)) ^ (uint8_t)(i * 37);
 
 	dt_begin(&w, "device-tree");
@@ -897,7 +904,7 @@ void avfboot_main(uint64_t fdt_pa)
 	dt_prop_u32(&w, "#size-cells", 2);
 
 	dt_begin(&w, "chosen");
-	dt_prop(&w, "random-seed", seed, sizeof(seed));
+	dt_prop(&w, "random-seed", seed, seed_len);
 	dt_prop_u64(&w, "dram-base", phys_base);
 	dt_prop_u64(&w, "dram-size", win_size);
 	dt_prop_u32(&w, "debug-enabled", 1);
@@ -962,7 +969,7 @@ void avfboot_main(uint64_t fdt_pa)
 
 	dt_begin(&w, "defaults");
 	dt_prop_u32(&w, "kern.vm_compressor", 2);
-	if (m.uart_pa)	/* xnu-12377's pe_serial.c finds its console through this phandle */
+	if (m.uart_pa && kernel_arm64e)	/* xnu-12377's pe_serial.c finds its console through this phandle */
 		dt_prop_u32(&w, "serial-device", UART0_PHANDLE);
 	dt_end(&w);
 
@@ -1036,7 +1043,8 @@ void avfboot_main(uint64_t fdt_pa)
 		dt_prop_str(&w, "compatible", m.uart_kind == UART_8250 ? "ns16550a" : "arm,pl011");
 		dt_prop(&w, "reg", reg2, sizeof(reg2));
 		dt_prop_u32(&w, "boot-console", 1);
-		dt_prop_u32(&w, "AAPL,phandle", UART0_PHANDLE);
+		if (kernel_arm64e)
+			dt_prop_u32(&w, "AAPL,phandle", UART0_PHANDLE);
 		dt_end(&w);
 	}
 	if (sccam.ok) {
