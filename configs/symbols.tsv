@@ -95,6 +95,8 @@ BT_VENDOR	arg	bt_vendor	User space	k	hakios.bcm4361_bt.c	never read the patch fr
 BT_VENDOR_PART	arg	bt_vendor_part	User space	k	hakios.bcm4361_bt.c	the partition the patch is read from (default VENDOR)
 BUTTONS	arg	buttons	Touch and buttons	k	hakios.buttons.c	
 BUTTONS_STEPS	arg	buttons_steps	Touch and buttons	k	hakios.buttons.c	
+CA_METALLIB	arg	ca_metallib	User space	u	inject.c	
+CA_PROF	arg	ca_prof	User space	u	HakiosMetalCA.m	
 CA_VBL	arg	ca_vbl	User space	u	inject.c	CoreAnimation's frame clock from the display driver's refresh notifications
 CAENV	arg	caenv	User space	u	inject.c,inject_sb.c	CoreAnimation's switches here as in the window server (inject.c), set before QuartzCore reads them
 CAM_AFTER	arg	cam_after	Cameras	k	hakios.camera.c	
@@ -155,6 +157,7 @@ EARLY_LOG	arg	early_log	CPU, memory and boot	k	loader_return.c	right after ml_pa
 ESSLOG	arg	esslog	CPU, memory and boot	k	loader_return.c	
 EXTRA_RAM	arg	extra_ram	Loader	kl	1512-arm-extra-ram.patch,loader.c	
 EXYNOS_KEYS	arg	exynos_keys	Touch and buttons	k	hakios.exynos_keys.c	
+FB_BEAM	arg	fb_beam	GPU and display	k	MiniIOMobileFramebuffer.cpp	frames written to the panel's memory whenever their beat comes, as before
 FB_BEAT	arg	fb_beat	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_CA_HZ	arg	fb_ca_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp	the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's
 FB_DIFF	arg	fb_diff	GPU and display	k	MiniIOMobileFramebuffer.cpp	which pixels of the panel each frame changed (it costs: the panel's memory is slow to read)
@@ -179,7 +182,7 @@ FBHEIGHT	arg	fbheight	GPU and display	k	MiniIOMobileFramebuffer.cpp
 FBSCALE	arg	fbscale	GPU and display	k	MiniIOMobileFramebuffer.cpp	the same points (375 x 812, or fb_native's) drawn at two pixels a point instead of three
 FBSUBTYPE	arg	fbsubtype	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FBTRACE	arg	fbtrace	GPU and display	k	MiniIOMobileFramebuffer.cpp	log the first N calls of every selector (default 3)
-FBWIDTH	arg	fbwidth	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FBWIDTH	arg	fbwidth	GPU and display	ku	MiniIOMobileFramebuffer.cpp,inject_sb.c	
 FP_S9	arg	fp_s9	User space	k	hakios.exynos_iris.c	
 FPS_LOG	arg	fps_log	GPU and display	k	MiniIOMobileFramebuffer.cpp,hakios.ufs.c	a line a second while frames come ("fps: ...", in the loader's log and the kernel's): swaps
 GAMUT	arg	gamut	Loader	l	loader.c	
@@ -260,6 +263,7 @@ KSAMPLE_US	arg	ksample_us	Debugging	k	user_exception_trace.c
 LGA_DPU	arg	lga_dpu	User space	k	hakios.lga_dpu.c	
 LGA_KICK	arg	lga_kick	User space	k	hakios.lga_dpu.c	
 LOADER_PLATFORM	arg	loader_platform	Loader	l	loader.c	
+M2V_UTRACE	arg	m2v_utrace	User space	u	HakiosMetalCA.m	Turnip's GPU trace of every render pass (u_trace) into a file, printed during the run
 M3_DIAG	arg	m3_diag	User space	k	psci_smp.c	
 M3_FLUSH	arg	m3_flush	User space	k	psci_smp.c	
 M3_IDS	arg	m3_ids	User space	k	psci_smp.c	
@@ -287,8 +291,20 @@ MAX98512_GAIN	arg	max98512_gain	Audio and battery	k	hakios.max98512.c	the bottom
 MC_CE	arg	mc_ce	User space	k	mc_ce.c	
 MD0	arg	md0	User space	k	1101-virtio-disk-as-md0.patch	
 MEMBENCH	arg	membench	CPU, memory and boot	k	hakios.cpufreq.c	
-METAL	arg	metal	GPU and display	ku	MiniIOMobileFramebuffer.cpp,hakios_metal_shown.c	say where Metal's device is (docs/metal-plan.md, step 1)
+METAL	arg	metal	GPU and display	ku	MiniIOMobileFramebuffer.cpp,hakios_metal_shown.c,inject_sb.c	say where Metal's device is (docs/metal-plan.md, step 1)
+METAL_ALL	arg	metal_all	User space	u	HakiosMetalCA.m	
+METAL_DEFER	arg	metal_defer	User space	u	HakiosMetalCA.m	this queue's command buffers recorded by a thread of hakios-metal's own (deferred recording), so that the window server's render thread does not wait
+METAL_DUMP	arg	metal_dump	User space	u	HakiosMetalCA.m	
+METAL_FPS	arg	metal_fps	User space	u	HakiosMetalCA.m	each draw of a sysmem pass timed alone, by program (only sysmem passes are: without metal_gmem=1)
+METAL_GMEM	arg	metal_gmem	User space	u	HakiosMetalCA.m	
+METAL_GMEM_DRAWS	arg	metal_gmem_draws	User space	u	HakiosMetalCA.m	GMEM for a pass whose like had at least N draws in the frame before (hakios_metal_cb_set_gmem_min_draws), sysmem for the rest; 56 when not given, 0
+METAL_GMEM_OFF	arg	metal_gmem_off	User space	u	HakiosMetalCA.m	
+METAL_LUMA_BOOST	arg	metal_luma_boost	User space	u	HakiosMetalCA.m	
+METAL_M2V	arg	metal_m2v	User space	u	HakiosMetalCA.m	
 METAL_PROFILE	arg	metal_profile	User space	u	hakiosmetal_air.m	
+METAL_SKIP	arg	metal_skip	User space	u	HakiosMetalCA.m	
+METAL_TRACE	arg	metal_trace	User space	u	HakiosMetalCA.m	
+METAL_WATCH	arg	metal_watch	User space	u	inject.c	
 MFC	arg	mfc	Loader	kl	hakios.exynos_mfc.c,loader.c	look: the domain's and the clocks' state, read only
 MFC_FW_PART	arg	mfc_fw_part	User space	k	hakios.exynos_mfc.c	the partition holding mfc_fw.bin (default VENDOR)
 MFC_INT_KHZ	arg	mfc_int_khz	User space	k	hakios.exynos_mfc.c	
@@ -448,10 +464,11 @@ TORCH_SECS	arg	torch_secs	Haptics and torch	k	hakios.s2mpb02_torch.c,hakios.torc
 TOUCH_COALESCE	arg	touch_coalesce	Touch and buttons	k	hakios.input.c	a reader that falls behind gets the newest pending MOVE of a finger, never a lost DOWN/UP. Off by default
 TOUCH_FAULT	arg	touch_fault	User space	u	inject.c	the touch screen first made answers no "PrimaryUsagePage" (tests the remake)
 TOUCH_FLIP	arg	touch_flip	Touch and buttons	k	hakios.goodix.c	
-TOUCH_LAT	arg	touch_lat	GPU and display	ku	MiniIOMobileFramebuffer.cpp,eagl.c,hakios.goodix.c,hakios.gpu.cpp,hakios.input.c,inject.c,inject_sb.c	logs each wait of 1 ms or more as tl: f KIND US at US, for tools/frames.py
+TOUCH_LAT	arg	touch_lat	GPU and display	ku	HakiosMetalCA.m,MiniIOMobileFramebuffer.cpp,eagl.c,hakios.goodix.c,hakios.gpu.cpp,hakios.input.c,inject.c,inject_sb.c	logs each wait of 1 ms or more as tl: f KIND US at US, for tools/frames.py
 TOUCH_POLL_US	arg	touch_poll_us	Touch and buttons	k	hakios.goodix.c	
 TOUCH_RATE	arg	touch_rate	Touch and buttons	k	hakios.goodix.c	the chip reports twice as often (Xiaomi's game mode; 240 otherwise)
 TOUCH_SPI_HZ	arg	touch_spi_hz	Touch and buttons	k	hakios.goodix.c	the bus at N Hz (Android's device tree gives the chip 5 MHz)
+TU_DEBUG	arg	tu_debug	User space	u	HakiosMetalCA.m	Turnip's TU_DEBUG in the window server (sysmem, gmem, forcebin, ...)
 UCACHE_TRAP	arg	ucache_trap	User space	k	1511-m3-user-cache-pou.patch	
 UFS_BENCH	arg	ufs_bench	Storage and APFS	k	hakios.ufs.c	what one request through the loader costs, by size
 UFS_CHECK	arg	ufs_check	Storage and APFS	k	hakios.ufs.c	
@@ -476,6 +493,7 @@ UFS_NATIVE_VERIFY	arg	ufs_native_verify	Storage and APFS	k	hakios.ufs.c
 UFS_NATIVE_WRITE	arg	ufs_native_write	Storage and APFS	k	hakios.ufs.c	own mode: the one partition that takes writes, through /dev/rufs_NAME (never EFS, BOOT, PARAM ...)
 UFS_PROBE	arg	ufs_probe	Loader	l	loader.c	
 UFS_WRITE_GUID	arg	ufs_write_guid	Loader	l	loader.c	
+UI_LITE	arg	ui_lite	User space	u	inject_sb.c	the system's own "Reduce Transparency" and "Reduce Motion" (Settings, Accessibility), for this
 USB_GADGET	arg	usb_gadget	USB	k	hakios.dwc3.c	the steps (0, or none: nothing)
 USB_GADGET_CLK	arg	usb_gadget_clk	USB	k	hakios.dwc3.c	the glue may open a clock the boot left shut (Android's mux, divider and gate)
 USB_GADGET_CRLF	arg	usb_gadget_crlf	USB	k	hakios.dwc3.c	send the log's line ends as they are (LF) rather than CR LF
@@ -506,6 +524,7 @@ VIRTIO_NET_SSID	arg	virtio_net_ssid	Network	k	hakios.virtio_net.c
 VIRTIO_NET_WIFI	arg	virtio_net_wifi	Network	k	hakios.virtio_net.c	iOS is told that en0 is a radio, the way the phone's is (hakios.net.c, hakios.wlan.cpp, hakios.apple80211.c), and a station of this file's stands
 VIRTIO_POLL	arg	virtio_poll	User space	k	hakios.virtio.c	
 VIRTIO_SOUND	arg	virtio_sound	Audio and battery	k	hakios.virtio_sound.c	
+WALLPAPER_CACHE	arg	wallpaper_cache	User space	u	inject_sb.c	the window that shows the wallpaper rasterized by the window server (CALayer's shouldRasterize), drawn from one texture instead of composed again
 WALLPAPER_FREEZE	arg	wallpaper_freeze	User space	u	inject_sb.c	the wallpaper as one still picture
 WDT	arg	wdt	User space	l	wdt_exynos.c	the Galaxy S9's hardware watchdog is not armed (a restart still goes to recovery: INFORM3 is written)
 WIFI_AGAIN	arg	wifi_again	Wi-Fi	k	hakios.wifi.c	start the DSP although the one before it was shut down without having acknowledged a stop: THAT HAS RESET THE PHONE, twice of two

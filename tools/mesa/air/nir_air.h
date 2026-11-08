@@ -110,6 +110,22 @@ struct air_sampler_state {
    unsigned reduction;            /* AGX does not read this field */
 };
 
+/* HOW MANY TEXTURE SLOTS A SHADER MAY REACH, and it is freedreno's number and
+ * not a round one: fd6_texture_state keeps view_seqno[16] beside textures[32],
+ * and a seventeenth view walks out of the first array (RWA_MAX_TEXTURES in
+ * air_metal.c has the reading, and a peer session found the fragility). The
+ * public contract header cannot include this one -- air_metal.h is standalone
+ * so a driver can use it without NIR -- so the two are kept equal by a
+ * static assertion in air_metal.c rather than by one of them including the
+ * other.
+ *
+ * It is here, in the frontend's half, because the frontend now INVENTS an
+ * index: a null texture is a reserved slot past the module's own (see
+ * air_resource.null_texture), and inventing one that nothing can bind would be
+ * worse than refusing to.
+ */
+#define AIR_MAX_TEXTURES 16
+
 struct air_resource {
    enum air_resource_kind kind;
    unsigned index;   /* Metal's [[buffer(n)]], [[texture(n)]], [[sampler(n)]] --
@@ -117,6 +133,68 @@ struct air_resource {
                       * index this frontend allocated: see argbuf_set below */
    unsigned size;    /* air.buffer_size when given, else 0 */
    bool read, write;
+
+   /* Whether the TRANSLATED SHADER stores through this binding -- a different
+    * fact from `write` above and read out of a different place, kept beside it
+    * rather than folded into it so that a consumer can compare the two.
+    *
+    * `write` is Apple's DECLARATION, out of `air.write`/`air.read_write`: a
+    * `device T *` argument is writable whether or not the body ever stores
+    * through it, and most of them never do. `ir_write` is what the IR the
+    * backend will compile actually contains. A runtime that must know whether
+    * a write can be LOST -- rwa_draw's unaligned `device` buffer, which can be
+    * uploaded like a `constant` one only if nothing writes it -- wants this
+    * one, and wants the declaration as a cross-check rather than as the
+    * answer.
+    *
+    * Only ever set for AIR_RESOURCE_DEVICE_BUFFER: a `constant` buffer cannot
+    * be stored to (air_store_ptr refuses it), and a texture or an image is not
+    * reached through a buffer binding.
+    */
+   bool ir_write;
+
+   /* A TEXTURE SLOT THE SHADER ASKED FOR AND THE APPLICATION DOES NOT BIND: the
+    * null texture (`air.get_null_texture_2d` and its fifteen siblings), which a
+    * Metal shader asks for when a pipeline bound no image. There is no index
+    * that means "nothing bound" -- a texture here is Metal's own
+    * `[[texture(n)]]`, resolved while translating -- so the frontend reserves
+    * one past the module's highest declared index and says so with this flag,
+    * which is Apple's own structure: where its textures are indices into a
+    * heap, its null texture is a reserved index in that heap
+    * (AGCLLVMUserObject::replaceTexturesAndSamplers, docs/air.md section 3).
+    *
+    * WHAT THE RUNTIME OWES IT, and what it must NOT do: create a 1x1
+    * zero-filled texture of the slot's own type and bind it there, and never
+    * demand that the application bind one. `param` is ~0u for it, as for an
+    * inline sampler, because no entry-point parameter carries it.
+    *
+    * AND THE ASSUMPTION IT RESTS ON, written here rather than implied: a zero
+    * texture is the right answer only if Metal's null texture reads as zero,
+    * and nothing this project can reach says that it does -- Apple's compiler
+    * substitutes a handle and leaves the result to the descriptor, so there is
+    * no semantics in it to borrow (docs/air.md section 3 has the reading). What
+    * this buys is not certainty but its LOCATION: the assumption lives in one
+    * 1x1 texture a boot can change, instead of being folded into every sample
+    * the frontend emits.
+    *
+    * WHICH TEXTURES TO MAKE IS NOT ONE PER SLOT. The same slot is sampled as
+    * both 2D and 3D in fixed_frag_lph_cph, so a caller needs one per (type,
+    * element class) PAIR -- rwa_texture_decl.sampled_as reports the set, and
+    * reports an empty one for a slot no instruction reads, which means bind
+    * nothing rather than bind everything.
+    *
+    * AND NOTHING YET SAYS THE TWO MODULES THIS EXISTS FOR ARE CORRECT. They
+    * translate and ir3 compiles them; that is all. Softpipe runs neither (f16
+    * registers, varyings, and an assertion in nir_to_tgsi) and cpuref compares
+    * neither (air.* calls LLVM has no body for, no rasteriser for the
+    * varyings), so the Adreno is the only machine that can say anything about
+    * them. And a pipeline that DRAWS is not evidence either: before this it was
+    * refused outright, so anything it draws is new rather than better. The
+    * reading that would mean something is a difference from the same boot
+    * without it.
+    */
+   bool null_texture;
+
    unsigned param;   /* the entry point's parameter; ~0u for an inline sampler */
    const char *name; /* air.arg_name */
    const char *type_name;
@@ -163,6 +241,9 @@ struct air_resource {
     */
    unsigned argbuf_set;
    unsigned argbuf_id;
+   /* ...and where its eight bytes are in the set (air_argbuf_member.offset):
+    * what the runtime reads to find what was encoded there */
+   unsigned argbuf_offset;
 };
 
 struct air_varying {
@@ -318,6 +399,13 @@ struct air_shader_info {
    const char **notes;
 
    unsigned threadgroup_bytes; /* static threadgroup memory */
+
+   /* A [[threadgroup(0)]] argument, sized by the encoder (setThreadgroupMemoryLength:):
+    * it starts at threadgroup_arg_base bytes, past the static arrays, so the runtime
+    * gives the dispatch threadgroup_arg_base + that length.
+    */
+   bool has_threadgroup_arg;
+   unsigned threadgroup_arg_base;
 };
 
 /* The word, field by field. A runtime that holds only `sampler_state` can call
@@ -330,7 +418,103 @@ struct air_sampler_state air_decode_sampler_state(uint64_t word);
 struct air_constant_value {
    unsigned index;     /* the function constant's index */
    uint64_t bits;      /* its value, as the bits of its type */
+
+   /*
+    * Whether the PIPELINE actually supplied that value, which is not the same question
+    * as whether the module declares the constant.
+    *
+    * air_module_function_constants() registers every constant a module declares, because
+    * it reads a declaration; a declaration carries no value, so `bits` is zero until a
+    * runtime fills it in. Those two facts together used to make
+    * air.is_function_constant_defined answer TRUE for every constant and then hand the
+    * module a zero -- and 80 of the corpus's 203 function constants exist precisely to
+    * be asked that question, every one of them guarded by that intrinsic with its own
+    * branch for "it was not supplied". Answering yes and giving zero takes the wrong
+    * branch with an invented value.
+    *
+    * rzalloc_array leaves this false, so a harness or a runtime that fills nothing says
+    * "nothing was supplied", which is the truth about it.
+    */
+   bool supplied;
 };
+
+/* -- function stitching ----------------------------------------------------
+ *
+ * Metal's own way of using an air.visible library function: the runtime hands
+ * the device a GRAPH of calls and gets back a function compiled out of them
+ * (-[MTLDevice newLibraryWithStitchedDescriptor:error:], and the SPI variant
+ * CoreImage actually uses). These three structures are that graph and nothing
+ * else: one field per property of Apple's own objects, read out of the
+ * device's shared cache rather than invented here, so that a runtime filling
+ * them in is transcribing a descriptor and not translating between two models.
+ *
+ *    MTLFunctionStitchingGraph        -> air_stitch_graph (functionName, nodes, outputNode)
+ *    MTLFunctionStitchingFunctionNode -> air_stitch_node  (name, arguments)
+ *    MTLFunctionStitchingInputNode    -> AIR_STITCH_INPUT (argumentIndex)
+ *    MTLFunctionStitchingInputTexture -> AIR_STITCH_TEXTURE (bindIndex), and so
+ *    ...InputSampler, ...InputBuffer     on for the other SPI input nodes
+ *    ...BuiltinThreadPositionInGrid   -> AIR_STITCH_GRID_POSITION
+ *
+ * What is NOT here is the stitching ABI's four functions (load_argument,
+ * copy_from_buffer, store_return_value, destroy). They are in the modules, with
+ * bodies, and the graph says nothing about them: the frontend reads them from
+ * the metadata of each function it stitches (docs/air.md section 5, "The
+ * stitching ABI, before any of it is built").
+ */
+enum air_stitch_arg_kind {
+   AIR_STITCH_NODE,            /* another node's result; index is the node */
+   AIR_STITCH_INPUT,           /* the stitched function's own argument i */
+   AIR_STITCH_TEXTURE,         /* a texture bound at index */
+   AIR_STITCH_SAMPLER,         /* a sampler bound at index */
+   AIR_STITCH_BUFFER,          /* a constant buffer bound at index */
+   AIR_STITCH_GRID_POSITION,   /* thread_position_in_grid */
+};
+
+struct air_stitch_arg {
+   enum air_stitch_arg_kind kind;
+   unsigned index;
+};
+
+struct air_stitch_node {
+   const char *function;                 /* the air.visible function this node calls */
+   unsigned num_args;
+   const struct air_stitch_arg *args;
+};
+
+struct air_stitch_graph {
+   const char *name;                     /* the stitched function's name */
+   unsigned num_nodes;
+   const struct air_stitch_node *nodes;  /* in dependency order */
+   unsigned output_node;                 /* whose result the function returns */
+};
+
+/* One function available to a graph: a module of the library, by name. The
+ * nodes of a graph name functions that live in DIFFERENT modules of the same
+ * .metallib -- every one of CoreImage's 135 is a module of its own -- so a
+ * stitched shader is built out of several bitcode blobs, which is why this
+ * exists at all.
+ */
+struct air_stitch_function {
+   const char *name;
+   const void *bitcode;
+   size_t size;
+};
+
+/* A graph written as text, and the functions it names, for the tools that have
+ * to type one: "f(in0); g(n0)" (air_stitch.c says the whole syntax). The error
+ * buffer is the caller's, and gets one sentence with no prefix.
+ */
+const struct air_stitch_graph *air_stitch_parse(void *mem_ctx, const char *text,
+                                                char *error, size_t size);
+
+/* Every distinct function a graph names, found in an MTLB container by name:
+ * the nodes of one graph live in different modules of one .metallib. Returns
+ * how many, or 0 with *error set.
+ */
+unsigned air_stitch_functions_of(void *mem_ctx, const struct air_stitch_graph *g,
+                                 const void *data, size_t size,
+                                 struct air_stitch_function **out,
+                                 char *error, size_t esize);
 
 struct air_to_nir_options {
    const struct air_constant_value *constants;
@@ -346,6 +530,35 @@ struct air_to_nir_options {
     * entry point of the corpus and is counted separately.
     */
    bool library_wrapper;
+
+   /* Stitch a graph of air.visible functions into one entry point, instead of
+    * translating the module handed to air_to_nir as a shader of its own. The
+    * graph's nodes name functions of `stitch_functions`; the module passed to
+    * air_to_nir must be one of them (its own visible function is then just
+    * another node, and nothing else about it is used).
+    *
+    * The entry point generated is the library wrapper's, extended: argument i
+    * of the STITCHED function is read from device buffer 0 at byte 16*i and the
+    * output node's result is written to device buffer 1. That is deliberate and
+    * not a convenience -- a one-node graph then has to produce exactly the
+    * words `library_wrapper` produces for the same function, which is a
+    * reference that already exists for 78 of the 135 and is what makes the
+    * graphs above it decidable (docs/air.md section 5).
+    */
+   const struct air_stitch_graph *stitch;
+   const struct air_stitch_function *stitch_functions;
+   unsigned num_stitch_functions;
+
+   /* Read the entry point's interface -- its outputs, its inputs and every
+    * member of its argument buffers, with the bindings allocated as a full
+    * translation allocates them -- and stop there: *info is complete, the body
+    * is not translated and the NIR returned has none. For what a runtime has
+    * to answer before any pipeline exists: MTLFunction's
+    * -newArgumentEncoderWithBufferIndex: is asked of functions whose bodies
+    * this frontend cannot translate yet (Resident Evil 4's culling shaders,
+    * air.simd_ballot), and the layout of a set is in the metadata alone.
+    */
+   bool interface_only;
 };
 
 /* Translates one AIR module (one function of a .metallib). entry_point may

@@ -37,6 +37,24 @@ enum air_ptr_class {
     * why argument buffers need no addresses here.
     */
    AIR_PTR_ARGBUF,
+
+   /* A LOCAL, OR A READ-ONLY GLOBAL, THAT HOLDS A POINTER -- kept as a
+    * translation-time slot and not as memory, because a pointer in this
+    * frontend is a resolution and has no bytes to put anywhere. .binding is
+    * the slot's number in air_ctx.slots, and a slot holds a whole air_val, so
+    * what comes back out of one may itself be a texture or a sampler.
+    *
+    * Only a whole load or store at offset 0 reaches a slot. That is not a
+    * simplification: the two shapes this exists for are `alloca ptr
+    * addrspace(2)` followed by a store of a sampler argument, and
+    * `constant %"struct.metal::sampler" { ptr addrspace(2) @__air_sampler_state }`
+    * read through a getelementptr whose every index is zero -- and offset 0 of
+    * a struct is offset 0 of its first member, transitively, which is the only
+    * byte arithmetic a tree of values can answer. Anything else is refused by
+    * name rather than resolved to whichever member the offset happened to land
+    * on (air_to_nir.c, slot_at_zero).
+    */
+   AIR_PTR_SLOT,
 };
 
 struct air_ptr {
@@ -187,7 +205,43 @@ struct air_ctx {
       unsigned offset;      /* bytes, when has_offset */
       bool has_offset;
       bool skip;            /* llvm.* lists, and anything that failed */
+
+      /* A PROGRAM-SCOPE VARIABLE THAT IS A VALUE, not memory. Set by
+       * plan_global_folding for a scalar integer global that the module only
+       * ever loads and stores WHOLE, whose single store is in its
+       * air.static_init constructor, and whose address never escapes. `known`
+       * and `bits` are then filled when that store is translated and the value
+       * turns out to be a constant -- which it is when it came from a function
+       * constant -- and every later load answers with the constant instead of
+       * a load_scratch. The scratch slot is still allocated and still written:
+       * the fold is an answer on top of memory that is there, not a promise
+       * that nothing reads it (air_to_nir.c, AIR_OP_LOAD).
+       */
+      bool fold;
+      bool known;
+      uint64_t bits;
+      unsigned bit_size;
    } *global_plan;
+
+   /* The translation-time slots: locals and read-only globals that hold a
+    * POINTER. Grown as allocas are met; the read-only globals reserve theirs
+    * in plan_globals, before any body is translated, and materialise_globals
+    * fills each one from the global's initialiser in whatever builder is
+    * asking -- the same rule the offsets follow, and for the same reason.
+    */
+   struct air_slot {
+      struct air_val *val;
+      const struct air_type *type;      /* what a whole load of it yields */
+      const struct air_value *init;     /* a read-only global's initialiser, or NULL */
+   } *slots;
+   unsigned num_slots;
+
+   /* The reserved texture slot the null texture lives in, or -1 before anything
+    * has asked for one. Allocated once per shader and shared by every
+    * air.get_null_texture_* call in it, because a module with fifteen of them
+    * (fixed_frag_lph_cph) wants one zero texture and not fifteen.
+    */
+   int null_texture_index;
 
    /* what the entry point's parameters are */
    unsigned num_params;
@@ -208,6 +262,7 @@ struct air_ctx {
 
    unsigned scratch_size;
    unsigned shared_size;
+   unsigned tg_param_plus1;   /* the [[threadgroup(0)]] argument's parameter + 1; 0 none */
 
    /* module-scope variables, by their air_global */
    struct hash_table *globals;
@@ -240,6 +295,14 @@ unsigned air_nir_components(const struct air_type *t);
 void air_note(struct air_ctx *c, const char *fmt, ...) PRINTFLIKE(2, 3);
 
 /* memory, by the pointer's class */
+/* The reserved texture slot a null texture lives in, allocated on the first
+ * air.get_null_texture_* of a shader and shared by the rest of them. Negative
+ * when it does not fit, with the reason already in c->error. Across the file
+ * boundary because the interface half decides it and the INTRINSIC half asks
+ * (air_intrinsics.c).
+ */
+int air_null_texture_slot(struct air_ctx *c);
+
 nir_def *air_load_ptr(struct air_ctx *c, struct air_ptr ptr, const struct air_type *type,
                       unsigned align);
 bool air_store_ptr(struct air_ctx *c, struct air_ptr ptr, nir_def *value, unsigned align);
