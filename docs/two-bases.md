@@ -151,6 +151,25 @@ stand-in (`libkern/amfi/miniamfi.c`, 0180); an image4 one would be new and sits 
 how far a stand-in may go. The series
 after this is the Tensor G5 platform, written fresh (gaps, below).
 
+## The Starbite series (xnu-12377, iOS 27 on the Galaxy S9)
+
+[`starbite/`](../starbite/README.md) holds the S9's iOS 27 port on the `xnu-12377` base: the Starbite author's series
+(`starbite/xnu/series-12377`, patches `0003`-`0398` with the ios-sweet and ios-a5xelte layers under their MIT notices), Scion's iOS 27 fixes after
+it (`0400`-`0414`, each its own commit), and the parity patches (`0420`-`0424`, boot-arg gated, off by default). It lands as a
+subtree first, deliberately **not** under `patches/xnu-12377/`: it is a different machine layer on the same Apple tag (its own
+`STARLTE` board and an iPhoneOS-target configuration, its own numbering), and its patch numbers would collide with the series
+there. Nothing in `profiles/`, the `Makefile` or `xnu/apply-series.sh` reads it, so the ios-26 build and the S9's xnu-8796 objects
+are untouched by it.
+
+What is left, in order, each step on its own:
+
+1. The Galaxy S7 layer (`0200`-`0238` in the author's numbering) has no licence and is not here, so the series does not build
+   from this tree: get a licence for it, or write the same on the pristine base. This also takes the loader's entry code.
+2. Fold the series into `patches/xnu-12377` (renumbered, one machine layer for the S9 beside `VMAPPLE`), with the `ios-27` profile
+   naming it and `patches/xnu-12377/0120` (Darwin 27's system calls; the Starbite tree carries a copy as its `0999`, which is left out here).
+3. Take the `hakios.*` files patches `0400` and `0420`-`0424` carry from `drivers/` by `drivers/map`, each marked
+   `bases xnu-8796 xnu-12377` in its `conf` once the 12377 build uses it, in place of the copies in the patches.
+
 ## ios-on-pixel-10: what Scion may take
 
 ios-on-pixel-10 by TheAndersMadsen (private here as `Scion-Project/scion-blazer`) boots iOS 26 on the Pixel 10 Pro. Its author

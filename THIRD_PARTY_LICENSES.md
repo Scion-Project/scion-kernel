@@ -36,6 +36,12 @@ This supersedes the summary in `NOTICE`, which stays as the short, canonical lis
 | FocalTech touch firmware header | `drivers/input/touch/hakios.focaltech_fw.h` | FocalTech (device firmware blob) | vendor's — **to verify** | candidate to move to pull-from-device |
 | Apple host headers (build only) | `xnu-deps/hostinc/mach-o/`, `.../mach/` | Apple (open-source cctools/xnu headers) | APSL 2.0 | host-side Mach-O headers for the cross build |
 | Pre-built kernel & user space | `prebuilt/` | built from this repo | APSL 2.0 / MIT (as source) | reproducible from source here |
+| Project Starbite (the Starbite author) | `starbite/` | the author's tree of 8 November 2026, with his agreement | his own files MIT (`starbite/LICENSES/MIT-Starbite.txt`); patches to Apple's XNU APSL 2.0; `starbite/shim/starlte/` GPL-2.0-only as each file's SPDX line says | per path: `starbite/LICENSES.md`. The loader parts are a program of their own; none is copied into a kernel file |
+| ios-sweet (dipa-studio) and ios-a5xelte (orhunnx, A5XELTE contributors) | `starbite/xnu/series-12377/0003`-`0128` | github.com/dipa-studio/ios-sweet, github.com/orhunnx/ios-a5xelte, as ported to xnu-12377 by the Starbite author | MIT for their parts (`starbite/LICENSES/MIT-ios-sweet.txt`, `MIT-ios-a5xelte.txt`); APSL 2.0 for the XNU changes | |
+| Galaxy S7 layer of wardevsa/ios-a5xelte (branch herolte) | **not in the repository** (`starbite/xnu/series-12377/0200`-`0238`, the loader files marked "Based on ios-a5xelte shim/herolte") | wardevsa | states no licence: **to verify**, withheld | `starbite/README.md`: the iOS 27 series does not build without it |
+| HakiOS EAGL bridge (copy) | `starbite/tools/ca-gpu/hakios/` | HakiOS authors, with iOS 27 table changes | MIT (`LICENSE.hakios` beside it) | Scion's copy is `userland/src/eagl.c` |
+| Mesa patches, DRM shim | `starbite/tools/mesa-ios/` | changes to Mesa; a shim after HakiOS's `hakios-drm` | MIT | patches only; Mesa is fetched |
+| darwin-xnu-build patch | `starbite/tools/dxb-ios.patch` | change to blacktop's `build.sh` | MIT, Copyright (c) 2023-2025 blacktop | patch only; its context lines are his |
 
 ## Fetched at build time, never committed
 

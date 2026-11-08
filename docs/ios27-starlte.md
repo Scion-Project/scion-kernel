@@ -3,6 +3,24 @@
 > Written 8 November 2026. Nothing here has run on a phone. The facts below were read from an iOS 27 restore image on the build
 > machine; nothing of that image is in this repository, and none may be.
 
+## Update, 8 November 2026 (evening): the Starbite port boots it
+
+The verdict below was written in the morning, from the restore image and Scion's tree alone. Since then iOS 27.0.1 (24A446)
+userland has been booted on a real Galaxy S9 to SpringBoard's home screen by another route: the Starbite port, now in
+[`starbite/`](../starbite/README.md). It does not use the `VMAPPLE` kernel of `docs/two-bases.md`. It builds the S9 as its own machine
+(`STARLTE`, plain arm64, 4 KiB kernel pages under 16 KiB user pages) on xnu-12377.121.6 with its own series (`starbite/xnu/series-12377`),
+and it answers the CPU question of point 2 by emulation: the instructions the Cortex-A55 and Mongoose M3 do not have (the
+register forms of the pointer-authentication instructions, `FJCVTZS`, `FCADD`, `LDAPR`, the LSE atomics on the M3) trap and the
+kernel emulates them (patches `0319`, `0342`-`0355`; `starbite/tools/a64e`), at some tens of thousands to a couple of hundred thousand traps a second.
+The root is still the builder's own, from their own IPSW; nothing of Apple's is in the repository.
+
+What it is, and is not, today: it runs, slowly (CPU-composited, 1.5 GiB of RAM visible, Settings usable); the GPU path
+(`starbite/tools/ca-gpu`) and frame pacing are in progress; the parity patches with the iOS 16.5 kernel (`starbite/docs/PARITY.md`)
+are built, off by default and not booted. It does **not** build from this repository alone: the Galaxy S7 layer it sits on has no
+published licence (`starbite/README.md`). The kernel the port builds is an iPhoneOS-target XNU
+(`starbite/docs/IOS27-TARGET.md`); the `ios-27` profile stays `not-implemented` here until its series is folded into
+`patches/xnu-12377` and a STARLTE machine, which is the follow-up (`docs/two-bases.md`, "The Starbite series").
+
 ## Verdict
 
 **Not bootable from Scion today, and no test image can be made yet.** Three things stand between the S9 and iOS 27, each on

@@ -99,3 +99,11 @@ Fetched at build time, never committed:
   fetched and patched by tools/metal/mk-metal2vulkan.sh and built only into libmetal2vulkan.dylib, a library of its own
   that the plug-in links and that can be replaced. None of its code is in this repository's files but our changes to it,
   patch files in tools/metal/m2v/, which are under its licence and say so in their headers.
+
+- Project Starbite (its author, credited as "Starbite author" until he names the account he wants), starbite/: the iOS 27 port to the
+  Galaxy S9, published with his agreement, his own files under MIT (starbite/LICENSES/MIT-Starbite.txt), the patches that modify
+  Apple's XNU under APSL 2.0, the loader's parts GPL-2.0-only as the files say. Per path: starbite/LICENSES.md.
+  It builds on ios-sweet (dipa-studio, MIT, Copyright (c) 2026 dipa-studio) and ios-a5xelte (orhunnx and A5XELTE contributors, MIT),
+  whose notices are starbite/LICENSES/MIT-ios-sweet.txt and MIT-ios-a5xelte.txt, and on a Galaxy S7 port (wardevsa/ios-a5xelte,
+  branch herolte) that states no licence and is therefore not in this repository.
+- blacktop/darwin-xnu-build (MIT, Copyright (c) 2023-2025 blacktop): starbite/tools/dxb-ios.patch is a patch to its build.sh.
