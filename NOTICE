@@ -12,6 +12,10 @@ In the repository:
 
 - XNU (Apple): the kernel sources are fetched by xnu/apply.sh from github.com/apple-oss-distributions/xnu;
   our patch and files are a derivative work under the Apple Public Source License 2.0 (LICENSE.APSL).
+- ios-on-pixel-10 (TheAndersMadsen; Scion-Project/scion-blazer): devices/blazer/carried/ holds kernel-side files that are its
+  author's own, MIT by their headers ("Copyright (c) 2026 hackios contributors" as the source states it), used in Scion with
+  the author's permission and his credit kept. Its third-party parts (ios-tegu-derived code, which has no licence; GPL-2.0-only
+  UFS link code; GPL-derived panel tables) are not in this repository: docs/two-bases.md.
 - libdeflate (Eric Biggers), xnu/files/bsd/miscfs/apfs/libdeflate/: MIT, see its COPYING.
 - Monocypher 4.0.2 (Loup Vaillant and others), xnu/files/osfmk/minicrypto/third_party/monocypher.*: CC0-1.0 or BSD-2-Clause.
 - BearSSL (Thomas Pornin), xnu/files/osfmk/minicrypto/third_party/bearssl_*: MIT.

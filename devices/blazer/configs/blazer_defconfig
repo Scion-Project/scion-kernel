@@ -1,0 +1,6 @@
+# Scion defconfig for the Google Pixel 10 Pro (blazer, Tensor G5 "lga", devices/blazer) on the ios-26 profile. `make blazer_defconfig`
+# also writes .os-profile (ios-26), so `make kernel` then builds xnu-12377.121.6 with patches/xnu-12377: no driver names that base
+# in its `bases` yet (drivers/*/conf, docs/two-bases.md), so this choice of drivers is recorded for when they do.
+#include common_defconfig
+#include lga.config
+#include blazer.config
