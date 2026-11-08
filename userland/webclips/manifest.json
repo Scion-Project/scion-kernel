@@ -1,0 +1,13 @@
+{
+  "_comment": "The web clips Scion starts with (tools/mk-webclips.py, userland/build.sh WEBCLIPS=1). id: a stable name (the clip's UUID is made from it); glyph: a pictogram of tools/mk-webclips.py; bg: gradient, top and bottom. Every address is the service's own public web client, opened in the person's own browser: nothing is proxied, scraped or logged in for them. A person who wants another Mastodon server, or their own Element homeserver, changes the url and builds again, or edits the clip's Info.plist on the phone.",
+  "clips": [
+    {"id": "wikipedia",  "title": "Wikipedia",  "url": "https://en.m.wikipedia.org/",       "glyph": "book",   "bg": ["#5b6f8f", "#34445f"]},
+    {"id": "mastodon",   "title": "Mastodon",   "url": "https://mastodon.social/",          "glyph": "bubble", "bg": ["#6f6cf2", "#3f3cb8"]},
+    {"id": "element",    "title": "Element",    "url": "https://app.element.io/",           "glyph": "room",   "bg": ["#2fb58a", "#17795c"]},
+    {"id": "osm",        "title": "Maps (OSM)", "url": "https://www.openstreetmap.org/",    "glyph": "pin",    "bg": ["#6cae4f", "#3d7a2c"]},
+    {"id": "excalidraw", "title": "Draw",       "url": "https://excalidraw.com/",           "glyph": "pencil", "bg": ["#a77be0", "#6b44a8"]},
+    {"id": "jitsi",      "title": "Meet",       "url": "https://meet.jit.si/",              "glyph": "camera", "bg": ["#4a90d9", "#24609f"]},
+    {"id": "bluesky",    "title": "Bluesky",    "url": "https://bsky.app/",                 "glyph": "cloud",  "bg": ["#4c9aff", "#1f64c9"]},
+    {"id": "scion",      "title": "Scion",      "url": "https://scion-project.github.io/",  "glyph": "globe",  "bg": ["#3a3d46", "#1a1c22"]}
+  ]
+}

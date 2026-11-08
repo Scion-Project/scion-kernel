@@ -78,6 +78,7 @@ on the Adreno 642L, at 100 to 104 frames a second in page swipes on a 120 Hz pan
 - [U-Boot](u-boot.md): the loader started by U-Boot instead of Silicium's UEFI, from RAM, with nothing of the vendor's.
 - [A modular kernel](modular-kernel.md): how this tree maps onto UniXNU's layers, what is ours in XNU, OS profiles.
 - [Two XNU bases](two-bases.md): xnu-8796 (iOS 16.5) and xnu-12377 (iOS 26) in one tree; the profile, series and device layout; what may be taken from ios-on-pixel-10.
+- [Apps without an App Store account](apps.md): web apps on the home screen from the first boot (`WEBCLIPS=1`), what open-source iOS apps can be built from source and run on a phone at iOS 16.5, and the plan for push.
 - [The real key store](keystore.md): `keystore_real=1`, off by default: the keychain's keys under the passcode, what that does and does not protect from, and what it costs.
 - [Screen-off power](screen-off-power.md): what the Galaxy S9 does with its screen off, and `panel_sleep=1`, `sleep_cores=1` (off by default).
 - [The passcode](passcode.md): Settings' passcode and the lock screen, on a key store with no Secure Enclave (it locks the

@@ -66,6 +66,8 @@ jobs:
           python3 tools/hakios-device-test.py
       - name: Each SoC's table, fragment and matrix row agree; a block without its numbers is off
         run: python3 tools/soc-check.py
+      - name: The web clips (manifest, icons, plists, the room they take in etc/var.skel) are made the same way every time
+        run: python3 tools/webclips-test.py
       - name: The documentation pages made from the source are current
         run: |
           [ ! -d devices/redwood ] || python3 tools/docs-gen.py --check

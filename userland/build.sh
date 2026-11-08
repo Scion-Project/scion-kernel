@@ -50,6 +50,11 @@
 #                                   a directory). This goes into the boot volume, which every recipe
 #                                   carries and which the flash recipe puts in RAM, so its size is paid
 #                                   for at every boot -- a few megabytes, not more
+#                      WEBCLIPS=1   web apps on the home screen from the first boot (off by default): the clips of
+#                                   webclips/manifest.json -- Wikipedia, Mastodon, Element, OpenStreetMap ... -- as the
+#                                   directories Safari's "Add to Home Screen" makes, in mobile/Library/WebClips of
+#                                   the data volume (tools/mk-webclips.py draws their icons: ours, not the sites' logos).
+#                                   WEBCLIPS_FULLSCREEN=1: open them as stand-alone web apps, not in Safari (untried)
 #                      SEED=<file>  a seed of the data volume, as share/var.seed: /private/var as an earlier
 #                                   boot left it (tools/var-seed.py takes it out of a store's disk image), which
 #                                   init unpacks over the template with boot-arg var_seed=1 (src/var_store.c).
@@ -731,11 +736,21 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		-e "s|^l\t/var/db/timezone/zoneinfo/[^\t]*\t/private/var/db/timezone/localtime\$|l\t/var/db/timezone/zoneinfo/$zone\t/private/var/db/timezone/localtime|" root/etc/var.skel
 	rm -f root/etc/var.skel.bak
 	# ... and the files of ours it puts there (var/): those under mobile/ belong to the user mobile
-	cp -r var root/var
-	(cd var && find . -type f | sed 's|^\./||' | sort) | while read -r f; do
+	# WEBCLIPS=1: the web clips are made next to var/, and go in with it (their directories first: init makes a
+	# directory before it copies into it, in the order of the list; and the list has room for them, 16 KB)
+	VARSRC=var
+	if [ -n "$WEBCLIPS" ]; then
+		rm -rf obj/varplus && cp -r var obj/varplus
+		python3 ../tools/mk-webclips.py --out obj/varplus --skel obj/webclips.skel ${WEBCLIPS_FULLSCREEN:+--fullscreen}
+		cat obj/webclips.skel >> root/etc/var.skel
+		VARSRC=obj/varplus
+	fi
+	cp -r $VARSRC root/var
+	(cd $VARSRC && find . -type f | sed 's|^\./||' | sort) | while read -r f; do
 		case $f in mobile/*) owner=501 ;; *) owner=0 ;; esac
 		printf 'f\t644\t%s\t%s\t/private/var/%s\t/var/%s\n' $owner $owner "$f" "$f"
 	done >> root/etc/var.skel
+	[ "$(wc -c < root/etc/var.skel)" -lt 15000 ] || { echo "build.sh: etc/var.skel is $(wc -c < root/etc/var.skel) bytes; init reads 16384 of it (src/init.c, mount_writable)"; exit 1; }
 	# mobile's own temporary directory, $HOME/tmp, which Darwin's template does not have: an application of
 	# mobile's without a data container of its own keeps its temporary files there -- Sileo, registered from
 	# the prefix with the root on the flash, downloads every package and index there, and without it each
