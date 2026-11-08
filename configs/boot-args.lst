@@ -415,6 +415,9 @@ s6sy761_steps	k
 s6sy761_trace	k
 sb_delay	u
 sb_fps	u
+sbc3s	u
+sbprof	u
+sbshot	u
 sccam.addr	k
 sccam.h	k
 sccam.size	k
