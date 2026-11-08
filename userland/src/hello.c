@@ -145,7 +145,7 @@ start(void)
 
 	/*
 	 * The kernel's own version: sysctl kern.hakios.version, which the loader gave the kernel on its command line
-	 * (hakios_kver, from the payload's kernel.ver). The same string the banner shows under hello hakios-kernel!
+	 * (hakios_kver, from the payload's kernel.ver). The same string the banner shows under hello scion-kernel!
 	 */
 	{
 		char version[96];

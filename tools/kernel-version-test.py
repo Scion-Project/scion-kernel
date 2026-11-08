@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tools/kernel-version.py: how the version string is made, and what it refuses.
 
-  the real VERSION file          -> 2.1.13-hakios-darwin22.5-g<8 hex>, in the form Android's kernels have
+  the real VERSION file          -> 2.1.13-scion-darwin22.5-g<8 hex>, in the form Android's kernels have
   OS_PROFILE=ios-26              -> darwin25.5, xnu-12377.121.6: the profile's Darwin, not VERSION's
   a tracked file changed         -> "-dirty"; a new untracked file is not a change (as in Linux's setlocalversion)
   CONFIG_SOC in a .config        -> "-<soc>" between the Darwin and the commit
@@ -53,7 +53,7 @@ try:
     git(repo, "commit", "-q", "-m", "x")
 
     full = run(repo)
-    check("the full string has the Android form", re.fullmatch(r"\d+\.\d+\.\d+-hakios-darwin22\.5-g[0-9a-f]{8}", full.stdout.strip()) is not None,
+    check("the full string has the Android form", re.fullmatch(r"\d+\.\d+\.\d+-scion-darwin22\.5-g[0-9a-f]{8}", full.stdout.strip()) is not None,
           full.stdout + full.stderr)
     check("--short is VERSION.PATCHLEVEL.SUBLEVEL", re.fullmatch(r"\d+\.\d+\.\d+", run(repo, "--short").stdout.strip()) is not None)
     check("--release adds EXTRAVERSION", run(repo, "--release").stdout.strip() == run(repo, "--short").stdout.strip() + "-hakios")
@@ -66,7 +66,7 @@ try:
     i26 = run(ROOT, "--darwin", env={"OS_PROFILE": "ios-26"})
     check("--darwin is ios-26's for an ios-26 build", i26.stdout.split() == ["25.5.0", "xnu-12377.121.6"], i26.stdout + i26.stderr)
     check("the full string of an ios-26 build says darwin25.5",
-          "-hakios-darwin25.5-" in run(ROOT, env={"OS_PROFILE": "ios-26", "HAKIOS_VERSION_SUFFIX": "-x"}).stdout)
+          "-scion-darwin25.5-" in run(ROOT, env={"OS_PROFILE": "ios-26", "HAKIOS_VERSION_SUFFIX": "-x"}).stdout)
 
     open(os.path.join(repo, "untracked.txt"), "w").write("new\n")
     check("an untracked file is not a change", "-dirty" not in run(repo).stdout)
@@ -77,7 +77,7 @@ try:
 
     open(os.path.join(repo, ".config"), "w").write('# a configuration\nCONFIG_SOC="sc7280"\nCONFIG_CPUS=8\n')
     check("CONFIG_SOC of .config goes between the Darwin and the commit",
-          re.fullmatch(r"\d+\.\d+\.\d+-hakios-darwin22\.5-sc7280-g[0-9a-f]{8}", run(repo).stdout.strip()) is not None, run(repo).stdout)
+          re.fullmatch(r"\d+\.\d+\.\d+-scion-darwin22\.5-sc7280-g[0-9a-f]{8}", run(repo).stdout.strip()) is not None, run(repo).stdout)
     other = os.path.join(work, "other.config")
     open(other, "w").write('CONFIG_SOC="sm8550"\n')
     check("--config names another configuration", "-sm8550-" in run(repo, "--config", other).stdout, run(repo, "--config", other).stdout)

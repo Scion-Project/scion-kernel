@@ -4,7 +4,7 @@ An Android kernel says `5.4.147-android12-9-...-g1a2b3c4d`: the Linux it is buil
 commit. This kernel says the same kind of thing about itself:
 
 ```
-2.3.4-hakios-darwin22.5-sc7280-g1a2b3c4d[-dirty]
+2.3.4-scion-darwin22.5-sc7280-g1a2b3c4d[-dirty]
 │ │  │  │      │          │      └ the commit; "-dirty" if a tracked file differs from it
 │ │  │  │      │          └ the SoC family the configuration is for (CONFIG_SOC)
 │ │  │  │      └ the Darwin it is built on (22.5.0, Apple's open xnu-8796.121.2)
@@ -31,9 +31,9 @@ in an Android kernel next to the vendor's own string.
 string from it, from `CONFIG_SOC` of the `.config` (see [configs.md](configs.md)) and from git:
 
 ```bash
-tools/kernel-version.py            # 2.3.4-hakios-darwin22.5-sc7280-g1a2b3c4d (the -sc7280 part is there with a .config)
+tools/kernel-version.py            # 2.3.4-scion-darwin22.5-sc7280-g1a2b3c4d (the -sc7280 part is there with a .config)
 tools/kernel-version.py --short    # 2.3.4
-tools/kernel-version.py --release  # 2.3.4-hakios: what a tag is called (v2.3.4-hakios)
+tools/kernel-version.py --release  # 2.3.4-scion: what a tag is called (v2.3.4-scion)
 tools/kernel-version.py --all      # every part, for a build log
 ```
 

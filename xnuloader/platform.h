@@ -14,6 +14,8 @@ struct platform {
 	uint32_t timeout_scale;          /* a kernel on several cores gets this much longer to wait for a lock, 0: as it is */
 	uint32_t small_cores;            /* a bit for each of the slower cores, by number: "small-core" in the device tree */
 	uint64_t fb_base;                /* the framebuffer the firmware reports (GOP): it tells this device apart */
+	uint64_t vol_down_reg;           /* a 32-bit register whose bit vol_down_bit reads 0 while Volume Down is held (splash=1: hold it for the log), 0: none */
+	uint32_t vol_down_bit;
 	uint64_t ram_log, ram_log_size;  /* where the log is kept across a restart when there is no log partition (write_ram_log) */
 	uint64_t ram_dump, ram_dump_size; /* ... and the start of the kernel's, in ramoops' dmesg record (write_ram_dump) */
 	uint64_t ufs_hc;                 /* the UFS host controller the kernel's own driver may take over (ufs_native=); 0: none */

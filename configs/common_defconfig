@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 665 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 667 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1599,7 +1599,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_USTACKS_TNAME is not set
 
 #
-# Loader (11)
+# Loader (12)
 #
 
 # the kernel's box for this core (above), if it has one, and only with a kernel on another core to watch
@@ -1629,6 +1629,9 @@ CONFIG_MODEM_AGAIN=y
 # read by loader.c (loader)
 # CONFIG_SERIAL is not set
 
+# read by loader.c, scion_splash.c (kernel and loader)
+# CONFIG_SPLASH is not set
+
 # read by loader.c (loader)
 # CONFIG_UFS_PROBE is not set
 
@@ -1636,7 +1639,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (122)
+# User space (123)
 #
 
 # arguments only the kernel reads built into the kernel (HAKIOS_BUILTIN_ARGS); given on the line, an argument goes ...
@@ -1953,6 +1956,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.scsnd.c (kernel)
 # CONFIG_SCSND_SIZE is not set
+
+# read by scion_splash.c (kernel)
+# CONFIG_SPLASH_LINES is not set
 
 # read by inject_sb.c (user space)
 # CONFIG_SWITCHER_WALLPAPER is not set

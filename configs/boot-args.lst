@@ -462,6 +462,8 @@ sound_guard_as	k
 sound_pause	k
 sound_secs	k
 speaker_probe	k
+splash	kl
+splash_lines	k
 surf_clear	k
 surf_wrap	k
 surftrace	k

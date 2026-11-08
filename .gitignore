@@ -54,6 +54,7 @@ __pycache__/
 !/xnuloader/*.c
 !/xnuloader/platform.h
 !/xnuloader/chooser.h
+!/xnuloader/scion_splash_logo.h
 !/xnuloader/platforms/
 !/xnuloader/mkidentity.py
 !/xnuloader/mkpayload.py
