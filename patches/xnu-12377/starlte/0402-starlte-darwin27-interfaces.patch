@@ -1,0 +1,91 @@
+From c6afced6cc16c43a4dfaa35b579e9a9241972ca0 Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:33:19 +0000
+Subject: [PATCH] starlte: the Darwin 27 interfaces launchd and
+ libsystem_darwin ask for: lockdown_mode_state_public, AMFI query 0x60,
+ PRIV_DARKBOOT, developer-mode sysctls
+
+security.mac.lockdown_mode_state_public (os_lockdown_mode_enabled aborts without it); amfi_interface_query_bootarg_state (AMFI
+syscall 0x60, answered 0 as on a stock device); SpringBoard's kern.darkboot (PRIV_DARKBOOT) is granted by the sandbox stand-in;
+security.mac.amfi.developer_mode_status/_resolved (Developer Mode on) and hw.features.allows_security_research (0).
+---
+ bsd/kern/lockdown_mode.c |  2 ++
+ bsd/kern/sweet_amfi.c    | 31 ++++++++++++++++++++++++++++++-
+ 2 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/bsd/kern/lockdown_mode.c b/bsd/kern/lockdown_mode.c
+index 1c104b3f2..fe82f1615 100644
+--- a/bsd/kern/lockdown_mode.c
++++ b/bsd/kern/lockdown_mode.c
+@@ -39,6 +39,8 @@ int lockdown_mode_state = 0;
+ 
+ SYSCTL_DECL(_security_mac);
+ SYSCTL_INT(_security_mac, OID_AUTO, lockdown_mode_state, CTLFLAG_RD | CTLFLAG_LOCKED, &lockdown_mode_state, 0, "Lockdown Mode state");
++/* iOS 27 on STARLTE: Darwin 27 libsystem_darwin (os_lockdown_mode_enabled) reads this name and aborts without it */
++SYSCTL_INT(_security_mac, OID_AUTO, lockdown_mode_state_public, CTLFLAG_RD | CTLFLAG_LOCKED, &lockdown_mode_state, 0, "Lockdown Mode state");
+ 
+ __startup_func
+ void
+diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
+index 07aefcf93..7590cd15a 100644
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -33,6 +33,7 @@
+ #include <sys/priv.h>
+ #include <sys/proc.h>
+ #include <sys/systm.h>
++#include <sys/sysctl.h>
+ #include <sys/ubc_internal.h>
+ #include <sys/vnode.h>
+ #include <security/mac_policy.h>
+@@ -345,6 +346,16 @@ sweet_amfi_syscall(struct proc *p, int call, user_addr_t arg)
+ 		}
+ 		return copyout(&flags, (user_addr_t)a.output, sizeof(flags));
+ 	}
++	if (call == 0x60) {
++		/*
++		 * amfi_interface_query_bootarg_state(uint64_t *state) (iOS 27 libxpc,
++		 * AppleMobileFileIntegrity.framework): arg = user pointer to a
++		 * uint64_t. lsd asked at start. iOS 27 on STARLTE: answer 0 (no
++		 * AMFI boot-args in effect), as on a stock device.
++		 */
++		uint64_t state = 0;
++		return copyout(&state, arg, sizeof(state));
++	}
+ 	if (call == 0x66) {
+ 		/*
+ 		 * amfi_launch_constraint_matches_process() (iOS 26): does the process
+@@ -395,7 +406,8 @@ static int sweet_priv_logged_count;
+ static int
+ sweet_sandbox_priv_grant(kauth_cred_t cred __unused, int priv)
+ {
+-	if (priv == PRIV_WORK_INTERVAL) {
++	/* iOS 27 on STARLTE: SpringBoard sets kern.darkboot (PRIV_DARKBOOT) at start */
++	if (priv == PRIV_WORK_INTERVAL || priv == PRIV_DARKBOOT) {
+ 		return 0;
+ 	}
+ 	char name[20];
+@@ -467,6 +479,23 @@ static struct mac_policy_conf sweet_quarantine_mac_conf = {
+ 
+ static mac_policy_handle_t sweet_quarantine_mac_handle;
+ 
++/*
++ * iOS 27 on STARLTE: Darwin 27 launchd/libs read these sysctls that the
++ * AMFI kext / platform provide on Apple hardware. Developer Mode on and
++ * resolved; not a security research device (stock value).
++ */
++SYSCTL_DECL(_security_mac);
++SYSCTL_DECL(_hw_features);
++SYSCTL_NODE(_security_mac, OID_AUTO, amfi, CTLFLAG_RW | CTLFLAG_LOCKED, NULL, "AMFI (SWEET stand-in)");
++static int sweet_developer_mode = 1;
++static int sweet_security_research;
++SYSCTL_INT(_security_mac_amfi, OID_AUTO, developer_mode_status, CTLFLAG_RD | CTLFLAG_LOCKED,
++    &sweet_developer_mode, 0, "Developer Mode status");
++SYSCTL_INT(_security_mac_amfi, OID_AUTO, developer_mode_resolved, CTLFLAG_RD | CTLFLAG_LOCKED,
++    &sweet_developer_mode, 0, "Developer Mode resolved");
++SYSCTL_INT(_hw_features, OID_AUTO, allows_security_research, CTLFLAG_RD | CTLFLAG_LOCKED,
++    &sweet_security_research, 0, "security research device");
++
+ /* Called from bsd_init once MAC policies can register, before any exec. */
+ void sweet_amfi_policy_register(void);
+ 
