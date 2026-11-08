@@ -37,42 +37,43 @@ always was, and `make blazer_defconfig && make kernel` is an xnu-12377 build.
 `Makefile` and `tools/hakios-config.py` take the tree, series, machine configuration, SDK and HFS step from the profile. For
 `ios-16.5` every one of them resolves to the value it had before, which is how the S9's kernel stays the same objects (below).
 Tools that only make sense on xnu-8796 (`tools/kernel-delta.sh`, `tools/guard-test.sh`, `tools/soc-compile.sh`, the APFS tools,
-`tools/new-workspace.sh`) still name its tree; `tools/kernel-version.py --darwin` still reads `VERSION`. Both are for later.
+`tools/new-workspace.sh`) still name its tree. `tools/kernel-version.py` takes the Darwin release and XNU tag from the profile
+(`darwin25.5` and `xnu-12377.121.6` for ios-26; `VERSION`'s `DARWIN` and `XNU` are ios-16.5's).
 
 ## Statuses
 
 | Status | Meaning |
 |---|---|
 | `real` | builds, and a kernel from it has booted on a phone (ios-16.5: the Galaxy S9) |
-| `experimental` | the base and its series apply; a build says on stderr that nothing from it has booted (ios-26) |
+| `experimental` | the base and its series apply and a kernel links; a build says on stderr that nothing from it has booted (ios-26) |
 | `not-implemented` | named so the plan has a place; any build fails with the reason (ios-27) |
 
 ## Drivers across bases
 
 A driver is source in `drivers/`, copied into the tree by `drivers/map`, and built when `config/MASTER.hakios` and the
-HakiOS block of `bsd/conf/files` say so (`tools/hakios-config.py kernel`). Only xnu-8796's series carries the hooks those two
-need, so on xnu-12377 `xnu/apply-series.sh` copies the drivers in and does not wire them: none is built there yet.
+HakiOS block of `bsd/conf/files` say so (`tools/hakios-config.py kernel`). Both series now carry the place for them
+(`patches/xnu-8796/0030-bsd-conf.patch` and `0130-config.patch` on 8796, `patches/xnu-12377/0080-hakios-drivers.patch` on 12377),
+and a driver says which bases it is built on with a `bases` line in its `drivers/<class>/conf` (`xnu-8796` when it says none;
+a `standard` file takes it too). `tools/hakios-config.py kernel` puts into a tree only the drivers of that tree's base, and says
+which it left out; the drivers table (`docs/reference/drivers.md`) marks a driver built for a device only on the base of the
+device's profile. No driver names `xnu-12377` yet, so the ios-26 kernel has none.
 
-The plan, in order, each step on its own:
+What is left, in order, each step on its own:
 
-1. A `bases` line in `drivers/<class>/conf` (default `xnu-8796`), read by `tools/hakios-config.py`, so a driver is offered only on
-   the bases it has been built on.
-2. A series patch for xnu-12377 that adds `config/MASTER.hakios` to XNU's configuration and the HakiOS block to
-   `bsd/conf/files`, as `patches/xnu-8796/0030-bsd-conf.patch` and `0130-config.patch` do on 8796.
-3. Shims where an interface really differs, and only there (`docs/modular-kernel.md`: none has been shown yet). They go beside
+1. Shims where an interface really differs, and only there (`docs/modular-kernel.md`: none has been shown yet). They go beside
    the interface headers the drivers already use (`sys/hakios.xnu.h` and the per-driver `*_xnu.c`), one directory per base:
    `drivers/core/xnu-12377/`. Expected first: `kalloc`'s typed forms, and pointer signing of the function pointers in
    `cdevsw` and IOKit tables on arm64e.
-4. Drivers one at a time on xnu-12377, starting with the device-neutral ones (DWC3, the log, the UFS core), each marked with
-   its base in `conf`.
+2. Drivers one at a time on xnu-12377, starting with the device-neutral ones (DWC3, the log, the UFS core), each marked with
+   `bases xnu-8796 xnu-12377` in `conf` once it builds there.
 
 ## What builds
 
 Built on the Mac mini on 7 November 2026 (Xcode 27.2):
 
 - **ios-16.5, starlte:** built from this branch and from main with the same version suffix; every object compared (below).
-- **ios-26, blazer:** Apple's tree is fetched and the (empty) series applied; XNU's own configuration step and `build_setup` pass;
-  the build stops at the exported headers, on DriverKit's `.iig` files (below).
+- **ios-26, VMAPPLE:** `OS_PROFILE=ios-26 make kernel` fetches Apple's tree, applies `patches/xnu-12377`, and links an arm64e
+  kernel for Apple's virtual machine (`VMAPPLE`, the profile's `machine`), with no device's drivers (below). Linked, not booted.
 
 ### The S9 stays the same
 
@@ -83,25 +84,36 @@ and 8 of the build time in the two copies of the version string. The pull reques
 
 ### The xnu-12377 build
 
-`make blazer_defconfig && make kernel` on the Mac mini (Xcode 27.2), 7 November 2026, in order of what had to be done:
+`OS_PROFILE=ios-26 make kernel` (or `make blazer_defconfig && make kernel` with that device's repository) on the Mac mini, Xcode
+27.2, 7 November 2026, from a fresh clone: `xnu-deps/setup.sh`, then `xnu/apply-series.sh`, then XNU's build for `VMAPPLE`,
+`DEVELOPMENT`, `-j4`, about five minutes. The result is `hakios-kernel`, a Mach-O arm64e kernel ("Darwin Kernel Version 25.5.0",
+`kern.osrelease` 25.5.0). What it takes, beyond what xnu-8796 does:
 
-1. `xnu/apply.sh` hands over to `xnu/apply-series.sh`: Apple's tag is fetched at `ac9718fb1af6`, the empty series applies, the
-   107 driver files are copied in and left out of the configuration.
-2. XNU 12377 reads its own version from the SDK's `System.kext`, which no public SDK has: `xnu-env.sh` now gives it
-   `RC_DARWIN_KERNEL_VERSION` from the profile's tag.
-3. It calls `/usr/bin/xcrun` by path (8796 called `xcrun`), so it bypassed `xnu-deps/host/bin/xcrun` and resolved Xcode's SDK:
-   `xnu-build.sh` passes `XCRUN=xcrun` on a base other than xnu-8796.
-4. The SDK: no iPhoneOS 26 SDK is set up by `xnu-deps/setup.sh`. For this run an overlay of Xcode's `iPhoneOS27.2.sdk` with
-   the 16.5 overlay's `usr/local` (Apple's `availability.pl` and headers, which the public SDK lacks) was made by hand in
-   `xnu-deps/sdk/iPhoneOS26.xnu.sdk`, and `XNU_SDK_PATH` pointed at it. Not in git; `setup.sh` should make it, with
-   AvailabilityVersions at a release that knows iOS 26.
-5. **Stop:** `build_exporthdrs_mi` in `iokit/DriverKit`: `iig shim: no pre-generated header for IOExtensiblePaniclog`.
-   `xnu-deps`' `iig` is a shim that serves headers generated for xnu-8796's DriverKit classes (`xnu-deps/gen-iig-stubs.py`);
-   12377 has classes 8796 did not. Next: generate them for 12377's `.iig` files, then the build goes on to compile Apple's
-   files for `VMAPPLE`, arm64e, with nothing of Scion's in them.
+1. **The SDK.** `xnu-deps/setup.sh` makes `xnu-deps/sdk/iPhoneOS26.xnu.sdk` for a profile on this base (its `sdk` is 26): links to
+   an iPhoneOS SDK of 26 or later (Xcode's on macOS, 27.2 here; `$THEOS/sdks/iPhoneOS26*.sdk` on Linux, which you bring), plus
+   `usr/local`: `availability.pl` from AvailabilityVersions-157.2, the firehose headers of libdispatch-1542.100.32, and stage 2's
+   `libfirehose_kernel.a`, compiled for arm64e against the kernel's exported headers. AvailabilityVersions-157.2 is the last
+   public release and its version list stops at iOS 17.3 and macOS 14.3: `xnu-deps/av-extend.py` adds the later versions, taken
+   (numbers only) from the SDK's own `AvailabilityVersions.h`. There is no pthread library to make: xnu-12377 has it built in.
+2. **The version.** XNU 12377 reads its own version from the SDK's `System.kext`, which no public SDK has: `xnu-env.sh` gives it
+   the profile's `darwin` (25.5.0) as `RC_DARWIN_KERNEL_VERSION`. It calls `/usr/bin/xcrun` by path: `xnu-build.sh` passes
+   `XCRUN=xcrun`, so ours answers. The machine is the profile's (`xnu-build.sh`).
+3. **DriverKit's `.iig` files.** On macOS `xnu-deps/host/bin/iig` hands over to Apple's own `iig`, which Xcode has (`xcrun -f iig`):
+   it writes the headers and the implementation for xnu-12377's 19 classes, as Apple's build does. On Linux, where there is no
+   `iig`, it hands out the headers it would generate, ready-made in the macOS 26.1 SDK (the same XNU release family) that
+   `setup.sh` fetches, with empty implementations, as for xnu-8796 (`xnu-deps/gen-iig-stubs.py` for what the linker then
+   misses). The Linux path is written, not yet run.
+4. **What Apple keeps in its KDK.** Apple compiles the arm64 machine layer (`start.s`, `locore.s`, the caches, `pmap`) into a
+   binary library that comes with its Kernel Debug Kit, and includes headers it does not publish. `patches/xnu-12377`
+   (its `README.md` lists each patch) compiles that layer from the tree for `VMAPPLE` (`config/MASTER.arm64.vmapple`), links the
+   KDK library only if it is there, fetches the TrustCache headers from xnu-8796.101.5 (`imports`), and stands in, as Scion's
+   own code, for what is still missing: CoreEntitlements' V2 types, four entitlement names, SART, the UAT, the CPU tunables, the
+   read-only region (`amcc_rorgn_scion.c`: none is locked), `ml_enable_monitor` and `ml_device_is_prod_fused`, the forced
+   cache clean, `CPU_OVRD`, and three calls of `pmap.c` into the monitor.
 
-So xnu-12377 is fetched and configured by this tree but not compiled. After it compiles, the series starts (`patches/xnu-12377`):
-the Tensor G5 platform, written fresh (gaps, below).
+What the kernel does not do yet, and is not claimed to: `VMAPPLE` expects Apple's hypervisor for its paravirtualized pointer
+authentication and read-only region, which QEMU and crosvm do not offer, so booting it elsewhere is its own work. The series
+after this is the Tensor G5 platform, written fresh (gaps, below).
 
 ## ios-on-pixel-10: what Scion may take
 

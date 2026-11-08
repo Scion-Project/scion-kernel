@@ -28,6 +28,7 @@ def load(name, file):
 
 
 def drivers_page(hc, hd):
+    profiles = load("os_profile", "os-profile.py")
     readers = hc.arg_readers() or {}
     by_file = {}
     for arg, files in readers.items():
@@ -43,7 +44,9 @@ def drivers_page(hc, hd):
             config = hc.overlay({}, hc.resolve(ROOT, [defconfig]))
         except hc.ConfigError:
             continue
-        configs[name] = hc.drivers_built(config)
+        # a driver is built for a device only on the XNU base of the device's OS profile (drivers/*/conf: `bases`)
+        base = profiles.read(hd.one(fields, "profile", profiles.DEFAULT))["base"]
+        configs[name] = {sym: on and base in hc.DRIVER_BY_SYMBOL[sym].bases for sym, on in hc.drivers_built(config).items()}
     out = [HEADER % "drivers/*/conf and the SoC and device repositories' drivers",
            "# Drivers", "",
            "Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconfig builds it in; "
@@ -70,7 +73,8 @@ def drivers_page(hc, hd):
                 ", ".join("`HAKIOS_%s`" % r for r in d.requires) or "", ", ".join("`%s=`" % a for a in args[:8]) +
                 (" and %d more" % (len(args) - 8) if len(args) > 8 else ""),
                 "".join("%s | " % ("built" if built[d.symbol] else "") for built in configs.values())))
-    out += ["", "The columns on the right are the devices' defconfigs: \"built\" means that defconfig builds the driver in.", ""]
+    out += ["", "The columns on the right are the devices' defconfigs: \"built\" means that defconfig builds the driver in, on the "
+            "XNU base of the device's OS profile (a driver's `bases` in its `conf`; [One tree, two XNU bases](../two-bases.md)).", ""]
     return "\n".join(out)
 
 
