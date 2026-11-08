@@ -48,8 +48,9 @@ the LSE and LDAPR instructions they lack for EL0, and pin a thread that uses ano
 console: `/dev/cu.usbmodem*`), `rd=ufsroot0 ufsroot=USERDATA ufsrw=1 rootrw=1`, `sweetacl=1`, `sweetfb_native=1 sweetfb_scale=1`,
 `sweetfb_gpu=1`, `sweetinject=/usr/lib/sbca.dylib,backboardd,Preferences`, `vm_compression_limit=196608`, `wdt=-1 -wdt_no_pmu`, and this kernel's
 own code-signing policy for the builder's own root (`cs_enforcement_disable=1 cs_integrity_skip=1 launchd_unsecure_cache=1`: its AMFI is a stand-in,
-`starlte/0025`, `0035`, `0036`, `0322`). `startop=1` adds trap statistics. The set that booted on the phone at 4 cores is that with
-`cpus=4`; `docs/boot-args.md` lists what the kernel reads.
+`starlte/0025`, `0035`, `0036`, `0322`). `startop=1` adds trap statistics. The set is `tools/ios27/cmdline/starlte-8core.txt` (pass it to `tools/ios27/mkpayload-ios26.sh NAME FILE`; the payload
+holds 607 bytes of it); the set that booted on the phone at 4 cores is that with `cpus=4`. `docs/boot-args.md` lists what the 16.5 kernel and
+user space read; the S9's own are in the sources under `xnu/files-12377/`.
 
 **The follow-up (not done, and why).** The series carries its own drivers: `# drivers: series` in `series.ios27` tells `xnu/apply-series.sh`
 to take none from `drivers/`. What is left to fold into this repository's modular layout, each step with the applied tree checked file for
