@@ -3,6 +3,71 @@
 > Written 8 November 2026. Nothing here has run on a phone. The facts below were read from an iOS 27 restore image on the build
 > machine; nothing of that image is in this repository, and none may be.
 
+## The Galaxy S9 runs it (8 November 2026): the ios-27 profile
+
+The verdict below was written in the morning, from the restore image and Scion's tree alone. Since then iOS 27.0.1 (24A446) user space
+has been booted on a real Galaxy S9 to SpringBoard's home screen, by a kernel built from this repository's `ios-27` profile. This
+section says what that is and where it sits; the sections after it are the morning's analysis, kept.
+
+**What it is.** `profiles/ios-27.conf`: Apple's `xnu-12377.121.6` (nothing newer is public; iOS 27.0.1's kernel is `xnu-13432.2.10`) with
+Darwin 27's system calls (`patches/xnu-12377/0120`) and a machine layer for the S9 (`STARLTE`: the Exynos 9810, plain arm64, 4 KiB kernel
+pages under 16 KiB user pages, no Apple SoC) that is the work of **Project Starbite** and the layers under it (below). iOS 27's user space
+is arm64e; the S9's Cortex-A55 and Mongoose M3 have no pointer authentication, so the kernel emulates the instructions that trap (the
+register forms of the PAC instructions, `FJCVTZS`, `FCADD`, `LDAPR` and the LSE atomics on the M3: `starlte/0319`, `0342`-`0355`;
+`tools/ios27/a64e` has the user-space side), some tens of thousands to a couple of hundred thousand traps a second. The root is the
+builder's own, from their own IPSW; nothing of Apple's is in this repository.
+
+**Where the pieces are.** One tree, one series directory:
+
+| Path | What |
+|---|---|
+| `profiles/ios-27.conf` | machine `STARLTE`, series `patches/xnu-12377/series.ios27`, status experimental |
+| `patches/xnu-12377/series.ios27` | the order: the edits darwin-xnu-build makes, the staging scripts (Apple's HFS and libpthread and BearSSL by commit; CoreEntitlements' headers from the Kernel Debug Kit you bring), `files` and `copy` lines, then the patches |
+| `patches/xnu-12377/starlte/` | the patches: hunks on Apple's files only (and on the sources the scripts stage). `README.md` there has the porting notes |
+| `xnu/files-12377/` | the files the series adds, in the tree's own layout: platform code, the Starbite and wardevsa drivers, the IOHID event services, the crypto stand-ins, the Mali and display services |
+| `xnu/apply-series.sh` | makes the tree; learned `files DIR`, `copy SOURCE TARGET`, `.sh` lines and `# drivers: series`, `# imports: none`, all inert for the ios-26 series |
+| `xnuloader/sboot/` | the loader S-Boot starts (boot menu, OS store, recovery menu, USB console and fastboot subset); Scion's own path boots through Mu-Silicium's UEFI and `xnuloader/`, which this leaves alone |
+| `tools/ios27/` | build, packing and test tools (`build-xnu-12377.sh`, `-ios.sh`, `mkpayload-ios26.sh`, `make-xnu-boot.sh`, the ADT makers, `a64e/`, `gpu/`, `mesa-ios/`, `ca-gpu/`) and wardevsa's `herolte/` packing tools |
+| `userland/src/sbca.c` | CoreAnimation's renderer through OpenGL ES on the Mali-G72 (Mesa Panfrost behind HakiOS's EAGL bridge), with iOS 27.0.1's addresses; the bridge's iOS 27 table is `tools/ios27/ca-gpu/hakios/` |
+| `docs/ios27/` | `IOS27-TARGET.md` (the iPhoneOS-target build and what it changes), `PARITY.md` (against Scion's 16.5 kernel), and the author's pages on the loader's USB console and fastboot, the microSD root and the recovery menu |
+
+**Layers, and whose they are** (`LICENSES.md` has the licences): ios-sweet (dipa-studio, MIT) `0003`-`0081`; ios-a5xelte (orhunnx and A5XELTE
+contributors, MIT) `0082`-`0128`; the Galaxy S7 layer of ios-a5xelte (wardevsa) `0200`-`0238`, used and published with the author's
+permission; the Starbite author's STARLTE port `0300`-`0398`; Scion's `0400` and up, and `0120`. The Starbite author's name is a placeholder
+("Starbite author") until he gives the one he wants credited.
+
+**Status.** It runs, slowly at first (CPU-composited, 1.5 GiB of RAM visible, Settings usable); with the GPU path of `sbca` (the
+`EDRClient` fix took the phone from about 0.1 to 10-50 frames a second, as the GPU track measured it) it is usable; frame pacing is in progress. 8-core mode is accepted as
+the default (below) and was built but not booted when this was written. The parity patches `0420`-`0424` (extra RAM, the CPU governor,
+Wi-Fi stage 1, TMU, DPU scan-out) are behind boot-arguments, off by default and not booted. `make kernel` does not build this profile; `tools/ios27/build-xnu-12377.sh` does,
+and `-ios.sh` builds it as an iOS-target XNU (`docs/ios27/IOS27-TARGET.md`). What was run on the phone is in each commit message; the
+repository's own checks (`docs/checks.md`) boot nothing.
+
+**Default boot arguments.** The kernel boots with `cpus=8` (four A55 and four M3: `starlte/0304` brings the M3s up, `0342`-`0344` emulate
+the LSE and LDAPR instructions they lack for EL0, and pin a thread that uses another one to an A55), `usb_gadget=5` (the log on the USB-C
+console: `/dev/cu.usbmodem*`), `rd=ufsroot0 ufsroot=USERDATA ufsrw=1 rootrw=1`, `sweetacl=1`, `sweetfb_native=1 sweetfb_scale=1`,
+`sweetfb_gpu=1`, `sweetinject=/usr/lib/sbca.dylib,backboardd,Preferences`, `vm_compression_limit=196608`, `wdt=-1 -wdt_no_pmu`, and this kernel's
+own code-signing policy for the builder's own root (`cs_enforcement_disable=1 cs_integrity_skip=1 launchd_unsecure_cache=1`: its AMFI is a stand-in,
+`starlte/0025`, `0035`, `0036`, `0322`). `startop=1` adds trap statistics. The set that booted on the phone at 4 cores is that with
+`cpus=4`; `docs/boot-args.md` lists what the kernel reads.
+
+**The follow-up (not done, and why).** The series carries its own drivers: `# drivers: series` in `series.ios27` tells `xnu/apply-series.sh`
+to take none from `drivers/`. What is left to fold into this repository's modular layout, each step with the applied tree checked file for
+file as the last two were (`xnu/files-12377` and the `copy` lines):
+
+1. The adapted Scion drivers that `xnu/files-12377` still holds: `hakios.dwc3.c` (one include more on xnu-12377: `vm/vm_kern_xnu.h`),
+   `hakios.exynos_cpufreq.c`, `hakios.scion_gov.c`, `hakios.exynos_tmu.c`/`.h`, `hakios.exynos_pcie.c`, `hakios.exynos_dpu.c`,
+   `hakios.exynos_acpm_dvfs.c`, `hakios.exynos9810_mem.h`, `hakios.exynos_soc.h` become `drivers/` files with `bases xnu-8796 xnu-12377` in their `conf`
+   (the differences go into `drivers/core/xnu-12377/` shims or the drivers themselves).
+2. The Starbite and wardevsa platform and device code (`sweet_*.c`, `a5xelte_*.c`, `herolte_*.c`, `starlte_*.c`, the Mali user client, the framebuffer and
+   surface services, the touch drivers) renamed to Scion's conventions (`hakios.<thing>.c`), grouped by subsystem under `drivers/` with `conf` blocks, with what
+   Scion already has (UFS, touch, the DPU, the S9's MUIC and battery) taken from there, and the boards this tree does not use (SWEET, A5XELTE, HEROLTE) dropped
+   once STARLTE no longer needs their patches (its board layer is built on them today).
+3. The stand-ins the series makes twice (`sart.h`, `uat.h`, `tunables.s`, the read-only region, the crypto providers, AMFI) merged with `0020`-`0100` of the ios-26
+   series, so one machine layer serves `VMAPPLE` and `STARLTE`; then `make kernel` can build the profile.
+4. The loader: `xnuloader/sboot` only where `xnuloader/` has nothing equivalent (S-Boot hand-off, the menu); the USB console is the DWC3 gadget's.
+5. `userland/src/eagl.c` takes the iOS 26 and 27 function tables of `tools/ios27/ca-gpu/hakios/eagl.c`, and `tools/mesa-ios` is folded into `tools/mesa`.
+
 ## Verdict
 
 **Not bootable from Scion today, and no test image can be made yet.** Three things stand between the S9 and iOS 27, each on

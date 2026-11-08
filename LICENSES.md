@@ -1,0 +1,30 @@
+# Licences of the iOS 27 on the Galaxy S9 work
+
+Read from each file's head and from where it came from, on 8 November 2026; this is a reading, not legal advice. The rule of
+`LICENSE` applies on top: XNU-derived files are APSL-2.0 (`LICENSE.APSL`), everything else of Scion's is MIT. `NOTICE` and
+`THIRD_PARTY_LICENSES.md` carry the same credits in short.
+
+| Path | Licence | Origin and notes |
+|---|---|---|
+| `patches/xnu-12377/starlte/*.patch` and `blacktop/*.patch`, as patches to Apple's XNU | **APSL-2.0** (`LICENSE.APSL`) | A patch to Apple's XNU is a modification of it and cannot be MIT. Apple's own notices stay in the files they change or add. |
+| `xnu/files-12377/` | **APSL-2.0** as a whole (it is XNU's tree: platform code, drivers and services written against its interfaces); the files below that are not Apple's code may also be used under the licence of their author | 27 files carry Apple's APSL header (the IOHIDFamily event services in `iokit/Kernel/arm/hid/`: Apple's open source). The rest are written for this series by the people credited next. |
+| ios-sweet layer `0003`-`0081` (and the staging scripts `0019`, `0020`, `0026`) | APSL-2.0 for the XNU modifications; **MIT** for the donor's parts, `LICENSES/MIT-ios-sweet.txt` | ios-sweet (dipa-studio, MIT), ported to xnu-12377 by the Starbite author. The staging scripts fetch Apple's libpthread and HFS (APSL-2.0) and BearSSL (MIT) by commit at build time; nothing of theirs is stored here. |
+| ios-a5xelte layer `0082`-`0128` | APSL-2.0; MIT for the donor's parts, `LICENSES/MIT-ios-a5xelte.txt` and `MIT-ios-sweet.txt` | ios-a5xelte (orhunnx and A5XELTE contributors, MIT), which keeps ios-sweet's notice. |
+| **Galaxy S7 layer `0200`-`0238`, and the loader files, tools and `tools/ios27/herolte/` that follow it** | patches to Apple XNU files remain **APSL-2.0**; the rest as the files say (the loader files are marked GPL-2.0-only by the Starbite author who derived them) | **wardevsa**: the herolte (Galaxy S7) XNU layer of ios-a5xelte (github.com/wardevsa/ios-a5xelte, branch `herolte`). Used and published with the author's permission (relayed by the Scion maintainer, 8 November 2026); credit kept. The repository states no licence of its own; this entry records the permission, not a licence grant to third parties beyond what the author gave. |
+| Starbite author's port `0300`-`0398` | APSL-2.0 as patches; the **new files** of it in `xnu/files-12377` (`sweet_*`, `Sweet*`, `starlte_*`, `StarbiteMali.cpp`, `StarbiteAccelerator.cpp` and the like) are the author's own and may also be taken under **MIT** (`LICENSES/MIT-Starbite.txt`) | Project Starbite, published with the author's agreement (8 November 2026). Credit: "Starbite author", a placeholder until he names the account he wants used. |
+| `patches/xnu-12377/starlte/04*.patch`, the `hakios.*` files in `xnu/files-12377` and the `copy` lines' sources | APSL-2.0 | Scion's (Claudius for Scion); the drivers are `drivers/`'s, adapted where each file's head says. They name the Samsung kernel's register facts (clocks, LDO numbers, opcode sequences) as facts; no Samsung GPL code is copied into them. |
+| `patches/xnu-12377/starlte/blacktop/` | **MIT** (`blacktop/LICENSE`) for the script; the patches are APSL-2.0 as patches to XNU | blacktop's darwin-xnu-build (MIT, Copyright (c) 2023-2025 blacktop): the edits and patches its build applies around the series. `10_dxb_build_seds.sh` repeats its `sed` lines. |
+| `xnuloader/sboot/*` | **GPL-2.0-only**, as each file's `SPDX-License-Identifier` says | The loader S-Boot starts: the Starbite author's, with the files derived from the S7 layer (`xnu_boot.*`, `fbtext.*`, `probe.*`, `build.sh`, `image.ld`, `fdt.*`; wardevsa) under the same marker. The author agreed to MIT for his own code; the markers stay as written until he says per file which are wholly his (several follow the Linux and Samsung drivers for the DWC3, UFS, MUIC and fuel gauge). The loader is a program of its own that the phone runs before the kernel; none of it is copied into a kernel file, and nothing GPL goes into an APSL file. |
+| `tools/ios27/*.sh`, `*.py` (build, packing, root helpers), `a64e/`, `memtest/`, `touchspy/`, `gpu/*.c`, `docs/ios27/*.md` | **MIT**, the Starbite author's (`LICENSES/MIT-Starbite.txt`) | `tools/ios27/usb-fastboot/host_test.c` is **GPL-2.0-only** by its head (it tests `xnuloader/sboot/fastboot.c`). `tools/ios27/gpu/panfrost_drm.h` is MIT (Broadcom, Collabora; the DRM uAPI, by its head). `tools/ios27/herolte/*.py` are wardevsa's (above). |
+| `tools/ios27/build-xnu-12377-ios.sh`, `adt-extra-ram.py`, `ca-gpu/build-sbca27.sh`, `docs/ios27/IOS27-TARGET.md`, `PARITY.md` | MIT | Written for this work. |
+| `tools/ios27/dxb-ios.patch` | **MIT** | A patch to blacktop's `build.sh` (MIT); the context lines are his. |
+| `userland/src/sbca.c` | MIT | The Starbite author's, with the iOS 27.0.1 offsets and addresses and the later fixes of the GPU track (numbers read from the builder's own restore image; no Apple code). |
+| `tools/ios27/ca-gpu/hakios/` | **MIT**, `hakios/LICENSE.hakios` | HakiOS's EAGL bridge (the HakiOS authors) with iOS 26 and 27 table changes. Scion's copy is `userland/src/eagl.c`; the follow-up folds them. |
+| `tools/ios27/mesa-ios/*.patch` | **MIT** (Mesa's terms for the files they change) | Patches only; Mesa is fetched. `starbite-drm/` follows HakiOS's `hakios-drm` shim (MIT). |
+| `LICENSES/` | | The notices the MIT parts need. |
+
+## Not asserted
+
+- The SPDX line of a file under `xnuloader/sboot` is the author's; it is not a claim that nothing in it follows a GPL source.
+- wardevsa's permission is recorded as the Scion maintainer relayed it; if the author's repository later states a licence, that governs.
+- The names "Starbite", "Samsung", "Galaxy", "Apple", "iOS" and the like are their owners'.

@@ -151,6 +151,15 @@ stand-in (`libkern/amfi/miniamfi.c`, 0180); an image4 one would be new and sits 
 how far a stand-in may go. The series
 after this is the Tensor G5 platform, written fresh (gaps, below).
 
+## The S9's machine layer on xnu-12377 (the ios-27 profile)
+
+`profiles/ios-27.conf` builds the Galaxy S9 (`STARLTE`) on this base: its series is `patches/xnu-12377/series.ios27`, one ordered block in
+this directory beside `series` (which the `ios-26` profile reads, unchanged), with the files it adds in `xnu/files-12377/`. The Exynos 9810 has
+no pointer authentication and no Apple SoC, so the machine layer is not `VMAPPLE`'s: it comes from Project Starbite and the layers under it, and
+`docs/ios27-starlte.md` says whose each is, what runs, and what the follow-up is (folding the drivers into `drivers/`, merging the stand-ins
+that both machine layers make with `0020`-`0100`, so that one layer serves both). `make kernel` does not build it yet;
+`tools/ios27/build-xnu-12377.sh` does.
+
 ## ios-on-pixel-10: what Scion may take
 
 ios-on-pixel-10 by TheAndersMadsen (private here as `Scion-Project/scion-blazer`) boots iOS 26 on the Pixel 10 Pro. Its author

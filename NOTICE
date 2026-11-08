@@ -99,3 +99,14 @@ Fetched at build time, never committed:
   fetched and patched by tools/metal/mk-metal2vulkan.sh and built only into libmetal2vulkan.dylib, a library of its own
   that the plug-in links and that can be replaced. None of its code is in this repository's files but our changes to it,
   patch files in tools/metal/m2v/, which are under its licence and say so in their headers.
+
+- Project Starbite (its author, credited as "Starbite author" until he names the account he wants), the iOS 27 port to the Galaxy S9
+  (patches/xnu-12377/starlte/, xnu/files-12377/, xnuloader/sboot/, tools/ios27/, userland/src/sbca.c), published with his agreement: his own
+  files under MIT (LICENSES/MIT-Starbite.txt), the patches that modify Apple's XNU under APSL 2.0, the loader GPL-2.0-only as its files say.
+  Per path: LICENSES.md.
+- wardevsa, the herolte (Galaxy S7) XNU layer of ios-a5xelte (github.com/wardevsa/ios-a5xelte, branch herolte), patches 0200-0238 of that series
+  and the loader files and packing tools that follow it: used and published with the author's permission (relayed by the Scion maintainer,
+  8 November 2026); patches to Apple XNU files remain APSL-2.0.
+- ios-sweet (dipa-studio, MIT, Copyright (c) 2026 dipa-studio) and ios-a5xelte (orhunnx and A5XELTE contributors, MIT, Copyright (c) 2026
+  orhunnx and A5XELTE contributors): the layers under it, patches 0003-0128; their notices are LICENSES/MIT-ios-sweet.txt and MIT-ios-a5xelte.txt.
+- blacktop/darwin-xnu-build (MIT, Copyright (c) 2023-2025 blacktop): patches/xnu-12377/starlte/blacktop/ and tools/ios27/dxb-ios.patch.
