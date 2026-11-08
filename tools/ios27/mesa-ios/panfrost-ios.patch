@@ -1,0 +1,300 @@
+--- a/include/GL/osmesa.h
++++ b/include/GL/osmesa.h
+@@ -106,6 +106,7 @@
+ #define OSMESA_COMPAT_PROFILE        0x35
+ #define OSMESA_CONTEXT_MAJOR_VERSION 0x36
+ #define OSMESA_CONTEXT_MINOR_VERSION 0x37
++#define OSMESA_ES_PROFILE            0x38  /* an OpenGL ES 2 or 3 context, by the version asked for */
+ 
+ 
+ typedef struct osmesa_context *OSMesaContext;
+--- a/meson.build
++++ b/meson.build
+@@ -1716,7 +1716,15 @@
+   # dependencies (such as vk-runtime) linking to it
+   dep_libdrm = null_dep
+ endif
+-if dep_libdrm.found()
++if host_machine.system() == 'darwin' and with_gallium_panfrost
++  # Starbite (iOS): no DRM on this system. Panfrost's requests go to the
++  # kernel's StarbiteMali user client through a stand-in for libdrm
++  # (src/starbite-drm, copied in by tools/ios27/mesa-ios/mk-mesa-ios.sh).
++  dep_libdrm = declare_dependency(
++    include_directories : include_directories('src/starbite-drm'),
++    link_args : ['-framework', 'IOKit', '-framework', 'CoreFoundation'],
++  )
++elif dep_libdrm.found()
+   pre_args += '-DHAVE_LIBDRM'
+   if with_dri_platform == 'drm' and with_dri
+     with_gallium_drisw_kms = true
+--- a/src/gallium/drivers/panfrost/pan_bo.c
++++ b/src/gallium/drivers/panfrost/pan_bo.c
+@@ -355,10 +355,13 @@
+    if (!bo->ptr.cpu)
+       return;
+ 
++#ifndef __APPLE__
++   /* (Starbite: the kernel's mapping lives until GEM_CLOSE) */
+    if (os_munmap((void *)(uintptr_t)bo->ptr.cpu, panfrost_bo_size(bo))) {
+       mesa_loge("munmap failed: %s", strerror(errno));
+       abort();
+    }
++#endif
+ 
+    bo->ptr.cpu = NULL;
+ }
+--- a/src/gallium/drivers/panfrost/pan_device.c
++++ b/src/gallium/drivers/panfrost/pan_device.c
+@@ -119,7 +119,13 @@
+ 
+    if (dev->arch < 10) {
+       dev->tiler_heap = panfrost_bo_create(
++#ifdef __APPLE__
++         /* Starbite: no GPU page faults, so the kernel commits heap
++          * buffers in full; 32 MiB of wired memory, not 128. */
++         dev, 32 * 1024 * 1024, PAN_BO_INVISIBLE | PAN_BO_GROWABLE, "Tiler heap");
++#else
+          dev, 128 * 1024 * 1024, PAN_BO_INVISIBLE | PAN_BO_GROWABLE, "Tiler heap");
++#endif
+       if (!dev->tiler_heap)
+          goto err_free_kmod_dev;
+    }
+--- a/src/gallium/frontends/osmesa/osmesa.c
++++ b/src/gallium/frontends/osmesa/osmesa.c
+@@ -86,8 +86,11 @@
+ extern struct pipe_screen *
+ osmesa_create_screen(void);
+ 
++extern struct pipe_resource *
++osmesa_surface_resource(struct pipe_screen *screen, uint32_t surface);
+ 
+ 
++
+ struct osmesa_buffer
+ {
+    struct pipe_frontend_drawable base;
+@@ -152,6 +155,29 @@
+    }
+ }
+ 
++/*
++ * No EGL here. What glEGLImageTargetTexture2DOES is given as an image is the
++ * ID of an IOSurface, whose memory becomes the texture's (Starbite; after
++ * HakiOS's freedreno-darwin.patch, MIT).
++ */
++static bool
++osmesa_st_get_egl_image(struct pipe_frontend_screen *fscreen, void *image,
++                        struct st_egl_image *out)
++{
++   out->texture = osmesa_surface_resource(fscreen->screen,
++                                          (uint32_t)(uintptr_t)image);
++   if (!out->texture)
++      return false;
++   out->format = out->texture->format;
++   return true;
++}
++
++static bool
++osmesa_st_validate_egl_image(struct pipe_frontend_screen *fscreen, void *image)
++{
++   return true;
++}
++
+ static void
+ create_st_manager(void)
+ {
+@@ -162,7 +188,8 @@
+    if (global_fscreen) {
+       global_fscreen->screen = osmesa_create_screen();
+       global_fscreen->get_param = osmesa_st_get_param;
+-      global_fscreen->get_egl_image = NULL;
++      global_fscreen->get_egl_image = osmesa_st_get_egl_image;
++      global_fscreen->validate_egl_image = osmesa_st_validate_egl_image;
+    }
+ }
+ 
+@@ -615,7 +642,8 @@
+       case OSMESA_PROFILE:
+          profile = attribList[i+1];
+          if (profile != OSMESA_CORE_PROFILE &&
+-             profile != OSMESA_COMPAT_PROFILE)
++             profile != OSMESA_COMPAT_PROFILE &&
++             profile != OSMESA_ES_PROFILE)
+             return NULL;
+          break;
+       case OSMESA_CONTEXT_MAJOR_VERSION:
+@@ -662,8 +690,8 @@
+     * Create the rendering context
+     */
+    memset(&attribs, 0, sizeof(attribs));
+-   attribs.profile = (profile == OSMESA_CORE_PROFILE)
+-      ? API_OPENGL_CORE : API_OPENGL_COMPAT;
++   attribs.profile = (profile == OSMESA_ES_PROFILE) ? API_OPENGLES2 :
++      (profile == OSMESA_CORE_PROFILE) ? API_OPENGL_CORE : API_OPENGL_COMPAT;
+    attribs.major = version_major;
+    attribs.minor = version_minor;
+    attribs.flags = 0;  /* ST_CONTEXT_FLAG_x */
+--- a/src/gallium/targets/osmesa/meson.build
++++ b/src/gallium/targets/osmesa/meson.build
+@@ -39,6 +39,7 @@
+   ],
+   dependencies : [
+     dep_ws2_32, dep_thread, dep_clock, dep_unwind, driver_swrast, idep_mesautil,
++    driver_panfrost, idep_xmlconfig, dep_libdrm,
+   ],
+   name_prefix : host_machine.system() == 'windows' ? '' : [],  # otherwise mingw will create libosmesa.dll
+   soversion : host_machine.system() == 'windows' ? '' : '8',
+--- a/src/gallium/targets/osmesa/osmesa_target.c
++++ b/src/gallium/targets/osmesa/osmesa_target.c
+@@ -26,7 +26,91 @@
+ 
+ #include "sw/null/null_sw_winsys.h"
+ 
++#include "frontend/winsys_handle.h"
++#include "pipe/p_screen.h"
++#include "pipe/p_state.h"
+ 
++#ifdef GALLIUM_PANFROST
++#include "panfrost/drm/panfrost_drm_public.h"
++#include "util/driconf.h"
++#include "util/xmlconfig.h"
++#include <xf86drm.h>
++
++static int gpu_fd = -1;
++
++static const driOptionDescription panfrost_options[] = {
++#include "panfrost/driinfo_panfrost.h"
++};
++
++/*
++ * Starbite: the Mali-G72 through Panfrost when the kernel offers it
++ * (StarbiteMali, see src/starbite-drm); NULL: none, use softpipe.
++ * OSMESA_SOFTWARE=1 asks for softpipe anyway.
++ */
++static struct pipe_screen *
++osmesa_create_gpu_screen(void)
++{
++   static driOptionCache info, cache;
++   static struct pipe_screen_config config;
++   struct pipe_screen *screen;
++   int fd;
++
++   if (debug_get_bool_option("OSMESA_SOFTWARE", false))
++      return NULL;
++   fd = drmOpenWithType("panfrost", NULL, DRM_NODE_RENDER);
++   if (fd < 0)
++      return NULL;
++   driParseOptionInfo(&info, panfrost_options, ARRAY_SIZE(panfrost_options));
++   config.options = &cache;
++   config.options_info = &info;
++   screen = panfrost_drm_screen_create_renderonly(fd, NULL, &config);
++   if (screen)
++      gpu_fd = fd;
++   else
++      close(fd);
++   return screen ? debug_screen_wrap(screen) : NULL;
++}
++#endif
++
++struct pipe_resource *
++osmesa_surface_resource(struct pipe_screen *screen, uint32_t surface);
++
++/*
++ * The memory of an IOSurface as a texture, to draw into and to draw with:
++ * the kernel maps the surface into the GPU. NULL: the screen is not the
++ * GPU's, or the surface is not one plane of 32-bit blue-first pixels.
++ */
++struct pipe_resource *
++osmesa_surface_resource(struct pipe_screen *screen, uint32_t surface)
++{
++#ifdef GALLIUM_PANFROST
++   struct starbite_drm_surface s = { .surface = surface };
++   struct pipe_resource templ = {
++      .target = PIPE_TEXTURE_2D,
++      .format = PIPE_FORMAT_B8G8R8A8_UNORM,
++      .depth0 = 1,
++      .array_size = 1,
++      .bind = PIPE_BIND_SAMPLER_VIEW | PIPE_BIND_RENDER_TARGET,
++   };
++   struct winsys_handle handle = { .type = WINSYS_HANDLE_TYPE_FD };
++
++   if (gpu_fd < 0 || starbite_drm_surface(gpu_fd, &s) != 0)
++      return NULL;
++   if (s.pixel_format != 0x42475241 /* 'BGRA' */ || s.planes > 1)
++      return NULL;
++   templ.width0 = s.width;
++   templ.height0 = s.height;
++   handle.handle = surface;
++   handle.stride = s.row_bytes;
++   handle.offset = s.offset;
++   handle.size = s.size;
++   return screen->resource_from_handle(screen, &templ, &handle, 0);
++#else
++   return NULL;
++#endif
++}
++
++
+ struct pipe_screen *
+ osmesa_create_screen(void);
+ 
+@@ -36,6 +120,12 @@
+ {
+    struct sw_winsys *winsys;
+    struct pipe_screen *screen;
++
++#ifdef GALLIUM_PANFROST
++   screen = osmesa_create_gpu_screen();
++   if (screen)
++      return screen;
++#endif
+ 
+    /* We use a null software winsys since we always just render to ordinary
+     * driver resources.
+--- a/src/panfrost/lib/kmod/meson.build
++++ b/src/panfrost/lib/kmod/meson.build
+@@ -6,6 +6,9 @@
+   'panfrost_kmod.c',
+   'panthor_kmod.c',
+ )
++if host_machine.system() == 'darwin'
++  libpankmod_lib_files += files('../../../starbite-drm/starbite_drm.c')
++endif
+ 
+ libpankmod_lib = static_library(
+   'pankmod_lib',
+--- a/src/panfrost/lib/kmod/pan_kmod.c
++++ b/src/panfrost/lib/kmod/pan_kmod.c
+@@ -176,7 +176,13 @@
+ 
+       p_atomic_inc(&bo->refcnt);
+    } else {
++#ifdef __APPLE__
++      /* Starbite: the "dma-buf" is an IOSurface ID (src/starbite-drm). */
++      struct starbite_drm_surface surface = { .surface = (uint32_t)fd };
++      size_t size = starbite_drm_surface(dev->fd, &surface) ? 0 : surface.size;
++#else
+       size_t size = lseek(fd, 0, SEEK_END);
++#endif
+       if (size == 0 || size == (size_t)-1) {
+          mesa_loge("invalid dmabuf size");
+          goto err_close_handle;
+--- a/src/panfrost/lib/kmod/pan_kmod.h
++++ b/src/panfrost/lib/kmod/pan_kmod.h
+@@ -615,8 +615,16 @@
+    if (mmap_offset < 0)
+       return MAP_FAILED;
+ 
++#ifdef __APPLE__
++   /* Starbite: the kernel mapped the buffer into this process when asked
++    * for its mmap offset, which is the address (src/starbite-drm). */
++   (void)prot;
++   (void)flags;
++   host_addr = (void *)(uintptr_t)(mmap_offset + bo_offset);
++#else
+    host_addr = os_mmap(host_addr, size, prot, flags, bo->dev->fd,
+                        mmap_offset + bo_offset);
++#endif
+    if (host_addr == MAP_FAILED) {
+       mesa_loge("mmap(..., size=%zu, prot=%d, flags=0x%x) failed: %s",
+                 size, prot, flags, strerror(errno));

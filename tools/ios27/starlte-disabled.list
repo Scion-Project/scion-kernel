@@ -1,0 +1,33 @@
+# Daemons that only waste CPU on this phone (no network, no iCloud, no Siri): taken out of launchd.plist
+# by tools/ios27/starlte-disable-jobs.py. From the S7 port (ios-a5xelte herolte tools/ios27/herolte-disabled.list).
+com.apple.healthd
+com.apple.remindd
+com.apple.email.maild
+com.apple.siriinferenced
+com.apple.siriknowledged
+com.apple.siriactionsd
+com.apple.assistantd
+com.apple.financed
+com.apple.fitcore
+com.apple.fitnesscoachingd
+com.apple.triald
+com.apple.mediaanalysisd
+com.apple.itunescloudd
+com.apple.Maps.mapspushd
+com.apple.navd
+com.apple.ap.adprivacyd
+com.apple.ap.promotedcontentd
+com.apple.amsengagementd
+com.apple.watchlistd
+# measured on this phone (kernel STARLTE TOP, boot70): imagent spins at 142% with no network
+com.apple.imagent
+com.apple.sirittsd
+com.apple.icloudmailagent
+com.apple.icloud.searchpartyd
+com.apple.cloudd
+com.apple.cloudd.sync
+com.apple.PerfPowerServices
+com.apple.PerfPowerServicesExtended
+# boot71: parsecd (Spotlight suggestions) spins at 133% with no network; passd (Wallet) crash-loops
+com.apple.parsecd
+com.apple.passd
