@@ -301,3 +301,4 @@ starlte/0414-starlte-ios-target-mac-policy-list.patch
 starlte/0415-starlte-surface-copy-fallback.patch
 # parity with Scion's iOS 16.5 kernel (docs/ios27-starlte.md): behind boot-args, off by default, built but not booted
 starlte/0420-starlte-extra-ram.patch
+starlte/0421-starlte-cpu-governor.patch
