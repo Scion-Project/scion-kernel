@@ -18,7 +18,11 @@ In the repository:
 - SoftwareAES (UniXNU, ArmVirtPlatform contributors), github.com/UniXNU/SoftwareAES at 4a45326da5c2:
   xnu/files/iokit/Kernel/MiniIOAESAccelerator.cpp is a port of it, under BSD-2-Clause-Patent (notice in the file).
 - UniXNU (github.com/UniXNU/UniXNU, BSD-2-Clause-Patent): patches/xnu-12377/0090, the PAC keys in the architectural
-  registers on a non-Apple CPU, follows the design of its native-pac-keys.patch; no UniXNU code is copied.
+  registers on a non-Apple CPU, follows the design of its native-pac-keys.patch; no UniXNU code is copied there. Patches
+  0096 (PAR_EL1 ISB), 0097 (64-bit physical address in the pmap's page-data sync) and 0098 (arm64 processes with the PAC keys
+  off, behind SCION_NATIVE_PAC) are UniXNU's own small patches (native-at-par-sync, zzx-pmap-sync-64bit-pa,
+  native-pac-arm64-user-jop and a hunk of native-pac-keys, at a9ec98c and f65660d/a11553a, by their contributors), taken with
+  their notice, patches/xnu-12377/LICENSE.UniXNU, under BSD-2-Clause-Patent; 0098's macro name is ours.
 - mkbootimg.py (Android Open Source Project), devices/redwood/prebuilt/mkbootimg.py: Apache License 2.0.
 - Mu-Silicium / Project Mu (Project Silicium, Microsoft and contributors): devices/redwood/uefi/ holds a
   patch and files against it; their license applies to the derived parts (BSD-2-Clause-Patent).

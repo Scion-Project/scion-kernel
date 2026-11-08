@@ -25,11 +25,14 @@ Debug Kit, and includes headers it does not publish. Scion's drivers have their 
 | `0093-chkstk-bti.patch` | `__chkstk_darwin` with a `bti c` landing pad (the kernel calls it with `blraa`; Xcode's copy has none) |
 | `0094-chained-fixups.patch` | `arm_init` applies and signs the kernel's `LC_DYLD_CHAINED_FIXUPS` (format 7): Xcode 26's `ld` no longer emits `__thread_starts` |
 | `0095-physmap-slack.patch` | the physical aperture's worst-case twig alignment, as with a monitor (`arm_vm_physmap_init` asserted without it) |
+| `0096-at-par-sync.patch` | an `ISB` before `PAR_EL1` is read after `AT S1E1W` in `mmu_kvtop_wpreflight` (UniXNU's `native-at-par-sync`) |
+| `0097-pmap-sync-64bit-pa.patch` | `ptoa(pp)` where `pp << PAGE_SHIFT` dropped the high bits of a physical address at or above 4 GiB, in both pmaps' page-data sync (UniXNU's `zzx-pmap-sync-64bit-pa`) |
+| `0098-native-pac-user-jop.patch` | with `SCION_NATIVE_PAC=1`: an arm64 thread runs at EL0 with the PAC keys off, and `ml_default_jop_pid()` is 1 so arm64e processes get signed pointers (UniXNU's `native-pac-arm64-user-jop`) |
 | `../xnu-8796/0280-osfmk-minicrypto.patch` | minicrypto, the xnu-8796 series' own crypto provider, the same file (one copy in the repository) |
 | `0100-minicrypto.patch` | minicrypto's digests, AES and HMAC-DRBG built on this base (not the key store's parts); registered at the end of `SYSCTL`, because this base runs `EARLY_BOOT` after `PE_init_iokit`, whose platform UUID already takes a SHA-1 |
 | `0110-hakios-core.patch` | what `drivers/core/hakios.version.c` needs here: `sys/hakios.version.h`, the `kern.hakios` sysctl node (`bsd/dev/hakios.base.c`, until `hakios.platform.c` builds on this base) and the call in `bsd_init()`; the first file of `drivers/` with `bases xnu-12377` |
 
-0090 to 0100 change what a kernel does only when it is built with `make kernel SCION_NATIVE_PAC=1` (off by default; 0100's
+0090 to 0095 and 0098 to 0100 change what a kernel does only when it is built with `make kernel SCION_NATIVE_PAC=1` (off by default; 0100's
 files are built either way, and register nothing without it). They came from Scion-Project/scion-avf's `vmapple/patches`
 0001-0007 (PR 23), where the same changes booted a macOS-SDK `VMAPPLE` kernel on QEMU; the PAC design follows UniXNU's
 (BSD-2-Clause-Patent, credited in NOTICE), and no UniXNU code is here. Why the kernel's crypto is minicrypto and not Apple's corecrypto,

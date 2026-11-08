@@ -1,0 +1,76 @@
+With SCION_NATIVE_PAC=1: an arm64 (non-arm64e) thread returns to EL0 with the PAC keys off, the EL0 vectors turn them back on, and ml_default_jop_pid() is 1 (never 0: the shared region and dyld pagers sign pointers only for a nonzero key), so arm64e processes get signed pointers and arm64 ones do not. arm64e system libraries still authenticate an arm64 process's return addresses with IB (libunwind), so its keys must be off, not merely unused.
+Taken from UniXNU's patches/xnu-12377/native-pac-arm64-user-jop.patch and the ml_default_jop_pid hunk of native-pac-keys.patch (github.com/UniXNU/UniXNU, BSD-2-Clause-Patent, commit a11553a by bluseliu50, 8 November 2026), with their HAS_NATIVE_PAC renamed to this series' SCION_NATIVE_PAC. Behaviour only with make kernel SCION_NATIVE_PAC=1; the default build is unchanged.
+Their licence notice: patches/xnu-12377/LICENSE.UniXNU.
+
+diff --git a/osfmk/arm/machine_routines_apple.c b/osfmk/arm/machine_routines_apple.c
+index 144dab5..cf65cca 100644
+--- a/osfmk/arm/machine_routines_apple.c
++++ b/osfmk/arm/machine_routines_apple.c
+@@ -249,6 +249,13 @@ ml_default_jop_pid(void)
+ #if HAS_PARAVIRTUALIZED_PAC
+ 	vmapple_pac_get_default_keys();
+ 	return vmapple_default_jop_pid;
++#elif SCION_NATIVE_PAC
++	/*
++	 * Every process signs with the one architectural key set, so this value
++	 * selects no key. It must not be 0: the shared region and dyld pagers
++	 * sign pointers only for a nonzero key and give arm64 processes key 0.
++	 */
++	return 1;
+ #else
+ 	return 0;
+ #endif /* HAS_PARAVIRTUALIZED_PAC */
+diff --git a/osfmk/arm64/locore.s b/osfmk/arm64/locore.s
+index 3f42af8..6689bab 100644
+--- a/osfmk/arm64/locore.s
++++ b/osfmk/arm64/locore.s
+@@ -907,6 +907,20 @@ el1_sp1_serror_vector_long:
+ 
+ .macro EL0_64_VECTOR guest_label
+ 	stp		x0, x1, [sp, #-16]!					// Save x0 and x1 to the exception stack
++#if SCION_NATIVE_PAC
++	/*
++	 * An arm64 (non-arm64e) thread runs with the PAC keys off at EL0, and
++	 * SCTLR_EL1 controls EL1 as well. Turn them back on before the first
++	 * pointer authentication below (LOAD_USER_PCB).
++	 */
++	mrs		x0, SCTLR_EL1
++	tbnz	x0, #SCTLR_PACIA_ENABLED_SHIFT, Lel0_jop_keys_on_\@
++	MOV64	x1, SCTLR_PAC_KEYS_ENABLED
++	orr		x0, x0, x1
++	msr		SCTLR_EL1, x0
++	isb		sy
++Lel0_jop_keys_on_\@:
++#endif /* SCION_NATIVE_PAC */
+ #if __ARM_KERNEL_PROTECT__
+ 	mov		x18, #0 						// Zero x18 to avoid leaking data to user SS
+ #endif
+@@ -2055,6 +2069,28 @@ Lno_gcr_mask_el0_reset:
+ #endif  /* defined(ERET_IS_NOT_CONTEXT_SYNCHRONIZING) && !__ARM_KERNEL_PROTECT__ */
+ 	strb	wzr, [x1, CPU_SYNC_ON_CSWITCH]
+ 
++#if SCION_NATIVE_PAC
++	/*
++	 * An arm64 (non-arm64e) thread returns to EL0 with all PAC keys off: it
++	 * signs nothing, and arm64e libraries authenticate its return addresses
++	 * with IB (libunwind). Nothing from here to the eret signs or authenticates
++	 * a pointer, and the EL0 vectors turn the keys back on.
++	 */
++	mrs		x2, SPSR_EL1
++	tst		w2, PSR64_MODE_EL_MASK
++	b.ne	Lskip_user_jop_keys_off				// Returning to EL1
++	mrs		x2, TPIDR_EL1
++	ldr		w2, [x2, TH_ARM_MACHINE_FLAGS]
++	tbz		w2, #ARM_MACHINE_THREAD_DISABLE_USER_JOP_SHIFT, Lskip_user_jop_keys_off
++	mrs		x2, SCTLR_EL1
++	MOV64	x3, SCTLR_PAC_KEYS_ENABLED
++	bic		x2, x2, x3
++	msr		SCTLR_EL1, x2
++#if ERET_NEEDS_ISB
++	orr		x5, x5, #(1 << BIT_ISB_PENDING)
++#endif /* ERET_NEEDS_ISB */
++Lskip_user_jop_keys_off:
++#endif /* SCION_NATIVE_PAC */
+ 
+ #if ERET_NEEDS_ISB
+ 	// Apply any pending isb from earlier.

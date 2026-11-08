@@ -16,6 +16,10 @@
 0093-chkstk-bti.patch
 0094-chained-fixups.patch
 0095-physmap-slack.patch
+# fixes taken from UniXNU's series (credited in each patch and NOTICE): 0096 and 0097 for any build, 0098 only with SCION_NATIVE_PAC=1
+0096-at-par-sync.patch
+0097-pmap-sync-64bit-pa.patch
+0098-native-pac-user-jop.patch
 # minicrypto, the xnu-8796 series' crypto provider, the same files; built here, registered only with SCION_NATIVE_PAC=1
 ../xnu-8796/0280-osfmk-minicrypto.patch
 0100-minicrypto.patch
