@@ -11,7 +11,7 @@ def edit(path, pairs):
     p = Path(path)
     t = p.read_text()
     for pat, rep in pairs:
-        t = re.sub(pat, lambda m: rep(m) if callable(rep) else rep, t, flags=re.M)
+        t = re.sub(pat, rep, t, flags=re.M)
     p.write_text(t)
 edit('bsd/sys/make_symbol_aliasing.sh', [(r'^AVAILABILITY_PL="\$\{SDKROOT\}/\$\{DRIVERKITROOT\}', 'AVAILABILITY_PL="${FAKEROOT_DIR}')])
 edit('libsyscall/Libsyscall.xcconfig', [(r'^#include.*BSD.xcconfig.*', '')])
