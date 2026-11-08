@@ -19,3 +19,4 @@
 # minicrypto, the xnu-8796 series' crypto provider, the same files; built here, registered only with SCION_NATIVE_PAC=1
 ../xnu-8796/0280-osfmk-minicrypto.patch
 0100-minicrypto.patch
+0110-hakios-core.patch

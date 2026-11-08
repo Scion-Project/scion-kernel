@@ -1,0 +1,91 @@
+0110: what drivers/core/hakios.version.c needs on this base: sys/hakios.version.h (as the xnu-8796 series has it), the kern.hakios
+sysctl node (bsd/dev/hakios.base.c, until drivers/core/hakios.platform.c builds here) and the call in bsd_init().
+Scion's change to Apple's xnu, under the APSL 2.0.
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 5f583f5b066c3e78bbcde055cff769832ed9665d..77c500ba26d4c4b340ae437187cf91835b02b0e6 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -108,6 +108,8 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
+ bsd/dev/unix_startup.c			standard
+ 
+ bsd/dev/monotonic.c         optional config_cpu_counters
++# Scion, this base only: kern.hakios until drivers/core/hakios.platform.c builds here (patches/xnu-12377/0110)
++bsd/dev/hakios.base.c	standard
+ # HakiOS drivers: made by tools/hakios-config.py kernel from drivers/*/conf. Edit those, not these lines.
+ # end of the HakiOS drivers
+ 
+diff --git a/bsd/dev/hakios.base.c b/bsd/dev/hakios.base.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..9332d41e03831e2135353357edb2b5e8a6a1723e
+--- /dev/null
++++ b/bsd/dev/hakios.base.c
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (c) 2026 Scion contributors. All rights reserved.
++ *
++ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
++ *
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this file.
++ *
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ *
++ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
++ */
++
++/*
++ * Scion, xnu-12377 only: what the drivers built on this base share, until drivers/core/hakios.platform.c (which needs
++ * the xnu-8796 series' log and boot-argument hooks) builds here too. Today that is kern.hakios, the sysctl node the
++ * drivers hang theirs under (kern.hakios.version: drivers/core/hakios.version.c).
++ */
++#include <sys/sysctl.h>
++
++SYSCTL_NODE(_kern, OID_AUTO, hakios, CTLFLAG_RW | CTLFLAG_LOCKED, 0, "Scion");
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index ffe7ce0939879d6c6c056ad8ebcee721c159afe4..023b4d50dc04c8e6c9b7c6b5f8d5e754fad38cba 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -182,6 +182,7 @@
+ 
+ #if CONFIG_NETBOOT
+ #include <sys/netboot.h>
++#include <sys/hakios.version.h>	/* Scion: drivers/core/hakios.version.c */
+ #endif
+ 
+ #if CONFIG_IMAGEBOOT
+@@ -1002,6 +1003,7 @@ bsd_init(void)
+ 
+ 		bsd_init_kprintf("calling devfs_kernel_mount\n");
+ 		devfs_kernel_mount(mounthere);
++		hakios_version_init();         /* Scion: kern.hakios.version, and the version in the boot log */
+ 	}
+ #endif /* DEVFS */
+ 
+diff --git a/bsd/sys/hakios.version.h b/bsd/sys/hakios.version.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f8d274ead0015720d65dbcb591728e3ee2c64f3b
+--- /dev/null
++++ b/bsd/sys/hakios.version.h
+@@ -0,0 +1,12 @@
++/*
++ * The version of this kernel (drivers/core/hakios.version.c): sysctl kern.hakios.version and a line of the boot log.
++ */
++#ifndef _SYS_HAKIOS_VERSION_H_
++#define _SYS_HAKIOS_VERSION_H_
++
++#ifdef KERNEL
++/* Read the boot-arg hakios_kver, keep it as kern.hakios.version and say it in the log. Called from bsd_init(). */
++void hakios_version_init(void);
++#endif /* KERNEL */
++
++#endif /* _SYS_HAKIOS_VERSION_H_ */
