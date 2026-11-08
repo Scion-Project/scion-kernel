@@ -46,10 +46,58 @@
 
 #define SBGL "/usr/local/starbite/lib/libsbgl.dylib"
 
+#ifndef SBCA_IOS27
+#define SBCA_IOS27 1
+#endif
+#if SBCA_IOS27
+#undef SBCA_IOS26
+#define SBCA_IOS26 1    /* iOS 27 behaves as 26 (same flow); only the addresses and offsets differ */
+#endif
 #ifndef SBCA_IOS26
 #define SBCA_IOS26 1
 #endif
-#if SBCA_IOS26
+#if SBCA_IOS27
+/*
+ * QuartzCore of iOS 27.0.1 (iPhone 11, 24A446), unslid shared cache addresses (numbers only, read from the user's own
+ * copy of the restore image). renderer(): ctx server+0x628, renderer
+ * server+0x630, MTLDevice display+0x140, renderer display+0x150, context call vtbl+0xf0.
+ */
+#define QC_ACCEL_SERVER_VTABLE   0x1e8fd77d8UL
+#define QC_RENDERER_SLOT         0x1e8fd79b8UL  /* +0x1d0 from the address point */
+#define QC_ACCEL_RENDERER        0x184415838UL
+#define QC_GLES_CONTEXT_CTOR     0x18466da0cUL
+#define QC_MALLOC_ZONE           0x1e709e650UL
+#define QC_MALLOC_ZONE_ONCE      0x1e709cf68UL
+#define QC_MALLOC_ZONE_INIT      0x1844b62b8UL
+#define QC_GLES_CONTEXT_VTABLE   0x1e8fd8250UL
+#define QC_FUNCTION_SUPPORTED_AT 0x480
+#define QC_FUNCTION_SUPPORTED    0x18471afecUL
+#define QC_TEX_FRAGMENT_SHADERS  0x1e05feb80UL
+#define IOS_GET_BULK_RETURN      0x0UL          /* iPadOS 18 only */
+#define IOS_IVAR_IMPL            0x0UL
+#define QC_METAL_WAIT_ONCE       0x1e4062540UL
+#define QC_PUSH_SURFACE_FOUND_BR 0x184464104UL
+#define PUSH_SURFACE_CBNZ        0xb50001e8u
+#define PUSH_SURFACE_B           0x1400000fu
+#define QC_FRAMEBUFFER_PIXEL_FORMAT 0x184461838UL
+static const uint32_t framebuffer_format_was[3] = { 0xd503237fu, 0x6dbc23e9u, 0xa90157f6u };
+static const uint32_t framebuffer_format_bgra[3] = { 0x528a4820u, 0x72a848e0u, 0xd65f03c0u };
+#define GLES_CONTEXT_SIZE        0xba0
+#define RENDERER_SIZE            0x68
+#define RENDERER_BUFFER_SIZE     0x40000
+#define SERVER_CONTEXT(s)        (*(void **)((char *)(s) + 0x628))
+#define SERVER_RENDERER(s)       (*(void **)((char *)(s) + 0x630))
+#define SERVER_DISPLAY(s)        (*(char **)((char *)(s) + 0x60))
+#define DISPLAY_RENDERER(d)      (*(void **)((d) + 0x150))
+#define CONTEXT_SET_COMPRESSION  0xf0
+/*
+ * CA::EDRClient::client(): asks backboardd's own libEDR server (com.apple.libEDR.Notification) for a
+ * client with EDRCreateClientForDisplayWithTimeout; on the S9 the server never answers and every
+ * attempt times out (EDR - transceive_data: mach_msg timed out, every ~5 s), and frames waited for it
+ * (one swap per ~5.2 s). "return 0" = no EDR client, as when libEDR is absent.
+ */
+#define QC_EDR_CLIENT            0x184787f88UL
+#elif SBCA_IOS26
 /*
  * QuartzCore of iOS 26.6.2 (iPhone 11, 23G90), unslid shared cache addresses; mapped from the
  * iPadOS 18 ones in build/ca-gpu/sbca-ios26-offsets.md (with the evidence for each).
@@ -877,6 +925,12 @@ sbca_init(void)
 		start_profiler();
 		return;
 	}
+#if SBCA_IOS27
+	if (!getenv("SBCA_EDR")) {
+		patch_instruction("EDRClient::client -> 0 (ret)", QC_EDR_CLIENT + 4, 0xd10143ffu, 0xd65f03c0u);
+		patch_instruction("EDRClient::client -> 0 (mov w0, #0)", QC_EDR_CLIENT, 0xd503237fu, 0x52800000u);
+	}
+#endif
 #if SBCA_IOS26
 	/* both renderers need it, so before sbgl=0 is looked at */
 	patch_instruction("Context::push_surface tracked-list assert", QC_PUSH_SURFACE_FOUND_BR, PUSH_SURFACE_CBNZ,
