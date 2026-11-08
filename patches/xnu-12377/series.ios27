@@ -298,4 +298,5 @@ starlte/0411-starlte-ios-target-hfs-encodings.patch
 starlte/0412-starlte-ios-target-exec-log.patch
 starlte/0413-starlte-relbuf-info.patch
 starlte/0414-starlte-ios-target-mac-policy-list.patch
+starlte/0415-starlte-surface-copy-fallback.patch
 # parity with Scion's iOS 16.5 kernel (docs/ios27-starlte.md): behind boot-args, off by default, built but not booted

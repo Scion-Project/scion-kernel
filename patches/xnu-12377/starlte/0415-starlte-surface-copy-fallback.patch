@@ -1,0 +1,77 @@
+From e27dfe83c446fd6fe6562a67c5352eef799c7316 Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 22:43:23 +0000
+Subject: [PATCH] SweetSurface: wrap fallback: copy the task's pages into a
+ kernel buffer when IOMemoryDescriptor::prepare() refuses them (iOS target)
+
+On the iOS-target kernel prepare() refuses some of backboardd's image memory (CoreAnimation's wrap_buffer, Settings' 80x80 icons), and the
+wrap failed with kIOReturnVMError. The caller is the task itself (IOSurface create/wrap from backboardd), so take a snapshot instead: a
+kernel buffer filled by copyin. Images do not change after they are wrapped; the surface then no longer aliases the task's pages. The
+failure and the fallback are logged (first 5 / 10, then every 500th), with the two prepare() results.
+Phone-proven on the k4 kernel (and its owner2 and 8-core builds).
+---
+ iokit/Kernel/arm/SweetSurface.cpp | 43 ++++++++++++++++++++++++++++---
+ 1 file changed, 40 insertions(+), 3 deletions(-)
+
+diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.cpp
+index 3e5e3cbbd..3e0ce6e9a 100644
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -789,17 +789,54 @@ sweet_surface_wrap_memory(SweetSurface *s, task_t task, uint64_t address, uint64
+ 	if (size == 0 || length > SWEET_SURFACE_MAX_ALLOC) {
+ 		return kIOReturnBadArgument;
+ 	}
++	IOReturn rw = kIOReturnSuccess, ro = kIOReturnSuccess;
+ 	IOMemoryDescriptor *mem = IOMemoryDescriptor::withAddressRange(address - lead, length, kIODirectionInOut, task);
+-	if (mem != NULL && mem->prepare() != kIOReturnSuccess) {
++	if (mem != NULL && (rw = mem->prepare()) != kIOReturnSuccess) {
+ 		mem->release();
+ 		mem = IOMemoryDescriptor::withAddressRange(address - lead, length, kIODirectionOut, task);
+ 		readOnly = true;
+-		if (mem != NULL && mem->prepare() != kIOReturnSuccess) {
++		if (mem != NULL && (ro = mem->prepare()) != kIOReturnSuccess) {
+ 			OSSafeReleaseNULL(mem);
+ 		}
+ 	}
+ 	if (mem == NULL) {
+-		IOLog("SWEET SURF: cannot wire %#llx+%#llx\n", address, size);
++		/*
++		 * iOS 27 on STARLTE (iOS-target kernel): prepare() refuses some of backboardd's image memory
++		 * (CA wrap_buffer, Settings' 80x80 icons). The caller is the task itself (IOSurface create /
++		 * wrap from backboardd), so take a snapshot instead: a kernel buffer filled by copyin. Images
++		 * do not change after they are wrapped; the surface simply no longer aliases the task's pages.
++		 */
++		static uint32_t failed, copied;
++		IOBufferMemoryDescriptor *buf = NULL;
++		bool ok = false;
++		if (task == current_task() && (uint64_t)OSAddAtomic64((SInt64)length, (volatile SInt64 *)&sweet_surface_wired) +
++		    length <= SWEET_SURFACE_WIRED_MAX) {
++			buf = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task, kIODirectionInOut | kIOMemoryKernelUserShared,
++			    length, page_size);
++			if (buf != NULL) {
++				bzero(buf->getBytesNoCopy(), length);
++				ok = copyin((user_addr_t)address, (char *)buf->getBytesNoCopy() + lead, (vm_size_t)size) == 0;
++			}
++			if (!ok) {
++				OSSafeReleaseNULL(buf);
++				OSAddAtomic64(-(SInt64)length, (volatile SInt64 *)&sweet_surface_wired);
++			}
++		}
++		if (ok) {
++			if (++copied <= 5 || (copied % 500) == 0) {
++				IOLog("SWEET SURF: %#llx+%#llx not wireable (prepare %#x/%#x): copied instead (%u so far)\n",
++				    address, size, rw, ro, copied);
++			}
++			s->memory = buf;
++			s->prepared = false;
++			s->offset += (uint32_t)lead;
++			s->allocSize = (uint32_t)length;
++			s->mapCache = kIOMapDefaultCache;
++			return kIOReturnSuccess;
++		}
++		if (++failed <= 10 || (failed % 500) == 0) {
++			IOLog("SWEET SURF: cannot wire %#llx+%#llx (prepare %#x/%#x; %u failures)\n", address, size, rw, ro, failed);
++		}
+ 		return kIOReturnVMError;
+ 	}
+ 	s->memory = mem;
