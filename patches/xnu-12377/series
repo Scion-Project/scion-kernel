@@ -9,3 +9,14 @@
 0060-osfmk-arm-pmap.patch
 0070-pexpert-arm64.patch
 0080-hakios-drivers.patch
+# A kernel for a VM without Apple's hypervisor (QEMU virt, crosvm/AVF): behaviour only with `make kernel SCION_NATIVE_PAC=1`.
+0090-native-pac.patch
+0091-ns16550.patch
+0092-no-impdef-regs.patch
+0093-chkstk-bti.patch
+0094-chained-fixups.patch
+0095-physmap-slack.patch
+# minicrypto, the xnu-8796 series' crypto provider, the same files; built here, registered only with SCION_NATIVE_PAC=1
+../xnu-8796/0280-osfmk-minicrypto.patch
+0100-minicrypto.patch
+0110-hakios-core.patch
