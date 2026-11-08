@@ -19,6 +19,20 @@ Debug Kit, and includes headers it does not publish. Scion's drivers have their 
 | `0060-osfmk-arm-pmap.patch` | `pmap.c` without a monitor: three calls into the monitor's code the open source lacks, and a declaration before use |
 | `0070-pexpert-arm64.patch` | `NO_CPU_OVRD` for `VMAPPLE`: the register's name is in Apple's private register header |
 | `0080-hakios-drivers.patch` | the place for Scion's drivers, as on xnu-8796: `config/MASTER.hakios` read by `doconf` and a dependency of each component's configuration, `HAKIOS_DRIVERS` in the machine's kernel configurations, the HakiOS blocks of `bsd/conf/files` and `iokit/conf/files`. `tools/hakios-config.py kernel` fills them with the drivers whose `conf` names `xnu-12377` in `bases`: none yet |
+| `0090-native-pac.patch` | the PAC keys in the architectural ARMv8.3 key registers, one set per boot, instead of `VMAPPLE`'s paravirtualised `hvc` calls that only Apple's hypervisor answers |
+| `0091-ns16550.patch` | a 16550 console in `pe_serial.c` for crosvm (AVF), beside the PL011 |
+| `0092-no-impdef-regs.patch` | no Apple implementation-defined register after `wfi` on a non-Apple CPU |
+| `0093-chkstk-bti.patch` | `__chkstk_darwin` with a `bti c` landing pad (the kernel calls it with `blraa`; Xcode's copy has none) |
+| `0094-chained-fixups.patch` | `arm_init` applies and signs the kernel's `LC_DYLD_CHAINED_FIXUPS` (format 7): Xcode 26's `ld` no longer emits `__thread_starts` |
+| `0095-physmap-slack.patch` | the physical aperture's worst-case twig alignment, as with a monitor (`arm_vm_physmap_init` asserted without it) |
+| `../xnu-8796/0280-osfmk-minicrypto.patch` | minicrypto, the xnu-8796 series' own crypto provider, the same file (one copy in the repository) |
+| `0100-minicrypto.patch` | minicrypto's digests, AES and HMAC-DRBG built on this base (not the key store's parts); registered at the end of `SYSCTL`, because this base runs `EARLY_BOOT` after `PE_init_iokit`, whose platform UUID already takes a SHA-1 |
+
+0090 to 0100 change what a kernel does only when it is built with `make kernel SCION_NATIVE_PAC=1` (off by default; 0100's
+files are built either way, and register nothing without it). They came from Scion-Project/scion-avf's `vmapple/patches`
+0001-0007 (PR 23), where the same changes booted a macOS-SDK `VMAPPLE` kernel on QEMU; the PAC design follows UniXNU's
+(BSD-2-Clause-Patent, credited in NOTICE), and no UniXNU code is here. Why the kernel's crypto is minicrypto and not Apple's corecrypto,
+and where the `SCION_NATIVE_PAC` kernel stops on QEMU today: `docs/two-bases.md`.
 
 The `VMAPPLE` kernel this makes is linked, not booted: `docs/two-bases.md` has the build and what it does not do yet (the
 paravirtualized parts of `VMAPPLE`, which only Apple's hypervisor answers).

@@ -1,0 +1,18 @@
+0095: the physical aperture's end with the worst-case twig alignment, as the configurations with a monitor have it; without it arm_vm_physmap_init asserts on a large, monitor-less VM.
+From Scion-Project/scion-avf vmapple/patches/0007 (PR 23).
+Scion's change to Apple's xnu, under the APSL 2.0 like the rest of this series. Behaviour only with SCION_NATIVE_PAC=1 (make kernel SCION_NATIVE_PAC=1).
+
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index 756af52163a57a83ff61ec1097512eed98e6b660..7b4e9289fbb6b56912e42622b4fa55597be480c9 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1885,6 +1885,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	/* For large memory systems with no PPL such as virtual machines */
+ 	static_memory_end = phystokv(args->topOfKernelData);
+ 	physmap_end = physmap_base + real_phys_size;
++#if SCION_NATIVE_PAC
++	physmap_end += PTOV_TABLE_SIZE * ARM_TT_TWIG_SIZE;     /* worst-case twig alignment, as below */
++#endif
+ #else
+ 	static_memory_end = physmap_base + mem_size + (PTOV_TABLE_SIZE * ARM_TT_TWIG_SIZE); // worst possible case for block alignment
+ 	physmap_end = physmap_base + real_phys_size + (PTOV_TABLE_SIZE * ARM_TT_TWIG_SIZE);
