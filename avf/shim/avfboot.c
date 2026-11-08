@@ -906,7 +906,10 @@ void avfboot_main(uint64_t fdt_pa)
 	dt_begin(&w, "chosen");
 	dt_prop(&w, "random-seed", seed, seed_len);
 	dt_prop_u64(&w, "dram-base", phys_base);
-	dt_prop_u64(&w, "dram-size", win_size);
+	/* dram-size is all of RAM from the window's base, as iBoot reports it: xnu-12377 maps /pram as memory, not as a device,
+	 * only when it lies inside dram-base/dram-size (is_dram_addr), and its panic header is read unaligned. XNU manages
+	 * memSize of it (boot_args); xnu-8796 kernels (arm64) keep the window here, as before. */
+	dt_prop_u64(&w, "dram-size", kernel_arm64e ? m.ram_hi - phys_base : win_size);
 	dt_prop_u32(&w, "debug-enabled", 1);
 	dt_prop_u32(&w, "display-scale", 3);
 	dt_prop_u32(&w, "display-rotation", 0);
