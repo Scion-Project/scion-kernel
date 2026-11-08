@@ -1,0 +1,131 @@
+From 8f21551fcd0a783b8ef7f2d63c58f7e10f72bb82 Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:11:05 +0000
+Subject: [PATCH] SweetFramebuffer: relbuf info for IOMFB (boot-arg sweetfb_relbuf=1)
+
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 59 ++++++++++++++++++++++++++-
+ 1 file changed, 58 insertions(+), 1 deletion(-)
+
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index e11fe0ca4..5d80b8313 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -103,7 +103,12 @@ enum {
+ #define SWEET_FB_SWAP_REC_SIZE          0x400
+ #define SWEET_FB_SWAP_REC_MAX           0x600   /* iPadOS 18 sends 0x514 */
+ #define SWEET_FB_LAYERS                 4
+-#define SWEET_FB_NOTIFY_TYPES           8
++#define SWEET_FB_NOTIFY_TYPES           16      /* IOMFB 27: 0..11 (7 = relbuf info) */
++#define SWEET_FB_NOTIFY_RELBUF          7
++/* relbuf state (defined with sweet_fb_swap_id() further down) */
++static int sweet_fb_relbuf;
++static uint32_t sweet_fb_relbuf_sent;
++static uint32_t sweet_fb_swap_id(const uint8_t *rec);
+ #define SWEET_FB_NOTIFY_VSYNC           5
+ #define SWEET_FB_VSYNC_US               16667
+ #if defined(ARM64_BOARD_CONFIG_A5XELTE)
+@@ -172,6 +177,7 @@ public:
+ 	void addClient(IOMobileFramebufferUserClient *client);
+ 	void removeClient(IOMobileFramebufferUserClient *client);
+ 	void swap(const uint8_t *rec, uint32_t size);
++	void relbuf(uint32_t swapId);
+ 	uint64_t present(const uint8_t *rec);
+ 	void sweetSaveUnderRect(int32_t dx, int32_t dy, int32_t w, int32_t h);
+ 	void sweetSaveUnder(bool save);
+@@ -345,6 +351,11 @@ AppleCLCD::start(IOService *provider)
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
++	PE_parse_boot_argn("sweetfb_relbuf", &sweet_fb_relbuf, sizeof(sweet_fb_relbuf));
++	if (sweet_fb_relbuf) {
++		setProperty("SupportRelbufInfoCb", 1ULL, 32);
++		IOLog("SWEET FB: sweetfb_relbuf=1: SupportRelbufInfoCb published, relbuf info sent per swap\n");
++	}
+ 	registerService();
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
+@@ -412,6 +423,9 @@ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ 		uint64_t before = fb->fPerfLog ? mach_absolute_time() : 0;
+ #endif
+ 		uint64_t bytes = fb->present(rec);
++		if (sweet_fb_relbuf) {
++			fb->relbuf(sweet_fb_swap_id(rec));
++		}
+ #if defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 		if (fb->fPerfLog) {
+ 			uint64_t ns = 0;
+@@ -449,6 +463,21 @@ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ 	sender->setTimeoutUS(SWEET_FB_VSYNC_US);
+ }
+ 
++void
++AppleCLCD::relbuf(uint32_t swapId)
++{
++	uint64_t now = mach_absolute_time();
++	uint64_t values[5] = { swapId, (uint32_t)now, (uint32_t)(now >> 32), (uint32_t)now, (uint32_t)(now >> 32) };
++	IOLockLock(fLock);
++	for (unsigned int i = 0; i < fClients->getCount(); i++) {
++		((IOMobileFramebufferUserClient *)fClients->getObject(i))->notify(SWEET_FB_NOTIFY_RELBUF, values, 5);
++	}
++	IOLockUnlock(fLock);
++	if (++sweet_fb_relbuf_sent <= 3 || (sweet_fb_relbuf_sent % 1000) == 0) {
++		IOLog("SWEET FB: relbuf info for swap %u (%u sent)\n", swapId, sweet_fb_relbuf_sent);
++	}
++}
++
+ void
+ AppleCLCD::addClient(IOMobileFramebufferUserClient *client)
+ {
+@@ -478,6 +507,21 @@ get32(const uint8_t *p, uint32_t off)
+ 
+ static uint32_t sweet_fb_swaps_logged;
+ static uint64_t sweet_fb_swap_count;
++/*
++ * sweetfb_relbuf=1 (iOS 27 on STARLTE): publish "SupportRelbufInfoCb" = 1 and send IOMFB's
++ * relbuf-info notification (type 7: swap id, release time, release time) for every swap as soon
++ * as its surfaces are no longer needed: after present() copied/scaled them to the panel, or when
++ * a newer swap replaced it before it was shown. iOS 27's CoreAnimation (IOMFBServer::
++ * relbuf_info_callback / IOMFBDisplay::wait_for_relbuf_info) paces frames on these; without the
++ * property IOMobileFramebufferRelbufInfo refuses (0xe00002c7) and backboardd swapped about once
++ * every 5 s.
++ */
++static uint32_t
++sweet_fb_swap_id(const uint8_t *rec)
++{
++	const uint32_t sh = get32(rec, 0x98) != 0 && get32(rec, 0x50) == 0 ? 0x48 : 0;
++	return get32(rec, 0x50 + sh);
++}
+ 
+ #if defined(ARM64_BOARD_CONFIG_HEROLTE)
+ /*
+@@ -599,9 +643,13 @@ void
+ AppleCLCD::swap(const uint8_t *rec, uint32_t size)
+ {
+ 	IOLockLock(fLock);
++	uint32_t replaced = fDirty ? sweet_fb_swap_id(fPending) : 0;
+ 	memcpy(fPending, rec, SWEET_FB_SWAP_REC_MAX);
+ 	fDirty = true;
+ 	IOLockUnlock(fLock);
++	if (sweet_fb_relbuf && replaced != 0) {
++		relbuf(replaced);
++	}
+ #if defined(ARM64_BOARD_CONFIG_HEROLTE) || defined(ARM64_BOARD_CONFIG_STARLTE)
+ 	/* Raw record of the first swaps: offset=value of every non-zero word
+ 	 * (STARLTE: iPadOS 18's record is 0x514 bytes with a new layout). */
+@@ -1328,6 +1376,15 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 		outCount = 1;
+ 		break;
+ 	case kSweetFBNotifications:
++		if (args->scalarInputCount >= 3) {
++			static uint32_t logged_notify;
++			if (logged_notify++ < 40) {
++				char who[32];
++				proc_selfname(who, sizeof(who));
++				IOLog("SWEET FB: %s sel 72 type %llu func %#llx refcon %#llx\n", who,
++				    args->scalarInput[2], args->scalarInput[0], args->scalarInput[1]);
++			}
++		}
+ 		if (args->scalarInputCount >= 3 && args->scalarInput[2] < SWEET_FB_NOTIFY_TYPES) {
+ 			uint32_t type = (uint32_t)args->scalarInput[2];
+ 			IOLockLock(fFB->fLock);
