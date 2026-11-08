@@ -1,0 +1,129 @@
+From c25af9a252faa9e1194935f3ebc375f238532b41 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:51 +0200
+Subject: [PATCH] patch: 0201-herolte-amfi-bridge.patch
+
+build: AMFI policy named "AMFI"; op 90 (dyld policy) answers development-vars only
+---
+ bsd/kern/bsd_init.c   |  4 ++--
+ bsd/kern/sweet_amfi.c | 54 +++++++++++++++++++++++++++++++++++++++----
+ 2 files changed, 51 insertions(+), 7 deletions(-)
+
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index b5072efd..de81e9ee 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -701,8 +701,8 @@ bsd_init(void)
+ 	bsd_init_kprintf("calling vfsinit\n");
+ 	vfsinit();
+ 
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
+-	/* AMFI's MAC policy is built in on SWEET (bsd/kern/sweet_amfi.c). */
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++	/* AMFI's MAC policy is built in (bsd/kern/sweet_amfi.c). */
+ 	extern void sweet_amfi_policy_register(void);
+ 	sweet_amfi_policy_register();
+ #endif
+diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
+index cb67b4db..c459e36e 100644
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -1,5 +1,5 @@
+ /*
+- * Built-in AMFI interface for SWEET.
++ * Built-in AMFI interface for SWEET, A5XELTE and HEROLTE.
+  *
+  * On Apple platforms AppleMobileFileIntegrity registers this interface and
+  * provides entitlements through the closed CoreEntitlements library. SWEET
+@@ -22,11 +22,12 @@
+  * Interfaces no kernel path uses on SWEET (they serve other Apple kexts)
+  * panic with a clear message instead of being NULL.
+  */
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+ #include <kern/debug.h>
+ #include <kern/startup.h>
+ #include <libkern/amfi/amfi.h>
+ #include <mach/kern_return.h>
++#include <pexpert/pexpert.h>
+ #include <sys/codesign.h>
+ #include <sys/mount.h>
+ #include <sys/priv.h>
+@@ -298,15 +299,58 @@ sweet_sandbox_syscall(struct proc *p, int call, __unused user_addr_t arg)
+ 	case 4:         /* container path (audit token / pid) */
+ 	case 5:         /* extension issue */
+ 	case 6:         /* extension consume */
+-	case 0x43:      /* container expected */
+ 		return ENOENT;
++	case 0x43:
++		/* container expected: libsystem_sandbox passes two out-pointers
++		 * it has zeroed and aborts _container_init() on any error (iOS 18:
++		 * "sandbox_get_container_expected() failed: -1", launchd).
++		 * Success without writing = no container expected. */
++		return 0;
+ 	default:
+ 		return 0;
+ 	}
+ }
+ 
++/*
++ * __mac_syscall("AMFI", op, arg). Op 90 = amfi_check_dyld_policy_self():
++ * arg -> { uint64_t input_flags; user_addr_t output_flags }. Without a policy
++ * named "AMFI" every process got ENOPOLICY, so libsystem_trace treated the
++ * device as non-development and ignored ACTIVITY_LOG_STDERR / OS_ACTIVITY_*
++ * (needed to read daemons' os_log on the console). Answer bit 8
++ * (AMFI_DYLD_OUTPUT_ALLOW_DEVELOPMENT_VARS); with boot-arg sweetinject
++ * (kern_exec.c inserts libraries) also path variables (1 << 1, for
++ * DYLD_INSERT_LIBRARIES), print variables (1 << 4), failed insertion
++ * (1 << 5: a missing library does not kill the process) and interposing
++ * (1 << 6). Other ops keep answering ENOPOLICY.
++ */
++static uint64_t sweet_amfi_seen;
++
++static int
++sweet_amfi_syscall(struct proc *p, int call, user_addr_t arg)
++{
++	if (call >= 0 && call < 64 && !(sweet_amfi_seen & (1ULL << call))) {
++		char name[32];
++		sweet_amfi_seen |= 1ULL << call;
++		proc_name(proc_pid(p), name, sizeof(name));
++		printf("SWEET AMFI: %s op %d\n", name, call);
++	}
++	if (call == 90) {
++		struct { uint64_t input; uint64_t output; } a;
++		uint64_t flags = 1ULL << 8;
++		if (PE_parse_boot_argn("sweetinject", NULL, 0)) {
++			flags |= (1ULL << 1) | (1ULL << 4) | (1ULL << 5) | (1ULL << 6);
++		}
++		if (copyin(arg, &a, sizeof(a)) != 0) {
++			return EFAULT;
++		}
++		return copyout(&flags, (user_addr_t)a.output, sizeof(flags));
++	}
++	return ENOPOLICY;
++}
++
+ static const struct mac_policy_ops sweet_amfi_mac_ops = {
+ 	.mpo_vnode_check_signature = sweet_amfi_vnode_check_signature,
++	.mpo_policy_syscall = sweet_amfi_syscall,
+ };
+ 
+ /*
+@@ -360,7 +404,7 @@ static struct mac_policy_conf sweet_sandbox_mac_conf = {
+ static mac_policy_handle_t sweet_sandbox_mac_handle;
+ 
+ static struct mac_policy_conf sweet_amfi_mac_conf = {
+-	.mpc_name = "SWEET AMFI",
++	.mpc_name = "AMFI",                 /* libsystem calls __mac_syscall("AMFI", ...) */
+ 	.mpc_fullname = "SWEET built-in Mobile File Integrity",
+ 	.mpc_ops = &sweet_amfi_mac_ops,
+ };
+@@ -380,4 +424,4 @@ sweet_amfi_policy_register(void)
+ 	printf("SWEET Sandbox: permissive policy %s (%d)\n",
+ 	    error ? "NOT registered" : "registered", error);
+ }
+-#endif /* ARM64_BOARD_CONFIG_SWEET */
++#endif /* ARM64_BOARD_CONFIG_SWEET || ARM64_BOARD_CONFIG_A5XELTE */
+-- 
+2.53.0
+

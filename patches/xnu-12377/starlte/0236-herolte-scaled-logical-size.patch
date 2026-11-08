@@ -1,0 +1,34 @@
+From 2cfb621797162e18f6333fe255450f9caa749a74 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:34:08 +0200
+Subject: [PATCH] patch: 0236-herolte-scaled-logical-size.patch
+
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index d70acd21..32381a71 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -236,6 +236,17 @@ AppleCLCD::start(IOService *provider)
+ 		fScaled = true;
+ 		fLogicalW = fWidth * 2 / 3;
+ 		fLogicalH = fHeight * 2 / 3;
++		/* sweetfb_lw/sweetfb_lh: another logical size (it must match the
++		 * ADT canvas). 960 px is 320 points at @3x, narrower than any
++		 * iPhone iOS 16 lays out for; 1125x2001 is 375x667 points, the
++		 * iPhone 8 / SE screen in the panel's 16:9. */
++		uint32_t lw = 0, lh = 0;
++		PE_parse_boot_argn("sweetfb_lw", &lw, sizeof(lw));
++		PE_parse_boot_argn("sweetfb_lh", &lh, sizeof(lh));
++		if (lw >= 320 && lw <= fWidth && lh >= 480 && lh <= fHeight) {
++			fLogicalW = lw;
++			fLogicalH = lh;
++		}
+ 		/* sweetfb_gpu=1: full-screen frames go through the Mali instead
+ 		 * (herolte_gpu.c), bilinear; scaledCopy() stays the fallback. */
+ 		int gpu = 0;
+-- 
+2.53.0
+

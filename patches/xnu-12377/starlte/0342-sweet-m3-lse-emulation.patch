@@ -1,0 +1,363 @@
+From 878d38a271debe3dcd0d0daed2a9beede3893e86 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Mon, 2 Nov 2026 17:13:51 +0200
+Subject: [PATCH] patch: 0342-sweet-m3-lse-emulation.patch - M3 (no LSE/LRCPC):
+ emulate CAS/CASP/LD<op>/SWP/LDAPR from EL0 via copyio CAS (_sweet_cas64/128);
+ other missing instructions pin the thread to an A55; STARLTE LSE stats
+
+---
+ bsd/dev/starlte_smp.c              |  14 +++
+ osfmk/arm64/copyio.c               |  40 ++++++++
+ osfmk/arm64/machine_routines_asm.s |  62 ++++++++++++
+ osfmk/arm64/sleh.c                 |  16 ++++
+ osfmk/arm64/sweet_a64e.c           | 147 +++++++++++++++++++++++++++++
+ 5 files changed, 279 insertions(+)
+
+diff --git a/bsd/dev/starlte_smp.c b/bsd/dev/starlte_smp.c
+index 13b51550..3cb83b0e 100644
+--- a/bsd/dev/starlte_smp.c
++++ b/bsd/dev/starlte_smp.c
+@@ -265,6 +265,20 @@ st_top_a64e(uint64_t window_ns)
+ 		sweet_a64e_pids[i].pid = 0;
+ 	}
+ 	printf("%s\n", line);
++
++	/* of which LSE/LRCPC on the Mongoose M3s, and threads pinned to an A55 for another instruction */
++	extern uint64_t sweet_lse_counts[4], sweet_m3_pins;
++	static uint64_t lse_last[4], pins_last;
++	uint64_t ld[4];
++	for (unsigned i = 0; i < 4; i++) {
++		ld[i] = sweet_lse_counts[i] - lse_last[i];
++		lse_last[i] = sweet_lse_counts[i];
++	}
++	if (ld[0] + ld[1] + ld[2] + ld[3] + (sweet_m3_pins - pins_last) != 0) {
++		printf("STARLTE LSE (M3): cas %llu casp %llu ldop %llu ldapr %llu in %llu ms; %llu threads pinned to A55 (%llu all)\n",
++		    ld[0], ld[1], ld[2], ld[3], window_ns / NSEC_PER_MSEC, sweet_m3_pins - pins_last, sweet_m3_pins);
++	}
++	pins_last = sweet_m3_pins;
+ }
+ 
+ static void
+diff --git a/osfmk/arm64/copyio.c b/osfmk/arm64/copyio.c
+index 506754cc..9d6d31f8 100644
+--- a/osfmk/arm64/copyio.c
++++ b/osfmk/arm64/copyio.c
+@@ -515,6 +515,46 @@ copyin_atomic64(const user_addr_t user_addr, uint64_t *kernel_addr)
+ 	           _copyin_atomic64(guarded_user_addr, kernel_addr));
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++extern int _sweet_cas64(user_addr_t addr, uint64_t expected, uint64_t desired, uint64_t *old);
++extern int _sweet_cas128(user_addr_t addr, uint64_t exp_lo, uint64_t exp_hi, uint64_t new_lo,
++    uint64_t new_hi, uint64_t old[2]);
++int sweet_copy_cas64(user_addr_t user_addr, uint64_t expected, uint64_t desired, uint64_t *old);
++int sweet_copy_cas128(user_addr_t user_addr, const uint64_t expected[2], const uint64_t desired[2],
++    uint64_t old[2]);
++
++/* sweet: user-memory compare-and-swap for the M3's LSE emulation (sweet_a64e.c); *old = the value seen */
++int
++sweet_copy_cas64(user_addr_t user_addr, uint64_t expected, uint64_t desired, uint64_t *old)
++{
++	vm_map_t map = current_thread()->map;
++	int result = copy_validate(map, user_addr, (uintptr_t)old, 8, COPYIO_IN | COPYIO_ATOMIC);
++	if (__improbable(result)) {
++		return result;
++	}
++	user_addr_t guarded_user_addr = copy_ensure_address_space_spec(map, user_addr);
++	return WRAP_COPYIO(USER_ACCESS_WRITE, map,
++	           _sweet_cas64(guarded_user_addr, expected, desired, old));
++}
++
++int
++sweet_copy_cas128(user_addr_t user_addr, const uint64_t expected[2], const uint64_t desired[2],
++    uint64_t old[2])
++{
++	vm_map_t map = current_thread()->map;
++	if (user_addr & 15) {
++		return EINVAL;
++	}
++	int result = copy_validate(map, user_addr, (uintptr_t)old, 16, COPYIO_IN);
++	if (__improbable(result)) {
++		return result;
++	}
++	user_addr_t guarded_user_addr = copy_ensure_address_space_spec(map, user_addr);
++	return WRAP_COPYIO(USER_ACCESS_WRITE, map,
++	           _sweet_cas128(guarded_user_addr, expected[0], expected[1], desired[0], desired[1], old));
++}
++#endif
++
+ int
+ copyout_atomic32(uint32_t value, user_addr_t user_addr)
+ {
+diff --git a/osfmk/arm64/machine_routines_asm.s b/osfmk/arm64/machine_routines_asm.s
+index 864fb208..fe84a0b9 100644
+--- a/osfmk/arm64/machine_routines_asm.s
++++ b/osfmk/arm64/machine_routines_asm.s
+@@ -838,6 +838,68 @@ Lcopyin_atomic64_common:
+ 	POP_FRAME
+ 	ARM64_STACK_EPILOG EXT(_copyin_atomic64)
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++/*
++ * sweet: compare-and-swap on user memory for the LSE emulation of the Mongoose M3 cores
++ * (sweet_a64e.c), with full barriers; a fault becomes EFAULT (copyio recovery).
++ *
++ * int _sweet_cas64(user_addr_t addr, uint64_t expected, uint64_t desired, uint64_t *old)
++ */
++	.text
++	.align 2
++	.globl EXT(_sweet_cas64)
++LEXT(_sweet_cas64)
++	COPYIO_STACK_PROLOG
++	PUSH_FRAME
++	dmb		ish
++	COPYIO_RECOVER_RANGE 3f
++1:
++	ldxr		x8, [x0]
++	cmp		x8, x1
++	b.ne		2f
++	stxr		w9, x2, [x0]
++	cbnz		w9, 1b
++	b		3f
++2:
++	clrex
++3:
++	dmb		ish
++	str		x8, [x3]
++	mov		x0, #0
++	POP_FRAME
++	ARM64_STACK_EPILOG EXT(_sweet_cas64)
++
++/*
++ * int _sweet_cas128(user_addr_t addr, uint64_t exp_lo, uint64_t exp_hi, uint64_t new_lo,
++ *     uint64_t new_hi, uint64_t old[2])
++ */
++	.text
++	.align 2
++	.globl EXT(_sweet_cas128)
++LEXT(_sweet_cas128)
++	COPYIO_STACK_PROLOG
++	PUSH_FRAME
++	dmb		ish
++	COPYIO_RECOVER_RANGE 3f
++1:
++	ldxp		x8, x9, [x0]
++	cmp		x8, x1
++	ccmp		x9, x2, #0, eq
++	b.ne		2f
++	stxp		w10, x3, x4, [x0]
++	cbnz		w10, 1b
++	b		3f
++2:
++	stxp		w10, x8, x9, [x0]	/* a pair read is only single-copy atomic once written back */
++	cbnz		w10, 1b
++3:
++	dmb		ish
++	stp		x8, x9, [x5]
++	mov		x0, #0
++	POP_FRAME
++	ARM64_STACK_EPILOG EXT(_sweet_cas128)
++#endif
++
+ 
+ /*
+  * int _copyout_atomic32(uint32_t u32, user_addr_t dst)
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index e172beca..057d6b54 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1320,6 +1320,22 @@ handle_uncategorized(arm_saved_state_t *state)
+ 		if (sweet_a64e_emulate(state, instr)) {
+ 			return;
+ 		}
++		/*
++		 * Any other instruction the Mongoose M3 lacks (FP16, DotProd, RDM ...; Samsung MIDR
++		 * implementer 0x53): pin the thread to one of the A55s (logical CPUs 0-3) and run the
++		 * instruction again there, instead of a SIGILL.
++		 */
++		if ((__builtin_arm_rsr64("MIDR_EL1") >> 24) == 0x53) {
++			extern uint64_t sweet_m3_pins;
++			int cpu = (int)(thread_tid(current_thread()) % 4);
++			processor_t little = cpu_to_processor(cpu);
++			if (little != PROCESSOR_NULL) {
++				sweet_m3_pins++;
++				thread_bind(little);
++				thread_block(THREAD_CONTINUE_NULL);
++				return;
++			}
++		}
+ 	}
+ #endif
+ 
+diff --git a/osfmk/arm64/sweet_a64e.c b/osfmk/arm64/sweet_a64e.c
+index a8a6312a..3ac0a1aa 100644
+--- a/osfmk/arm64/sweet_a64e.c
++++ b/osfmk/arm64/sweet_a64e.c
+@@ -12,6 +12,12 @@
+  *   PACGA                                 -> deterministic 32-bit hash << 32
+  *   FJCVTZS                               -> JavaScript ToInt32, Z = exact
+  *   FCADD (vector, H/S/D)                 -> lane-wise FADD/FSUB, user FPCR
++ *
++ * And for the Mongoose M3 (ARMv8.0: no LSE, no LRCPC), so iOS 26 runs on the big cores too:
++ *   CAS*, CASP*, LD<op>*, ST<op>*, SWP*   -> compare-and-swap loop on the aligned 8 (16) bytes
++ *                                            around the target (sweet_copy_cas64/128, copyio.c),
++ *                                            full barriers (stronger than any A/L form)
++ *   LDAPR{B,H,,}                          -> load + DMB ISH
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -181,6 +187,144 @@ emulate_fcadd(arm_saved_state_t *ss, uint32_t w)
+ 	return true;
+ }
+ 
++
++/* ---- LSE and LRCPC for the Mongoose M3 ------------------------------------------------------ */
++
++extern int sweet_copy_cas64(user_addr_t user_addr, uint64_t expected, uint64_t desired, uint64_t *old);
++extern int sweet_copy_cas128(user_addr_t user_addr, const uint64_t expected[2], const uint64_t desired[2],
++    uint64_t old[2]);
++extern int copyin_atomic64(const user_addr_t user_addr, uint64_t *kernel_addr);
++
++uint64_t sweet_lse_counts[4];   /* CAS, CASP, LD<op>/SWP, LDAPR */
++uint64_t sweet_m3_pins;          /* threads pinned to an A55 (sleh.c) */
++
++static int64_t
++sext(uint64_t v, unsigned bits)
++{
++	return bits == 64 ? (int64_t)v : (int64_t)(v << (64 - bits)) >> (64 - bits);
++}
++
++/* An atomic op on the `bytes`-wide field at addr: *old = the field before; false = fault/misaligned. */
++static bool
++lse_rmw(user_addr_t addr, unsigned bytes, unsigned op, uint64_t operand, uint64_t compare, uint64_t *old)
++{
++	if (addr & (bytes - 1)) {
++		return false;
++	}
++	unsigned bits = bytes * 8;
++	user_addr_t base = addr & ~7ULL;
++	unsigned shift = (unsigned)(addr & 7) * 8;
++	uint64_t mask = bits == 64 ? ~0ULL : ((1ULL << bits) - 1) << shift;
++	uint64_t word;
++	if (copyin_atomic64(base, &word) != 0) {
++		return false;
++	}
++	for (int tries = 0; tries < 100000; tries++) {
++		uint64_t field = (word & mask) >> shift, next;
++		switch (op) {
++		case 0: next = field + operand; break;                                   /* ADD */
++		case 1: next = field & ~operand; break;                                  /* CLR */
++		case 2: next = field ^ operand; break;                                   /* EOR */
++		case 3: next = field | operand; break;                                   /* SET */
++		case 4: next = sext(field, bits) > sext(operand, bits) ? field : operand; break; /* SMAX */
++		case 5: next = sext(field, bits) < sext(operand, bits) ? field : operand; break; /* SMIN */
++		case 6: next = field > (operand & (mask >> shift)) ? field : operand; break;     /* UMAX */
++		case 7: next = field < (operand & (mask >> shift)) ? field : operand; break;     /* UMIN */
++		case 8: next = operand; break;                                           /* SWP */
++		default:                                                                 /* CAS */
++			if (field != (compare & (mask >> shift))) {
++				/* no store, but the same ordering as a successful one */
++				__asm__ volatile ("dmb ish" ::: "memory");
++				*old = field;
++				return true;
++			}
++			next = operand;
++			break;
++		}
++		uint64_t desired = (word & ~mask) | ((next << shift) & mask), seen = 0;
++		if (sweet_copy_cas64(base, word, desired, &seen) != 0) {
++			return false;
++		}
++		if (seen == word) {
++			*old = field;
++			return true;
++		}
++		word = seen;
++	}
++	return false;
++}
++
++static bool
++sweet_lse_emulate(arm_saved_state_t *ss, uint32_t w)
++{
++	uint64_t pc = get_saved_state_pc(ss);
++	unsigned rt = w & 31, rn = (w >> 5) & 31, rs = (w >> 16) & 31;
++	user_addr_t addr = (user_addr_t)reg_get(ss, rn, true);
++
++	if ((w & 0x3fa07c00) == 0x08a07c00) {                   /* CAS{A,L,AL}{B,H,,} */
++		unsigned bytes = 1u << (w >> 30);
++		uint64_t old;
++		if (!lse_rmw(addr, bytes, 9, reg_get(ss, rt, false), reg_get(ss, rs, false), &old)) {
++			return false;
++		}
++		reg_set(ss, rs, false, old);
++		sweet_lse_counts[0]++;
++	} else if ((w & 0xbfa07c00) == 0x08207c00) {            /* CASP{A,L,AL} Ws/Xs pairs */
++		if ((rs & 1) || (rt & 1)) {
++			return false;
++		}
++		bool x = (w >> 30) & 1;
++		if (!x) {
++			uint64_t cmp = (reg_get(ss, rs, false) & 0xffffffffULL) | reg_get(ss, rs + 1, false) << 32;
++			uint64_t nv = (reg_get(ss, rt, false) & 0xffffffffULL) | reg_get(ss, rt + 1, false) << 32;
++			uint64_t old;
++			if (!lse_rmw(addr, 8, 9, nv, cmp, &old)) {
++				return false;
++			}
++			reg_set(ss, rs, false, old & 0xffffffffULL);
++			reg_set(ss, rs + 1, false, old >> 32);
++		} else {
++			uint64_t cmp[2] = { reg_get(ss, rs, false), reg_get(ss, rs + 1, false) };
++			uint64_t nv[2] = { reg_get(ss, rt, false), reg_get(ss, rt + 1, false) };
++			uint64_t old[2];
++			if (sweet_copy_cas128(addr, cmp, nv, old) != 0) {
++				return false;
++			}
++			reg_set(ss, rs, false, old[0]);
++			reg_set(ss, rs + 1, false, old[1]);
++		}
++		sweet_lse_counts[1]++;
++	} else if ((w & 0x3f200c00) == 0x38200000) {            /* LD<op>, SWP, LDAPR */
++		unsigned bytes = 1u << (w >> 30), o3 = (w >> 15) & 1, opc = (w >> 12) & 7;
++		uint64_t old;
++		if (o3 && opc == 4 && rs == 31) {                   /* LDAPR{B,H,,} */
++			uint64_t word;
++			if ((addr & (bytes - 1)) || copyin_atomic64(addr & ~7ULL, &word) != 0) {
++				return false;
++			}
++			__asm__ volatile ("dmb ish" ::: "memory");
++			unsigned shift = (unsigned)(addr & 7) * 8;
++			old = bytes == 8 ? word : (word >> shift) & ((1ULL << (bytes * 8)) - 1);
++			reg_set(ss, rt, false, old);
++			sweet_lse_counts[3]++;
++			set_saved_state_pc(ss, pc + 4);
++			return true;
++		}
++		if (o3 && opc != 0) {
++			return false;
++		}
++		if (!lse_rmw(addr, bytes, o3 ? 8 : opc, reg_get(ss, rs, false), 0, &old)) {
++			return false;
++		}
++		reg_set(ss, rt, false, old);                        /* Rt = 31: ST<op>, the result goes to XZR */
++		sweet_lse_counts[2]++;
++	} else {
++		return false;
++	}
++	set_saved_state_pc(ss, pc + 4);
++	return true;
++}
++
+ bool
+ sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
+ {
+@@ -252,6 +396,9 @@ sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
+ 		sweet_a64e_counts[5]++;
+ 		return true;
+ 	}
++	if (sweet_lse_emulate(ss, w)) {
++		return true;
++	}
+ 	if ((w & 0xBF20EC00) == 0x2E00E400) {                   /* FCADD (vector) */
+ 		if (!emulate_fcadd(ss, w)) {
+ 			return false;

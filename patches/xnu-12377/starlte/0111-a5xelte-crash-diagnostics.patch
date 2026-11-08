@@ -1,0 +1,87 @@
+From 9894c57d73506ec52a0f2520be9f2f2cab655e55 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:34 +0200
+Subject: [PATCH] patch: 0111-a5xelte-crash-diagnostics.patch
+
+---
+ bsd/kern/kern_exec.c   |  4 ++--
+ bsd/kern/kern_exit.c   |  2 +-
+ osfmk/kern/exception.c | 13 +++++++++++--
+ 3 files changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+index 89acb1cb..1a63e18f 100644
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -8658,8 +8658,8 @@ process_signature(proc_t p, struct image_params *imgp)
+ 				error = EACCES;
+ 				goto done;
+ 			}
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
+-			/* SWEET runs every iOS binary this way: one short line per exec. */
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++			/* A short line keeps the persistent console ring useful. */
+ 			printf("exec %s\n", p->p_name);
+ #else
+ 			printf("Allowing spawn of iOS binary %s since it has "
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index 9b6d8284..2bc84d61 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2084,7 +2084,7 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
+ 		subcode = ut->uu_subcode;
+ 		etype = ut->uu_exception;
+ 
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 		if (p == current_proc()) {
+ 			extern void sweet_crash_log(const char *, int, int, uint64_t, uint64_t);
+ 			sweet_crash_log(p->p_comm, proc_getpid(p), WTERMSIG(rv),
+diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
+index 7a258009..7a9f7899 100644
+--- a/osfmk/kern/exception.c
++++ b/osfmk/kern/exception.c
+@@ -960,7 +960,7 @@ exception_triage(
+ 	return exception_triage_thread(exception, code, codeCnt, thread);
+ }
+ 
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+ #include <vm/vm_shared_region.h>
+ #include <vm/vm_shared_region_xnu.h>  /* 11417: vm_shared_region_get/deallocate, struct vm_shared_region */
+ #include <vm/vm_map_internal.h>      /* 11417: vm_map_region_recurse_64 */
+@@ -1051,6 +1051,9 @@ static void
+ sweet_crash_strings(const char *name)
+ {
+ 	static char names[128];
++	#if defined(ARM64_BOARD_CONFIG_A5XELTE)
++	static int a5_scans;
++	#endif
+ 	char *buf;
+ 	vm_map_t map = current_map();
+ 	vm_map_offset_t addr = 0;
+@@ -1077,6 +1080,12 @@ sweet_crash_strings(const char *name)
+ 	if (!found) {
+ 		return;
+ 	}
++	#if defined(ARM64_BOARD_CONFIG_A5XELTE)
++	/* Keep repeated service crashes from flooding a single-core boot. */
++	if (a5_scans++ >= 4) {
++		return;
++	}
++	#endif
+ 	buf = kalloc_data(65536, Z_WAITOK);
+ 	if (buf == NULL) {
+ 		return;
+@@ -1182,7 +1191,7 @@ sweet_sample_task(const char *name, int pid, task_t task)
+ 	task_unlock(task);
+ }
+ 
+-#endif /* ARM64_BOARD_CONFIG_SWEET */
++#endif /* ARM64_BOARD_CONFIG_SWEET || ARM64_BOARD_CONFIG_A5XELTE */
+ 
+ kern_return_t
+ bsd_exception(
+-- 
+2.53.0
+

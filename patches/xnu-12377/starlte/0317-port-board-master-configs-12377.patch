@@ -1,0 +1,334 @@
+From ca12c0fc40bb6155fd13b86ee7c80af14b662463 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Sun, 1 Nov 2026 15:30:55 +0200
+Subject: [PATCH] port: rebase board MASTER configs on xnu-12377
+
+MASTER.arm64.{sweet,a5xelte,herolte,starlte}: three-way merged onto
+12377's MacOSX config (base = 11417 MacOSX). Board delta unchanged
+(config_pmap_ppl + nos_arm_asm nos_arm_pmap in KERNEL_BASE instead of
+12377's ARM_EXTRAS_BASE, no SPTM/exclaves). Taken from 12377: release
+option in KERNEL_RELEASE, config_ucoredump, config_memory_microstackshot;
+config_nexus_monitor, config_mbuf_jumbo, config_ledger_interval_max,
+pgzalloc and CONFIG_HYPERVISOR_PUBLIC are gone upstream.
+---
+ config/MASTER.arm64.a5xelte | 25 +++++++++++++------------
+ config/MASTER.arm64.herolte | 25 +++++++++++++------------
+ config/MASTER.arm64.starlte | 25 +++++++++++++------------
+ config/MASTER.arm64.sweet   | 25 +++++++++++++------------
+ 4 files changed, 52 insertions(+), 48 deletions(-)
+
+diff --git a/config/MASTER.arm64.a5xelte b/config/MASTER.arm64.a5xelte
+index a28b2de1..c1380e87 100644
+--- a/config/MASTER.arm64.a5xelte
++++ b/config/MASTER.arm64.a5xelte
+@@ -22,10 +22,10 @@
+ #  -------- ----- -- ---------------
+ #
+ #  KERNEL_BASE =    [ arm64 config_pmap_ppl medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot nos_arm_asm nos_arm_pmap ]
+-#  KERNEL_RELEASE = [ KERNEL_BASE ]
++#  KERNEL_RELEASE = [ KERNEL_BASE release ]
+ #  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits config_ext_paniclog ]
+ #  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits config_ext_paniclog ]
+-#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump pgo config_personas ]
++#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump config_ucoredump pgo config_personas ]
+ #  BSD_RELEASE =    [ BSD_BASE ]
+ #  BSD_DEV =        [ BSD_BASE config_vnguard ]
+ #  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
+@@ -34,11 +34,11 @@
+ #  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
+ #  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
+ #  NFS =            [ nfsserver ]
+-#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_monitor config_nexus_flowswitch config_nexus_netif ]
++#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_flowswitch config_nexus_netif ]
+ #  SKYWALK_RELEASE = [ SKYWALK_BASE ]
+ #  SKYWALK_DEV =    [ SKYWALK_BASE ]
+ #  SKYWALK_DEBUG =  [ SKYWALK_BASE ]
+-#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk config_mbuf_jumbo if_bridge MULTIPATH if_fake if_redirect remote_vif ]
++#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk if_bridge MULTIPATH if_fake if_redirect remote_vif ]
+ #  NETWORKING_RELEASE = [ NETWORKING ]
+ #  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless kctl_test ]
+ #  NETWORKING_DEBUG = [ NETWORKING_DEV ]
+@@ -61,15 +61,15 @@
+ #  CPU_COUNTERS_BASE = [ ]
+ #  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption CPU_COUNTERS_BASE kperf ]
+ #  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
+-#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
+-#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
+-#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace ]
++#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
+ #if SOC_IS_VIRTUALIZED
+ #  PARAVIRT_BASE =  [ config_pv_ticket ]
+ #else
+ #  PARAVIRT_BASE =  [ ]
+ #endif /*SOC_IS_VIRTUALIZED*/
+-#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE config_ledger_interval_max ]
++#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE ]
+ #  MACH_RELEASE =   [ MACH_BASE ]
+ #  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace config_task_suspend_stats ]
+ #  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug config_task_suspend_stats ]
+@@ -77,12 +77,15 @@
+ #  SCHED_RELEASE =  [ SCHED_BASE ]
+ #  SCHED_DEV =      [ SCHED_BASE ]
+ #  SCHED_DEBUG =    [ SCHED_BASE ]
+-#if   MASTER_CONFIG_ENABLE_SPTM
++#if MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM
++#  VM_EXTRA =       [ kernel_tagging ]
++#  VM_EXTRA_DEV =   [ ]
++#elif MASTER_CONFIG_ENABLE_SPTM
+ #  VM_EXTRA =       [ ]
+ #  VM_EXTRA_DEV =   [ ]
+ #else
+ #  VM_EXTRA =       [ ]
+-#  VM_EXTRA_DEV =   [ pgzalloc ]
++#  VM_EXTRA_DEV =   [ ]
+ #endif /* MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM */
+ #  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim VM_EXTRA ]
+ #  VM_RELEASE =     [ VM_BASE ]
+@@ -120,8 +123,6 @@ options   CONFIG_KERNEL_INTEGRITY		# <kernel_integrity>
+ 
+ options CONFIG_MACF_LAZY_VNODE_LABELS   # Turn on labels, don't preallocate
+ 
+-options CONFIG_HYPERVISOR_PUBLIC   # unrestricted entitlement for hypervisor
+-
+ options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
+ options   CONFIG_KERNEL_TBI		# <kernel_tbi>
+ options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
+diff --git a/config/MASTER.arm64.herolte b/config/MASTER.arm64.herolte
+index 152213af..27669118 100644
+--- a/config/MASTER.arm64.herolte
++++ b/config/MASTER.arm64.herolte
+@@ -24,10 +24,10 @@
+ #  -------- ----- -- ---------------
+ #
+ #  KERNEL_BASE =    [ arm64 config_pmap_ppl medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot nos_arm_asm nos_arm_pmap ]
+-#  KERNEL_RELEASE = [ KERNEL_BASE ]
++#  KERNEL_RELEASE = [ KERNEL_BASE release ]
+ #  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits config_ext_paniclog ]
+ #  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits config_ext_paniclog ]
+-#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump pgo config_personas ]
++#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump config_ucoredump pgo config_personas ]
+ #  BSD_RELEASE =    [ BSD_BASE ]
+ #  BSD_DEV =        [ BSD_BASE config_vnguard ]
+ #  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
+@@ -36,11 +36,11 @@
+ #  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
+ #  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
+ #  NFS =            [ nfsserver ]
+-#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_monitor config_nexus_flowswitch config_nexus_netif ]
++#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_flowswitch config_nexus_netif ]
+ #  SKYWALK_RELEASE = [ SKYWALK_BASE ]
+ #  SKYWALK_DEV =    [ SKYWALK_BASE ]
+ #  SKYWALK_DEBUG =  [ SKYWALK_BASE ]
+-#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk config_mbuf_jumbo if_bridge MULTIPATH if_fake if_redirect remote_vif ]
++#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk if_bridge MULTIPATH if_fake if_redirect remote_vif ]
+ #  NETWORKING_RELEASE = [ NETWORKING ]
+ #  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless kctl_test ]
+ #  NETWORKING_DEBUG = [ NETWORKING_DEV ]
+@@ -63,15 +63,15 @@
+ #  CPU_COUNTERS_BASE = [ ]
+ #  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption CPU_COUNTERS_BASE kperf ]
+ #  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
+-#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
+-#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
+-#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace ]
++#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
+ #if SOC_IS_VIRTUALIZED
+ #  PARAVIRT_BASE =  [ config_pv_ticket ]
+ #else
+ #  PARAVIRT_BASE =  [ ]
+ #endif /*SOC_IS_VIRTUALIZED*/
+-#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE config_ledger_interval_max ]
++#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE ]
+ #  MACH_RELEASE =   [ MACH_BASE ]
+ #  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace config_task_suspend_stats ]
+ #  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug config_task_suspend_stats ]
+@@ -79,12 +79,15 @@
+ #  SCHED_RELEASE =  [ SCHED_BASE ]
+ #  SCHED_DEV =      [ SCHED_BASE ]
+ #  SCHED_DEBUG =    [ SCHED_BASE ]
+-#if   MASTER_CONFIG_ENABLE_SPTM
++#if MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM
++#  VM_EXTRA =       [ kernel_tagging ]
++#  VM_EXTRA_DEV =   [ ]
++#elif MASTER_CONFIG_ENABLE_SPTM
+ #  VM_EXTRA =       [ ]
+ #  VM_EXTRA_DEV =   [ ]
+ #else
+ #  VM_EXTRA =       [ ]
+-#  VM_EXTRA_DEV =   [ pgzalloc ]
++#  VM_EXTRA_DEV =   [ ]
+ #endif /* MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM */
+ #  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim VM_EXTRA ]
+ #  VM_RELEASE =     [ VM_BASE ]
+@@ -122,8 +125,6 @@ options   CONFIG_KERNEL_INTEGRITY		# <kernel_integrity>
+ 
+ options CONFIG_MACF_LAZY_VNODE_LABELS   # Turn on labels, don't preallocate
+ 
+-options CONFIG_HYPERVISOR_PUBLIC   # unrestricted entitlement for hypervisor
+-
+ options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
+ options   CONFIG_KERNEL_TBI		# <kernel_tbi>
+ options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
+diff --git a/config/MASTER.arm64.starlte b/config/MASTER.arm64.starlte
+index d869959d..8ee3b714 100644
+--- a/config/MASTER.arm64.starlte
++++ b/config/MASTER.arm64.starlte
+@@ -27,10 +27,10 @@
+ #  -------- ----- -- ---------------
+ #
+ #  KERNEL_BASE =    [ arm64 config_pmap_ppl medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot nos_arm_asm nos_arm_pmap ]
+-#  KERNEL_RELEASE = [ KERNEL_BASE ]
++#  KERNEL_RELEASE = [ KERNEL_BASE release ]
+ #  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits config_ext_paniclog ]
+ #  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits config_ext_paniclog ]
+-#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump pgo config_personas ]
++#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump config_ucoredump pgo config_personas ]
+ #  BSD_RELEASE =    [ BSD_BASE ]
+ #  BSD_DEV =        [ BSD_BASE config_vnguard ]
+ #  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
+@@ -39,11 +39,11 @@
+ #  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
+ #  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
+ #  NFS =            [ nfsserver ]
+-#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_monitor config_nexus_flowswitch config_nexus_netif ]
++#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_flowswitch config_nexus_netif ]
+ #  SKYWALK_RELEASE = [ SKYWALK_BASE ]
+ #  SKYWALK_DEV =    [ SKYWALK_BASE ]
+ #  SKYWALK_DEBUG =  [ SKYWALK_BASE ]
+-#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk config_mbuf_jumbo if_bridge MULTIPATH if_fake if_redirect remote_vif ]
++#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk if_bridge MULTIPATH if_fake if_redirect remote_vif ]
+ #  NETWORKING_RELEASE = [ NETWORKING ]
+ #  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless kctl_test ]
+ #  NETWORKING_DEBUG = [ NETWORKING_DEV ]
+@@ -66,15 +66,15 @@
+ #  CPU_COUNTERS_BASE = [ ]
+ #  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption CPU_COUNTERS_BASE kperf ]
+ #  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
+-#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
+-#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
+-#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace ]
++#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
+ #if SOC_IS_VIRTUALIZED
+ #  PARAVIRT_BASE =  [ config_pv_ticket ]
+ #else
+ #  PARAVIRT_BASE =  [ ]
+ #endif /*SOC_IS_VIRTUALIZED*/
+-#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE config_ledger_interval_max ]
++#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE ]
+ #  MACH_RELEASE =   [ MACH_BASE ]
+ #  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace config_task_suspend_stats ]
+ #  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug config_task_suspend_stats ]
+@@ -82,12 +82,15 @@
+ #  SCHED_RELEASE =  [ SCHED_BASE ]
+ #  SCHED_DEV =      [ SCHED_BASE ]
+ #  SCHED_DEBUG =    [ SCHED_BASE ]
+-#if   MASTER_CONFIG_ENABLE_SPTM
++#if MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM
++#  VM_EXTRA =       [ kernel_tagging ]
++#  VM_EXTRA_DEV =   [ ]
++#elif MASTER_CONFIG_ENABLE_SPTM
+ #  VM_EXTRA =       [ ]
+ #  VM_EXTRA_DEV =   [ ]
+ #else
+ #  VM_EXTRA =       [ ]
+-#  VM_EXTRA_DEV =   [ pgzalloc ]
++#  VM_EXTRA_DEV =   [ ]
+ #endif /* MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM */
+ #  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim VM_EXTRA ]
+ #  VM_RELEASE =     [ VM_BASE ]
+@@ -125,8 +128,6 @@ options   CONFIG_KERNEL_INTEGRITY		# <kernel_integrity>
+ 
+ options CONFIG_MACF_LAZY_VNODE_LABELS   # Turn on labels, don't preallocate
+ 
+-options CONFIG_HYPERVISOR_PUBLIC   # unrestricted entitlement for hypervisor
+-
+ options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
+ options   CONFIG_KERNEL_TBI		# <kernel_tbi>
+ options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
+diff --git a/config/MASTER.arm64.sweet b/config/MASTER.arm64.sweet
+index af3b4e6b..9470727b 100644
+--- a/config/MASTER.arm64.sweet
++++ b/config/MASTER.arm64.sweet
+@@ -22,10 +22,10 @@
+ #  -------- ----- -- ---------------
+ #
+ #  KERNEL_BASE =    [ arm64 config_pmap_ppl medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot nos_arm_asm nos_arm_pmap ]
+-#  KERNEL_RELEASE = [ KERNEL_BASE ]
++#  KERNEL_RELEASE = [ KERNEL_BASE release ]
+ #  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits config_ext_paniclog ]
+ #  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits config_ext_paniclog ]
+-#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump pgo config_personas ]
++#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump config_ucoredump pgo config_personas ]
+ #  BSD_RELEASE =    [ BSD_BASE ]
+ #  BSD_DEV =        [ BSD_BASE config_vnguard ]
+ #  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
+@@ -34,11 +34,11 @@
+ #  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
+ #  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
+ #  NFS =            [ nfsserver ]
+-#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_monitor config_nexus_flowswitch config_nexus_netif ]
++#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_flowswitch config_nexus_netif ]
+ #  SKYWALK_RELEASE = [ SKYWALK_BASE ]
+ #  SKYWALK_DEV =    [ SKYWALK_BASE ]
+ #  SKYWALK_DEBUG =  [ SKYWALK_BASE ]
+-#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk config_mbuf_jumbo if_bridge MULTIPATH if_fake if_redirect remote_vif ]
++#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk if_bridge MULTIPATH if_fake if_redirect remote_vif ]
+ #  NETWORKING_RELEASE = [ NETWORKING ]
+ #  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless kctl_test ]
+ #  NETWORKING_DEBUG = [ NETWORKING_DEV ]
+@@ -61,15 +61,15 @@
+ #  CPU_COUNTERS_BASE = [ ]
+ #  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption CPU_COUNTERS_BASE kperf ]
+ #  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
+-#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
+-#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
+-#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace ]
++#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
+ #if SOC_IS_VIRTUALIZED
+ #  PARAVIRT_BASE =  [ config_pv_ticket ]
+ #else
+ #  PARAVIRT_BASE =  [ ]
+ #endif /*SOC_IS_VIRTUALIZED*/
+-#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE config_ledger_interval_max ]
++#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE ]
+ #  MACH_RELEASE =   [ MACH_BASE ]
+ #  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace config_task_suspend_stats ]
+ #  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug config_task_suspend_stats ]
+@@ -77,12 +77,15 @@
+ #  SCHED_RELEASE =  [ SCHED_BASE ]
+ #  SCHED_DEV =      [ SCHED_BASE ]
+ #  SCHED_DEBUG =    [ SCHED_BASE ]
+-#if   MASTER_CONFIG_ENABLE_SPTM
++#if MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM
++#  VM_EXTRA =       [ kernel_tagging ]
++#  VM_EXTRA_DEV =   [ ]
++#elif MASTER_CONFIG_ENABLE_SPTM
+ #  VM_EXTRA =       [ ]
+ #  VM_EXTRA_DEV =   [ ]
+ #else
+ #  VM_EXTRA =       [ ]
+-#  VM_EXTRA_DEV =   [ pgzalloc ]
++#  VM_EXTRA_DEV =   [ ]
+ #endif /* MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM */
+ #  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim VM_EXTRA ]
+ #  VM_RELEASE =     [ VM_BASE ]
+@@ -120,8 +123,6 @@ options   CONFIG_KERNEL_INTEGRITY		# <kernel_integrity>
+ 
+ options CONFIG_MACF_LAZY_VNODE_LABELS   # Turn on labels, don't preallocate
+ 
+-options CONFIG_HYPERVISOR_PUBLIC   # unrestricted entitlement for hypervisor
+-
+ options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
+ options   CONFIG_KERNEL_TBI		# <kernel_tbi>
+ options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
+-- 
+2.53.0
+

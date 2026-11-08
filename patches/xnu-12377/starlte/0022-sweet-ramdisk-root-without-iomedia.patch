@@ -1,0 +1,40 @@
+From 94bfdc93e721c138e51897dd31012d2dc71ff9c1 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:19 +0200
+Subject: [PATCH] patch: 0022-sweet-ramdisk-root-without-iomedia.patch
+
+---
+ iokit/Kernel/IOService.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/iokit/Kernel/IOService.cpp b/iokit/Kernel/IOService.cpp
+index 3a0fa8b8..f4304475 100644
+--- a/iokit/Kernel/IOService.cpp
++++ b/iokit/Kernel/IOService.cpp
+@@ -5396,7 +5396,9 @@ IOService::publishHiddenMedia(IOService * parent)
+ 	bool                wasHiding;
+ 
+ 	iomediaClass = OSMetaClass::getMetaClassWithName(gIOMediaKey);
++#if !defined(ARM64_BOARD_CONFIG_SWEET)
+ 	assert(iomediaClass);
++#endif
+ 
+ 	LOCKWRITENOTIFY();
+ 	wasHiding = gIOServiceHideIOMedia;
+@@ -5405,6 +5407,13 @@ IOService::publishHiddenMedia(IOService * parent)
+ 	}
+ 	UNLOCKNOTIFY();
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/* SWEET has no IOStorageFamily: without the IOMedia class no media exists to unhide. */
++	if (!iomediaClass) {
++		wasHiding = false;
++	}
++#endif
++
+ 	FindRootMediaContext ctx = { .services = NULL, .parent = parent };
+ 
+ 	if (wasHiding) {
+-- 
+2.53.0
+

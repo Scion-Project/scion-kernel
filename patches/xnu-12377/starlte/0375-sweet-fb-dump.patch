@@ -1,0 +1,60 @@
+From caed83d39049a191347d61429ba1e799c055de07 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Wed, 4 Nov 2026 13:26:04 +0200
+Subject: [PATCH] patch: 0375-sweet-fb-dump.patch - sweetfbdump=N: once after N
+ s of uptime, the full-screen layer at 1/6 scale as 12-bit colour hex lines in
+ the kernel log
+
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 35 +++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 3d1b1496..50ace11f 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -818,6 +818,41 @@ AppleCLCD::present(const uint8_t *rec)
+ 				}
+ 			}
+ 		}
++#endif
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++		{
++			/* sweetfbdump=N: once, at the first full-screen present after N s of uptime, the
++			 * layer at 1/6 scale as 12-bit colour (3 hex digits a pixel, R G B nibbles), 69
++			 * pixels a line: "SWEET FBDUMP W H y x0 hex" (tools/macos/fbdump-png.py). */
++			static int at = -1, done;
++			if (at < 0) {
++				at = 0;
++				PE_parse_boot_argn("sweetfbdump", &at, sizeof(at));
++			}
++			uint64_t up = 0;
++			absolutetime_to_nanoseconds(mach_absolute_time(), &up);
++			if (at > 0 && !done && src && bpe == 4 && s->width >= 256 && s->height >= 256 &&
++			    up / 1000000000ULL >= (uint64_t)at) {
++				done = 1;
++				uint32_t W = s->width / 6, H = s->height / 6;
++				static const char hx[] = "0123456789abcdef";
++				char line[69 * 3 + 1];
++				for (uint32_t y = 0; y < H; y++) {
++					for (uint32_t x0 = 0; x0 < W; x0 += 69) {
++						uint32_t n = 0;
++						for (uint32_t x = x0; x < W && x < x0 + 69; x++) {
++							uint32_t v = *(const volatile uint32_t *)(src + (size_t)(y * 6 + 3) * s->bytesPerRow + (x * 6 + 3) * 4);
++							line[n++] = hx[(v >> 20) & 0xf];
++							line[n++] = hx[(v >> 12) & 0xf];
++							line[n++] = hx[(v >> 4) & 0xf];
++						}
++						line[n] = 0;
++						IOLog("SWEET FBDUMP %u %u %u %u %s\n", W, H, y, x0, line);
++					}
++				}
++				IOLog("SWEET FBDUMP end\n");
++			}
++		}
+ #endif
+ 		if (w <= 0 || h <= 0) {
+ 			w = (int32_t)s->width;
+-- 
+2.53.0
+

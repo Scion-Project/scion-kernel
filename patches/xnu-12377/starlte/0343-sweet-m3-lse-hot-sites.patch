@@ -1,0 +1,88 @@
+From ee31bd4a86a0bb79e4f18e6e15ae774853854818 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Mon, 2 Nov 2026 17:35:44 +0200
+Subject: [PATCH] patch: 0343-sweet-m3-lse-hot-sites.patch - STARLTE LSE hot:
+ the ten hottest trapping user PCs per 10 s window
+
+---
+ bsd/dev/starlte_smp.c    | 25 +++++++++++++++++++++++++
+ osfmk/arm64/sweet_a64e.c | 23 +++++++++++++++++++++++
+ 2 files changed, 48 insertions(+)
+
+diff --git a/bsd/dev/starlte_smp.c b/bsd/dev/starlte_smp.c
+index 3cb83b0e..97b8d581 100644
+--- a/bsd/dev/starlte_smp.c
++++ b/bsd/dev/starlte_smp.c
+@@ -279,6 +279,31 @@ st_top_a64e(uint64_t window_ns)
+ 		    ld[0], ld[1], ld[2], ld[3], window_ns / NSEC_PER_MSEC, sweet_m3_pins - pins_last, sweet_m3_pins);
+ 	}
+ 	pins_last = sweet_m3_pins;
++
++	/* the hottest trapping PCs of the window */
++	struct sweet_lse_site { uint64_t pc, count; };
++	extern struct sweet_lse_site sweet_lse_sites[512];
++	char hot[400];
++	int hn = snprintf(hot, sizeof(hot), "STARLTE LSE hot:");
++	for (unsigned k = 0; k < 10; k++) {
++		unsigned best = 512;
++		for (unsigned i = 0; i < 512; i++) {
++			if (sweet_lse_sites[i].count != 0 &&
++			    (best == 512 || sweet_lse_sites[i].count > sweet_lse_sites[best].count)) {
++				best = i;
++			}
++		}
++		if (best == 512 || hn >= (int)sizeof(hot) - 40) {
++			break;
++		}
++		hn += snprintf(hot + hn, sizeof(hot) - (size_t)hn, " %llx:%llu", sweet_lse_sites[best].pc,
++		    sweet_lse_sites[best].count);
++		sweet_lse_sites[best].count = 0;
++	}
++	if (hn > 17) {
++		printf("%s\n", hot);
++	}
++	bzero(sweet_lse_sites, sizeof(sweet_lse_sites));
+ }
+ 
+ static void
+diff --git a/osfmk/arm64/sweet_a64e.c b/osfmk/arm64/sweet_a64e.c
+index 3ac0a1aa..d9d84298 100644
+--- a/osfmk/arm64/sweet_a64e.c
++++ b/osfmk/arm64/sweet_a64e.c
+@@ -198,6 +198,26 @@ extern int copyin_atomic64(const user_addr_t user_addr, uint64_t *kernel_addr);
+ uint64_t sweet_lse_counts[4];   /* CAS, CASP, LD<op>/SWP, LDAPR */
+ uint64_t sweet_m3_pins;          /* threads pinned to an A55 (sleh.c) */
+ 
++/* Where the traps come from: an open table of user PCs (racy counts are fine), read and reset by the
++ * STARLTE TOP report (bsd/dev/starlte_smp.c). Shared-cache PCs are the same in every process. */
++#define SWEET_LSE_SITES 512
++struct sweet_lse_site { uint64_t pc, count; };
++struct sweet_lse_site sweet_lse_sites[SWEET_LSE_SITES];
++
++static void
++lse_site(uint64_t pc)
++{
++	unsigned h = (unsigned)((pc >> 2) * 0x9E3779B1u) % SWEET_LSE_SITES;
++	for (unsigned i = 0; i < 8; i++) {
++		struct sweet_lse_site *e = &sweet_lse_sites[(h + i) % SWEET_LSE_SITES];
++		if (e->pc == pc || e->pc == 0) {
++			e->pc = pc;
++			e->count++;
++			return;
++		}
++	}
++}
++
+ static int64_t
+ sext(uint64_t v, unsigned bits)
+ {
+@@ -259,6 +279,9 @@ sweet_lse_emulate(arm_saved_state_t *ss, uint32_t w)
+ {
+ 	uint64_t pc = get_saved_state_pc(ss);
+ 	unsigned rt = w & 31, rn = (w >> 5) & 31, rs = (w >> 16) & 31;
++	if ((w & 0x3fa07c00) == 0x08a07c00 || (w & 0xbfa07c00) == 0x08207c00 || (w & 0x3f200c00) == 0x38200000) {
++		lse_site(pc);
++	}
+ 	user_addr_t addr = (user_addr_t)reg_get(ss, rn, true);
+ 
+ 	if ((w & 0x3fa07c00) == 0x08a07c00) {                   /* CAS{A,L,AL}{B,H,,} */

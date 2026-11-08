@@ -1,0 +1,27 @@
+From 8955b9a91f79cbc1be6d04b3241c1acc6388a7b5 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Sun, 1 Nov 2026 21:29:01 +0200
+Subject: [PATCH] patch: 0328-sweet-mali-bo-16k.patch
+
+sweet: GPU buffers are whole 16 KiB user pages (as IOSurfaces since 0326): one mapped into a 16 KiB-page task (Mesa mmaps them) left the rest of its last page without memory behind it.
+- StarbiteMali.cpp: 16 KiB buffers
+---
+ iokit/Kernel/arm/StarbiteMali.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/iokit/Kernel/arm/StarbiteMali.cpp b/iokit/Kernel/arm/StarbiteMali.cpp
+index 6da1989d..3b3bbed0 100644
+--- a/iokit/Kernel/arm/StarbiteMali.cpp
++++ b/iokit/Kernel/arm/StarbiteMali.cpp
+@@ -272,8 +272,9 @@ StarbiteMaliUserClient::createBO(sbm_create_bo *a)
+ 		}
+ 		handle = ++fCount;
+ 	}
+-	uint32_t pages = (a->size + 0xfff) / 0x1000;
+-	uint64_t bytes = (uint64_t)pages * 0x1000;
++	/* whole 16 KiB pages: Mesa maps the buffer into a task with 16 KiB pages */
++	uint64_t bytes = ((uint64_t)a->size + 0x3fff) & ~0x3fffull;
++	uint32_t pages = (uint32_t)(bytes / 0x1000);
+ 	uint64_t va = sbm_va_alloc(bytes);
+ 	if (va == 0) {
+ 		return kIOReturnNoSpace;

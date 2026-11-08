@@ -1,0 +1,52 @@
+From 44958fab9a9dea57a7fe119d93909bf5c3d448ab Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Mon, 2 Nov 2026 17:53:51 +0200
+Subject: [PATCH] patch: 0344-sweet-m3-lse-fast-path.patch - LSE fast path:
+ checked first, 64-bit CAS as one copyio CAS
+
+---
+ osfmk/arm64/sweet_a64e.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/osfmk/arm64/sweet_a64e.c b/osfmk/arm64/sweet_a64e.c
+index d9d84298..e41b7cc1 100644
+--- a/osfmk/arm64/sweet_a64e.c
++++ b/osfmk/arm64/sweet_a64e.c
+@@ -287,6 +287,15 @@ sweet_lse_emulate(arm_saved_state_t *ss, uint32_t w)
+ 	if ((w & 0x3fa07c00) == 0x08a07c00) {                   /* CAS{A,L,AL}{B,H,,} */
+ 		unsigned bytes = 1u << (w >> 30);
+ 		uint64_t old;
++		if (bytes == 8) {                                   /* the common case: one CAS on the word itself */
++			if ((addr & 7) || sweet_copy_cas64(addr, reg_get(ss, rs, false), reg_get(ss, rt, false), &old) != 0) {
++				return false;
++			}
++			reg_set(ss, rs, false, old);
++			sweet_lse_counts[0]++;
++			set_saved_state_pc(ss, pc + 4);
++			return true;
++		}
+ 		if (!lse_rmw(addr, bytes, 9, reg_get(ss, rt, false), reg_get(ss, rs, false), &old)) {
+ 			return false;
+ 		}
+@@ -351,6 +360,11 @@ sweet_lse_emulate(arm_saved_state_t *ss, uint32_t w)
+ bool
+ sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
+ {
++	/* LSE/LRCPC (the M3s, millions a second) first: they are not arm64e and not counted per pid */
++	if (((w & 0x3f200c00) == 0x38200000 || (w & 0x3fa07c00) == 0x08a07c00 || (w & 0xbfa07c00) == 0x08207c00) &&
++	    sweet_lse_emulate(ss, w)) {
++		return true;
++	}
+ 	sweet_a64e_count_pid();
+ 	uint64_t pc = get_saved_state_pc(ss);
+ 
+@@ -419,9 +433,6 @@ sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
+ 		sweet_a64e_counts[5]++;
+ 		return true;
+ 	}
+-	if (sweet_lse_emulate(ss, w)) {
+-		return true;
+-	}
+ 	if ((w & 0xBF20EC00) == 0x2E00E400) {                   /* FCADD (vector) */
+ 		if (!emulate_fcadd(ss, w)) {
+ 			return false;

@@ -1,0 +1,28 @@
+From c6cc1ab9aa477334f6e3bccb0b73ed07bacb7112 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:34 +0200
+Subject: [PATCH] patch: 0117-a5xelte-hfs-rename-swap.patch
+
+---
+ bsd/vfs/kpi_vfs.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/bsd/vfs/kpi_vfs.c b/bsd/vfs/kpi_vfs.c
+index 2cb6abc1..5e91ef31 100644
+--- a/bsd/vfs/kpi_vfs.c
++++ b/bsd/vfs/kpi_vfs.c
+@@ -4660,9 +4660,9 @@ vn_rename(struct vnode *fdvp, struct vnode **fvpp, struct componentname *fcnp, s
+ 					_err = VNOP_RENAME(fdvp, *fvpp, fcnp, tdvp, *tvpp, tcnp, ctx);
+ 				}
+ 			}
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 			/*
+-			 * SWEET: HFS has no RENAME_SWAP, which Foundation's atomic
++			 * HFS has no RENAME_SWAP on these boards, which Foundation's atomic
+ 			 * writes use (usermanagerd: "Failed to atomically swap writing
+ 			 * file: Operation not supported"). Swapping two regular files
+ 			 * on one volume is what exchangedata does: each name ends up
+-- 
+2.53.0
+

@@ -1,0 +1,130 @@
+From a07b947abe02016d83fe7ee38dd9bed2ad4b72d3 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Thu, 5 Nov 2026 09:59:06 +0200
+Subject: [PATCH] patch: 0394-sweet-hid-trackpad-two-finger.patch - macOS
+ trackpad: two-finger drag scrolls (natural), two-finger tap = secondary click
+
+---
+ iokit/Kernel/arm/hid/SweetHID.cpp | 82 ++++++++++++++++++++++++-------
+ 1 file changed, 64 insertions(+), 18 deletions(-)
+
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+index 5cfec842..2fc14be3 100644
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -654,7 +654,14 @@ SweetHIDTouch::touchTestFired(OSObject *owner, IOTimerEventSource *sender)
+ void
+ SweetHIDTouch::trackpadTouch(int finger, bool down, int x, int y)
+ {
+-	static int primary = -1, lastX, lastY, travel, remX, remY;
++	/*
++	 * One finger: relative pointer motion; a short tap (< 300 ms, < 40 px) clicks button 1.
++	 * Two fingers (0394): the first finger's movement scrolls (24 panel px a line, natural direction
++	 * like a Mac trackpad); a short two-finger tap clicks button 2 (secondary click / context menu).
++	 */
++	static int primary = -1, lastX, lastY, travel, remX, remY, accX, accY;
++	static uint32_t downMask;
++	static bool two;
+ 	static uint64_t downAt;
+ 	static uint32_t moves;
+ 	uint64_t now = mach_absolute_time();
+@@ -662,40 +669,79 @@ SweetHIDTouch::trackpadTouch(int finger, bool down, int x, int y)
+ 	const char *what = NULL;
+ 
+ 	IOLockLock(fLock);
+-	if (down && primary < 0) {
++	uint32_t bit = 1u << finger;
++	bool was = (downMask & bit) != 0;
++	if (down) {
++		downMask |= bit;
++	} else {
++		downMask &= ~bit;
++	}
++	if (down && !was && primary < 0) {
+ 		primary = finger;
+ 		lastX = x;
+ 		lastY = y;
+ 		travel = 0;
++		two = false;
+ 		downAt = now;
+ 		what = "down";
++	} else if (down && !was && finger != primary && primary >= 0 && !two) {
++		two = true;
++		accX = accY = 0;
++		what = "two fingers";
++	} else if (down && finger == primary && lastX == -100000) {
++		lastX = x;              /* a new primary finger: its first report only sets the reference */
++		lastY = y;
+ 	} else if (down && finger == primary) {
+ 		int dx = x - lastX, dy = y - lastY;
+ 		lastX = x;
+ 		lastY = y;
+ 		travel += (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
+-		/* 1440 -> 828 and 2960 -> 1792: about 0.575 and 0.605 points a panel pixel */
+-		int px = dx * 575 + remX, py = dy * 605 + remY;
+-		int ox = px / 1000, oy = py / 1000;
+-		remX = px - ox * 1000;
+-		remY = py - oy * 1000;
+-		if (ox || oy) {
+-			events[0] = IOHIDEvent::relativePointerEvent(now, ox, oy, 0, 0, 0);
+-			if (moves++ < 200 || (moves % 100) == 0) {
+-				IOLog("SWEET HID: trackpad move %d,%d (move %u)\n", ox, oy, moves);
++		if (two) {
++			accX += dx;
++			accY += dy;
++			int lx = accX / 24, ly = accY / 24;
++			if (lx || ly) {
++				accX -= lx * 24;
++				accY -= ly * 24;
++				events[0] = IOHIDEvent::scrollEvent(now, -lx, -ly, 0);
++			}
++		} else {
++			/* 1440 -> 828 and 2960 -> 1792: about 0.575 and 0.605 points a panel pixel */
++			int px = dx * 575 + remX, py = dy * 605 + remY;
++			int ox = px / 1000, oy = py / 1000;
++			remX = px - ox * 1000;
++			remY = py - oy * 1000;
++			if (ox || oy) {
++				events[0] = IOHIDEvent::relativePointerEvent(now, ox, oy, 0, 0, 0);
++				if (moves++ < 200 || (moves % 100) == 0) {
++					IOLog("SWEET HID: trackpad move %d,%d (move %u)\n", ox, oy, moves);
++				}
+ 			}
+ 		}
+-	} else if (!down && finger == primary) {
+-		primary = -1;
++	} else if (!down && was && downMask == 0 && primary >= 0) {
++		/* every finger up: the gesture ends */
+ 		uint64_t ns = 0;
+ 		absolutetime_to_nanoseconds(now - downAt, &ns);
+-		if (ns < 300000000ULL && travel < 40) {
+-			events[0] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 1, 0);
+-			events[1] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 0, 1);
+-			what = "tap = click";
++		bool tap = ns < 300000000ULL && travel < 40;
++		UInt32 button = two ? 2 : 1;
++		if (tap) {
++			events[0] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, button, 0);
++			events[1] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 0, button);
++			what = two ? "two-finger tap = secondary click" : "tap = click";
+ 		} else {
+-			what = "up";
++			what = two ? "scroll end" : "up";
++		}
++		primary = -1;
++		two = false;
++	} else if (!down && was && finger == primary) {
++		/* the first finger lifts while another stays: the other one carries on */
++		for (int i = 0; i < SWEET_TOUCH_FINGERS; i++) {
++			if (downMask & (1u << i)) {
++				primary = i;
++				break;
++			}
+ 		}
++		lastX = lastY = -100000;
+ 	}
+ 	IOLockUnlock(fLock);
+ 	if (what) {
+-- 
+2.53.0
+

@@ -1,0 +1,34 @@
+From 494c7e651099e3b2dc00bbdd0739d56670fd63c7 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Wed, 4 Nov 2026 15:49:21 +0200
+Subject: [PATCH] patch: 0382-sweet-hid-mouse-properties.patch - macOS touch
+ service: a USB mouse's pointer properties (HIDPointerResolution 400 dpi,
+ acceleration types, button count, report rate)
+
+---
+ iokit/Kernel/arm/hid/SweetHID.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+index 45f573b4..771adc92 100644
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -574,6 +574,15 @@ SweetHIDTouch::start(IOService *provider)
+ 			pairs->release();
+ 		}
+ 		removeProperty("DisplayIntegrated");
++		/* What a Mac's USB mouse service publishes for the pointer filter: WindowServer read our
++		 * relative events (500 queued, 0 dropped, boot 154332) but the pointer never moved; the
++		 * acceleration step scales by the device resolution, and there was none. */
++		setProperty("HIDPointerResolution", (unsigned long long)(400 << 16), 32);
++		setProperty("HIDScrollResolution", (unsigned long long)(400 << 16), 32);
++		setProperty("HIDPointerAccelerationType", "HIDMouseAcceleration");
++		setProperty("HIDScrollAccelerationType", "HIDMouseScrollAcceleration");
++		setProperty("HIDPointerButtonCount", 2ULL, 32);
++		setProperty("HIDPointerReportRate", 120ULL, 32);
+ 	}
+ 	gSweetTouch = this;
+ 	registerService();
+-- 
+2.53.0
+

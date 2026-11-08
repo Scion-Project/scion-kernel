@@ -1,0 +1,25 @@
+From 0f3e54f5f0a6585fe09b402cf9649942eae1fe84 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:00 +0200
+Subject: [PATCH] patch: 0095-a5xelte-disable-pan.patch
+
+---
+ pexpert/pexpert/arm64/A5XELTE.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pexpert/pexpert/arm64/A5XELTE.h b/pexpert/pexpert/arm64/A5XELTE.h
+index f8d42888..dd22be9d 100644
+--- a/pexpert/pexpert/arm64/A5XELTE.h
++++ b/pexpert/pexpert/arm64/A5XELTE.h
+@@ -18,7 +18,7 @@
+ #define __ARM_DEBUG__                 7
+ #define __ARM_ENABLE_SWAP__           1
+ #define __ARM_V8_CRYPTO_EXTENSIONS__  1
+-#define __ARM_PAN_AVAILABLE__         1
++#define __ARM_PAN_AVAILABLE__         0
+ 
+ /* Exynos7580 has a GICv2 distributor and CPU interface, not GICv3. */
+ #define HAS_GIC_V3                    0
+-- 
+2.53.0
+

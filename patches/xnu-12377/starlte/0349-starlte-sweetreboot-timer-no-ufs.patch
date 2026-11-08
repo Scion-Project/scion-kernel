@@ -1,0 +1,60 @@
+From 057cec6f39516befe901faf6caa0cf5dd9a232d9 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Tue, 3 Nov 2026 20:16:57 +0200
+Subject: [PATCH] patch: 0349-starlte-sweetreboot-timer-no-ufs.patch -
+ sweetreboot=N timer independent of the UFS log thread (rd=sdroot0/md0 hangs
+ reset into TWRP with the console tail)
+
+---
+ bsd/dev/herolte_ufs.c | 35 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/bsd/dev/herolte_ufs.c b/bsd/dev/herolte_ufs.c
+index bf6abe20..0d5c9549 100644
+--- a/bsd/dev/herolte_ufs.c
++++ b/bsd/dev/herolte_ufs.c
+@@ -1040,6 +1040,41 @@ starlte_reboot_early(void)
+ 	}
+ }
+ STARTUP(KMEM, STARTUP_RANK_LAST, starlte_reboot_early);
++
++/*
++ * sweetreboot=N with no UFS log (rd=sdroot0, rd=md0, a read-only UFS root):
++ * herolte_log_start() never starts the log thread there, so its N-second reset
++ * never came and a hang needed the buttons (macOS t0 boot, 2026-11-03). This
++ * thread does it N seconds after boot unless the UFS log thread took over:
++ * the console tail goes to the ramoops pmsg ring, then the reset into TWRP.
++ */
++static void
++starlte_reboot_timer_thread(__unused void *arg, __unused wait_result_t wr)
++{
++	static int chan;
++	uint32_t secs = 0;
++	PE_parse_boot_argn("sweetreboot", &secs, sizeof(secs));
++	(void)tsleep(&chan, PZERO, "sweetreboot", (int)(secs * hz));
++	if (herolte_log_started) {
++		return;                 /* herolte_log_thread flushes and resets itself */
++	}
++	printf("HEROLTE LOG: sweetreboot=%u reached with no UFS log: console tail to pmsg, reset to recovery\n", secs);
++	starlte_dump_file();
++	starlte_panic_to_recovery();    /* no panic log: header + console tail */
++}
++
++static void
++starlte_reboot_timer(void)
++{
++	uint32_t secs = 0;
++	thread_t th;
++	if (PE_parse_boot_argn("sweetreboot", &secs, sizeof(secs)) && secs > 1 && starlte_pmu_va != NULL &&
++	    kernel_thread_start(starlte_reboot_timer_thread, NULL, &th) == KERN_SUCCESS) {
++		thread_deallocate(th);
++		printf("HEROLTE LOG: sweetreboot timer %u s armed (independent of the UFS log)\n", secs);
++	}
++}
++STARTUP(EARLY_BOOT, STARTUP_RANK_LAST, starlte_reboot_timer);
+ #endif
+ 
+ static void
+-- 
+2.53.0
+

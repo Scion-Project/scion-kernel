@@ -1,0 +1,42 @@
+From 2e99a41095e30d634fac0221a897597339ebae6b Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:56 +0200
+Subject: [PATCH] patch: 0066-sweet-crash-fault-region.patch
+
+---
+ osfmk/kern/exception.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
+index 3c110592..7a258009 100644
+--- a/osfmk/kern/exception.c
++++ b/osfmk/kern/exception.c
+@@ -1015,6 +1015,25 @@ sweet_crash_log(const char *name, int pid, int sig, uint64_t code, uint64_t subc
+ 	}
+ 	printf("%s\n", line);
+ 
++	if (sig == 11 || sig == 10) {
++		/* Which mapping the faulting address is in, or which two it falls between. */
++		uint64_t far = (uint64_t)saved_state64(ss)->far;
++		vm_map_t map = current_map();
++		vm_map_entry_t entry;
++		vm_map_lock_read(map);
++		bool inside = vm_map_lookup_entry(map, (vm_map_offset_t)far, &entry);
++		for (int i = 0; i < 2 && entry != vm_map_to_entry(map); i++) {
++			printf("CRASH %s map%s 0x%llx-0x%llx prot %d/%d tag %d\n", name,
++			    inside && i == 0 ? " (far inside)" : (i == 0 ? " before far" : " after far"),
++			    (uint64_t)entry->vme_start, (uint64_t)entry->vme_end, entry->protection,
++			    entry->max_protection, (int)VME_ALIAS(entry));
++			if (inside) {
++				break;
++			}
++			entry = entry->vme_next;
++		}
++		vm_map_unlock_read(map);
++	}
+ 	if (sig == 6 || sig == 5) {
+ 		sweet_crash_strings(name);
+ 	}
+-- 
+2.53.0
+

@@ -1,0 +1,29 @@
+From 5e3f4c2057c636b799b9415f6f910561f799ea78 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Thu, 5 Nov 2026 00:54:43 +0200
+Subject: [PATCH] patch: 0387-sweet-fb-swap-rec-0x400.patch - swap records from
+ 0x400 bytes: macOS 13's IOMobileFramebuffer sends 0x468 (every Ventura frame
+ was refused with kIOReturnBadArgument)
+
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 222c7bf1..fe699cfd 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -98,7 +98,9 @@ enum {
+ 	kSweetFBNotifications           = 72,
+ };
+ 
+-#define SWEET_FB_SWAP_REC_SIZE          0x46c
++/* the shortest swap record taken: macOS 13 (Ventura) sends 0x468, iOS 16 0x46c, iPadOS 18 0x514; every
++ * field read here (swap id 0x50 .. enabled mask 0x104, +0x48 on iPadOS 18) lies far inside it */
++#define SWEET_FB_SWAP_REC_SIZE          0x400
+ #define SWEET_FB_SWAP_REC_MAX           0x600   /* iPadOS 18 sends 0x514 */
+ #define SWEET_FB_LAYERS                 4
+ #define SWEET_FB_NOTIFY_TYPES           8
+-- 
+2.53.0
+

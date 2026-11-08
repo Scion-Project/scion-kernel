@@ -1,0 +1,30 @@
+From bc10662809368a940e4786d86b061d9cc79fd1cf Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:26 +0200
+Subject: [PATCH] patch: 0105-a5xelte-unsealed-hfs-root.patch
+
+---
+ bsd/kern/bsd_init.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index d97be0ad..b5072efd 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -959,7 +959,12 @@ bsd_init(void)
+ 		if (require_rootauth) {
+ 			/* enforce sealedness */
+ 			int autherr = VNOP_IOCTL(rootvnode, FSIOC_KERNEL_ROOTAUTH, NULL, 0, vfs_context_kernel());
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_A5XELTE)
++			/* The lab phone has no Image4/AMFI chain for this HFS+ root. */
++			if (autherr) {
++				printf("A5XELTE: root volume is not authenticated (error %d); continuing unsealed\n", autherr);
++			}
++#elif defined(ARM64_BOARD_CONFIG_SWEET)
+ 			/*
+ 			 * SWEET has no chain of trust to extend: the kernel itself is
+ 			 * booted unsigned and there is no Image4/AMFI, and its HFS root
+-- 
+2.53.0
+

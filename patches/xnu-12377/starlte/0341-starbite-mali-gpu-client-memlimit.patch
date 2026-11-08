@@ -1,0 +1,81 @@
+From dc939b9f95985935e82c05a6543001a5bde962f5 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Mon, 2 Nov 2026 16:29:10 +0200
+Subject: [PATCH] patch: 0341-starbite-mali-gpu-client-memlimit.patch -
+ kern_memorystatus.c + StarbiteMali: a GPU client's memory limits at least 64
+ MB (x sweetmemscale) - 0341: raise only (an 800 MB active limit stays)
+
+---
+ bsd/kern/kern_memorystatus.c      | 34 +++++++++++++++++++++++++++++++
+ iokit/Kernel/arm/StarbiteMali.cpp |  6 ++++++
+ 2 files changed, 40 insertions(+)
+
+diff --git a/bsd/kern/kern_memorystatus.c b/bsd/kern/kern_memorystatus.c
+index 6094f22b..56ed4967 100644
+--- a/bsd/kern/kern_memorystatus.c
++++ b/bsd/kern/kern_memorystatus.c
+@@ -3330,6 +3330,40 @@ memstat_set_memlimits_locked(proc_t p, int32_t active_limit,
+ 	return err;
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++/*
++ * sweet: a process that opens the GPU (StarbiteMali) gets at least 64 MB limits before
++ * sweetmemscale: a Metal device (PanVK, the metal2vulkan runtime) costs some 50 MB of footprint,
++ * which killed iconservicesagent (15 MB x 4) in a loop.
++ */
++void sweet_memstat_gpu_client(proc_t p);
++void
++sweet_memstat_gpu_client(proc_t p)
++{
++	proc_list_lock();
++	int32_t active = p->p_memstat_memlimit_active, inactive = p->p_memstat_memlimit_inactive;
++	if ((active > 0 && active < 256) || (inactive > 0 && inactive < 256)) {
++		memlimit_options_t options = 0;
++		if (p->p_memstat_state & P_MEMSTAT_MEMLIMIT_ACTIVE_FATAL) {
++			options |= MEMLIMIT_ACTIVE_FATAL;
++		}
++		if (p->p_memstat_state & P_MEMSTAT_MEMLIMIT_INACTIVE_FATAL) {
++			options |= MEMLIMIT_INACTIVE_FATAL;
++		}
++		/* the limits are stored scaled; set_memlimits scales again (sweetmemscale): raise, never lower */
++		int32_t scale = 1;
++		PE_parse_boot_argn("sweetmemscale", &scale, sizeof(scale));
++		scale = (scale >= 1 && scale <= 16) ? scale : 1;
++		int32_t new_active = active > 0 ? MAX(active / scale, 64) : active;
++		int32_t new_inactive = inactive > 0 ? MAX(inactive / scale, 64) : inactive;
++		(void)memstat_set_memlimits_locked(p, new_active, new_inactive, options);
++		printf("sweet: %s [%d] opened the GPU: memory limits %d/%d MB -> %d/%d MB\n", proc_best_name(p),
++		    proc_getpid(p), active, inactive, p->p_memstat_memlimit_active, p->p_memstat_memlimit_inactive);
++	}
++	proc_list_unlock();
++}
++#endif
++
+ int
+ memorystatus_set_memlimits(proc_t p, int32_t active_limit,
+     int32_t inactive_limit, memlimit_options_t options)
+diff --git a/iokit/Kernel/arm/StarbiteMali.cpp b/iokit/Kernel/arm/StarbiteMali.cpp
+index 7d7d2a5f..222a13b9 100644
+--- a/iokit/Kernel/arm/StarbiteMali.cpp
++++ b/iokit/Kernel/arm/StarbiteMali.cpp
+@@ -30,6 +30,9 @@
+ #include <sys/errno.h>
+ 
+ #include "SweetSurface.h"
++
++extern "C" void sweet_memstat_gpu_client(struct proc *p);  /* bsd/kern/kern_memorystatus.c */
++extern "C" void *get_bsdtask_info(task_t);
+ extern "C" void pmap_set_cache_attributes(ppnum_t pn, unsigned int cacheattr);
+ 
+ extern "C" {
+@@ -242,6 +245,9 @@ StarbiteMaliUserClient::initWithTask(task_t owningTask, void *securityID, UInt32
+ 		return false;
+ 	}
+ 	fTask = owningTask;
++	if (void *bsd = get_bsdtask_info(owningTask)) {
++		sweet_memstat_gpu_client((struct proc *)bsd);
++	}
+ 	fLock = IOLockAlloc();
+ 	fBos = (sbm_bo *)IOMallocZeroData(SBM_MAX_BOS * sizeof(sbm_bo));
+ 	if (fLock == NULL || fBos == NULL) {

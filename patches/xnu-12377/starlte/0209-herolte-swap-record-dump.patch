@@ -1,0 +1,168 @@
+From b827562d228ccdcb3c91e1ac6b57b6b8de845e43 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:51 +0200
+Subject: [PATCH] patch: 0209-herolte-swap-record-dump.patch
+
+build: STARLTE too; the record size is passed and dumped (iPadOS 18 sends 0x514 bytes)
+
+build: iPadOS 18 record layout (+0x48); dump only swaps that carry a surface
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 69 +++++++++++++++++++++------
+ 1 file changed, 54 insertions(+), 15 deletions(-)
+
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 07c8b027..d6f0e927 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -66,6 +66,7 @@ enum {
+ };
+ 
+ #define SWEET_FB_SWAP_REC_SIZE          0x46c
++#define SWEET_FB_SWAP_REC_MAX           0x600   /* iPadOS 18 sends 0x514 */
+ #define SWEET_FB_LAYERS                 4
+ #define SWEET_FB_NOTIFY_TYPES           8
+ #define SWEET_FB_NOTIFY_VSYNC           5
+@@ -116,7 +117,7 @@ public:
+ 	OSArray      *fClients;
+ 	uint32_t      fSwapID;
+ 	bool          fConsolePaused;
+-	uint8_t       fPending[SWEET_FB_SWAP_REC_SIZE];     /* latest swap, not yet shown */
++	uint8_t       fPending[SWEET_FB_SWAP_REC_MAX];      /* latest swap, not yet shown */
+ 	bool          fDirty;
+ 	uint32_t      fFlushTicks;    /* vsync ticks between panel copies */
+ #if defined(ARM64_BOARD_CONFIG_A5XELTE)
+@@ -133,7 +134,7 @@ public:
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+ 	void addClient(IOMobileFramebufferUserClient *client);
+ 	void removeClient(IOMobileFramebufferUserClient *client);
+-	void swap(const uint8_t *rec);
++	void swap(const uint8_t *rec, uint32_t size);
+ 	uint64_t present(const uint8_t *rec);
+ };
+ 
+@@ -304,9 +305,9 @@ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ 	bool flush = fb->fDirty && (count % fb->fFlushTicks) == 0;
+ 	uint8_t *rec = NULL;
+ 	if (flush) {
+-		rec = (uint8_t *)IOMallocData(SWEET_FB_SWAP_REC_SIZE);
++		rec = (uint8_t *)IOMallocData(SWEET_FB_SWAP_REC_MAX);
+ 		if (rec != NULL) {
+-			memcpy(rec, fb->fPending, SWEET_FB_SWAP_REC_SIZE);
++			memcpy(rec, fb->fPending, SWEET_FB_SWAP_REC_MAX);
+ 			fb->fDirty = false;
+ 		}
+ 	}
+@@ -330,7 +331,7 @@ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ #else
+ 		(void)bytes;
+ #endif
+-		IOFreeData(rec, SWEET_FB_SWAP_REC_SIZE);
++		IOFreeData(rec, SWEET_FB_SWAP_REC_MAX);
+ 	}
+ #if defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 	/* Aggregate after 300 callbacks; measure wall time because expensive
+@@ -391,12 +392,41 @@ static uint64_t sweet_fb_swap_count;
+  * default 10 Hz).
+  */
+ void
+-AppleCLCD::swap(const uint8_t *rec)
++AppleCLCD::swap(const uint8_t *rec, uint32_t size)
+ {
+ 	IOLockLock(fLock);
+-	memcpy(fPending, rec, SWEET_FB_SWAP_REC_SIZE);
++	memcpy(fPending, rec, SWEET_FB_SWAP_REC_MAX);
+ 	fDirty = true;
+ 	IOLockUnlock(fLock);
++#if defined(ARM64_BOARD_CONFIG_HEROLTE) || defined(ARM64_BOARD_CONFIG_STARLTE)
++	/* Raw record of the first swaps: offset=value of every non-zero word
++	 * (STARLTE: iPadOS 18's record is 0x514 bytes with a new layout). */
++	static uint32_t dumped;
++	bool has_surface = false;
++	for (uint32_t l = 0; l < 4; l++) {
++		if (get32(rec, 0x54 + 4 * l) != 0 || get32(rec, 0x9c + 4 * l) != 0) {
++			has_surface = true;
++		}
++	}
++	if (has_surface && dumped < 8) {
++		char line[160];
++		int n = 0;
++		dumped++;
++		IOLog("HEROLTE FB: rec %llu size 0x%x\n", sweet_fb_swap_count, size);
++		for (uint32_t off = 0; off + 4 <= size; off += 4) {
++			uint32_t v = get32(rec, off);
++			if (v == 0) {
++				continue;
++			}
++			n += snprintf(line + n, sizeof(line) - n, " %x=%x", off, v);
++			if (n > (int)sizeof(line) - 24) {
++				IOLog("HEROLTE FB: rec %llu%s\n", sweet_fb_swap_count, line);
++				n = 0;
++			}
++		}
++		IOLog("HEROLTE FB: rec %llu%s\n", sweet_fb_swap_count, n ? line : " end");
++	}
++#endif
+ 	if ((++sweet_fb_swap_count % 1000) == 0) {
+ 		IOLog("SWEET FB: %llu swaps\n", sweet_fb_swap_count);
+ 	}
+@@ -405,7 +435,11 @@ AppleCLCD::swap(const uint8_t *rec)
+ uint64_t
+ AppleCLCD::present(const uint8_t *rec)
+ {
+-	uint32_t mask = get32(rec, 0x104);
++	/* iPadOS 18 (IOMobileFramebuffer 0x514-byte record): the same fields
++	 * 0x48 further in (swap id 0x98, surface ids 0x9c, enabled mask 0x14c);
++	 * the record is zero past 0x46c on iOS 16, so the swap id tells. */
++	const uint32_t sh = get32(rec, 0x98) != 0 && get32(rec, 0x50) == 0 ? 0x48 : 0;
++	uint32_t mask = get32(rec, 0x104 + sh);
+ 	uint64_t copied = 0;
+ 
+ 
+@@ -424,9 +458,9 @@ AppleCLCD::present(const uint8_t *rec)
+ 	}
+ 
+ 	for (uint32_t layer = 0; layer < SWEET_FB_LAYERS; layer++) {
+-		uint32_t id = get32(rec, 0x54 + 4 * layer);
+-		const uint8_t *a = rec + 0x64 + 16 * layer;
+-		const uint8_t *b = rec + 0xc4 + 16 * layer;
++		uint32_t id = get32(rec, 0x54 + sh + 4 * layer);
++		const uint8_t *a = rec + 0x64 + sh + 16 * layer;
++		const uint8_t *b = rec + 0xc4 + sh + 16 * layer;
+ 		int32_t sx = (int32_t)get32(a, 0), sy = (int32_t)get32(a, 4);
+ 		int32_t dx = (int32_t)get32(b, 0), dy = (int32_t)get32(b, 4);
+ 		int32_t w = (int32_t)get32(b, 8), h = (int32_t)get32(b, 12);
+@@ -438,7 +472,7 @@ AppleCLCD::present(const uint8_t *rec)
+ 		if (sweet_fb_swaps_logged < 16) {
+ 			sweet_fb_swaps_logged++;
+ 			IOLog("SWEET FB: swap %u layer %u surface %u %ux%u fmt 0x%x bpr %u a %d,%d %ux%u b %d,%d %dx%d\n",
+-			    get32(rec, 0x50), layer, id, s ? s->width : 0, s ? s->height : 0,
++			    get32(rec, 0x50 + sh), layer, id, s ? s->width : 0, s ? s->height : 0,
+ 			    s ? s->pixelFormat : 0, s ? s->bytesPerRow : 0, sx, sy, get32(a, 8),
+ 			    get32(a, 12), dx, dy, w, h);
+ 		}
+@@ -593,14 +627,19 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 		outCount = 1;
+ 		break;
+ 	case kSweetFBSwapEnd: {
+-		uint8_t rec[SWEET_FB_SWAP_REC_SIZE];
++		uint8_t rec[SWEET_FB_SWAP_REC_MAX];
+ 		if (args->structureInputDescriptor != NULL ||
+ 		    args->structureInputSize < SWEET_FB_SWAP_REC_SIZE) {
+ 			ret = kIOReturnBadArgument;
+ 			break;
+ 		}
+-		memcpy(rec, args->structureInput, sizeof(rec));
+-		fFB->swap(rec);
++		uint32_t size = (uint32_t)args->structureInputSize;
++		if (size > sizeof(rec)) {
++			size = sizeof(rec);
++		}
++		bzero(rec, sizeof(rec));
++		memcpy(rec, args->structureInput, size);
++		fFB->swap(rec, size);
+ 		break;
+ 	}
+ 	case kSweetFBGetID:
+-- 
+2.53.0
+
