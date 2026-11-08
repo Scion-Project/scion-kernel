@@ -1,0 +1,27 @@
+--- a/build.sh
++++ b/build.sh
+@@ -695,7 +695,7 @@
+ }
+ 
+ build_xnu() {
+-    if [ ! -f "${BUILD_DIR}/xnu.obj/kernel.${KERNEL_TYPE}" ]; then
++    if true; then
+         if [ "$JSONDB" -ne "0" ]; then
+             running "📦 Building XNU kernel with JSON compilation database"
+             if [ ! -d "${KDKROOT}" ]; then
+@@ -724,12 +724,12 @@
+             fi
+             ensure_hw_env_overrides
+             SRCROOT="${WORK_DIR}/xnu"
+-            OBJROOT="${BUILD_DIR}/xnu.obj"
+-            SYMROOT="${BUILD_DIR}/xnu.sym"
++            OBJROOT="${BUILD_DIR}/xnu-ios.obj"
++            SYMROOT="${BUILD_DIR}/xnu-ios.sym"
+             cd "${SRCROOT}"
+             ctf_tool_overrides
+             kernel_version_env
+-            make install -j4 VERBOSE=YES "${CTF_TOOL_OVERRIDES[@]}" SDKROOT=macosx TARGET_CONFIGS="$KERNEL_CONFIG $ARCH_CONFIG $MACHINE_CONFIG" CONCISE=0 LOGCOLORS=y BUILD_WERROR=0 BUILD_LTO=0 SRCROOT="${SRCROOT}" OBJROOT="${OBJROOT}" SYMROOT="${SYMROOT}" DSTROOT="${DSTROOT}" FAKEROOT_DIR="${FAKEROOT_DIR}" KDKROOT="${KDKROOT}" TIGHTBEAMC=${TIGHTBEAMC} RC_DARWIN_KERNEL_VERSION=${RC_DARWIN_KERNEL_VERSION} MEMORY_SIZE="${MEMORY_SIZE_OVERRIDE}" SYSCTL_HW_PHYSICALCPU="${PHYS_CPU_OVERRIDE}" SYSCTL_HW_LOGICALCPU="${LOGICAL_CPU_OVERRIDE}" KERNEL_BUILDS_IN_PARALLEL="${KERNEL_PARALLELISM_OVERRIDE:-1}"
++            make install -j4 VERBOSE=YES "${CTF_TOOL_OVERRIDES[@]}" SDKROOT=${XNU_SDKROOT:-iphoneos} UBSAN_CHECKS= UBSAN_RUNTIME= "LDFLAGS_KERNEL_SDK=-L${BUILD_DIR}/firehose-ios -lfirehose_kernel" ${XNU_EXTRA_MAKEARGS:-} TARGET_CONFIGS="$KERNEL_CONFIG $ARCH_CONFIG $MACHINE_CONFIG" CONCISE=0 LOGCOLORS=y BUILD_WERROR=0 BUILD_LTO=0 SRCROOT="${SRCROOT}" OBJROOT="${OBJROOT}" SYMROOT="${SYMROOT}" DSTROOT="${DSTROOT}" FAKEROOT_DIR="${FAKEROOT_DIR}" KDKROOT="${KDKROOT}" TIGHTBEAMC=${TIGHTBEAMC} RC_DARWIN_KERNEL_VERSION=${RC_DARWIN_KERNEL_VERSION} MEMORY_SIZE="${MEMORY_SIZE_OVERRIDE}" SYSCTL_HW_PHYSICALCPU="${PHYS_CPU_OVERRIDE}" SYSCTL_HW_LOGICALCPU="${LOGICAL_CPU_OVERRIDE}" KERNEL_BUILDS_IN_PARALLEL="${KERNEL_PARALLELISM_OVERRIDE:-1}"
+             cd "${WORK_DIR}"
+         fi
+     else

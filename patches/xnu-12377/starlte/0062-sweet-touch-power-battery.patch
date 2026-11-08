@@ -1,0 +1,64 @@
+From 97bd10a127cd6b6c7159f0581c5d272d952e7e12 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:32 +0200
+Subject: [PATCH] patch: 0062-sweet-touch-power-battery.patch
+
+---
+ bsd/conf/files                    |   2 +
+ bsd/dev/sweet_rpmh.c              | 358 ++++++++++++++++++++++++++++++
+ bsd/dev/sweet_spmi.c              | 126 +++++++++++
+ bsd/dev/sweet_spmi.h              |  14 ++
+ bsd/dev/sweet_touch.c             |  37 +--
+ iokit/Kernel/arm/SweetBattery.cpp | 319 ++++++++++++++++++++++++++
+ iokit/KernelConfigTables.cpp      |   5 +
+ iokit/conf/files.arm64            |   1 +
+ 8 files changed, 849 insertions(+), 13 deletions(-)
+ create mode 100644 bsd/dev/sweet_rpmh.c
+ create mode 100644 bsd/dev/sweet_spmi.c
+ create mode 100644 bsd/dev/sweet_spmi.h
+ create mode 100644 iokit/Kernel/arm/SweetBattery.cpp
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 3f0ff54e..c50915d7 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -107,6 +107,8 @@ bsd/dev/sweet_ufs.c			standard
+ bsd/dev/sweet_sample.c			standard
+ bsd/dev/sweet_keys.c			standard
+ bsd/dev/sweet_touch.c			standard
++bsd/dev/sweet_rpmh.c			standard
++bsd/dev/sweet_spmi.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+ bsd/dev/unix_startup.c			standard
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index 420e5950..c4fdd55e 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -77,6 +77,11 @@ const char * gIOKernelConfigTables =
+     "     'IOProviderClass' = IOResources;"
+     "     'IOMatchCategory' = SweetHIDTouch;"
+     "   },"
++    "   {"
++    "     'IOClass'         = SweetBattery;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = SweetBattery;"
++    "   },"
+ #endif
+     "   {"
+     "     'IOClass'         = IOPanicPlatform;"
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+index da6c812f..acc9ae02 100644
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -15,6 +15,7 @@ iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitc
+ iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp
+ iokit/Kernel/arm/SweetSurface.cpp                                optional iokitcpp
+ iokit/Kernel/arm/SweetFramebuffer.cpp                            optional iokitcpp
++iokit/Kernel/arm/SweetBattery.cpp                                optional iokitcpp
+ iokit/Kernel/arm/hid/SweetHID.cpp                                optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEvent.cpp                              optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp                  optional iokitcpp
+-- 
+2.53.0
+

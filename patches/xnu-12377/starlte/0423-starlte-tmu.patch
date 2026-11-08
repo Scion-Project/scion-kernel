@@ -1,0 +1,43 @@
+From 6dfa40e3837c44f19dc8d07f61a0fd4adbd5edab Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:11:36 +0000
+Subject: [PATCH] parity: Scion TMU steps 1-2 (tmu=1|2, reads only) wired to
+ the governor
+
+---
+ bsd/conf/files                  |   1 +
+ bsd/dev/hakios.exynos_cpufreq.c |  30 +--
+ bsd/dev/hakios.exynos_tmu.c     | 397 ++++++++++++++++++++++++++++++++
+ bsd/sys/hakios.exynos_tmu.h     | 231 +++++++++++++++++++
+ iokit/bsddev/IOKitBSDInit.cpp   |   4 +
+ 5 files changed, 643 insertions(+), 20 deletions(-)
+ create mode 100644 bsd/dev/hakios.exynos_tmu.c
+ create mode 100644 bsd/sys/hakios.exynos_tmu.h
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 113de214a..2e7f727a3 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -119,6 +119,7 @@ bsd/dev/starlte_overlay.c		standard
+ bsd/dev/starlte_sd.c			standard
+ bsd/dev/hakios.exynos_acpm_dvfs.c	standard
+ bsd/dev/hakios.exynos_cpufreq.c	standard
++bsd/dev/hakios.exynos_tmu.c		standard
+ bsd/dev/hakios.scion_gov.c		standard
+ bsd/dev/hakios.exynos_pcie.c		standard
+ bsd/dev/herolte_battery.c		standard
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index e3cfb9ce2..d4ea537ac 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -812,6 +812,10 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+ 	{
+ 		extern void starlte_touch_probe(void);
+ 		starlte_touch_probe();
++		/* Boot-arg tmu=1|2: the TMU's temperatures, read only (bsd/dev/hakios.exynos_tmu.c), before the
++		 * governor that reads them; off: nothing mapped, nothing read. */
++		extern void hakios_exynos_tmu_start(void);
++		hakios_exynos_tmu_start();
+ 		/* Boot-arg cpufreq_gov=1: the CPU governor (bsd/dev/hakios.exynos_cpufreq.c); off: nothing. */
+ 		extern bool hakios_exynos_cpufreq_gov_start(void);
+ 		(void)hakios_exynos_cpufreq_gov_start();

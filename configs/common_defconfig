@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 666 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 669 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1630,7 +1630,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (125)
+# User space (128)
 #
 
 # arguments only the kernel reads built into the kernel (HAKIOS_BUILTIN_ARGS); given on the line, an argument goes ...
@@ -1935,6 +1935,15 @@ CONFIG_MODEM_AGAIN=y
 
 # read by inject_sb.c (user space)
 # CONFIG_SB_FPS is not set
+
+# read by sbca.c (user space)
+# CONFIG_SBC3S is not set
+
+# read by sbca.c (user space)
+# CONFIG_SBPROF is not set
+
+# read by sbca.c (user space)
+# CONFIG_SBSHOT is not set
 
 # read by hakios.vgpu3d_xnu.c (kernel)
 # CONFIG_SCGPU_ADDR is not set

@@ -1,0 +1,41 @@
+From 6553a7c3826523b60fd63722de241deb1c742e67 Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:05:51 +0000
+Subject: [PATCH] parity: Scion Wi-Fi stage 1 (wifi_pcie=1..5: PCIe ch0 link +
+ BCM4361 identity), off by default
+
+---
+ bsd/conf/files                |    1 +
+ bsd/dev/hakios.exynos_pcie.c  | 1017 +++++++++++++++++++++++++++++++++
+ bsd/sys/hakios.exynos_pcie.h  |   40 ++
+ iokit/bsddev/IOKitBSDInit.cpp |    3 +
+ 4 files changed, 1061 insertions(+)
+ create mode 100644 bsd/dev/hakios.exynos_pcie.c
+ create mode 100644 bsd/sys/hakios.exynos_pcie.h
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index b1e7d12b3..113de214a 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -120,6 +120,7 @@ bsd/dev/starlte_sd.c			standard
+ bsd/dev/hakios.exynos_acpm_dvfs.c	standard
+ bsd/dev/hakios.exynos_cpufreq.c	standard
+ bsd/dev/hakios.scion_gov.c		standard
++bsd/dev/hakios.exynos_pcie.c		standard
+ bsd/dev/herolte_battery.c		standard
+ bsd/dev/herolte_gpu.c			standard
+ bsd/dev/a5xelte_keys.c			standard
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index d7d1b315c..e3cfb9ce2 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -815,6 +815,9 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+ 		/* Boot-arg cpufreq_gov=1: the CPU governor (bsd/dev/hakios.exynos_cpufreq.c); off: nothing. */
+ 		extern bool hakios_exynos_cpufreq_gov_start(void);
+ 		(void)hakios_exynos_cpufreq_gov_start();
++		/* Boot-arg wifi_pcie=N (1-5): Scion's Wi-Fi stage 1, PCIe channel 0 to the BCM4361 (bsd/dev/hakios.exynos_pcie.c). */
++		extern void hakios_exynos_pcie_init(void);
++		hakios_exynos_pcie_init();
+ 		extern void starlte_smp_probe(void);   /* boot-arg starsmpprobe=1 */
+ 		starlte_smp_probe();
+ 		/* Mali-G72 read-only probe (bsd/dev/starlte_gpu.c), boot-arg stargpu=0 off. */

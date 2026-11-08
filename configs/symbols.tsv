@@ -393,6 +393,9 @@ S6SY761_PRI	arg	s6sy761_pri	Touch and buttons	k	hakios.s6sy761.c
 S6SY761_STEPS	arg	s6sy761_steps	Touch and buttons	k	hakios.s6sy761.c	
 S6SY761_TRACE	arg	s6sy761_trace	Touch and buttons	k	hakios.s6sy761.c	say the first N finger events, with their time (ms, from the 24 MHz counter), to measure the rate
 SB_FPS	arg	sb_fps	User space	u	inject_sb.c	
+SBC3S	arg	sbc3s	User space	u	sbca.c	
+SBPROF	arg	sbprof	User space	u	sbca.c	
+SBSHOT	arg	sbshot	User space	u	sbca.c	
 SCCAM_ADDR	arg	sccam.addr	Cameras	k	hakios.camera.c,hakios.sccam_torch.c	the app's camera (above), whatever cam= says
 SCCAM_H	arg	sccam.h	Cameras	k	hakios.camera.c	
 SCCAM_SIZE	arg	sccam.size	Cameras	k	hakios.camera.c	

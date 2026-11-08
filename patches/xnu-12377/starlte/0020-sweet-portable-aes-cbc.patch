@@ -1,0 +1,123 @@
+From 8211dd5d2c9edbdca4e2f736782e357399b8190f Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:19 +0200
+Subject: [PATCH] patch: 0020-sweet-portable-aes-cbc.patch
+
+---
+ libkern/conf/Makefile.template       |  18 +++++
+ libkern/conf/files                   |   6 ++
+ libkern/crypto/corecrypto_aes.c      |  19 ++++-
+ libkern/crypto/sweet_aes.c           | 111 +++++++++++++++++++++++++++
+ libkern/crypto/sweet_aes_ct.c        |   4 +
+ libkern/crypto/sweet_aes_ct_cbcdec.c |   4 +
+ libkern/crypto/sweet_aes_ct_cbcenc.c |   4 +
+ libkern/crypto/sweet_aes_ct_dec.c    |   4 +
+ libkern/crypto/sweet_aes_ct_enc.c    |   4 +
+ 9 files changed, 170 insertions(+), 4 deletions(-)
+ create mode 100644 libkern/crypto/sweet_aes.c
+ create mode 100644 libkern/crypto/sweet_aes_ct.c
+ create mode 100644 libkern/crypto/sweet_aes_ct_cbcdec.c
+ create mode 100644 libkern/crypto/sweet_aes_ct_cbcenc.c
+ create mode 100644 libkern/crypto/sweet_aes_ct_dec.c
+ create mode 100644 libkern/crypto/sweet_aes_ct_enc.c
+
+diff --git a/libkern/conf/Makefile.template b/libkern/conf/Makefile.template
+index 6ef0911b..c5c9352c 100644
+--- a/libkern/conf/Makefile.template
++++ b/libkern/conf/Makefile.template
+@@ -19,6 +19,24 @@ include $(MakeInc_def)
+ CFLAGS+= -include meta_features.h -DLIBKERN_KERNEL_PRIVATE -DOSALLOCDEBUG=1
+ SFLAGS+= -include meta_features.h
+ 
++ifeq ($(CURRENT_MACHINE_CONFIG),SWEET)
++SWEET_AES_ROOT = $(SRCROOT)/libkern/crypto/sweet_bearssl
++SWEET_AES_INC = -I$(SWEET_AES_ROOT)/inc -I$(SWEET_AES_ROOT)/src
++sweet_aes.o_INCFLAGS = $(SWEET_AES_INC)
++sweet_aes_ct.o_INCFLAGS = $(SWEET_AES_INC)
++sweet_aes_ct_enc.o_INCFLAGS = $(SWEET_AES_INC)
++sweet_aes_ct_dec.o_INCFLAGS = $(SWEET_AES_INC)
++sweet_aes_ct_cbcenc.o_INCFLAGS = $(SWEET_AES_INC)
++sweet_aes_ct_cbcdec.o_INCFLAGS = $(SWEET_AES_INC)
++sweet_aes.o_CFLAGS_ADD += -mgeneral-regs-only
++sweet_aes_ct.o_CFLAGS_ADD += -mgeneral-regs-only
++sweet_aes_ct_enc.o_CFLAGS_ADD += -mgeneral-regs-only
++sweet_aes_ct_dec.o_CFLAGS_ADD += -mgeneral-regs-only
++sweet_aes_ct_cbcenc.o_CFLAGS_ADD += -mgeneral-regs-only
++sweet_aes_ct_cbcdec.o_CFLAGS_ADD += -mgeneral-regs-only
++corecrypto_aes.o_CFLAGS_ADD += -mgeneral-regs-only
++endif
++
+ # Runtime support functions don't interact well with LTO (9294679)
+ stack_protector.o_CFLAGS_ADD += $(CFLAGS_NOLTO_FLAG)
+ 
+diff --git a/libkern/conf/files b/libkern/conf/files
+index c4684c20..693af701 100644
+--- a/libkern/conf/files
++++ b/libkern/conf/files
+@@ -97,6 +97,12 @@ libkern/crypto/corecrypto_sha1.c		optional crypto
+ libkern/crypto/corecrypto_md5.c			optional crypto
+ libkern/crypto/corecrypto_des.c			optional crypto
+ libkern/crypto/corecrypto_aes.c			optional crypto
++libkern/crypto/sweet_aes.c	optional crypto
++libkern/crypto/sweet_aes_ct.c	optional crypto
++libkern/crypto/sweet_aes_ct_enc.c	optional crypto
++libkern/crypto/sweet_aes_ct_dec.c	optional crypto
++libkern/crypto/sweet_aes_ct_cbcenc.c	optional crypto
++libkern/crypto/sweet_aes_ct_cbcdec.c	optional crypto
+ libkern/crypto/corecrypto_aesxts.c		optional crypto
+ libkern/crypto/corecrypto_rand.c		optional crypto
+ libkern/crypto/corecrypto_rsa.c		    optional crypto
+diff --git a/libkern/crypto/corecrypto_aes.c b/libkern/crypto/corecrypto_aes.c
+index 20ff4f1c..384abb64 100644
+--- a/libkern/crypto/corecrypto_aes.c
++++ b/libkern/crypto/corecrypto_aes.c
+@@ -32,10 +32,21 @@
+ #include <corecrypto/ccaes.h>
+ #include <kern/debug.h>
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++/* SWEET has a built-in portable AES provider for the legacy CBC/ECB API. */
++extern const struct ccmode_cbc sweet_aes_cbc_encrypt;
++extern const struct ccmode_cbc sweet_aes_cbc_decrypt;
++#define AES_CBC_ENCRYPT_MODE (&sweet_aes_cbc_encrypt)
++#define AES_CBC_DECRYPT_MODE (&sweet_aes_cbc_decrypt)
++#else
++#define AES_CBC_ENCRYPT_MODE (g_crypto_funcs->ccaes_cbc_encrypt)
++#define AES_CBC_DECRYPT_MODE (g_crypto_funcs->ccaes_cbc_decrypt)
++#endif
++
+ aes_rval
+ aes_encrypt_key(const unsigned char *key, int key_len, aes_encrypt_ctx cx[1])
+ {
+-	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_encrypt;
++	const struct ccmode_cbc *cbc = AES_CBC_ENCRYPT_MODE;
+ 
+ 	/* Make sure the context size for the mode fits in the one we have */
+ 	if (cbc->size > sizeof(aes_encrypt_ctx)) {
+@@ -49,7 +60,7 @@ aes_rval
+ aes_encrypt_cbc(const unsigned char *in_blk, const unsigned char *in_iv, unsigned int num_blk,
+     unsigned char *out_blk, aes_encrypt_ctx cx[1])
+ {
+-	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_encrypt;
++	const struct ccmode_cbc *cbc = AES_CBC_ENCRYPT_MODE;
+ 	cccbc_iv_decl(cbc->block_size, ctx_iv);
+ 
+ 	int rc = cccbc_set_iv(cbc, ctx_iv, in_iv);
+@@ -72,7 +83,7 @@ aes_encrypt(const unsigned char *in_blk, unsigned char *out_blk, aes_encrypt_ctx
+ aes_rval
+ aes_decrypt_key(const unsigned char *key, int key_len, aes_decrypt_ctx cx[1])
+ {
+-	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_decrypt;
++	const struct ccmode_cbc *cbc = AES_CBC_DECRYPT_MODE;
+ 
+ 	/* Make sure the context size for the mode fits in the one we have */
+ 	if (cbc->size > sizeof(aes_decrypt_ctx)) {
+@@ -86,7 +97,7 @@ aes_rval
+ aes_decrypt_cbc(const unsigned char *in_blk, const unsigned char *in_iv, unsigned int num_blk,
+     unsigned char *out_blk, aes_decrypt_ctx cx[1])
+ {
+-	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_decrypt;
++	const struct ccmode_cbc *cbc = AES_CBC_DECRYPT_MODE;
+ 	cccbc_iv_decl(cbc->block_size, ctx_iv);
+ 
+ 	int rc = cccbc_set_iv(cbc, ctx_iv, in_iv);

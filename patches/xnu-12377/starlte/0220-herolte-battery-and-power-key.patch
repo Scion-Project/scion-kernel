@@ -1,0 +1,43 @@
+From fc4d02ee53e4009d79112134851908d53479990b Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:52 +0200
+Subject: [PATCH] patch: 0220-herolte-battery-and-power-key.patch
+
+---
+ bsd/conf/files                        |   1 +
+ bsd/dev/a5xelte_keys.c                |   7 +
+ bsd/dev/herolte_battery.c             | 212 ++++++++++++++++++++++++++
+ iokit/Kernel/arm/SweetBattery.cpp     |  59 ++++++-
+ iokit/Kernel/arm/SweetFramebuffer.cpp |  17 ++-
+ iokit/KernelConfigTables.cpp          |   2 +-
+ 6 files changed, 287 insertions(+), 11 deletions(-)
+ create mode 100644 bsd/dev/herolte_battery.c
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index de5f06a8..9a28c2c3 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -107,6 +107,7 @@ bsd/dev/sweet_ufs.c			standard
+ bsd/dev/a5xelte_emmc.c			standard
+ bsd/dev/herolte_ufs.c			standard
+ bsd/dev/herolte_touch.c			standard
++bsd/dev/herolte_battery.c		standard
+ bsd/dev/a5xelte_keys.c			standard
+ bsd/dev/a5xelte_touch.c			standard
+ bsd/dev/sweet_sample.c			standard
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index f931ec63..ac4992d6 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -89,7 +89,7 @@ const char * gIOKernelConfigTables =
+     "     'IOProviderClass' = IOResources;"
+     "     'IOMatchCategory' = SweetHIDTouch;"
+     "   },"
+-#if !defined(ARM64_BOARD_CONFIG_A5XELTE)
++#if !defined(ARM64_BOARD_CONFIG_A5XELTE) || defined(ARM64_BOARD_CONFIG_HEROLTE)
+     "   {"
+     "     'IOClass'         = SweetBattery;"
+     "     'IOProviderClass' = IOResources;"
+-- 
+2.53.0
+

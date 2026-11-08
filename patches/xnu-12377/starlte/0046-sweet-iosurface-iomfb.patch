@@ -1,0 +1,51 @@
+From 66027517ee5fe7268c323a2f25d7607bba0c93c2 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:20 +0200
+Subject: [PATCH] patch: 0046-sweet-iosurface-iomfb.patch
+
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp    |  455 ++++++++++
+ iokit/Kernel/arm/SweetPlatformExpert.cpp |   12 +
+ iokit/Kernel/arm/SweetSurface.cpp        | 1030 ++++++++++++++++++++++
+ iokit/Kernel/arm/SweetSurface.h          |   66 ++
+ iokit/KernelConfigTables.cpp             |   10 +
+ iokit/conf/files.arm64                   |    2 +
+ 6 files changed, 1575 insertions(+)
+ create mode 100644 iokit/Kernel/arm/SweetFramebuffer.cpp
+ create mode 100644 iokit/Kernel/arm/SweetSurface.cpp
+ create mode 100644 iokit/Kernel/arm/SweetSurface.h
+
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index bb99d13a..ed8cd689 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -57,6 +57,16 @@ const char * gIOKernelConfigTables =
+     "     'IOProviderClass' = IOResources;"
+     "     'IOMatchCategory' = IOWatchdog;"
+     "   },"
++    "   {"
++    "     'IOClass'         = IOCoreSurfaceRoot;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = IOCoreSurfaceRoot;"
++    "   },"
++    "   {"
++    "     'IOClass'         = AppleCLCD;"
++    "     'IOProviderClass' = IOPlatformDevice;"
++    "     'IONameMatch'     = 'sweet,display';"
++    "   },"
+ #endif
+     "   {"
+     "     'IOClass'         = IOPanicPlatform;"
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+index c4a1b657..05de20f9 100644
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -13,3 +13,5 @@ iokit/Kernel/arm/SweetCPU.cpp                                    optional iokitc
+ iokit/Kernel/arm/SweetEntitlements.cpp                           optional iokitcpp
+ iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitcpp
+ iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp
++iokit/Kernel/arm/SweetSurface.cpp                                optional iokitcpp
++iokit/Kernel/arm/SweetFramebuffer.cpp                            optional iokitcpp
+-- 
+2.53.0
+

@@ -19,7 +19,11 @@ BASE=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_commit)
 BASEID=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get base)
 HFS=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get hfs)
 SERIES=$HERE/../patches/$BASEID
-[ -s "$SERIES/series" ] || { echo "apply-series.sh: no $SERIES/series" >&2; exit 1; }
+# the series the profile names (profiles/*.conf `patches`), or the base's own
+PATCHES=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get patches)
+case "$PATCHES" in patches/$BASEID/series*) SERIESFILE=$HERE/../$PATCHES ;; *) SERIESFILE=$SERIES/series ;; esac
+MACHINE=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get machine)
+[ -s "$SERIESFILE" ] || { echo "apply-series.sh: no $SERIESFILE" >&2; exit 1; }
 [ -f "$HERE/../drivers/map" ] || { echo "apply.sh: no drivers/map next to xnu/ (the drivers are in drivers/)" >&2; exit 1; }
 mkdir -p "$(dirname "$DIR")"
 DIR=$(cd "$(dirname "$DIR")" && pwd)/$(basename "$DIR")
@@ -33,7 +37,7 @@ git checkout -q -b hakios "$TAG"
 echo 'BUILD/' >> .git/info/exclude
 # files Apple's tag includes but does not ship, taken from another open-source release of XNU: patches/<base>/imports,
 # one line each: "<tag> <commit> <path>" (fetched like the tag itself, and checked against the commit)
-if [ -s "$SERIES/imports" ]; then
+if [ -s "$SERIES/imports" ] && ! grep -q '^# imports: none' "$SERIESFILE"; then
 	grep -v '^#' "$SERIES/imports" | while read -r itag icommit ipath; do
 		[ -n "$itag" ] || continue
 		git fetch -q --depth 1 origin "refs/tags/$itag:refs/tags/$itag"
@@ -41,11 +45,24 @@ if [ -s "$SERIES/imports" ]; then
 		git checkout -q "$itag" -- "$ipath"
 	done
 fi
-grep -v '^#' "$SERIES/series" | while read -r p; do
-	git apply --whitespace=nowarn "$SERIES/$p" || { echo "apply-series.sh: $p does not apply" >&2; exit 1; }
+grep -v '^#' "$SERIESFILE" | while read -r p; do
+	[ -n "$p" ] || continue
+	case "$p" in
+	files\ *)	# files the series adds, in the tree's own layout (the directory named, from the repository root)
+		mkdir -p "$DIR" && cp -Rp "$HERE/../${p#files }/." "$DIR/" || { echo "apply-series.sh: $p failed" >&2; exit 1; } ;;
+	copy\ *)	# one of this repository's own files into the tree: copy SOURCE (from the repository root) TARGET (in the tree)
+		set -- $p; mkdir -p "$(dirname "$DIR/$3")" && cp -p "$HERE/../$2" "$DIR/$3" || { echo "apply-series.sh: $p failed" >&2; exit 1; } ;;
+	*.sh)	# a script of the series (it stages sources by commit, ...): run in the tree's root, with the profile's machine
+		MACHINE_CONFIG=$MACHINE MACOS_VERSION=${MACOS_VERSION:-26.5} bash "$SERIES/$p" || { echo "apply-series.sh: $p failed" >&2; exit 1; } ;;
+	*)	git apply --whitespace=nowarn "$SERIES/$p" || { echo "apply-series.sh: $p does not apply" >&2; exit 1; } ;;
+	esac
 done
 # HFS Plus (the data volume): Apple's release, fetched like XNU, and this port's changes over it
 if [ "$HFS" = yes ]; then "$HERE/hfs/hfs.sh" put "$DIR"; fi
+NDRIVERS=0
+if grep -q '^# drivers: series' "$SERIESFILE"; then
+echo "apply-series.sh: this series carries its own drivers (# drivers: series), none is taken from drivers/"
+else
 # the drivers are kept by subsystem (drivers/<subsystem>/), not at their place in Apple's tree: drivers/map says where
 # each one goes, one line per file: "<subsystem> <path in the tree>"
 NDRIVERS=0
@@ -72,5 +89,6 @@ if grep -qF "# HakiOS drivers: made by tools/hakios-config.py kernel" bsd/conf/f
 	python3 "$HERE/../tools/hakios-config.py" kernel --tree "$DIR"
 else
 	echo "apply-series.sh: $BASEID: the drivers are in the tree but not in its configuration (docs/two-bases.md)"
+fi
 fi
 echo "apply-series.sh: $DIR: $TAG + the series + $NDRIVERS drivers"

@@ -1,0 +1,26 @@
+From 3014c1117926945bc169b221a1f28e5150e6d1a0 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:35:14 +0200
+Subject: [PATCH] patch: 0305-starlte-mali-user-client.patch
+
+---
+ iokit/Kernel/arm/StarbiteMali.cpp | 624 ++++++++++++++++++++++++++++++
+ iokit/conf/files.arm64            |   1 +
+ 2 files changed, 625 insertions(+)
+ create mode 100644 iokit/Kernel/arm/StarbiteMali.cpp
+
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+index 4a5f5f46..01248169 100644
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -15,6 +15,7 @@ iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitc
+ iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp
+ iokit/Kernel/arm/SweetSurface.cpp                                optional iokitcpp
+ iokit/Kernel/arm/SweetFramebuffer.cpp                            optional iokitcpp
++iokit/Kernel/arm/StarbiteMali.cpp                                optional iokitcpp
+ iokit/Kernel/arm/A5XELTEGPU.cpp                                 optional iokitcpp
+ iokit/Kernel/arm/SweetBattery.cpp                                optional iokitcpp
+ iokit/Kernel/arm/hid/SweetHID.cpp                                optional iokitcpp
+-- 
+2.53.0
+

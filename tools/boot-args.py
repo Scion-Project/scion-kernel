@@ -116,6 +116,10 @@ def scan(root, keep=None):
     for f in tracked(root):
         if not f.endswith((".c", ".cpp", ".m", ".h", ".patch")):
             continue
+        # the ios-27 profile's files (the S9's Starbite kernel has arguments of its own, listed in docs/ios27-starlte.md; they join this
+        # catalogue when the drivers move into drivers/): their adapted copies of drivers/ files must not stand for them in `keep`
+        if f.startswith(("xnu/files-12377/", "patches/xnu-12377/")):
+            continue
         try:
             text = open(os.path.join(root, f), encoding="utf-8", errors="replace").read()
         except OSError:

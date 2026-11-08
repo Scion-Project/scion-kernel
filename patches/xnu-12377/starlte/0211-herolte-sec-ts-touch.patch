@@ -1,0 +1,47 @@
+From 68bc80d58f962bc1cd3d41bc19144a07da81f9f8 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:51 +0200
+Subject: [PATCH] patch: 0211-herolte-sec-ts-touch.patch
+
+---
+ bsd/conf/files                    |   1 +
+ bsd/dev/herolte_touch.c           | 332 ++++++++++++++++++++++++++++++
+ iokit/Kernel/arm/hid/SweetHID.cpp |  37 ++--
+ iokit/bsddev/IOKitBSDInit.cpp     |   8 +-
+ 4 files changed, 364 insertions(+), 14 deletions(-)
+ create mode 100644 bsd/dev/herolte_touch.c
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 781a421b..de5f06a8 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -106,6 +106,7 @@ bsd/dev/memdev.c			standard
+ bsd/dev/sweet_ufs.c			standard
+ bsd/dev/a5xelte_emmc.c			standard
+ bsd/dev/herolte_ufs.c			standard
++bsd/dev/herolte_touch.c			standard
+ bsd/dev/a5xelte_keys.c			standard
+ bsd/dev/a5xelte_touch.c			standard
+ bsd/dev/sweet_sample.c			standard
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index 15e81faa..487bbba7 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -803,8 +803,12 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+ #if defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 	/* GPIO keys: Exynos 7580 or, on HEROLTE, the Exynos 8890 ALIVE pins. */
+ 	a5xelte_keys_init();
+-#if !defined(ARM64_BOARD_CONFIG_HEROLTE)
+-	/* Exynos 7580 I2C touch; HEROLTE needs its own driver. */
++#if defined(ARM64_BOARD_CONFIG_HEROLTE)
++	/* sec_ts on the Exynos 8890 HSI2C (bsd/dev/herolte_touch.c). */
++	extern void herolte_touch_probe(void);
++	herolte_touch_probe();
++#else
++	/* Exynos 7580 I2C touch. */
+ 	a5xelte_touch_probe();
+ #endif
+ 	{
+-- 
+2.53.0
+

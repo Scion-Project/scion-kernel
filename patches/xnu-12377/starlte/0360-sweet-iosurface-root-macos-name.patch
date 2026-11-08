@@ -1,0 +1,23 @@
+From: starbite <starbite@local>
+Subject: [PATCH] sweet: IOSurfaceRoot, the IOSurface root under its macOS name
+
+macOS IOSurface.framework (26.x; read in macOS 27.2 ____ioSurfaceConnectInternal_block_invoke) finds the
+root with IOServiceNameMatching("IOSurfaceRoot"); iOS 16-26 use "IOCoreSurfaceRoot". A second personality
+of the same class: one surface table, one lock, the same user client. Without it every IOSurfaceCreate in
+macOS userland returns NULL (WindowServer, CoreAnimation, the Metal layer, sbmtltest step 2).
+(docs/MACOS-METAL.md; not compiled here: written against build/xnu-12377 at f1e38734.)
+---
+--- a/iokit/KernelConfigTables.cpp	2026-11-03 22:22:18
++++ b/iokit/KernelConfigTables.cpp	2026-11-03 22:23:22
+@@ -71,6 +71,11 @@
+     "     'IOMatchCategory' = IOCoreSurfaceRoot;"
+     "   },"
+     "   {"
++    "     'IOClass'         = IOSurfaceRoot;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = IOSurfaceRoot;"
++    "   },"
++    "   {"
+     "     'IOClass'         = AppleCLCD;"
+     "     'IOProviderClass' = IOPlatformDevice;"
+ #if defined(ARM64_BOARD_CONFIG_A5XELTE)

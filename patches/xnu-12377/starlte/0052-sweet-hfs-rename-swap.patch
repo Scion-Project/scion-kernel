@@ -1,0 +1,37 @@
+From 0ceb1cf1848ab35ede173a58c2fb66519fad6c36 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:31 +0200
+Subject: [PATCH] patch: 0052-sweet-hfs-rename-swap.patch
+
+---
+ bsd/vfs/kpi_vfs.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/bsd/vfs/kpi_vfs.c b/bsd/vfs/kpi_vfs.c
+index b4a58326..2cb6abc1 100644
+--- a/bsd/vfs/kpi_vfs.c
++++ b/bsd/vfs/kpi_vfs.c
+@@ -4660,6 +4660,20 @@ vn_rename(struct vnode *fdvp, struct vnode **fvpp, struct componentname *fcnp, s
+ 					_err = VNOP_RENAME(fdvp, *fvpp, fcnp, tdvp, *tvpp, tcnp, ctx);
+ 				}
+ 			}
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++			/*
++			 * SWEET: HFS has no RENAME_SWAP, which Foundation's atomic
++			 * writes use (usermanagerd: "Failed to atomically swap writing
++			 * file: Operation not supported"). Swapping two regular files
++			 * on one volume is what exchangedata does: each name ends up
++			 * with the other file's data and attributes.
++			 */
++			if (_err == ENOTSUP && flags == VFS_RENAME_SWAP && *tvpp != NULLVP &&
++			    vnode_isreg(*fvpp) && vnode_isreg(*tvpp) &&
++			    vnode_mount(*fvpp) == vnode_mount(*tvpp)) {
++				_err = VNOP_EXCHANGE(*fvpp, *tvpp, 0, ctx);
++			}
++#endif
+ 		} else {
+ 			_err = VNOP_RENAME(fdvp, *fvpp, fcnp, tdvp, *tvpp, tcnp, ctx);
+ 		}
+-- 
+2.53.0
+

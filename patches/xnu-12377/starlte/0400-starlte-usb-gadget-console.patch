@@ -1,0 +1,61 @@
+From 8c3c3bafc2efef597973fd24610f148631779747 Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:33:05 +0000
+Subject: [PATCH] starlte: DWC3 CDC-ACM gadget console (usb_gadget) and
+ MAX77705 USB switch close, with the log tap and a 'return' command
+
+The kernel's console ring streamed to a host over a CDC-ACM serial port on the S9's USB-C (/dev/cu.usbmodem* on macOS), and a
+line console back; 'return' flushes the log and resets into recovery. Uses Scion's hakios DWC3 gadget (hakios.dwc3.c,
+hakios.exynos_usb.c, hakios.usb_acm.h; drivers/usb), the Exynos HSI2C master and the MUIC sequence of hakios.max77705.c to close
+the USB-C switch (starlte_muic.c). starlte_usbcon.c supplies what those drivers need from their kernel and the tap fed from the
+a5xelte console ring. Boot-args usb_gadget=N, usb_muic.
+---
+ bsd/conf/files                  |    5 +
+ bsd/dev/a5xelte_emmc.c          |    3 +
+ bsd/dev/hakios.dwc3.c           | 2102 +++++++++++++++++++++++++++++++
+ bsd/dev/hakios.exynos_hsi2c.c   |  251 ++++
+ bsd/dev/hakios.exynos_usb.c     |  391 ++++++
+ bsd/dev/hakios.usb_acm.h        |  422 +++++++
+ bsd/dev/hakios.usb_glue.h       |   34 +
+ bsd/dev/herolte_ufs.c           |   14 +
+ bsd/dev/starlte_muic.c          |  122 ++
+ bsd/dev/starlte_usbcon.c        |  159 +++
+ bsd/sys/hakios.exynos9810_soc.h |  284 +++++
+ bsd/sys/hakios.exynos_acpm.h    |   59 +
+ bsd/sys/hakios.exynos_hsi2c.h   |   48 +
+ bsd/sys/hakios.exynos_soc.h     |    8 +
+ bsd/sys/hakios.input.h          |  178 +++
+ bsd/sys/hakios.log.h            |   12 +
+ bsd/sys/hakios.xnu.h            |   33 +
+ 17 files changed, 4125 insertions(+)
+ create mode 100644 bsd/dev/hakios.dwc3.c
+ create mode 100644 bsd/dev/hakios.exynos_hsi2c.c
+ create mode 100644 bsd/dev/hakios.exynos_usb.c
+ create mode 100644 bsd/dev/hakios.usb_acm.h
+ create mode 100644 bsd/dev/hakios.usb_glue.h
+ create mode 100644 bsd/dev/starlte_muic.c
+ create mode 100644 bsd/dev/starlte_usbcon.c
+ create mode 100644 bsd/sys/hakios.exynos9810_soc.h
+ create mode 100644 bsd/sys/hakios.exynos_acpm.h
+ create mode 100644 bsd/sys/hakios.exynos_hsi2c.h
+ create mode 100644 bsd/sys/hakios.exynos_soc.h
+ create mode 100644 bsd/sys/hakios.input.h
+ create mode 100644 bsd/sys/hakios.log.h
+ create mode 100644 bsd/sys/hakios.xnu.h
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index ba9d06c60..3ace96fda 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -109,6 +109,11 @@ bsd/dev/herolte_ufs.c			standard
+ bsd/dev/herolte_touch.c			standard
+ bsd/dev/starlte_touch.c			standard
+ bsd/dev/starlte_smp.c			standard
++bsd/dev/hakios.dwc3.c			standard
++bsd/dev/hakios.exynos_usb.c		standard
++bsd/dev/starlte_usbcon.c		standard
++bsd/dev/starlte_muic.c			standard
++bsd/dev/hakios.exynos_hsi2c.c		standard
+ bsd/dev/starlte_gpu.c			standard
+ bsd/dev/starlte_overlay.c		standard
+ bsd/dev/starlte_sd.c			standard

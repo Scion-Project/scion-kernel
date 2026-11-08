@@ -1,0 +1,83 @@
+From b4902c22f96e24dda2769767bb927cff30a2f14b Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Sun, 1 Nov 2026 16:37:38 +0200
+Subject: [PATCH] patch: 0319-sweet-arm64e-userland.patch
+
+arm64e (iOS 26) userland on cores without ARMv8.3: ml_grade_binary takes
+arm64e slices (below arm64), and user-mode undefined instructions go through
+sweet_a64e_emulate() first: PAC/AUT/XPAC as no-ops, RETA*/BRA*/BLRA* as
+RET/BR/BLR, LDRAA/LDRAB as LDR, PACGA as a fixed hash, FJCVTZS (JS ToInt32)
+in integer code, FCADD with a scalar FP helper under the user's FPCR.
+---
+ bsd/dev/arm/kern_machdep.c  |  11 +-
+ osfmk/arm64/sleh.c          |  10 ++
+ osfmk/arm64/sweet_a64e.c    | 243 ++++++++++++++++++++++++++++++++++++
+ osfmk/arm64/sweet_a64e_fp.s |  52 ++++++++
+ osfmk/conf/files.arm64      |   2 +
+ 5 files changed, 317 insertions(+), 1 deletion(-)
+ create mode 100644 osfmk/arm64/sweet_a64e.c
+ create mode 100644 osfmk/arm64/sweet_a64e_fp.s
+
+diff --git a/bsd/dev/arm/kern_machdep.c b/bsd/dev/arm/kern_machdep.c
+index 58769e07..14535df7 100644
+--- a/bsd/dev/arm/kern_machdep.c
++++ b/bsd/dev/arm/kern_machdep.c
+@@ -72,7 +72,7 @@ grade_arm64e_binary(cpu_subtype_t execfeatures)
+ *		not acceptable.
+ **********************************************************************/
+ int
+-ml_grade_binary(cpu_type_t exectype, cpu_subtype_t execsubtype, cpu_subtype_t execfeatures __unused, bool allow_simulator_binary __unused)
++ml_grade_binary(cpu_type_t exectype, cpu_subtype_t execsubtype, cpu_subtype_t execfeatures, bool allow_simulator_binary __unused)
+ {
+ #if __arm64__
+ 	cpu_subtype_t hostsubtype =
+@@ -91,6 +91,15 @@ ml_grade_binary(cpu_type_t exectype, cpu_subtype_t execsubtype, cpu_subtype_t ex
+ 				return 10;
+ 			case CPU_SUBTYPE_ARM64_ALL:
+ 				return 9;
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++			case CPU_SUBTYPE_ARM64E:
++				/*
++				 * sweet: no PAC here, but arm64e-only userland (iOS 26)
++				 * runs with sweet_a64e.c emulating the ARMv8.3 ops; an
++				 * arm64 slice is still preferred when there is one.
++				 */
++				return (execfeatures & CPU_SUBTYPE_PTRAUTH_ABI) ? 8 : 0;
++#endif
+ 			}
+ 			break;
+ 
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index b33fae1c..8ddea96b 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1255,6 +1255,16 @@ handle_uncategorized(arm_saved_state_t *state)
+ 		}
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++	/* arm64e (ARMv8.3+) instructions these cores lack: sweet_a64e.c. */
++	if (PSR64_IS_USER64(get_saved_state_cpsr(state))) {
++		extern bool sweet_a64e_emulate(arm_saved_state_t *, uint32_t);
++		if (sweet_a64e_emulate(state, instr)) {
++			return;
++		}
++	}
++#endif
++
+ 	/*
+ 	 * Check for GDB breakpoint via illegal opcode.
+ 	 */
+diff --git a/osfmk/conf/files.arm64 b/osfmk/conf/files.arm64
+index defad01a..7ecfb7c0 100644
+--- a/osfmk/conf/files.arm64
++++ b/osfmk/conf/files.arm64
+@@ -53,6 +53,8 @@ osfmk/arm/arm_timer.c		standard
+ osfmk/arm/arm_init.c	optional config_pmap_ppl
+ osfmk/arm64/arm_vm_init.c	optional config_pmap_ppl
+ osfmk/arm64/sweet_early.c	standard
++osfmk/arm64/sweet_a64e.c	standard
++osfmk/arm64/sweet_a64e_fp.s	standard
+ osfmk/arm64/arm64_hypercall.c	standard
+ osfmk/arm/io_map.c		standard
+ osfmk/arm64/loose_ends.c	standard

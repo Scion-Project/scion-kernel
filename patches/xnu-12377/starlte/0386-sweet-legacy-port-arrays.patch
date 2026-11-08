@@ -1,0 +1,121 @@
+From fa3f60da41cf34523cd0633f8c3d404d31710e01 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Wed, 4 Nov 2026 23:58:44 +0200
+Subject: [PATCH] patch: 0386-sweet-legacy-port-arrays.patch -
+ mach/sweet_ports_compat.h: SWEET_LEGACY_PORT_ARRAYS=1 serves
+ mach_ports_register/lookup in the out-of-line array form macOS 13 user space
+ sends (default 0: unchanged)
+
+---
+ osfmk/kern/ipc_tt.c             | 62 +++++++++++++++++++++++++++++++++
+ osfmk/mach/sweet_ports_compat.h | 11 ++++++
+ osfmk/mach/task.defs            |  5 +--
+ 3 files changed, 76 insertions(+), 2 deletions(-)
+ create mode 100644 osfmk/mach/sweet_ports_compat.h
+
+diff --git a/osfmk/kern/ipc_tt.c b/osfmk/kern/ipc_tt.c
+index a555ffa8..17422121 100644
+--- a/osfmk/kern/ipc_tt.c
++++ b/osfmk/kern/ipc_tt.c
+@@ -2180,6 +2180,68 @@ out:
+  *		KERN_INVALID_ARGUMENT	Too many port rights supplied.
+  */
+ 
++#include <mach/sweet_ports_compat.h>
++#if SWEET_LEGACY_PORT_ARRAYS
++/*
++ * Starbite (mach/sweet_ports_compat.h): the older out-of-line form of the two routines, for macOS 13 user space;
++ * the three-port routines below do the work. MIG gives the array as kernel memory of mach_port_ool_t (consumed).
++ */
++kern_return_t _kernelrpc_mach_ports_register3(task_t, mach_port_t, mach_port_t, mach_port_t);
++kern_return_t _kernelrpc_mach_ports_lookup3(task_t, ipc_port_t *, ipc_port_t *, ipc_port_t *);
++kern_return_t mach_ports_register(task_t, mach_port_array_t, mach_msg_type_number_t);
++kern_return_t mach_ports_lookup(task_t, mach_port_array_t *, mach_msg_type_number_t *);
++
++kern_return_t
++mach_ports_register(
++	task_t                  task,
++	mach_port_array_t       memory,
++	mach_msg_type_number_t  portsCnt)
++{
++	ipc_port_t p[TASK_PORT_REGISTER_MAX] = { IP_NULL, IP_NULL, IP_NULL };
++
++	if (task == TASK_NULL || portsCnt > TASK_PORT_REGISTER_MAX || (portsCnt != 0 && memory == NULL)) {
++		return KERN_INVALID_ARGUMENT;
++	}
++	for (mach_msg_type_number_t i = 0; i < portsCnt; i++) {
++		p[i] = memory[i].port;
++	}
++	kern_return_t kr = _kernelrpc_mach_ports_register3(task, p[0], p[1], p[2]);
++	if (kr == KERN_SUCCESS && portsCnt != 0) {
++		mach_port_array_free(memory, portsCnt);     /* the rights went to the task */
++	}
++	return kr;
++}
++
++kern_return_t
++mach_ports_lookup(
++	task_t                  task,
++	mach_port_array_t      *portsp,
++	mach_msg_type_number_t *portsCnt)
++{
++	ipc_port_t p[TASK_PORT_REGISTER_MAX];
++	mach_port_array_t memory;
++
++	if (task == TASK_NULL) {
++		return KERN_INVALID_ARGUMENT;
++	}
++	memory = mach_port_array_alloc(TASK_PORT_REGISTER_MAX, Z_WAITOK | Z_ZERO);
++	if (memory == NULL) {
++		return KERN_RESOURCE_SHORTAGE;
++	}
++	kern_return_t kr = _kernelrpc_mach_ports_lookup3(task, &p[0], &p[1], &p[2]);
++	if (kr != KERN_SUCCESS) {
++		mach_port_array_free(memory, TASK_PORT_REGISTER_MAX);
++		return kr;
++	}
++	for (int i = 0; i < TASK_PORT_REGISTER_MAX; i++) {
++		memory[i].port = p[i];
++	}
++	*portsp = memory;
++	*portsCnt = TASK_PORT_REGISTER_MAX;
++	return KERN_SUCCESS;
++}
++#endif /* SWEET_LEGACY_PORT_ARRAYS */
++
+ kern_return_t
+ _kernelrpc_mach_ports_register3(
+ 	task_t                  task,
+diff --git a/osfmk/mach/task.defs b/osfmk/mach/task.defs
+index f3449802..e1476d8d 100644
+--- a/osfmk/mach/task.defs
++++ b/osfmk/mach/task.defs
+@@ -68,6 +68,7 @@ subsystem
+ #endif	/* KERNEL_SERVER || KOBJECT_SERVER */
+ 	  task 3400;
+ 
++#include <mach/sweet_ports_compat.h>
+ #include <mach/std_types.defs>
+ #include <mach/mach_types.defs>
+ #include <mach_debug/mach_debug_types.defs>
+@@ -132,7 +133,7 @@ task_threads(
+  *	Stash a handful of ports for the target task; child
+  *	tasks inherit this stash at task_create time.
+  */
+-#if LIBSYSCALL_INTERFACE
++#if LIBSYSCALL_INTERFACE || SWEET_LEGACY_PORT_ARRAYS
+ routine	mach_ports_register(
+ 		target_task	: task_t;
+ 		init_port_set	: mach_port_array_t =
+@@ -148,7 +149,7 @@ routine	_kernelrpc_mach_ports_register3(
+ /*
+  *	Retrieve the stashed ports for the target task.
+  */
+-#if LIBSYSCALL_INTERFACE
++#if LIBSYSCALL_INTERFACE || SWEET_LEGACY_PORT_ARRAYS
+ routine	mach_ports_lookup(
+ 		target_task	: task_t;
+ 	out	init_port_set	: mach_port_array_t =
+-- 
+2.53.0
+

@@ -1,0 +1,32 @@
+From 70e56296140fb7a2b3748d6b4bf6aaa5cce70d4c Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Tue, 3 Nov 2026 17:44:02 +0200
+Subject: [PATCH] patch: 0345-starlte-microsd-driver.patch - STARLTE microSD
+ (dwmmc2 0x11500000): polling read-only block device after shim/starlte/sd.c,
+ CMD9 card size, MBR/EBR + sdroot= range (pN | lba:START,COUNT, no default,
+ FAT/exFAT/NTFS/store refused), devfs sdroot0/rsdroot0, sdprobe=1/2 (MBR, p1
+ boot sector, p2 SBSTORE2 header/directory CRCs, throughput; 2 = sdhold then a
+ deliberate panic); no write path - review: sd_recover after every failed read
+ (controller+FIFO reset, UPD_CLK, CMD12 stop_abort, CMD13 tran), second
+ rootdev call panics (failed mount), gates/rails/GPA1 printed and checked
+ before the controller, CLKSEL timing-field RMW, lba: refuses logical data
+ partitions and the store below its used end, reread err vs DIFF
+
+---
+ bsd/conf/files       |    1 +
+ bsd/dev/starlte_sd.c | 1370 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 1371 insertions(+)
+ create mode 100644 bsd/dev/starlte_sd.c
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index ad533bbe..ba9d06c6 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -111,6 +111,7 @@ bsd/dev/starlte_touch.c			standard
+ bsd/dev/starlte_smp.c			standard
+ bsd/dev/starlte_gpu.c			standard
+ bsd/dev/starlte_overlay.c		standard
++bsd/dev/starlte_sd.c			standard
+ bsd/dev/herolte_battery.c		standard
+ bsd/dev/herolte_gpu.c			standard
+ bsd/dev/a5xelte_keys.c			standard

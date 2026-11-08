@@ -1,0 +1,28 @@
+From 20d3095616bd65e927c0180bf46e3a78a67b565e Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:26 +0200
+Subject: [PATCH] patch: 0102-a5xelte-builtin-pthread.patch
+
+---
+ bsd/pthread/sweet_pthread_init.c    | 8 ++++++--
+ bsd/pthread/sweet_pthread_support.c | 4 ++--
+ bsd/pthread/sweet_pthread_synch.c   | 4 ++--
+ bsd/sys/pthread_internal.h          | 2 +-
+ 4 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/bsd/sys/pthread_internal.h b/bsd/sys/pthread_internal.h
+index 135405e0..0042011e 100644
+--- a/bsd/sys/pthread_internal.h
++++ b/bsd/sys/pthread_internal.h
+@@ -34,7 +34,7 @@
+ 
+ struct ksyn_waitq_element {
+ #if __LP64__
+-	#if defined(ARM64_BOARD_CONFIG_SWEET)
++	#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 	/* libpthread-514.100.2 includes the trailing kwe_uth pointer. */
+ 	char opaque[56];
+ #else
+-- 
+2.53.0
+

@@ -36,6 +36,12 @@ This supersedes the summary in `NOTICE`, which stays as the short, canonical lis
 | FocalTech touch firmware header | `drivers/input/touch/hakios.focaltech_fw.h` | FocalTech (device firmware blob) | vendor's — **to verify** | candidate to move to pull-from-device |
 | Apple host headers (build only) | `xnu-deps/hostinc/mach-o/`, `.../mach/` | Apple (open-source cctools/xnu headers) | APSL 2.0 | host-side Mach-O headers for the cross build |
 | Pre-built kernel & user space | `prebuilt/` | built from this repo | APSL 2.0 / MIT (as source) | reproducible from source here |
+| Project Starbite (the Starbite author) | `patches/xnu-12377/starlte/03*`, `xnu/files-12377/`, `xnuloader/sboot/`, `tools/ios27/`, `userland/src/sbca.c` | the author's tree of 8 November 2026, with his agreement | his own files MIT (`LICENSES/MIT-Starbite.txt`); patches to Apple's XNU APSL 2.0; `xnuloader/sboot/` GPL-2.0-only as each file's SPDX line says | per path: `LICENSES.md`. The loader is a program of its own; none is copied into a kernel file |
+| ios-sweet (dipa-studio) and ios-a5xelte (orhunnx, A5XELTE contributors) | `patches/xnu-12377/starlte/` `0003`-`0128` | github.com/dipa-studio/ios-sweet, github.com/orhunnx/ios-a5xelte, as ported to xnu-12377 by the Starbite author | MIT for their parts (`LICENSES/MIT-ios-sweet.txt`, `MIT-ios-a5xelte.txt`); APSL 2.0 for the XNU changes | |
+| herolte (Galaxy S7) layer of ios-a5xelte (wardevsa) | `patches/xnu-12377/starlte/` `0200`-`0238`, the loader files marked "Based on ios-a5xelte shim/herolte", `tools/ios27/herolte/` | github.com/wardevsa/ios-a5xelte, branch `herolte` | used and published with the author's permission (relayed by the Scion maintainer, 8 November 2026); the repository states no licence of its own; patches to XNU files APSL 2.0 | credit kept in `NOTICE`; if the author states a licence later, that governs |
+| HakiOS EAGL bridge (copy, with iOS 26/27 tables) | `tools/ios27/ca-gpu/hakios/` | HakiOS authors | MIT (`LICENSE.hakios` beside it) | Scion's copy is `userland/src/eagl.c`; the follow-up folds them |
+| Mesa patches, DRM shim | `tools/ios27/mesa-ios/` | changes to Mesa; a shim after HakiOS's `hakios-drm` | MIT | patches only; Mesa is fetched |
+| darwin-xnu-build edits and patches | `patches/xnu-12377/starlte/blacktop/`, `tools/ios27/dxb-ios.patch` | blacktop | MIT, Copyright (c) 2023-2025 blacktop | the patches are APSL 2.0 as patches to XNU |
 
 ## Fetched at build time, never committed
 

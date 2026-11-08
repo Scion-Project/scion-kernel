@@ -1,0 +1,26 @@
+From a07c22e197e769d6a90a7232a8039691d8ecf57b Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 20:32:47 +0000
+Subject: [PATCH] starlte: iPhoneOS-derived option set; HFS keeps OS X features
+ when iOS-target
+
+---
+ bsd/sweet_hfs/core/kext-config.h |  4 +++-
+ config/MASTER.arm64.starlte      | 23 ++++++++++++++---------
+ 2 files changed, 17 insertions(+), 10 deletions(-)
+
+diff --git a/bsd/sweet_hfs/core/kext-config.h b/bsd/sweet_hfs/core/kext-config.h
+index 59088a57c..454c35564 100644
+--- a/bsd/sweet_hfs/core/kext-config.h
++++ b/bsd/sweet_hfs/core/kext-config.h
+@@ -36,7 +36,9 @@
+ 
+ // #define HFS_LEAK_DEBUG 1
+ 
+-#if (TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR) // iOS (real hardware)
++/* Starbite boards: no AppleKeyStore, so keep the OS X feature set
++ * (no content protection) even when the kernel is built iOS-target. */
++#if (TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR) && 0 // iOS (real hardware)
+ 
+ #define QUOTA 0
+ #define CONFIG_PROTECT 1

@@ -1,0 +1,59 @@
+From 13f794583cf3bb7c2c159bdeb7160b3e435cee31 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:33 +0200
+Subject: [PATCH] patch: 0109-a5xelte-decon-iosurface-bridge.patch
+
+port: context only (ported 0047/0067 lines)
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 24 ++++++++++++++++++++++--
+ iokit/KernelConfigTables.cpp          |  6 +++++-
+ osfmk/console/serial_console.c        |  4 ++++
+ 3 files changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index 58ea9b11..c1a65e3a 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -70,12 +70,16 @@ const char * gIOKernelConfigTables =
+     "     'IOProviderClass' = IOResources;"
+     "     'IOMatchCategory' = IOCoreSurfaceRoot;"
+     "   },"
+-#if !defined(ARM64_BOARD_CONFIG_A5XELTE)
+     "   {"
+     "     'IOClass'         = AppleCLCD;"
+     "     'IOProviderClass' = IOPlatformDevice;"
++#if defined(ARM64_BOARD_CONFIG_A5XELTE)
++    "     'IONameMatch'     = 'samsung,a5xelte-display';"
++#else
+     "     'IONameMatch'     = 'sweet,display';"
++#endif
+     "   },"
++#if !defined(ARM64_BOARD_CONFIG_A5XELTE)
+     "   {"
+     "     'IOClass'         = SweetHIDButtons;"
+     "     'IOProviderClass' = IOResources;"
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+index 9a0bfc14..1bcb427b 100644
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -277,6 +277,8 @@ _cnputc(char c, bool poll)
+  */
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ extern void sweet_log_append(const char *c, int size);  /* bsd/dev/sweet_ufs.c */
++#endif
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+ /*
+  * Set by AppleCLCD (boot-arg sweetfb_noconsole=1) once the GUI presents:
+  * console text still goes to the persistent log, but is not drawn over
+@@ -290,6 +292,8 @@ _cnputs(char *c, int size, bool poll)
+ {
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ 	sweet_log_append(c, size);
++#endif
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 	if (sweet_console_muted && !panic_active()) {
+ 		return;
+ 	}
+-- 
+2.53.0
+

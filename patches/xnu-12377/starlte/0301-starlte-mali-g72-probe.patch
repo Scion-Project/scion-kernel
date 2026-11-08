@@ -1,0 +1,43 @@
+From 3a68c3719df9a3292b3815727c8a8707efede7e8 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:35:14 +0200
+Subject: [PATCH] patch: 0301-starlte-mali-g72-probe.patch
+
+---
+ bsd/conf/files                |    1 +
+ bsd/dev/starlte_gpu.c         | 1183 +++++++++++++++++++++++++++++++++
+ bsd/dev/starlte_gpu_tri.h     |  210 ++++++
+ iokit/bsddev/IOKitBSDInit.cpp |    3 +
+ 4 files changed, 1397 insertions(+)
+ create mode 100644 bsd/dev/starlte_gpu.c
+ create mode 100644 bsd/dev/starlte_gpu_tri.h
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 22945546..c34fb6af 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -109,6 +109,7 @@ bsd/dev/herolte_ufs.c			standard
+ bsd/dev/herolte_touch.c			standard
+ bsd/dev/starlte_touch.c			standard
+ bsd/dev/starlte_smp.c			standard
++bsd/dev/starlte_gpu.c			standard
+ bsd/dev/herolte_battery.c		standard
+ bsd/dev/herolte_gpu.c			standard
+ bsd/dev/a5xelte_keys.c			standard
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index 2c28458a..7fac379e 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -814,6 +814,9 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+ 		starlte_touch_probe();
+ 		extern void starlte_smp_probe(void);   /* boot-arg starsmpprobe=1 */
+ 		starlte_smp_probe();
++		/* Mali-G72 read-only probe (bsd/dev/starlte_gpu.c), boot-arg stargpu=0 off. */
++		extern void starlte_gpu_probe(void);
++		starlte_gpu_probe();
+ 	}
+ 	{
+ 	uint32_t ufsprobe = 0;
+-- 
+2.53.0
+

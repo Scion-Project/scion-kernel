@@ -1,0 +1,108 @@
+From 0b72bef1a1462fbd0ae2712f30c2521919e40825 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:32 +0200
+Subject: [PATCH] patch: 0058-sweet-hid-event-services.patch
+
+---
+ iokit/Kernel/arm/hid/AppleHIDUsageTables.h    |   22 +
+ iokit/Kernel/arm/hid/IOGraphicsTypes.h        |   22 +
+ iokit/Kernel/arm/hid/IOHIDDebug.h             |   31 +
+ iokit/Kernel/arm/hid/IOHIDDeviceKeys.h        |  228 +
+ iokit/Kernel/arm/hid/IOHIDDeviceTypes.h       |  311 +
+ iokit/Kernel/arm/hid/IOHIDEvent.cpp           | 1814 ++++
+ iokit/Kernel/arm/hid/IOHIDEvent.h             |  483 +
+ iokit/Kernel/arm/hid/IOHIDEventData.h         |  254 +
+ iokit/Kernel/arm/hid/IOHIDEventFieldDefs.h    |  324 +
+ iokit/Kernel/arm/hid/IOHIDEventMacroDefs.h    | 8571 +++++++++++++++++
+ iokit/Kernel/arm/hid/IOHIDEventService.h      |   75 +
+ iokit/Kernel/arm/hid/IOHIDEventServiceKeys.h  |  144 +
+ .../arm/hid/IOHIDEventServiceKeys_Private.h   |  330 +
+ .../Kernel/arm/hid/IOHIDEventServiceQueue.cpp |  298 +
+ iokit/Kernel/arm/hid/IOHIDEventServiceQueue.h |   74 +
+ iokit/Kernel/arm/hid/IOHIDEventServiceTypes.h |   74 +
+ .../arm/hid/IOHIDEventServiceUserClient.cpp   |  706 ++
+ .../arm/hid/IOHIDEventServiceUserClient.h     |  148 +
+ iokit/Kernel/arm/hid/IOHIDEventStructDefs.h   |  811 ++
+ iokit/Kernel/arm/hid/IOHIDEventTypes.h        |  799 ++
+ iokit/Kernel/arm/hid/IOHIDFamilyTrace.h       |   72 +
+ iokit/Kernel/arm/hid/IOHIDKeys.h              |  466 +
+ iokit/Kernel/arm/hid/IOHIDParameter.h         |  350 +
+ iokit/Kernel/arm/hid/IOHIDPrivateKeys.h       |  212 +
+ iokit/Kernel/arm/hid/IOHIDProperties.h        |  105 +
+ iokit/Kernel/arm/hid/IOHIDShared.h            |  291 +
+ iokit/Kernel/arm/hid/IOHIDTypes.h             |  182 +
+ iokit/Kernel/arm/hid/IOHIDUsageTables.h       | 2694 ++++++
+ iokit/Kernel/arm/hid/IOLLEvent.h              |  586 ++
+ iokit/Kernel/arm/hid/SweetHID.cpp             |  539 ++
+ iokit/Kernel/arm/hid/ev_keymap.h              |  171 +
+ iokit/KernelConfigTables.cpp                  |   10 +
+ iokit/conf/files.arm64                        |    4 +
+ 33 files changed, 21201 insertions(+)
+ create mode 100644 iokit/Kernel/arm/hid/AppleHIDUsageTables.h
+ create mode 100644 iokit/Kernel/arm/hid/IOGraphicsTypes.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDDebug.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDDeviceKeys.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDDeviceTypes.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEvent.cpp
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEvent.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventData.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventFieldDefs.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventMacroDefs.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventService.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventServiceKeys.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventServiceKeys_Private.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventServiceQueue.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventServiceTypes.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventStructDefs.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDEventTypes.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDFamilyTrace.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDKeys.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDParameter.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDPrivateKeys.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDProperties.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDShared.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDTypes.h
+ create mode 100644 iokit/Kernel/arm/hid/IOHIDUsageTables.h
+ create mode 100644 iokit/Kernel/arm/hid/IOLLEvent.h
+ create mode 100644 iokit/Kernel/arm/hid/SweetHID.cpp
+ create mode 100644 iokit/Kernel/arm/hid/ev_keymap.h
+
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index ed8cd689..420e5950 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -67,6 +67,16 @@ const char * gIOKernelConfigTables =
+     "     'IOProviderClass' = IOPlatformDevice;"
+     "     'IONameMatch'     = 'sweet,display';"
+     "   },"
++    "   {"
++    "     'IOClass'         = SweetHIDButtons;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = SweetHIDButtons;"
++    "   },"
++    "   {"
++    "     'IOClass'         = SweetHIDTouch;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = SweetHIDTouch;"
++    "   },"
+ #endif
+     "   {"
+     "     'IOClass'         = IOPanicPlatform;"
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+index 05de20f9..da6c812f 100644
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -15,3 +15,7 @@ iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitc
+ iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp
+ iokit/Kernel/arm/SweetSurface.cpp                                optional iokitcpp
+ iokit/Kernel/arm/SweetFramebuffer.cpp                            optional iokitcpp
++iokit/Kernel/arm/hid/SweetHID.cpp                                optional iokitcpp
++iokit/Kernel/arm/hid/IOHIDEvent.cpp                              optional iokitcpp
++iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp                  optional iokitcpp
++iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp             optional iokitcpp
+-- 
+2.53.0
+

@@ -1,0 +1,73 @@
+From 87c2db20f71bdf66c0d87dc232b662120c0a9505 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:19 +0200
+Subject: [PATCH] patch: 0019-sweet-builtin-pthread.patch
+
+---
+ bsd/conf/Makefile.template          |  9 +++++++++
+ bsd/conf/files                      |  3 +++
+ bsd/pthread/sweet_pthread_compat.h  | 25 +++++++++++++++++++++++++
+ bsd/pthread/sweet_pthread_init.c    | 26 ++++++++++++++++++++++++++
+ bsd/pthread/sweet_pthread_support.c |  5 +++++
+ bsd/pthread/sweet_pthread_synch.c   |  5 +++++
+ bsd/sys/pthread_internal.h          |  5 +++++
+ 7 files changed, 78 insertions(+)
+ create mode 100644 bsd/pthread/sweet_pthread_compat.h
+ create mode 100644 bsd/pthread/sweet_pthread_init.c
+ create mode 100644 bsd/pthread/sweet_pthread_support.c
+ create mode 100644 bsd/pthread/sweet_pthread_synch.c
+
+diff --git a/bsd/conf/Makefile.template b/bsd/conf/Makefile.template
+index c4cbbe93..23b413a7 100644
+--- a/bsd/conf/Makefile.template
++++ b/bsd/conf/Makefile.template
+@@ -44,6 +44,15 @@ CFLAGS+= -include meta_features.h -DDRIVER_PRIVATE \
+         -Warray-bounds-pointer-arithmetic
+ SFLAGS+= -include meta_features.h
+ 
++# This provider is built into SWEET; other boards use their normal kext.
++ifeq ($(CURRENT_MACHINE_CONFIG),SWEET)
++SWEET_PTHREAD_ROOT = $(SRCROOT)/bsd/pthread/sweet_libpthread
++SWEET_PTHREAD_INC = -I$(SWEET_PTHREAD_ROOT) -I$(SWEET_PTHREAD_ROOT)/private -I$(SWEET_PTHREAD_ROOT)/include
++sweet_pthread_init.o_INCFLAGS = $(SWEET_PTHREAD_INC)
++sweet_pthread_support.o_INCFLAGS = $(SWEET_PTHREAD_INC)
++sweet_pthread_synch.o_INCFLAGS = $(SWEET_PTHREAD_INC)
++endif
++
+ #
+ # Directories for mig generated files
+ #
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 60d8aa61..0ba38ded 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -380,6 +380,9 @@ bsd/security/audit/audit_syscalls.c		standard
+ bsd/security/audit/audit_worker.c		optional config_audit
+ 
+ bsd/pthread/pthread_shims.c		standard
++bsd/pthread/sweet_pthread_init.c	standard
++bsd/pthread/sweet_pthread_support.c	standard
++bsd/pthread/sweet_pthread_synch.c	standard
+ bsd/pthread/pthread_priority.c		standard
+ bsd/pthread/pthread_workqueue.c		standard
+ 
+diff --git a/bsd/sys/pthread_internal.h b/bsd/sys/pthread_internal.h
+index 42e23d81..135405e0 100644
+--- a/bsd/sys/pthread_internal.h
++++ b/bsd/sys/pthread_internal.h
+@@ -34,7 +34,12 @@
+ 
+ struct ksyn_waitq_element {
+ #if __LP64__
++	#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/* libpthread-514.100.2 includes the trailing kwe_uth pointer. */
++	char opaque[56];
++#else
+ 	char opaque[48];
++#endif
+ #else
+ 	char opaque[32];
+ #endif
+-- 
+2.53.0
+

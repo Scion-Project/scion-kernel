@@ -1,0 +1,23 @@
+From 0365a6b294a39c8634195a26b5a2a7f0412b0615 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:19 +0200
+Subject: [PATCH] patch: 0025-sweet-builtin-amfi-no-entitlements.patch
+
+---
+ bsd/conf/files        |   1 +
+ bsd/kern/sweet_amfi.c | 176 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 177 insertions(+)
+ create mode 100644 bsd/kern/sweet_amfi.c
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 0ba38ded..638bc522 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -401,6 +401,7 @@ bsd/kern/kern_core.c			optional config_ucoredump
+ bsd/kern/kern_credential.c		standard
+ bsd/kern/kern_crossarch.c		standard
+ bsd/kern/kern_cs.c			standard
++bsd/kern/sweet_amfi.c			standard
+ bsd/kern/kern_csr.c			optional config_csr
+ bsd/kern/kern_debug.c			standard
+ bsd/kern/kern_symfile.c			standard

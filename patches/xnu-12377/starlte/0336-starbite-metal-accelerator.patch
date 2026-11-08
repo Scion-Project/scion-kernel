@@ -1,0 +1,42 @@
+From 5b223667f48e135a055788682d4701f1d7bc01a1 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Sun, 1 Nov 2026 23:52:24 +0200
+Subject: [PATCH] patch: 0336-starbite-metal-accelerator.patch
+
+sweet: StarbiteAccelerator, the GPU as Metal sees it (after IOS-26-Hot patch 0096, MIT): an IOAcceleratorES service whose MetalPluginName/MetalPluginClassName point Metal.framework at /System/Library/Extensions/StarbiteMetal.bundle (metal2vulkan over PanVK, tools/metal2). Boot-arg sbmtl=1 publishes it; without it Metal finds no device and CoreAnimation keeps sbca's GL renderer.
+- StarbiteAccelerator
+---
+ iokit/Kernel/arm/StarbiteAccelerator.cpp | 57 ++++++++++++++++++++++++
+ iokit/KernelConfigTables.cpp             |  5 +++
+ iokit/conf/files.arm64                   |  1 +
+ 3 files changed, 63 insertions(+)
+ create mode 100644 iokit/Kernel/arm/StarbiteAccelerator.cpp
+
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index ac4992d6..1b4b7d4d 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -95,6 +95,11 @@ const char * gIOKernelConfigTables =
+     "     'IOProviderClass' = IOResources;"
+     "     'IOMatchCategory' = SweetBattery;"
+     "   },"
++    "   {"
++    "     'IOClass'         = StarbiteAccelerator;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = StarbiteAccelerator;"
++    "   },"
+ #endif
+ #if defined(ARM64_BOARD_CONFIG_A5XELTE)
+     "   {"
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+index 01248169..f212ddfe 100644
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -18,6 +18,7 @@ iokit/Kernel/arm/SweetFramebuffer.cpp                            optional iokitc
+ iokit/Kernel/arm/StarbiteMali.cpp                                optional iokitcpp
+ iokit/Kernel/arm/A5XELTEGPU.cpp                                 optional iokitcpp
+ iokit/Kernel/arm/SweetBattery.cpp                                optional iokitcpp
++iokit/Kernel/arm/StarbiteAccelerator.cpp                         optional iokitcpp
+ iokit/Kernel/arm/hid/SweetHID.cpp                                optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEvent.cpp                              optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp                  optional iokitcpp

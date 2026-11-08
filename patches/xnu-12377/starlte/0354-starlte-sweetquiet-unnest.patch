@@ -1,0 +1,46 @@
+From 4d4b289437c1a7c5af94a2a0e496e9c7cec60d77 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 4 Nov 2026 00:21:00 +0200
+Subject: [PATCH] patch: 0354-starlte-sweetquiet-unnest.patch - sweetquiet=1
+ drops the shared-region unnest line (it filled the 16 KiB pmsg ring on macOS)
+
+---
+ bsd/vm/vm_unix.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/bsd/vm/vm_unix.c b/bsd/vm/vm_unix.c
+index e3513e47..1046ab29 100644
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -852,6 +852,20 @@ log_unnest_badness(
+ 	    vm_map_offset_t, s,
+ 	    vm_map_offset_t, e,
+ 	    vm_map_offset_t, lowest_unnestable_addr);
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	{
++		/* sweetquiet=1: macOS processes unnest on every exec here (the trap-emulated arm64e
++		 * code); the line fills the 16 KiB pmsg ring that carries the panic log to TWRP */
++		static int quiet = -1;
++		if (quiet < 0) {
++			quiet = 0;
++			PE_parse_boot_argn("sweetquiet", &quiet, sizeof(quiet));
++		}
++		if (quiet) {
++			return;
++		}
++	}
++#endif
+ #if defined(__x86_64__)
+ 	printf("%s[%d] triggered unnest of range 0x%qx->0x%qx of DYLD shared region in VM map %p. While not abnormal for debuggers, this increases system memory footprint until the target exits.\n", current_proc()->p_comm, proc_getpid(current_proc()), (uint64_t)s, (uint64_t)e, (void *) VM_KERNEL_ADDRPERM(m));
+ #else
+@@ -3161,6 +3175,7 @@ SYSCTL_PROC(_vm_reclaim, OID_AUTO, sampling_period_critical_ns,
+ 
+ #include <kern/thread.h>
+ #include <sys/user.h>
++#include <pexpert/pexpert.h>
+ 
+ void vm_pageout_io_throttle(void);
+ 
+-- 
+2.53.0
+

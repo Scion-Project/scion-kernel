@@ -1,0 +1,66 @@
+From ef92328c16fa7386139b1dbc93eb7fd25fad89f9 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:35:14 +0200
+Subject: [PATCH] patch: 0306-starlte-ios-overlay.patch
+
+---
+ bsd/conf/files            |   1 +
+ bsd/dev/starlte_overlay.c | 251 ++++++++++++++++++++++++++++++++++++++
+ bsd/kern/bsd_init.c       |   9 ++
+ bsd/vfs/vfs_subr.c        |   5 +-
+ 4 files changed, 264 insertions(+), 2 deletions(-)
+ create mode 100644 bsd/dev/starlte_overlay.c
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index c34fb6af..ad533bbe 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -110,6 +110,7 @@ bsd/dev/herolte_touch.c			standard
+ bsd/dev/starlte_touch.c			standard
+ bsd/dev/starlte_smp.c			standard
+ bsd/dev/starlte_gpu.c			standard
++bsd/dev/starlte_overlay.c		standard
+ bsd/dev/herolte_battery.c		standard
+ bsd/dev/herolte_gpu.c			standard
+ bsd/dev/a5xelte_keys.c			standard
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index de81e9ee..f73a304a 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -1133,6 +1133,15 @@ bsdinit_task(void)
+ 
+ 	bsd_init_kprintf("bsd_do_post - done");
+ 
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	/* Starbite iOS overlay from the OS store, before launchd reads anything
++	 * (bsd/dev/starlte_overlay.c). */
++	{
++		extern void starlte_overlay_install(void);
++		starlte_overlay_install();
++	}
++#endif
++
+ 	load_init_program(p);
+ 	lock_trace = 1;
+ }
+diff --git a/bsd/vfs/vfs_subr.c b/bsd/vfs/vfs_subr.c
+index b1328f4e..742c1f44 100644
+--- a/bsd/vfs/vfs_subr.c
++++ b/bsd/vfs/vfs_subr.c
+@@ -1250,10 +1250,11 @@ vfs_mountroot(void)
+ 
+ 		mp = vfs_rootmountalloc_internal(vfsp, "root_device");
+ 		mp->mnt_devvp = rootvp;
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_STARLTE)
+ 		/*
+ 		 * SWEET has no data volume: /private/var lives on the root, so
+-		 * boot-arg rootrw=1 mounts it read-write from the start.
++		 * boot-arg rootrw=1 mounts it read-write from the start. STARLTE
++		 * too, and its overlay installer writes before launchd starts.
+ 		 */
+ 		{
+ 			uint32_t rootrw = 0;
+-- 
+2.53.0
+

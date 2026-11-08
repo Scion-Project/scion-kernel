@@ -1,0 +1,143 @@
+--- a/meson.build
++++ b/meson.build
+@@ -1716,7 +1716,7 @@
+   # dependencies (such as vk-runtime) linking to it
+   dep_libdrm = null_dep
+ endif
+-if host_machine.system() == 'darwin' and with_gallium_panfrost
++if host_machine.system() == 'darwin' and (with_gallium_panfrost or with_panfrost_vk)
+   # Starbite (iOS): no DRM on this system. Panfrost's requests go to the
+   # kernel's StarbiteMali user client through a stand-in for libdrm
+   # (src/starbite-drm, copied in by tools/ios27/mesa-ios/mk-mesa-ios.sh).
+@@ -1724,6 +1724,10 @@
+     include_directories : include_directories('src/starbite-drm'),
+     link_args : ['-framework', 'IOKit', '-framework', 'CoreFoundation'],
+   )
++  if with_panfrost_vk
++    # (Vulkan's runtime and PanVK need libdrm's devices and sync objects: in the stand-in too)
++    pre_args += '-DHAVE_LIBDRM'
++  endif
+ elif dep_libdrm.found()
+   pre_args += '-DHAVE_LIBDRM'
+   if with_dri_platform == 'drm' and with_dri
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -10,8 +10,14 @@
+  */
+ 
+ #include <sys/stat.h>
++#ifdef __APPLE__
++#include <sys/sysctl.h>
++#else
+ #include <sys/sysinfo.h>
++#endif
++#ifndef __APPLE__
+ #include <sys/sysmacros.h>
++#endif
+ 
+ #include "util/disk_cache.h"
+ #include "git_sha1.h"
+@@ -1085,10 +1091,17 @@
+ static uint64_t
+ get_system_heap_size()
+ {
++#ifdef __APPLE__
++   /* Starbite (iOS): hw.memsize */
++   uint64_t total_ram = 0;
++   size_t len = sizeof(total_ram);
++   sysctlbyname("hw.memsize", &total_ram, &len, NULL, 0);
++#else
+    struct sysinfo info;
+    sysinfo(&info);
+ 
+    uint64_t total_ram = (uint64_t)info.totalram * info.mem_unit;
++#endif
+ 
+    /* We don't want to burn too much ram with the GPU.  If the user has 4GiB
+     * or less, we use at most half.  If they have more than 4GiB, we use 3/4.
+--- a/src/panfrost/vulkan/panvk_instance.c
++++ b/src/panfrost/vulkan/panvk_instance.c
+@@ -155,6 +155,7 @@
+ 
+    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
+ 
++#ifndef __APPLE__
+    const struct build_id_note *note =
+       build_id_find_nhdr_for_addr(panvk_CreateInstance);
+    if (!note) {
+@@ -167,6 +168,7 @@
+       return panvk_errorf(NULL, VK_ERROR_INITIALIZATION_FAILED,
+                           "build-id too short.  It needs to be a SHA");
+    }
++#endif
+ 
+    pAllocator = pAllocator ?: vk_default_allocator();
+    instance = vk_zalloc(pAllocator, sizeof(*instance), 8,
+@@ -206,7 +208,13 @@
+    VG(VALGRIND_CREATE_MEMPOOL(instance, 0, false));
+ 
+    STATIC_ASSERT(sizeof(instance->driver_build_sha) == SHA1_DIGEST_LENGTH);
++#ifdef __APPLE__
++   /* Starbite (iOS): no ELF build-id in a Mach-O; the version names the build */
++   _mesa_sha1_compute("starbite-panvk-" PACKAGE_VERSION, strlen("starbite-panvk-" PACKAGE_VERSION),
++                      instance->driver_build_sha);
++#else
+    memcpy(instance->driver_build_sha, build_id_data(note), SHA1_DIGEST_LENGTH);
++#endif
+ 
+    *pInstance = panvk_instance_to_handle(instance);
+ 
+--- a/src/panfrost/vulkan/meson.build
++++ b/src/panfrost/vulkan/meson.build
+@@ -202,7 +202,10 @@
+     idep_mesautil,
+   ],
+   c_args : [no_override_init_args, panvk_flags],
+-  link_args : [ld_args_bsymbolic, ld_args_gc_sections, ld_args_build_id],
++  # (Starbite, iOS: the entrypoint tables point at weak declarations of every entrypoint, which
++  # ELF leaves NULL when undefined; Mach-O's linker wants to be told)
++  link_args : [ld_args_bsymbolic, ld_args_gc_sections, ld_args_build_id] +
++    (host_machine.system() == 'darwin' ? ['-Wl,-undefined,dynamic_lookup'] : []),
+   install : true,
+ )
+ 
+--- a/src/vulkan/runtime/vk_image.h
++++ b/src/vulkan/runtime/vk_image.h
+@@ -75,7 +75,7 @@
+    /* wsi_image_create_info::scanout */
+    bool wsi_legacy_scanout;
+ 
+-#if DETECT_OS_LINUX || DETECT_OS_BSD
++#if DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_APPLE
+    /* VK_EXT_drm_format_modifier
+     *
+     * Initialized by vk_image_create/init() to DRM_FORMAT_MOD_INVALID.  It's
+--- a/src/vulkan/runtime/vk_image.c
++++ b/src/vulkan/runtime/vk_image.c
+@@ -23,7 +23,7 @@
+ 
+ #include "vk_image.h"
+ 
+-#if DETECT_OS_LINUX || DETECT_OS_BSD
++#if DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_APPLE
+ #include <drm-uapi/drm_fourcc.h>
+ #endif
+ 
+@@ -96,7 +96,7 @@
+       vk_find_struct_const(pCreateInfo->pNext, WSI_IMAGE_CREATE_INFO_MESA);
+    image->wsi_legacy_scanout = wsi_info && wsi_info->scanout;
+ 
+-#if DETECT_OS_LINUX || DETECT_OS_BSD
++#if DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_APPLE
+    image->drm_format_mod = ((1ULL << 56) - 1) /* DRM_FORMAT_MOD_INVALID */;
+ #endif
+ 
+@@ -168,7 +168,7 @@
+    vk_object_free(device, alloc, image);
+ }
+ 
+-#if DETECT_OS_LINUX || DETECT_OS_BSD
++#if DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_APPLE
+ VKAPI_ATTR VkResult VKAPI_CALL
+ vk_common_GetImageDrmFormatModifierPropertiesEXT(UNUSED VkDevice device,
+                                                  VkImage _image,

@@ -1,0 +1,42 @@
+From 66785c1f9fdc453ba1695f286b12fada3610a08f Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:19 +0200
+Subject: [PATCH] patch: 0018-sweet-boot-cpu-driver.patch
+
+---
+ iokit/Kernel/arm/SweetCPU.cpp | 171 ++++++++++++++++++++++++++++++++++
+ iokit/KernelConfigTables.cpp  |   6 ++
+ iokit/conf/files.arm64        |   2 +
+ 3 files changed, 179 insertions(+)
+ create mode 100644 iokit/Kernel/arm/SweetCPU.cpp
+
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index 4709a644..4da6023c 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -41,6 +41,12 @@ const char * gIOKernelConfigTables =
+     "     'IONameMatch'     = 'xiaomi,sweet';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
++    "   {"
++    "     'IOClass'         = SweetCPU;"
++    "     'IOProviderClass' = IOPlatformDevice;"
++    "     'IONameMatch'     = 'qcom,kryo470';"
++    "     'IOProbeScore'    = 10000:32;"
++    "   },"
+ #endif
+     "   {"
+     "     'IOClass'         = IOPanicPlatform;"
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+index 90cff062..2aec2c05 100644
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -8,3 +8,5 @@ iokit/Kernel/arm/AppleARMSMP.cpp    					optional iokitcpp
+ 
+ # SWEET device-tree platform (empty translation unit on other boards)
+ iokit/Kernel/arm/SweetPlatformExpert.cpp                         optional iokitcpp
++
++iokit/Kernel/arm/SweetCPU.cpp                                    optional iokitcpp
+-- 
+2.53.0
+

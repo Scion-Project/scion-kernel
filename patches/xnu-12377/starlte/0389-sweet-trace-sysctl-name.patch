@@ -1,0 +1,26 @@
+From d99f6fa6d8e79a0b175f2b2946f92ea84b457d70 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Thu, 5 Nov 2026 01:42:50 +0200
+Subject: [PATCH] patch: 0389-sweet-trace-sysctl-name.patch - sweettracename:
+ the name of a failing sysctlbyname lookup
+
+---
+ bsd/dev/arm/systemcalls.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 95a2e9f0..a6d58052 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -101,6 +101,8 @@ sweet_trace_path_arg(int code, const uint64_t *arg)
+ 		return (user_addr_t)arg[0];
+ 	case 464:       /* openat_nocancel */
+ 		return (user_addr_t)arg[1];
++	case 202:       /* sysctl: a two-level name is sysctlbyname's {0, 3} lookup, the name string in newp */
++		return arg[1] == 2 ? (user_addr_t)arg[4] : 0;
+ 	case SYS_openat: case SYS_renameat: case SYS_faccessat: case SYS_fchmodat:
+ 	case SYS_fchownat: case SYS_fstatat64: case SYS_unlinkat: case SYS_readlinkat:
+ 	case SYS_mkdirat: case SYS_getattrlistat:
+-- 
+2.53.0
+

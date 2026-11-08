@@ -1,0 +1,42 @@
+From 1a4f989e5d772d05464e19b9d8c49a37d9c0654f Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:20 +0200
+Subject: [PATCH] patch: 0035-sweet-amfi-entitlements-platform-binaries.patch
+
+---
+ bsd/kern/bsd_init.c                    |   6 +
+ bsd/kern/sweet_amfi.c                  | 189 ++++++++++++++++++++-----
+ iokit/Kernel/arm/SweetEntitlements.cpp | 184 ++++++++++++++++++++++++
+ iokit/conf/files.arm64                 |   1 +
+ 4 files changed, 344 insertions(+), 36 deletions(-)
+ create mode 100644 iokit/Kernel/arm/SweetEntitlements.cpp
+
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index f139b128..d97be0ad 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -701,6 +701,12 @@ bsd_init(void)
+ 	bsd_init_kprintf("calling vfsinit\n");
+ 	vfsinit();
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/* AMFI's MAC policy is built in on SWEET (bsd/kern/sweet_amfi.c). */
++	extern void sweet_amfi_policy_register(void);
++	sweet_amfi_policy_register();
++#endif
++
+ #if SWEET_HFS
+ 	/* HFS is built in on SWEET: register it like its kext would, before mounting root. */
+ 	extern void sweet_hfs_register(void);
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+index 2aec2c05..d4528a35 100644
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -10,3 +10,4 @@ iokit/Kernel/arm/AppleARMSMP.cpp    					optional iokitcpp
+ iokit/Kernel/arm/SweetPlatformExpert.cpp                         optional iokitcpp
+ 
+ iokit/Kernel/arm/SweetCPU.cpp                                    optional iokitcpp
++iokit/Kernel/arm/SweetEntitlements.cpp                           optional iokitcpp
+-- 
+2.53.0
+

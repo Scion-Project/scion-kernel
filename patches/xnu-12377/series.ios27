@@ -1,0 +1,203 @@
+# iOS 27 on the Galaxy S9 (STARLTE, Exynos 9810): Apple's xnu-12377.121.6 (ac9718fb1af6), pristine, then these, in order
+# (xnu/apply-series.sh, selected by profiles/ios-27.conf). One block, from three layers and Scion's changes:
+#   - darwin-xnu-build's edits to the tree and its own patches (blacktop, MIT): starlte/blacktop/
+#   - ios-sweet (dipa-studio, MIT) 0003-0081, ios-a5xelte (orhunnx and A5XELTE contributors, MIT) 0082-0128, the Galaxy S7 layer
+#     (wardevsa; used and published with the author's permission) 0200-0238, and the Starbite author's STARLTE port 0300-0398:
+#     starlte/ (its README.md says how each patch was ported to xnu-12377)
+#   - Scion's: 0120 (Darwin 27's system calls, the same file as the ios-26 series) and starlte/0400 and up
+# Lines ending .sh are run in the tree's root with MACHINE_CONFIG (the profile's) and MACOS_VERSION=26.5: they stage Apple's HFS,
+# libpthread and BearSSL by commit, and take CoreEntitlements' headers from the Kernel Debug Kit you bring (KDKROOT).
+# The drivers are this series': it carries the ones it booted with (docs/ios27-starlte.md has the plan to take them from drivers/).
+# drivers: series
+# imports: none
+starlte/blacktop/10_dxb_build_seds.sh
+starlte/0019-stage-libpthread.sh
+starlte/0020-stage-bearssl.sh
+starlte/0026-stage-hfs.sh
+starlte/blacktop/00_setup_coreentitlements.sh
+# what the series adds as files (xnu/files-12377/, the tree's own layout): after the staging above, before the patches that hook them in
+files xnu/files-12377
+# Scion's own driver files, from where they live in this repository (drivers/, socs/, xnu/files/), byte for byte as the series booted with them
+copy drivers/soc/exynos/hakios.exynos_hsi2c.c bsd/dev/hakios.exynos_hsi2c.c
+copy drivers/usb/hakios.exynos_usb.c bsd/dev/hakios.exynos_usb.c
+copy drivers/usb/hakios.usb_acm.h bsd/dev/hakios.usb_acm.h
+copy drivers/usb/hakios.usb_glue.h bsd/dev/hakios.usb_glue.h
+copy socs/exynos9810/include/hakios.exynos9810_soc.h bsd/sys/hakios.exynos9810_soc.h
+copy xnu/files/bsd/sys/hakios.exynos_acpm.h bsd/sys/hakios.exynos_acpm.h
+copy xnu/files/bsd/sys/hakios.exynos_hsi2c.h bsd/sys/hakios.exynos_hsi2c.h
+copy xnu/files/bsd/sys/hakios.exynos_pcie.h bsd/sys/hakios.exynos_pcie.h
+copy xnu/files/bsd/sys/hakios.input.h bsd/sys/hakios.input.h
+copy xnu/files/bsd/sys/hakios.log.h bsd/sys/hakios.log.h
+copy xnu/files/bsd/sys/hakios.scion_gov.h bsd/sys/hakios.scion_gov.h
+copy xnu/files/bsd/sys/hakios.xnu.h bsd/sys/hakios.xnu.h
+
+starlte/0003-sweet-framebuffer-serial-console.patch
+starlte/0004-sweet-machine-config.patch
+starlte/0006-sweet-master-config-open-source-asm-pmap.patch
+starlte/0008-sweet-fill-closed-lib-gaps-kpc-stub.patch
+starlte/0009-sweet-drop-apple-soc-only-exports.patch
+starlte/0010-sweet-early-framebuffer-debug.patch
+starlte/0011-sweet-physmap-alignment-padding.patch
+starlte/0012-sweet-keep-debug-console-after-ttbr0.patch
+starlte/0013-sweet-kmem-rng-without-corecrypto.patch
+starlte/0014-sweet-kernel-hmac-prng.patch
+starlte/0015-sweet-unavailable-trust-cache-runtime.patch
+starlte/0016-sweet-device-tree-platform-expert.patch
+starlte/0017-sweet-device-tree-virtual-timer-irq.patch
+starlte/0018-sweet-boot-cpu-driver.patch
+starlte/0019-sweet-builtin-pthread.patch
+starlte/0020-sweet-portable-aes-cbc.patch
+starlte/0021-sweet-mockfs-ramdisk-root.patch
+starlte/0022-sweet-ramdisk-root-without-iomedia.patch
+starlte/0023-sweet-builtin-sha256-for-libkern.patch
+starlte/0024-sweet-mockfs-virtual-ramdisk-io.patch
+starlte/0025-sweet-builtin-amfi-no-entitlements.patch
+starlte/0026-sweet-builtin-hfs.patch
+starlte/0027-sweet-bearssl-md5.patch
+starlte/0028-sweet-ufs-root-device.patch
+starlte/0029-sweet-unsealed-root-volume.patch
+starlte/0031-sweet-read-write-root.patch
+starlte/0032-sweet-bearssl-sha1.patch
+starlte/0033-sweet-bearssl-sha384-sha512.patch
+starlte/0035-sweet-amfi-entitlements-platform-binaries.patch
+starlte/0038-sweet-applekeystore.patch
+starlte/0039-sweet-coredump-default-off.patch
+starlte/0040-sweet-iowatchdog.patch
+starlte/0041-sweet-hfs-link-notes.patch
+starlte/0042-sweet-short-exec-log.patch
+starlte/0043-sweet-console-crash-log.patch
+starlte/0044-sweet-crash-log-reason.patch
+starlte/0046-sweet-iosurface-iomfb.patch
+starlte/0047-sweet-persistent-console-log.patch
+starlte/0048-sweet-devnull-tee.patch
+starlte/0049-sweet-iokit-trace.patch
+starlte/0051-sweet-crash-heap-strings.patch
+starlte/0052-sweet-hfs-rename-swap.patch
+starlte/0053-sweet-crash-scan-springboard.patch
+starlte/0054-sweet-process-sampler.patch
+starlte/0055-sweet-aks-ext-state-sampler-depth.patch
+starlte/0058-sweet-hid-event-services.patch
+starlte/0059-sweet-iphone-identity.patch
+starlte/0060-sweet-keys-touch-drivers.patch
+starlte/0062-sweet-touch-power-battery.patch
+starlte/0065-sweet-smp-psci.patch
+starlte/0066-sweet-crash-fault-region.patch
+starlte/0067-sweet-console-mute.patch
+starlte/0070-sweet-pid-hibernate.patch
+starlte/0072-sweet-usb-probe.patch
+starlte/0078-sweet-smp-8-cores.patch
+starlte/0080-sweet-net-trace.patch
+starlte/0082-a5xelte-4k-entry.patch
+starlte/0084-a5xelte-4k-user-va.patch
+starlte/0085-a5xelte-board-target.patch
+starlte/0086-a5xelte-gicv2-platform.patch
+starlte/0087-a5xelte-shared-build-providers.patch
+starlte/0089-a5xelte-decon-screen-checkpoints.patch
+starlte/0090-a5xelte-framebuffer-console.patch
+starlte/0091-a5xelte-assembly-screen-stages.patch
+starlte/0092-a5xelte-xnu-early-text.patch
+starlte/0093-a5xelte-39bit-kernel-va.patch
+starlte/0094-a5xelte-cortex-a53-codegen.patch
+starlte/0096-a5xelte-commpage-llsc.patch
+starlte/0097-a5xelte-zone-va-size.patch
+starlte/0098-a5xelte-portable-crypto.patch
+starlte/0099-a5xelte-architected-timer.patch
+starlte/0100-a5xelte-counter-epoch.patch
+starlte/0102-a5xelte-builtin-pthread.patch
+starlte/0103-a5xelte-ramdisk-root-without-iostorage.patch
+starlte/0104-a5xelte-emmc-gpt-probe.patch
+starlte/0105-a5xelte-unsealed-hfs-root.patch
+starlte/0109-a5xelte-decon-iosurface-bridge.patch
+starlte/0110-a5xelte-system-bootlog.patch
+starlte/0111-a5xelte-crash-diagnostics.patch
+starlte/0114-a5xelte-gicv2-sgi-intid.patch
+starlte/0117-a5xelte-hfs-rename-swap.patch
+starlte/0118-a5xelte-home-hid-display-probe.patch
+starlte/0125-a5xelte-g3d-resource-service.patch
+starlte/0200-herolte-board-target.patch
+starlte/0201-herolte-amfi-bridge.patch
+starlte/0202-herolte-4k-unsigned-dyld-cache.patch
+starlte/0204-herolte-exynos-ufs.patch
+starlte/0208-herolte-four-core-smp.patch
+starlte/0210-herolte-gpio-keys.patch
+starlte/0211-herolte-sec-ts-touch.patch
+starlte/0220-herolte-battery-and-power-key.patch
+starlte/0224-herolte-parallel-copy-kmem-log.patch
+starlte/0225-herolte-mali-t880-probe.patch
+starlte/0226-herolte-mali-first-job.patch
+starlte/0238-herolte-fast-cores-aks-wrap.patch
+starlte/0300-starlte-board-target.patch
+starlte/0301-starlte-mali-g72-probe.patch
+starlte/0304-starlte-m3-cores.patch
+starlte/0305-starlte-mali-user-client.patch
+starlte/0306-starlte-ios-overlay.patch
+starlte/0308-port-sweetcpu-processor-boot.patch
+starlte/0309-port-critical-exit-log.patch
+starlte/0310-port-madvise-hardware-page.patch
+starlte/0311-port-pgz-require-aligned.patch
+starlte/0312-port-xpc-service-port-check.patch
+starlte/0313-port-memlimit-scale.patch
+starlte/0314-port-4k-pages-above-1g.patch
+starlte/0315-port-sync-page-phys-64bit.patch
+starlte/0316-port-exec-inject.patch
+starlte/0318-port-12377-build-fixes.patch
+starlte/0319-sweet-arm64e-userland.patch
+starlte/0320-sweet-dyld-pager-16k.patch
+starlte/0321-sweet-shared-cache-slide-16k.patch
+starlte/0324-sweet-inject-keys-off.patch
+starlte/0325-sweet-user-platform-error.patch
+starlte/0329-sweet-platform-error-par.patch
+starlte/0334-sweet-sr-slide-no-deadlock.patch
+starlte/0336-starbite-metal-accelerator.patch
+starlte/0341-starbite-mali-gpu-client-memlimit.patch
+starlte/0342-sweet-m3-lse-emulation.patch
+starlte/0345-starlte-microsd-driver.patch
+starlte/0346-starlte-microsd-root.patch
+starlte/0354-starlte-sweetquiet-unnest.patch
+starlte/0356-starlte-nosys-log.patch
+starlte/0359-starlte-mac-enopolicy-log.patch
+starlte/0360-sweet-iosurface-root-macos-name.patch
+starlte/0364-sweet-crash-terse.patch
+starlte/0365-starlte-traced-exit-log.patch
+starlte/0366-starlte-traced-exit-backtrace.patch
+starlte/0367-sweet-hidsystem-macos.patch
+starlte/0369-sweet-crash-terse-traced.patch
+starlte/0371-starlte-console-tee.patch
+starlte/0372-starlte-console-tee-iovecs.patch
+starlte/0379-sweet-no-app-sandbox-macos.patch
+starlte/0381-sweet-no-app-sandbox-self-only.patch
+starlte/0383-starlte-msgbuf-8m.patch
+starlte/0386-sweet-legacy-port-arrays.patch
+starlte/0388-sweet-trace-nocancel-paths.patch
+starlte/0389-sweet-trace-sysctl-name.patch
+
+# Darwin 27 system calls (Scion's, the ios-26 series' own file)
+0120-darwin27-syscalls.patch
+
+# darwin-xnu-build's patches that applied to this tree (blacktop, MIT; its link_kdk and remove_applefeatures_include did not)
+starlte/blacktop/define_esr_ec_pac_fail_unconditionally.patch
+starlte/blacktop/disable_bti_vmapple.patch
+starlte/blacktop/dsymutil_no_process_substitution.patch
+starlte/blacktop/guard_sptm_user_pointer_ops_with_pac.patch
+starlte/blacktop/simplify_san_lipo.patch
+
+# Scion's iOS 27 changes on the S9: the USB console, kauth, Darwin 27's interfaces, the 8 GiB shared region, boot-args
+starlte/0400-starlte-usb-gadget-console.patch
+starlte/0401-starlte-kauth-group-guid.patch
+starlte/0402-starlte-darwin27-interfaces.patch
+starlte/0403-starlte-shared-region-8gib.patch
+starlte/0404-starlte-sweetacl-bootarg.patch
+starlte/0405-starlte-eacces-trace.patch
+starlte/0407-starlte-mac-enopolicy-log-once.patch
+starlte/0408-starlte-targetconditionals.patch
+# the iOS-target configuration (tools/ios27/build-xnu-12377-ios.sh) and the GPU track's kernel side (relbuf, IOSurface copy fallback)
+starlte/0410-starlte-ios-target-config.patch
+starlte/0411-starlte-ios-target-hfs-encodings.patch
+starlte/0412-starlte-ios-target-exec-log.patch
+starlte/0414-starlte-ios-target-mac-policy-list.patch
+# parity with Scion's iOS 16.5 kernel (docs/ios27-starlte.md): behind boot-args, off by default, built but not booted
+starlte/0420-starlte-extra-ram.patch
+starlte/0421-starlte-cpu-governor.patch
+starlte/0422-starlte-wifi-pcie-stage1.patch
+starlte/0423-starlte-tmu.patch
+starlte/0424-starlte-dpu-scanout.patch

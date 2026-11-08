@@ -1,0 +1,27 @@
+From 198043640033f0afc66309d6a877cc0a6b5c158c Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:32 +0200
+Subject: [PATCH] patch: 0060-sweet-keys-touch-drivers.patch
+
+---
+ bsd/conf/files        |   2 +
+ bsd/dev/sweet_keys.c  | 182 ++++++++++++++
+ bsd/dev/sweet_touch.c | 568 ++++++++++++++++++++++++++++++++++++++++++
+ bsd/dev/sweet_ufs.c   |   5 +
+ 4 files changed, 757 insertions(+)
+ create mode 100644 bsd/dev/sweet_keys.c
+ create mode 100644 bsd/dev/sweet_touch.c
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 3cc59a2e..3f0ff54e 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -105,6 +105,8 @@ bsd/dev/random/randomdev.c		standard
+ bsd/dev/memdev.c			standard
+ bsd/dev/sweet_ufs.c			standard
+ bsd/dev/sweet_sample.c			standard
++bsd/dev/sweet_keys.c			standard
++bsd/dev/sweet_touch.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+ bsd/dev/unix_startup.c			standard
