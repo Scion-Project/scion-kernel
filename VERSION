@@ -19,6 +19,7 @@ SUBLEVEL = 13
 EXTRAVERSION = -hakios
 NAME = Hello Darwin
 
-# the Darwin this kernel is built on: Apple's open xnu tag (xnu/apply.sh fetches it)
+# the Darwin this kernel is built on: Apple's open xnu tag (xnu/apply.sh fetches it). These are ios-16.5's; a build for
+# another OS profile takes that profile's `darwin` and `xnu_tag` instead (profiles/*.conf, docs/two-bases.md)
 DARWIN = 22.5.0
 XNU = xnu-8796.121.2

@@ -11,12 +11,14 @@ Where to start:
 - [On the phone](getting-started/phone.md): the POCO X5 Pro 5G, in RAM with `fastboot boot`, back to Android with a reboot.
 - [Port a device](porting/index.md): a device is a repository of its own over the common one: a defconfig, a status file, its
   drivers.
+- [Android beside iOS on the Galaxy S9](dual-boot-s9.md): a design for the S9, a boot chooser, a partition plan and a write fence. Nothing run on a phone.
 - [Installing beside Android](dual-boot.md): HakiOS as a second system on the POCO X5 Pro, a menu at every start, your data kept.
 - [U-Boot](u-boot.md): the loader started by U-Boot instead of Silicium's UEFI, from RAM, with nothing of the vendor's.
 - [Reference](reference/drivers.md): every driver, configuration symbol and boot argument, made from the source.
 - [A modular kernel](modular-kernel.md): how this tree maps onto UniXNU's layers, what is ours in XNU, OS profiles.
 - [Two XNU bases](two-bases.md): xnu-8796 (iOS 16.5) and xnu-12377 (iOS 26) in one tree; the profile, series and device layout; what may be taken from ios-on-pixel-10.
 - [The real key store](keystore.md): `keystore_real=1`, off by default: the keychain's keys under the passcode, what that does and does not protect from, and what it costs.
+- [Screen-off power](screen-off-power.md): what the Galaxy S9 does with its screen off, and `panel_sleep=1`, `sleep_cores=1` (off by default).
 - [The passcode](passcode.md): Settings' passcode and the lock screen, on a key store with no Secure Enclave (it locks the
   screen, it does not encrypt), and how to get back in (`passcode_reset=1`).
 

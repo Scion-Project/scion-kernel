@@ -112,6 +112,8 @@ static bool        gic_v2;
 static vm_offset_t gicc_base;
 static uint8_t     gic_v2_target[MAX_CPUS];
 static uint32_t    gic_v2_phys[MAX_CPUS];
+/* a GICv3: each processor's GICD_IROUTER value, as gic_v3_spi_attach() writes it (patch 1517: gic_v3_spi_move()) */
+static uint64_t    gic_v3_route[MAX_CPUS];
 
 /*
  * Acknowledged, not yet EOI'd; 0: none. The signal between processors is interrupt 0 and reads
@@ -148,6 +150,7 @@ void gic_v3_spi_unmask(uint32_t intid);
 void gic_v3_spi_detach(uint32_t intid);
 uint64_t gic_v3_spi_count(uint32_t intid);
 void gic_v3_irq_cpu_shutdown(void);
+uint32_t gic_v3_spi_move(int from_cpu, int to_cpu);
 void gic_v3_irq_signal(uint32_t phys_id);
 void gic_v3_irq_signal_stop(uint32_t phys_id);
 
@@ -451,6 +454,31 @@ gic_v3_irq_quiesce(void)
 }
 
 /*
+ * Scion (patch 1517): this core is switching itself off and will be started again in this same run, because
+ * sleep_cores= is taking it off (its bit is set in hakios_cpu_exit_mask, GenericARMPE.cpp). Forget that its interface
+ * was set up, so that gic_v3_irq_cpu_init() sets it up again at its start rather than returning at once (a core started
+ * so would take no interrupt, not even the timer's or a signal). Its target bit gone, nobody signals it while it is
+ * off. Any other core's shutdown is for the rest of the run, and is left as it was.
+ */
+static void
+gic_v3_irq_cpu_forget(void)
+{
+	int cpu = cpu_number();
+
+#if defined(GENERIC_PSCI_SMP)
+	extern uint32_t hakios_cpu_exit_mask;   /* osfmk/arm/cpu_common.c: the cores sleep_cores= takes off */
+
+	if (cpu < 0 || cpu >= 32 || !(*(volatile uint32_t *)&hakios_cpu_exit_mask & (1u << cpu))) {
+		return;                         /* any other core's shutdown is for the rest of the run: as before */
+	}
+#endif
+	if (cpu >= 0 && cpu < MAX_CPUS) {
+		os_atomic_store(&gic_v2_target[cpu], 0, release);
+		gicr_cpu_base[cpu] = 0;
+	}
+}
+
+/*
  * This processor is leaving for good: the firmware is about to be asked to switch it off
  * (psci_smp_cpu_off(), and the boot processor in the loader's stub when the kernel has a core of
  * its own). Nothing may be left that could interrupt it. The redistributor outlives the core, and
@@ -474,6 +502,7 @@ gic_v3_irq_cpu_shutdown(void)
 		gic_write32(gicd_base + GICD_ICPENDR(0), 0xffffffffu);
 		gic_write32(gicd_base + GICD_ICACTIVER(0), 0xffffffffu);
 		gic_write32(gicc_base + GICC_CTLR, gic_read32(gicc_base + GICC_CTLR) & ~GICC_CTLR_ENABLE);
+		gic_v3_irq_cpu_forget();
 		return;
 	}
 	gicr = gicr_cpu_base[cpu_number()];
@@ -484,6 +513,50 @@ gic_v3_irq_cpu_shutdown(void)
 	}
 	__builtin_arm_wsr64("ICC_IGRPEN1_EL1", 0);
 	__builtin_arm_isb(ISB_SY);
+	gic_v3_irq_cpu_forget();
+}
+
+/*
+ * Scion (patch 1517): every attached SPI routed to processor from_cpu is routed to to_cpu instead: a core about to be
+ * taken off (sleep_cores=, GenericARMPE.cpp) gives its devices' interrupts (the side button, the touch, the storage ...)
+ * to one that stays. They are not given back when it returns: where an SPI goes changes nothing but which core takes it.
+ * How many were moved.
+ */
+uint32_t
+gic_v3_spi_move(int from_cpu, int to_cpu)
+{
+	uint32_t moved = 0;
+
+	if (gicd_base == 0 || from_cpu < 0 || to_cpu < 0 || from_cpu >= MAX_CPUS || to_cpu >= MAX_CPUS || from_cpu == to_cpu ||
+	    (gic_v2 ? gic_v2_target[to_cpu] == 0 : gic_v3_route[to_cpu] == 0)) {
+		return 0;
+	}
+	simple_lock(&gic_spi_lock, LCK_GRP_NULL);
+	for (unsigned i = 0; i < GIC_SPI_MOST; i++) {
+		uint32_t intid = os_atomic_load(&gic_spi[i].intid, acquire);
+
+		if (intid == 0) {
+			continue;
+		}
+		if (gic_v2) {
+			volatile uint8_t *target = (volatile uint8_t *)(gicd_base + GICD_ITARGETSR(intid));
+
+			if (gic_v2_target[from_cpu] != 0 && *target == gic_v2_target[from_cpu]) {
+				*target = gic_v2_target[to_cpu];
+				moved++;
+			}
+		} else {
+			volatile uint64_t *route = (volatile uint64_t *)(gicd_base + GICD_IROUTER(intid));
+
+			if (gic_v3_route[from_cpu] != 0 && *route == gic_v3_route[from_cpu]) {
+				*route = gic_v3_route[to_cpu];
+				moved++;
+			}
+		}
+	}
+	simple_unlock(&gic_spi_lock);
+	gic_distributor_settle();
+	return moved;
 }
 
 static vm_offset_t
@@ -528,7 +601,7 @@ gic_v2_cpu_init(int cpu)
 		/* (a GIC with a single CPU interface may say nothing: it is the only one) */
 		target = 1;
 	}
-	gic_v2_phys[cpu] = (uint32_t)(__builtin_arm_rsr64("MPIDR_EL1") & 0xffff);
+	gic_v2_phys[cpu] = ml_phys_id_from_mpidr(__builtin_arm_rsr64("MPIDR_EL1"));    /* as phys_id has it (patch 1504) */
 
 	if (ml_get_cpu_count() > 1) {
 		uint32_t sgis = (1u << GIC_SGI_SIGNAL) | (1u << GIC_SGI_STOP);
@@ -622,6 +695,11 @@ gic_v3_irq_cpu_init(void)
 	__builtin_arm_isb(ISB_SY);
 
 	gicr = gicr_cpu_base[cpu] = gic_find_redistributor();
+	{
+		uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1");
+
+		gic_v3_route[cpu] = (mpidr & 0xff00000000ull) | (mpidr & 0xffffff);
+	}
 
 	uint32_t waker = gic_read32(gicr + GICR_WAKER);
 	if (waker & (GICR_WAKER_PROCSLEEP | GICR_WAKER_CHILDASLEEP)) {

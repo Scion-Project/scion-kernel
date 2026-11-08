@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 639 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 645 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -197,7 +197,7 @@ CONFIG_HAKIOS_EXYNOS_PCIE=y
 CONFIG_HAKIOS_BRCMFMAC=y
 
 #
-# CPU, memory and boot (21)
+# CPU, memory and boot (26)
 #
 
 # CPU cores the kernel uses, 1 to 8; one if not set
@@ -215,6 +215,9 @@ CONFIG_HAKIOS_BRCMFMAC=y
 # read by the patch to Apple's files (kernel)
 # CONFIG_APPLOG_NAME is not set
 
+# read by loader_return.c (kernel)
+# CONFIG_AVF_EXIT is not set
+
 # every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py ...
 # CONFIG_CPULOAD is not set
 
@@ -226,6 +229,12 @@ CONFIG_HAKIOS_BRCMFMAC=y
 
 # read by hakios.cpufreq.c (kernel)
 # CONFIG_DDR_VOTE is not set
+
+# right after ml_parse_cpu_topology(), what the kernel will match each processor's MPIDR against
+# CONFIG_EARLY_LOG is not set
+
+# read by loader_return.c (kernel)
+# CONFIG_ESSLOG is not set
 
 # read by GenericARMPE.cpp (kernel)
 # CONFIG_MACHINE_NAME is not set
@@ -244,6 +253,12 @@ CONFIG_HAKIOS_BRCMFMAC=y
 
 # read by loader_return.c (kernel)
 # CONFIG_RETURN_PANIC is not set
+
+# sleep_cores_after= seconds (default 10) after the screen went off, the cores of the performance
+# CONFIG_SLEEP_CORES is not set
+
+# read by GenericARMPE.cpp (kernel)
+# CONFIG_SLEEP_CORES_AFTER is not set
 
 # read by the patch to Apple's files (kernel)
 # CONFIG_SMALL_CORES is not set
@@ -497,7 +512,7 @@ CONFIG_TOUCHSCREEN=y
 # CONFIG_VIRTIO_INPUT is not set
 
 #
-# GPU and display (107)
+# GPU and display (109)
 #
 
 # rendering on Adreno (an image built with GL=1; the GPU's firmware from your phone) [needs fw-gpu/ from the phone]
@@ -788,6 +803,9 @@ CONFIG_GPU=y
 # all 74 rows in the log, as Android's kernel prints them at start ("gamma[nits] : ...") to set beside Android's log ...
 # CONFIG_PANEL_GAMMA_LOG is not set
 
+# read by GenericARMPE.cpp, hakios.s6e3ha8.c (kernel)
+# CONFIG_PANEL_SLEEP is not set
+
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_REC_MB is not set
 
@@ -802,6 +820,9 @@ CONFIG_GPU=y
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_REC_STEP is not set
+
+# read by MiniIOMobileFramebuffer.cpp, hakios.scfb_battery.c (kernel)
+# CONFIG_SCFB_ADDR is not set
 
 # kept memory is given out as it is (to see what the clearing costs; a surface is then not all zeroes)
 # CONFIG_SURF_CLEAR is not set
@@ -822,7 +843,7 @@ CONFIG_GPU=y
 # CONFIG_VBLUR is not set
 
 #
-# Audio and battery (61)
+# Audio and battery (63)
 #
 
 # the audio DSP; the battery level in the UI and charging state come through it [needs fw-audio/ from the phone]
@@ -941,6 +962,12 @@ CONFIG_SOUND=4
 
 # read by hakios.max77705.c (kernel)
 # CONFIG_MAX77705 is not set
+
+# read by hakios.max77705.c (kernel)
+# CONFIG_MAX77705_DIAG is not set
+
+# the gauge's short line (only reads)
+# CONFIG_MAX77705_FG_S is not set
 
 # read by hakios.max77705.c (kernel)
 # CONFIG_MAX77705_HAPTIC is not set
@@ -1528,11 +1555,14 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_VIRTIO_NET_WIFI is not set
 
 #
-# Security stand-ins (1)
+# Security stand-ins (2)
 #
 
 # read by kern_minimac.c (kernel)
 # CONFIG_PRIVS is not set
+
+# read by kern_minimac.c (kernel)
+# CONFIG_SECURITY is not set
 
 #
 # Debugging (8)
@@ -1563,7 +1593,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_USTACKS_TNAME is not set
 
 #
-# Loader (10)
+# Loader (11)
 #
 
 # the kernel's box for this core (above), if it has one, and only with a kernel on another core to watch
@@ -1596,8 +1626,11 @@ CONFIG_MODEM_AGAIN=y
 # read by loader.c (loader)
 # CONFIG_UFS_PROBE is not set
 
+# read by loader.c (loader)
+# CONFIG_UFS_WRITE_GUID is not set
+
 #
-# User space (109)
+# User space (104)
 #
 
 # arguments only the kernel reads built into the kernel (HAKIOS_BUILTIN_ARGS); given on the line, an argument goes ...
@@ -1605,9 +1638,6 @@ CONFIG_MODEM_AGAIN=y
 
 # read by inject_sb.c (user space)
 # CONFIG_AUTOUNLOCK is not set
-
-# read by 1001-avf-psci-system-off.patch (kernel)
-# CONFIG_AVF_EXIT is not set
 
 # the brightness the user sets (Control Center's slider, Settings) is taken to the panel
 # CONFIG_BRIGHTNESS_BRIDGE is not set
@@ -1698,12 +1728,6 @@ CONFIG_MODEM_AGAIN=y
 
 # read by 1002-avf-security-level.patch (kernel)
 # CONFIG_CS_RELAX_PLATFORM_TASK_PORTS is not set
-
-# read by 1503-early-log-and-panic.patch (kernel)
-# CONFIG_EARLY_LOG is not set
-
-# read by 1507-esslog-exynos-snapshot.patch, 1509-m3-diag-and-pan-off.patch (kernel)
-# CONFIG_ESSLOG is not set
 
 # read by hakios.exynos_dpu.c (kernel)
 # CONFIG_FB_PSR is not set
@@ -1804,13 +1828,13 @@ CONFIG_MODEM_AGAIN=y
 # read by hakios.lga_dpu.c (kernel)
 # CONFIG_LGA_KICK is not set
 
-# read by 1509-m3-diag-and-pan-off.patch (kernel)
+# read by psci_smp.c (kernel)
 # CONFIG_M3_DIAG is not set
 
-# read by 1509-m3-diag-and-pan-off.patch (kernel)
+# read by psci_smp.c (kernel)
 # CONFIG_M3_FLUSH is not set
 
-# read by 1509-m3-diag-and-pan-off.patch (kernel)
+# read by psci_smp.c (kernel)
 # CONFIG_M3_IDS is not set
 
 # read by 1510-isa-floor.patch, 1511-m3-user-cache-pou.patch, hakios.exynos_m3.c (kernel)
@@ -1867,9 +1891,6 @@ CONFIG_MODEM_AGAIN=y
 # read by inject_sb.c (user space)
 # CONFIG_SB_FPS is not set
 
-# read by 1200-avf-scfb-display.patch, 1202-virtio-gpu-2d.patch, hakios.scfb_battery.c (kernel)
-# CONFIG_SCFB_ADDR is not set
-
 # read by hakios.vgpu3d_xnu.c (kernel)
 # CONFIG_SCGPU_ADDR is not set
 
@@ -1881,9 +1902,6 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.scsnd.c (kernel)
 # CONFIG_SCSND_SIZE is not set
-
-# read by 1002-avf-security-level.patch (kernel)
-# CONFIG_SECURITY is not set
 
 # read by inject_sb.c (user space)
 # CONFIG_SWITCHER_WALLPAPER is not set

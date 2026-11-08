@@ -10,42 +10,6 @@ diff --git a/osfmk/arm/machine_routines.h b/osfmk/arm/machine_routines.h
  
  unsigned int ml_get_cpu_number_local(void);
  
-diff --git a/osfmk/arm64/gic_v3_irq.c b/osfmk/arm64/gic_v3_irq.c
---- a/osfmk/arm64/gic_v3_irq.c
-+++ b/osfmk/arm64/gic_v3_irq.c
-@@ -528,7 +528,7 @@
- 		/* (a GIC with a single CPU interface may say nothing: it is the only one) */
- 		target = 1;
- 	}
--	gic_v2_phys[cpu] = (uint32_t)(__builtin_arm_rsr64("MPIDR_EL1") & 0xffff);
-+	gic_v2_phys[cpu] = ml_phys_id_from_mpidr(__builtin_arm_rsr64("MPIDR_EL1"));    /* as phys_id has it (patch 1504) */
- 
- 	if (ml_get_cpu_count() > 1) {
- 		uint32_t sgis = (1u << GIC_SGI_SIGNAL) | (1u << GIC_SGI_STOP);
-diff --git a/osfmk/arm64/loader_return.c b/osfmk/arm64/loader_return.c
---- a/osfmk/arm64/loader_return.c
-+++ b/osfmk/arm64/loader_return.c
-@@ -361,6 +361,7 @@
- void loader_log_vprintf(const char *fmt, va_list *ap);
- void loader_log_panic(const char *fmt, va_list *ap, unsigned long caller);
- void loader_log_cpu_facts(void);
-+extern uint32_t ml_mpidr_mt_aff1;
- 
- void
- loader_early_log_init(void)
-@@ -468,9 +469,10 @@
- 		return;
- 	}
- 	loader_log_printf("early_log: topology: %u cpus (max id %u), %u clusters; boot cpu id %d phys %x; "
--	    "this processor by its MPIDR: cpu %d\n", t->num_cpus, t->max_cpu_id, t->num_clusters,
-+	    "this processor by its MPIDR: phys %x, cpu %d%s\n", t->num_cpus, t->max_cpu_id, t->num_clusters,
- 	    t->boot_cpu != NULL ? (int)t->boot_cpu->cpu_id : -1, t->boot_cpu != NULL ? t->boot_cpu->phys_id : 0,
--	    ml_get_cpu_number((uint32_t)mpidr));
-+	    ml_phys_id_from_mpidr(mpidr), ml_get_cpu_number(ml_phys_id_from_mpidr(mpidr)),
-+	    ml_mpidr_mt_aff1 ? " (MT: the device tree numbers the cores one affinity field lower)" : "");
- 	for (unsigned i = 0; i < t->num_cpus; i++) {
- 		loader_log_printf("early_log:   cpu %u phys %x cluster %u type %d\n", t->cpus[i].cpu_id,
- 		    t->cpus[i].phys_id, t->cpus[i].cluster_id, (int)t->cpus[i].cluster_type);
 diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
 --- a/osfmk/arm64/machine_routines.c
 +++ b/osfmk/arm64/machine_routines.c

@@ -31,6 +31,16 @@ git fetch -q --depth 1 origin "refs/tags/$TAG:refs/tags/$TAG"      # that one re
 git checkout -q -b hakios "$TAG"
 [ "$(git rev-parse HEAD)" = "$BASE" ] || { echo "apply.sh: $TAG is $(git rev-parse HEAD), expected $BASE" >&2; false; }
 echo 'BUILD/' >> .git/info/exclude
+# files Apple's tag includes but does not ship, taken from another open-source release of XNU: patches/<base>/imports,
+# one line each: "<tag> <commit> <path>" (fetched like the tag itself, and checked against the commit)
+if [ -s "$SERIES/imports" ]; then
+	grep -v '^#' "$SERIES/imports" | while read -r itag icommit ipath; do
+		[ -n "$itag" ] || continue
+		git fetch -q --depth 1 origin "refs/tags/$itag:refs/tags/$itag"
+		[ "$(git rev-parse "$itag^{commit}")" = "$icommit" ] || { echo "apply-series.sh: $itag is not $icommit" >&2; exit 1; }
+		git checkout -q "$itag" -- "$ipath"
+	done
+fi
 grep -v '^#' "$SERIES/series" | while read -r p; do
 	git apply --whitespace=nowarn "$SERIES/$p" || { echo "apply-series.sh: $p does not apply" >&2; exit 1; }
 done
@@ -56,9 +66,9 @@ if [ -s "$SERIES/9000-driver-fixups.patch" ]; then git apply --whitespace=nowarn
 # which of them are built is the configuration's (drivers/*/conf, CONFIG_HAKIOS_*): put into the tree as XNU reads it.
 # What that writes is made again for every build, so it is kept out of the work that xnu/export.sh saves.
 printf '%s\n' config/MASTER.hakios bsd/dev/hakios.drivers.h >> .git/info/exclude
-# Only xnu-8796's series wires the drivers into XNU's configuration so far; on another base they are copied in, not built
-# (docs/two-bases.md: the per-base shims come first).
-if [ "$BASEID" = xnu-8796 ]; then
+# Into XNU's configuration where the base's series has made a place for them (the HakiOS block of bsd/conf/files, read with
+# config/MASTER.hakios): both series do. Which drivers a base gets is drivers/*/conf's `bases` (docs/two-bases.md).
+if grep -qF "# HakiOS drivers: made by tools/hakios-config.py kernel" bsd/conf/files; then
 	python3 "$HERE/../tools/hakios-config.py" kernel --tree "$DIR"
 else
 	echo "apply-series.sh: $BASEID: the drivers are in the tree but not in its configuration (docs/two-bases.md)"

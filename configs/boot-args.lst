@@ -290,6 +290,8 @@ mali_nap_us	k
 mali_pll	k
 mali_trace	k
 max77705	k
+max77705_diag	k
+max77705_fg_s	k
 max77705_haptic	k
 max77705_ipclk	k
 max77705_steps	k
@@ -363,6 +365,7 @@ panel	k
 panel_brightness	k
 panel_gamma	k
 panel_gamma_log	k
+panel_sleep	k
 passcode_debug	u
 passcode_reset	k
 passcode_selftest	k
@@ -418,6 +421,8 @@ shub_ms	k
 shub_req_len	k
 shub_req_rpc	k
 shub_sensors	k
+sleep_cores	k
+sleep_cores_after	k
 small_cores	k
 small_cores_after	k
 soc_cmd_db	k
@@ -501,6 +506,7 @@ ufs_native_write	k
 ufs_probe	l
 ufs_shared_pa	k
 ufs_write	kl
+ufs_write_guid	l
 usb_gadget	k
 usb_gadget_clk	k
 usb_gadget_crlf	k

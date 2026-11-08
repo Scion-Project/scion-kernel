@@ -21,6 +21,14 @@ extern void             psci_smp_cpu_reached(uint32_t stage);
 extern void             psci_smp_cpu_running(void);
 extern void             psci_smp_cpu_off(void) __dead2;
 
+/* PSCI SYSTEM_OFF (reset = false) or SYSTEM_RESET; returns only if the firmware refuses */
+extern int64_t          psci_system_off(int reset);
+
+/* patch 1509: m3_diag=1, the first exception of a core being started recorded and that core parked */
+extern uint32_t         psci_smp_diag;
+extern void             psci_smp_diag_vectors(void);
+extern void             psci_smp_diag_sleh(uint32_t esr, uint64_t far, uint64_t elr, uint64_t spsr, uint64_t lr, uint64_t sp);
+
 extern void             psci_smp_stop_others(void);
 extern void             psci_smp_stop_here(void);
 

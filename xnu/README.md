@@ -36,8 +36,10 @@ Things to know:
   the kernel has been linked. Look at the file's date, not at make's exit code.
 - No spaces in the repository's path.
 - After changing kernel headers that the two external libraries see: `xnu-deps/setup.sh --rebuild-libs`.
-- Apple's DriverKit generator (`iig`) is closed; `xnu-deps/iig-impl/` holds stubs generated from
-  the linker's undefined symbols (`xnu-deps/gen-iig-stubs.py`).
+- Apple's DriverKit generator (`iig`) is closed. For xnu-8796, `xnu-deps/host/bin/iig` hands out the headers it would
+  generate, ready-made in the macOS 13.3 SDK, and `xnu-deps/iig-impl/` holds stubs generated from the linker's undefined
+  symbols (`xnu-deps/gen-iig-stubs.py`). For xnu-12377 on macOS it hands over to Apple's own `iig`, which Xcode has
+  (headers and implementation both); on Linux it hands out the macOS 26.1 SDK's headers (docs/two-bases.md).
 - A driver can be edited in `drivers/<subsystem>/`: `make kernel` runs `xnu/sync-drivers.sh`, which copies it into
   the tree when it is newer than the tree's copy (never the other way round). Everything else, and drivers edited
   in the tree, go back with `xnu/export.sh`.

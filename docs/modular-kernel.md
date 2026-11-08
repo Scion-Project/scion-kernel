@@ -98,8 +98,7 @@ This is a reading of the files, not legal advice, and it needs a person's review
 | `brcmfmac`, `ath11k` | ISC, BSD-3-Clause-Clear, fetched and built, not kept | compatible |
 
 Drivers state that Samsung's GPL kernel was "read for these facts, not copied". Facts are generally not protected, but whether a given table of
-register sequences stays on the right side of that is a question for a lawyer. `THIRD_PARTY_LICENSES.md` has 5 rows marked to verify, and
-`tools/provenance-check.py` fails on `drivers/media/mfc/hakios.exynos_mfc_test.h` (bytes compiled into source, no explanation in `provenance.allow`).
+register sequences stays on the right side of that is a question for a lawyer. `THIRD_PARTY_LICENSES.md` has 5 rows marked to verify.
 
 ## OS profiles
 
