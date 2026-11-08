@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 667 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 666 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -197,7 +197,7 @@ CONFIG_HAKIOS_EXYNOS_PCIE=y
 CONFIG_HAKIOS_BRCMFMAC=y
 
 #
-# CPU, memory and boot (26)
+# CPU, memory and boot (22)
 #
 
 # CPU cores the kernel uses, 1 to 8; one if not set
@@ -208,12 +208,6 @@ CONFIG_HAKIOS_BRCMFMAC=y
 
 # set the boot core to its top speed
 # CONFIG_CPUFREQ is not set
-
-# read by the patch to Apple's files (kernel)
-# CONFIG_APPLOG is not set
-
-# read by the patch to Apple's files (kernel)
-# CONFIG_APPLOG_NAME is not set
 
 # read by loader_return.c (kernel)
 # CONFIG_AVF_EXIT is not set
@@ -242,6 +236,9 @@ CONFIG_HAKIOS_BRCMFMAC=y
 # read by hakios.cpufreq.c (kernel)
 # CONFIG_MEMBENCH is not set
 
+# read by the patch to Apple's files (kernel)
+# CONFIG_PAN is not set
+
 # read by the patch to Apple's files, 1100-virtio-pci-transport.patch, loader.c (kernel and loader)
 # CONFIG_RD is not set
 
@@ -268,15 +265,6 @@ CONFIG_HAKIOS_BRCMFMAC=y
 
 # read by the patch to Apple's files (kernel)
 # CONFIG_SYSSLEEP is not set
-
-# read by the patch to Apple's files, user_exception_trace.c (kernel)
-# CONFIG_SYSTRACE is not set
-
-# read by the patch to Apple's files (kernel)
-# CONFIG_SYSTRACE_NAME is not set
-
-# read by the patch to Apple's files (kernel)
-# CONFIG_XPCPROXY_IDVERSION is not set
 
 #
 # Storage and APFS (57)
@@ -1571,7 +1559,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_SECURITY is not set
 
 #
-# Debugging (8)
+# Debugging (9)
 #
 
 # read by user_exception_trace.c (kernel)
@@ -1579,6 +1567,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by user_exception_trace.c (kernel)
 # CONFIG_KSAMPLE_US is not set
+
+# read by hakios.exec.c, hakios.systrace.c, user_exception_trace.c (kernel)
+# CONFIG_SYSTRACE is not set
 
 # read by user_exception_trace.c (kernel)
 # CONFIG_USTACKS is not set
@@ -1611,7 +1602,7 @@ CONFIG_MODEM_AGAIN=y
 # read by loader.c (loader)
 # CONFIG_CPUMASK is not set
 
-# read by 1512-arm-extra-ram.patch, loader.c (kernel and loader)
+# read by hakios_extra_ram.h, loader.c (kernel and loader)
 # CONFIG_EXTRA_RAM is not set
 
 # read by loader.c (loader)
@@ -1639,11 +1630,17 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (123)
+# User space (125)
 #
 
 # arguments only the kernel reads built into the kernel (HAKIOS_BUILTIN_ARGS); given on the line, an argument goes ...
 # CONFIG_BUILTIN_ARGS is not set
+
+# read by hakios.exec.c (kernel)
+# CONFIG_APPLOG is not set
+
+# read by hakios.exec.c (kernel)
+# CONFIG_APPLOG_NAME is not set
 
 # read by inject_sb.c (user space)
 # CONFIG_AUTOUNLOCK is not set
@@ -1801,9 +1798,6 @@ CONFIG_MODEM_AGAIN=y
 # read by hakios.vgpu3d_xnu.c (kernel)
 # CONFIG_GPU3D_SIZE is not set
 
-# read by 1509-m3-diag-and-pan-off.patch (kernel)
-# CONFIG_IMMEDIATE_NMI is not set
-
 # no IOAESAccelerator at all, as the kernel was before this driver
 # CONFIG_IOAES is not set
 
@@ -1825,7 +1819,7 @@ CONFIG_MODEM_AGAIN=y
 # secure monitor calls around the run: 0 none, 1 PREPARE, 2 also holds ISPPRE, 3 also SYSREG_PROT
 # CONFIG_IRIS_S9_SMC is not set
 
-# read by 1510-isa-floor.patch (kernel)
+# read by hakios_commpage.h (kernel)
 # CONFIG_ISA_FLOOR is not set
 
 # read by MiniAppleKeyStore.cpp (kernel)
@@ -1855,7 +1849,7 @@ CONFIG_MODEM_AGAIN=y
 # read by psci_smp.c (kernel)
 # CONFIG_M3_IDS is not set
 
-# read by 1510-isa-floor.patch, 1511-m3-user-cache-pou.patch, hakios.exynos_m3.c (kernel)
+# read by hakios.exynos_m3.c, hakios_arm_init.h, hakios_commpage.h (kernel)
 # CONFIG_M3_PREP is not set
 
 # read by mc_ce.c (kernel)
@@ -1918,9 +1912,6 @@ CONFIG_MODEM_AGAIN=y
 # read by hakios.exynos_mfc.c (kernel)
 # CONFIG_MFC_ZC is not set
 
-# read by 1509-m3-diag-and-pan-off.patch (kernel)
-# CONFIG_PAN is not set
-
 # read by passcoded.m (user space)
 # CONFIG_PASSCODE_DEBUG is not set
 
@@ -1966,6 +1957,9 @@ CONFIG_MODEM_AGAIN=y
 # the root is to be the big system image (userland/system.apfs, a RAM boot's md0) on /dev/DEV, read
 # CONFIG_SYSTEM_APFS is not set
 
+# read by hakios.systrace.c (kernel)
+# CONFIG_SYSTRACE_NAME is not set
+
 # one read-only MC_FC_INFO (0xFF000002), extended id 0 (MCI_VERSION)
 # CONFIG_TEE_PROBE is not set
 
@@ -1975,7 +1969,7 @@ CONFIG_MODEM_AGAIN=y
 # Turnip's TU_DEBUG in the window server (sysmem, gmem, forcebin, ...)
 # CONFIG_TU_DEBUG is not set
 
-# read by 1511-m3-user-cache-pou.patch (kernel)
+# read by hakios_arm_init.h (kernel)
 # CONFIG_UCACHE_TRAP is not set
 
 # the system's own "Reduce Transparency" and "Reduce Motion" (Settings, Accessibility), for this
@@ -2010,6 +2004,9 @@ CONFIG_MODEM_AGAIN=y
 
 # the Galaxy S9's hardware watchdog is not armed (a restart still goes to recovery: INFORM3 is written)
 # CONFIG_WDT is not set
+
+# read by hakios.exec.c (kernel)
+# CONFIG_XPCPROXY_IDVERSION is not set
 
 #
 # Extra arguments (2)

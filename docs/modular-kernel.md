@@ -40,6 +40,22 @@ Changed lines (added plus removed) in Apple's files, counted from the patches on
 | the rest | 165 | 108 | 273 |
 | All | 1673 lines, 82 files | 3163 lines, 39 files | 4836 |
 
+`tools/xnu-patch-size.py` makes the count again (`--files N` lists the largest). It gives two numbers: every added or removed line of
+`xnu/hakios.patch` and `xnu/patches/` (the count above), and the lines that change what Apple wrote (a hunk of one of our own files or of a driver is
+left out). On 7 November 2026, at each of three points:
+
+| | Patches | Every file | Apple's files |
+|---|---|---:|---:|
+| main of 7 November | `hakios.patch` and 29 numbered | 4065 | 2582 |
+| numbered patches that only change our own files folded into those files | `hakios.patch` and 16 numbered | 2582 | 2582 |
+| bring-up logic moved out of Apple's files into files of ours, included or called from them | `hakios.patch` and 12 numbered | 1410 | 1410 |
+
+The second step is a pure refactor: the tree `xnu/apply.sh` lays out is the same. The third moves text (the start of the early-boot assembly, the
+slow-core pairing, `systrace=`, the exec and persona code, the file system tables, the extra RAM, the cache-maintenance trap, the ID-register floor,
+the two consoles) into files under `xnu/files/` and `drivers/core/`: where the text is included at the same place the compiler reads the same
+program (the assembler's output is byte-identical; a C object differs in its debug line table, and in the line numbers of assertions after the
+moved text), and where it is a function in a file of its own, the object is not the same.
+
 About 4800 lines, so a `patches/xnu-8796/series` would be small. Much of the numbered set's `bsd/dev` part changes our own drivers and
 would be folded into them. Beside the patches:
 

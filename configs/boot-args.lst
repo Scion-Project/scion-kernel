@@ -259,7 +259,6 @@ halt_off	k
 haptic	k
 haptic_effect	k
 hv_wdt_pet	k
-immediate_NMI	k
 ioaes	k
 iris_s9	k
 iris_s9_exp	k

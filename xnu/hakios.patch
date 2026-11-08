@@ -119,62 +119,19 @@ index 4b83160780c3..8997af1f0e1b 100644
  include $(MakeInc_rule)
  include $(MakeInc_dir)
 diff --git a/bsd/conf/files b/bsd/conf/files
-index 44274016a4cf..27cccab98c8e 100644
+index 44274016a4cf..088c4232762f 100644
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -109,6 +109,51 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
+@@ -109,6 +109,8 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
  bsd/dev/unix_startup.c			standard
  
  bsd/dev/monotonic.c optional monotonic
 +# HakiOS drivers: made by tools/hakios-config.py kernel from drivers/*/conf. Edit those, not these lines.
-+bsd/dev/hakios.audio.c                   standard
-+bsd/dev/hakios.version.c                 standard
-+bsd/dev/hakios.platform.c                standard
-+bsd/dev/hakios.stubs.c                   standard
-+bsd/dev/hakios.input.c                   standard
-+bsd/dev/hakios.net.c                     standard
-+bsd/dev/hakios.image.c                   standard
-+bsd/dev/hakios.sparse.c                  standard
-+bsd/dev/hakios.apfs_check.c              optional apfs
-+bsd/dev/hakios.adsp.c                    optional hakios_adsp
-+bsd/dev/hakios.speaker.c                 optional hakios_speaker
-+bsd/dev/hakios.sound.c                   optional hakios_sound
-+bsd/dev/hakios.guard.c                   optional hakios_sound
-+bsd/dev/hakios.mic.c                     optional hakios_mic
-+bsd/dev/hakios.virtio_sound.c            optional hakios_virtio_sound
-+bsd/dev/hakios.bt.c                      optional hakios_bt
-+bsd/dev/hakios.camera.c                  optional hakios_camera
-+bsd/dev/hakios.torch.c                   optional hakios_torch
-+bsd/dev/hakios.socinfo.c                 optional hakios_socinfo
-+bsd/dev/hakios.adreno.c                  optional hakios_adreno
-+bsd/dev/hakios.haptic.c                  optional hakios_haptic
-+bsd/dev/hakios.virtio_input.c            optional hakios_virtio_input
-+bsd/dev/hakios.goodix.c                  optional hakios_goodix
-+bsd/dev/hakios.buttons.c                 optional hakios_buttons
-+bsd/dev/hakios.qmi.c                     optional hakios_qmi
-+bsd/dev/hakios.mpss.c                    optional hakios_modem
-+bsd/dev/hakios.cell.c                    optional hakios_modem
-+bsd/dev/hakios.nas.c                     optional hakios_modem
-+bsd/dev/hakios.ipa.c                     optional hakios_modem
-+bsd/dev/hakios.virtio_net.c              optional hakios_virtio_net
-+bsd/dev/hakios.battery.c                 optional hakios_battery
-+bsd/dev/hakios.cpufreq.c                 optional hakios_cpufreq
-+bsd/dev/hakios.thermal.c                 optional hakios_thermal
-+bsd/dev/hakios.pmic.c                    optional hakios_pmic
-+bsd/dev/hakios.battguard.c               optional hakios_battguard
-+bsd/dev/hakios.ufs.c                     optional hakios_ufs
-+bsd/dev/hakios.ufshc.c                   optional hakios_ufs
-+bsd/dev/hakios.virtio_blk.c              optional hakios_virtio_blk
-+bsd/dev/hakios.wifi.c                    optional hakios_wifi
-+bsd/dev/hakios.wlfw.c                    optional hakios_wifi
-+bsd/dev/hakios.lx.c                      optional hakios_wifi
-+bsd/dev/hakios.sta.c                     optional hakios_wifi
-+bsd/dev/hakios.apple80211.c              optional hakios_wifi
 +# end of the HakiOS drivers
  bsd/dev/dev_perfmon.c optional config_perfmon
  
  bsd/libkern/crc32.c			standard
-@@ -155,6 +200,52 @@ bsd/miscfs/devfs/devfs_vfsops.c		optional devfs
+@@ -155,6 +157,52 @@ bsd/miscfs/devfs/devfs_vfsops.c		optional devfs
  bsd/miscfs/mockfs/mockfs_fsnode.c	optional mockfs
  bsd/miscfs/mockfs/mockfs_vfsops.c	optional mockfs
  bsd/miscfs/mockfs/mockfs_vnops.c	optional mockfs
@@ -227,7 +184,7 @@ index 44274016a4cf..27cccab98c8e 100644
  
  bsd/miscfs/routefs/routefs_ops.c	optional routefs
  
-@@ -361,6 +452,7 @@ bsd/security/audit/audit_syscalls.c		standard
+@@ -361,6 +409,7 @@ bsd/security/audit/audit_syscalls.c		standard
  bsd/security/audit/audit_worker.c		optional config_audit
  
  bsd/pthread/pthread_shims.c		standard
@@ -235,7 +192,7 @@ index 44274016a4cf..27cccab98c8e 100644
  bsd/pthread/pthread_priority.c		standard
  bsd/pthread/pthread_workqueue.c		standard
  
-@@ -383,6 +475,7 @@ bsd/kern/kern_debug.c			standard
+@@ -383,6 +432,7 @@ bsd/kern/kern_debug.c			standard
  bsd/kern/kern_symfile.c			standard
  bsd/kern/kern_descrip.c			standard
  bsd/kern/kern_guarded.c			standard
@@ -283,109 +240,22 @@ index fd7a94b20794..69eaceedd248 100644
  		if (cc > 1) {
  			console_write((char *)buf, cc);
 diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
-index 7fd9be1a5f38..0d035255b030 100644
+index 7fd9be1a5f38..d71504c0e6d4 100644
 --- a/bsd/dev/arm/systemcalls.c
 +++ b/bsd/dev/arm/systemcalls.c
-@@ -36,6 +36,92 @@
- #include <security/mac_framework.h>
- #endif
+@@ -29,6 +29,7 @@
+ #include <sys/sysproto.h>
+ #include <sys/kauth.h>
+ #include <sys/bitstring.h>
++#include <sys/hakios.systrace.h>
  
-+/*
-+ * Bring-up aid: boot-arg systrace=1 logs every BSD system call that fails,
-+ * systrace=2 logs all of them (to the kernel message buffer). For calls that
-+ * take a path, the path is shown. systrace_name=NAME keeps it to the processes
-+ * of that name: with a whole system running, everybody's failed calls are
-+ * megabytes a minute.
-+ */
-+static TUNABLE(uint32_t, systrace_level, "systrace", 0);
-+static TUNABLE_STR(systrace_name, MAXCOMLEN + 1, "systrace_name", "");
-+extern const char *syscallnames[];
-+
-+static void
-+systrace_report(struct proc *proc, unsigned short syscode, struct uthread *uthread, int error)
-+{
-+	/* system calls whose first (or, for the second list, second) argument is a path */
-+	static const unsigned short path_arg0[] = {
-+		SYS_open, SYS_link, SYS_unlink, SYS_chdir, SYS_mknod, SYS_chmod, SYS_chown, SYS_access, SYS_readlink,
-+		SYS_execve, SYS_chroot, SYS_rename, SYS_mkdir, SYS_rmdir, SYS_pathconf, SYS_getattrlist, SYS_setattrlist,
-+		SYS_getxattr, SYS_listxattr, SYS_fsctl, SYS_stat64, SYS_lstat64, SYS_statfs64, SYS_open_nocancel,
-+		SYS_open_dprotected_np, SYS_symlink, SYS_unmount, SYS_stat64_extended, SYS_lstat64_extended,
-+	};
-+	static const unsigned short path_arg1[] = {
-+		SYS_mount, SYS_posix_spawn, SYS_openat, SYS_openat_nocancel, SYS_fstatat64, SYS_faccessat, SYS_readlinkat,
-+		SYS_getattrlistat, SYS_mkdirat, SYS_unlinkat,
-+	};
-+	char path[160] = "";
-+	/*
-+	 * Two calls are worth more than their arguments' addresses, because what they ASK is the whole
-+	 * of what they do. __mac_syscall carries the policy's name and the request number: this
-+	 * kernel's AMFI stand-in answers only 0x5a and 0x60 and returns ENOPOLICY to anything else
-+	 * (bsd/kern/kern_minimac.c), so a daemon refused there is refused in a way nothing in user
-+	 * space can see -- and a library of ours cannot watch it either, since the call is made inside
-+	 * libsystem and dyld interposing only stands between images. The name matters as much as the
-+	 * number: the same call goes to Sandbox as well. And sysctl carries its MIB, which is the only
-+	 * thing that says what was asked about.
-+	 */
-+	char detail[112] = "";
-+	size_t done;
-+
-+	if (systrace_level < 2 && (error == 0 || error == EJUSTRETURN || error == ERESTART)) {
-+		return;
-+	}
-+	if (systrace_name[0] != 0 && strncmp(proc->p_comm, systrace_name, MAXCOMLEN) != 0) {
-+		return;
-+	}
-+	for (unsigned i = 0; i < sizeof(path_arg0) / sizeof(path_arg0[0]); i++) {
-+		if (path_arg0[i] == syscode) {
-+			(void)copyinstr((user_addr_t)uthread->uu_arg[0], path, sizeof(path), &done);
-+		}
-+	}
-+	for (unsigned i = 0; i < sizeof(path_arg1) / sizeof(path_arg1[0]); i++) {
-+		if (path_arg1[i] == syscode) {
-+			(void)copyinstr((user_addr_t)uthread->uu_arg[1], path, sizeof(path), &done);
-+		}
-+	}
-+	path[sizeof(path) - 1] = 0;
-+	if (syscode == SYS___mac_syscall) {
-+		char policy[32] = "";
-+
-+		(void)copyinstr((user_addr_t)uthread->uu_arg[0], policy, sizeof(policy), &done);
-+		policy[sizeof(policy) - 1] = 0;
-+		snprintf(detail, sizeof(detail), " policy \"%s\" request %lld", policy,
-+		    (long long)uthread->uu_arg[1]);
-+	} else if (syscode == SYS_sysctl) {
-+		int mib[6];
-+		unsigned count = (unsigned)uthread->uu_arg[1];
-+
-+		if (count > 6) {
-+			count = 6;
-+		}
-+		if (count > 0 && copyin((user_addr_t)uthread->uu_arg[0], mib, count * sizeof(mib[0])) == 0) {
-+			size_t used = (size_t)snprintf(detail, sizeof(detail), " mib");
-+
-+			for (unsigned i = 0; i < count && used + 12 < sizeof(detail); i++) {
-+				used += (size_t)snprintf(detail + used, sizeof(detail) - used, " %d", mib[i]);
-+			}
-+		}
-+	}
-+	detail[sizeof(detail) - 1] = 0;
-+	printf("systrace: %s[%d] %s(0x%llx, 0x%llx, 0x%llx, 0x%llx)%s%s%s%s = %d\n",
-+	    proc->p_comm, proc_getpid(proc), syscallnames[syscode],
-+	    (unsigned long long)uthread->uu_arg[0], (unsigned long long)uthread->uu_arg[1],
-+	    (unsigned long long)uthread->uu_arg[2], (unsigned long long)uthread->uu_arg[3],
-+	    path[0] ? " \"" : "", path, path[0] ? "\"" : "", detail, error);
-+}
-+
- #if CONFIG_DTRACE
- extern int32_t dtrace_systrace_syscall(struct proc *, void *, int *);
- extern void dtrace_systrace_syscall_return(unsigned short, int, int *);
-@@ -181,6 +267,10 @@ unix_syscall(
+ #include <security/audit/audit.h>
+ 
+@@ -181,6 +182,8 @@ unix_syscall(
  	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
  	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
  
-+	if (__improbable(systrace_level != 0)) {
-+		systrace_report(proc, syscode, uthread, error);
-+	}
++	HAKIOS_SYSTRACE(proc, syscode, uthread, error);
 +
  #if CONFIG_MACF
  skip_syscall:
@@ -519,107 +389,43 @@ index 95192dd62449..b00da803b5b4 100644
  
  	/*
 diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
-index 1d71c66629fb..a22095ccf5f0 100644
+index 1d71c66629fb..8ebc09f09958 100644
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -1157,6 +1157,9 @@ SYSCTL_PROC(_vm, OID_AUTO, shared_region_control,
-  *		activators should not be given the opportunity to attempt
-  *		to activate the image.
-  */
-+/* Bring-up aid: with boot-arg systrace set, say which stage of an exec refused the image. */
-+static TUNABLE(uint32_t, exec_trace, "systrace", 0);
-+
- static int
- exec_mach_imgact(struct image_params *imgp)
- {
-@@ -1315,6 +1318,9 @@ grade:
+@@ -100,6 +100,7 @@
+ #include <sys/acct.h>
+ #include <sys/exec.h>
+ #include <sys/kdebug.h>
++#include <sys/hakios.exec.h>
+ #include <sys/signal.h>
+ #include <sys/aio_kern.h>
+ #include <sys/sysproto.h>
+@@ -1315,6 +1316,7 @@ grade:
  	 * Actually load the image file we previously decided to load.
  	 */
  	lret = load_machfile(imgp, mach_header, thread, &map, &load_result);
-+	if (lret != LOAD_SUCCESS && exec_trace) {
-+		printf("exectrace: %s: load_machfile failed: %d\n", imgp->ip_ndp->ni_cnd.cn_pnbuf, lret);
-+	}
++	HAKIOS_EXEC_TRACE(imgp, "load_machfile", lret);
  	if (lret != LOAD_SUCCESS) {
  		error = load_return_to_errno(lret);
  
-@@ -2197,6 +2203,9 @@ again:
+@@ -2197,6 +2199,7 @@ again:
  	}
  
  	error = exec_check_permissions(imgp);
-+	if (error && exec_trace) {
-+		printf("exectrace: %s: exec_check_permissions failed: %d\n", imgp->ip_ndp->ni_cnd.cn_pnbuf, error);
-+	}
++	HAKIOS_EXEC_TRACE(imgp, "exec_check_permissions", error);
  	if (error) {
  		goto bad;
  	}
-@@ -2640,6 +2649,57 @@ done:
- 	return ret;
- }
- 
-+/*
-+ * Bring-up aid, boot-arg applog=1: what applications and other programs started without a
-+ * terminal say is worth reading here. Their standard output and error, which launchd opens on
-+ * /dev/null, go to the console instead (that shows NSLog and the "Terminating app due to
-+ * uncaught exception" kind of message). With applog=2 every program also gets
-+ * OS_ACTIVITY_DT_MODE in its environment, which makes os_log write to standard error as well:
-+ * everything any program logs, and a much slower system. applog_name=NAME[,NAME...] with
-+ * applog=1 does that for the programs whose file names begin with one of the NAMEs only,
-+ * which is how to read what one application extension has to say (launchd starts those for
-+ * whoever asks, so there is no job description of ours to put the variable in).
-+ */
-+static TUNABLE(uint32_t, exec_applog, "applog", 0);
-+static TUNABLE_STR(exec_applog_name, 128, "applog_name", "");
-+
-+static bool
-+exec_applog_oslog(struct image_params *imgp)
-+{
-+	const char *name, *p = exec_applog_name;
-+
-+	if (exec_applog >= 2) {
-+		return true;
-+	}
-+	if (exec_applog == 0 || *p == 0 || imgp->ip_ndp == NULL) {
-+		return false;
-+	}
-+	name = imgp->ip_ndp->ni_cnd.cn_nameptr;
-+	while (*p != 0) {
-+		const char *word = p;
-+
-+		while (*p != 0 && *p != ',') {
-+			p++;
-+		}
-+		if (p != word && (size_t)(p - word) <= imgp->ip_ndp->ni_cnd.cn_namelen && strncmp(word, name, (size_t)(p - word)) == 0) {
-+			return true;
-+		}
-+		if (*p == ',') {
-+			p++;
-+		}
-+	}
-+	return false;
-+}
-+
-+static const char *
-+exec_applog_path(int fd, const char *path)
-+{
-+	if (exec_applog && (fd == 1 || fd == 2) && strcmp(path, "/dev/null") == 0) {
-+		return "/dev/console";
-+	}
-+	return path;
-+}
-+
- /*
-  * exec_handle_file_actions
-  *
-@@ -2709,7 +2769,7 @@ exec_handle_file_actions(struct image_params *imgp, short psa_flags)
+@@ -2709,7 +2712,7 @@ exec_handle_file_actions(struct image_params *imgp, short psa_flags)
  			AUDIT_SUBCALL_ENTER(OPEN, p, uthread);
  
  			NDINIT(ndp, LOOKUP, OP_OPEN, FOLLOW | AUDITVNPATH1, UIO_SYSSPACE,
 -			    CAST_USER_ADDR_T(psfa->psfaa_openargs.psfao_path),
-+			    CAST_USER_ADDR_T(exec_applog_path(psfa->psfaa_filedes, psfa->psfaa_openargs.psfao_path)),
++			    CAST_USER_ADDR_T(hakios_exec_applog_path(psfa->psfaa_filedes, psfa->psfaa_openargs.psfao_path)),
  			    imgp->ip_vfs_context);
  
  			error = open1(imgp->ip_vfs_context, ndp,
-@@ -3094,10 +3154,16 @@ spawn_validate_persona(struct _posix_spawn_persona_info *px_persona)
+@@ -3094,10 +3097,7 @@ spawn_validate_persona(struct _posix_spawn_persona_info *px_persona)
  	int error = 0;
  	struct persona *persona = NULL;
  
@@ -627,20 +433,11 @@ index 1d71c66629fb..a22095ccf5f0 100644
 -		return EPERM;
 -	}
 -
-+	/*
-+	 * hakios: two of the three checks below cannot be passed in this port, and both stand in
-+	 * the way of something ordinary. The entitlement is one nobody carries here (nothing is
-+	 * signed, AMFI is a stub), and the persona is one nobody makes -- yet a package manager
-+	 * becomes root by asking for exactly this: Sileo spawns apt and dpkg into persona 99 with
-+	 * the uid it wants (its APTWrapper). Refused here, the spawn failed before the program was
-+	 * ever started, and the application waited for an answer that could not come. The check
-+	 * that still means something -- the size of the group list -- stays; see
-+	 * spawn_persona_adopt() below for what happens then.
-+	 */
++	/* hakios: no entitlement and no persona are needed; see hakios_spawn_adopt_credential() (hakios.exec.c) */
  	if (px_persona->pspi_flags & POSIX_SPAWN_PERSONA_GROUPS) {
  		if (px_persona->pspi_ngroups > NGROUPS_MAX) {
  			return EINVAL;
-@@ -3105,12 +3171,6 @@ spawn_validate_persona(struct _posix_spawn_persona_info *px_persona)
+@@ -3105,12 +3105,6 @@ spawn_validate_persona(struct _posix_spawn_persona_info *px_persona)
  	}
  
  	persona = persona_lookup(px_persona->pspi_id);
@@ -653,7 +450,7 @@ index 1d71c66629fb..a22095ccf5f0 100644
  	if (persona) {
  		persona_put(persona);
  	}
-@@ -3130,9 +3190,6 @@ spawn_persona_adopt(proc_t p, struct _posix_spawn_persona_info *px_persona)
+@@ -3130,9 +3124,6 @@ spawn_persona_adopt(proc_t p, struct _posix_spawn_persona_info *px_persona)
  	 * the kauth with a different UID/GID combo
  	 */
  	persona = persona_lookup(px_persona->pspi_id);
@@ -663,151 +460,33 @@ index 1d71c66629fb..a22095ccf5f0 100644
  
  	cred = kauth_cred_proc_ref(p);
  
-@@ -3158,6 +3215,48 @@ spawn_persona_adopt(proc_t p, struct _posix_spawn_persona_info *px_persona)
+@@ -3158,6 +3149,10 @@ spawn_persona_adopt(proc_t p, struct _posix_spawn_persona_info *px_persona)
  		    px_persona->pspi_gmuid);
  	}
  
 +	if (persona == NULL) {
-+		/*
-+		 * hakios: there are no personas in this port -- nothing makes them, and
-+		 * kpersona_find_by_type() answers "no such process" to everyone who asks. Darwin's own
-+		 * programs get along without them, but a package manager becomes root by way of one:
-+		 * Sileo asks posix_spawn for persona 99 with OVERRIDE and uid 0 (its APTWrapper), and
-+		 * that is how it runs apt and dpkg. With the persona missing the lookup failed, the
-+		 * whole spawn failed with ESRCH, and the application sat for ever waiting for an
-+		 * answer from a program that was never started. What the caller is after is the
-+		 * credential, not the persona, so the credential is what it gets: the uid, gid and
-+		 * groups it asked for, set on the process being spawned.
-+		 *
-+		 * The thread's own credential is not touched here: the thread running this is the
-+		 * parent's, and the new process gets its credential when its image is activated.
-+		 *
-+		 * And the count of processes per real uid follows, as persona_proc_adopt() keeps it:
-+		 * fork1() counted the new process under the parent's uid (mobile's), its exit takes
-+		 * it off under the one it has then (root's). Without that, every program Sileo ran as
-+		 * root took one away from root's count that had never been given -- and once Sileo's
-+		 * own mv, cp and rm ran at all, a few dozen of them brought root's count to nothing,
-+		 * and the next process of root's to exit panicked the kernel ("chgproccnt: lost user").
-+		 */
-+		__block kauth_cred_t new_cred = cred;
-+		__block uid_t old_ruid = KAUTH_UID_NONE;
-+		uid_t new_ruid = kauth_cred_getruid(cred);
-+
-+		(void)proc_update_label(p, true, ^kauth_cred_t (kauth_cred_t cur_cred) {
-+			old_ruid = kauth_cred_getruid(cur_cred);
-+			if (new_cred != cur_cred) {
-+			        kauth_cred_ref(new_cred);
-+			        kauth_cred_unref(&cur_cred);
-+			}
-+			return new_cred;
-+		});
-+		kauth_cred_unref(&cred);
-+		if (old_ruid != KAUTH_UID_NONE && old_ruid != new_ruid) {
-+			(void)chgproccnt(new_ruid, 1);
-+			(void)chgproccnt(old_ruid, -1);
-+		}
-+		return 0;
++		return hakios_spawn_adopt_credential(p, cred);
 +	}
 +
  	ret = persona_proc_adopt(p, persona, cred);
  
  	kauth_cred_unref(&cred);
-@@ -5586,10 +5685,75 @@ bad:
-  * Note:	The argument and environment vectors are user space pointers
-  *		to arrays of user space pointers.
-  */
-+/*
-+ * Bring-up aid: the sysctl kern.exec_inject holds "LIBRARY NAME NAME ..."; every program
-+ * whose file name is one of the NAMEs is started with DYLD_INSERT_LIBRARIES=LIBRARY in its
-+ * environment, so that dyld loads our library into it. Several such groups may follow each
-+ * other, separated by ";". A program named in more than one group gets every one of those
-+ * libraries, joined with ":" in the one DYLD_INSERT_LIBRARIES, so SpringBoard can carry both
-+ * our window-server library and the tweak loader. launchd refuses to pass DYLD_ variables
-+ * from a job description, which is why the kernel adds this one. Set once by our init (from
-+ * etc/inject.conf) before it hands over to launchd.
-+ */
-+static char exec_inject_conf[512];
-+SYSCTL_STRING(_kern, OID_AUTO, exec_inject, CTLFLAG_RW | CTLFLAG_LOCKED, exec_inject_conf, sizeof(exec_inject_conf),
-+    "LIBRARY NAME... [; LIBRARY NAME...]: programs started with the library inserted");
-+
-+static bool
-+exec_inject_env(struct image_params *imgp, char *env, size_t size)
-+{
-+	const char *name, *p = exec_inject_conf;
-+	size_t namelen, used;
-+	bool any = false;
-+
-+	if (*p == 0 || imgp->ip_ndp == NULL) {
-+		return false;
-+	}
-+	name = imgp->ip_ndp->ni_cnd.cn_nameptr;
-+	namelen = imgp->ip_ndp->ni_cnd.cn_namelen;
-+	used = strlcpy(env, "DYLD_INSERT_LIBRARIES=", size);
-+	while (*p != 0) {
-+		const char *library;
-+		size_t liblen;
-+		bool matched = false;
-+
-+		while (*p == ' ' || *p == ';') {
-+			p++;
-+		}
-+		library = p;
-+		while (*p != 0 && *p != ' ' && *p != ';') {
-+			p++;
-+		}
-+		liblen = (size_t)(p - library);
-+		while (*p == ' ') {
-+			const char *word = ++p;
-+
-+			while (*p != 0 && *p != ' ' && *p != ';') {
-+				p++;
-+			}
-+			if (!matched && (size_t)(p - word) == namelen && namelen != 0 && liblen != 0 &&
-+			    strncmp(word, name, namelen) == 0) {
-+				matched = true;         /* this group names this program; its library is added once */
-+			}
-+		}
-+		if (matched && liblen != 0 && used + 1 + liblen < size) {
-+			if (any) {
-+				env[used++] = ':';      /* dyld takes several libraries separated by ":" */
-+			}
-+			memcpy(env + used, library, liblen);
-+			used += liblen;
-+			env[used] = 0;
-+			any = true;
-+		}
-+	}
-+	return any;
-+}
-+
- __attribute__((noinline))
+@@ -5590,6 +5585,8 @@ __attribute__((noinline))
  static int
  exec_extract_strings(struct image_params *imgp)
  {
 +	char            inject_env[512];
++	const char     *extra_env;
  	int error = 0;
  	int     ptr_size = (imgp->ip_flags & IMGPF_WAS_64BIT_ADDR) ? 8 : 4;
  	int new_ptr_size = (imgp->ip_flags & IMGPF_IS_64BIT_ADDR) ? 8 : 4;
-@@ -5759,6 +5923,33 @@ exec_extract_strings(struct image_params *imgp)
+@@ -5759,6 +5756,20 @@ exec_extract_strings(struct image_params *imgp)
  		imgp->ip_envc++;
  	}
  
-+	/* one more variable for the programs that get our library inside them (see exec_inject_env) */
-+	if (exec_inject_env(imgp, inject_env, sizeof(inject_env))) {
-+		error = exec_add_user_string(imgp, CAST_USER_ADDR_T(inject_env), UIO_SYSSPACE, TRUE);
-+		if (error) {
-+			goto bad;
-+		}
-+		if (imgp->ip_argspace < new_ptr_size) {
-+			error = E2BIG;
-+			goto bad;
-+		}
-+		imgp->ip_argspace -= new_ptr_size;
-+		imgp->ip_envc++;
-+	}
-+	/* ... and one for everybody when the logs are wanted on the console (see exec_applog_path) */
-+	if (exec_applog_oslog(imgp)) {
-+		error = exec_add_user_string(imgp, CAST_USER_ADDR_T("OS_ACTIVITY_DT_MODE=YES"), UIO_SYSSPACE, TRUE);
++	/* the variables the bring-up aids add (hakios.exec.c) */
++	for (unsigned cursor = 0; (extra_env = hakios_exec_extra_env(imgp, &cursor, inject_env, sizeof(inject_env))) != NULL;) {
++		error = exec_add_user_string(imgp, CAST_USER_ADDR_T(extra_env), UIO_SYSSPACE, TRUE);
 +		if (error) {
 +			goto bad;
 +		}
@@ -822,40 +501,22 @@ index 1d71c66629fb..a22095ccf5f0 100644
  	/* Save space for envv[] NULL terminator */
  	if (imgp->ip_argspace < new_ptr_size) {
  		error = E2BIG;
-@@ -6636,7 +6827,23 @@ handle_mac_transition:
+@@ -6636,7 +6647,9 @@ handle_mac_transition:
  	}
  
  	/* Update the process' identity version and set the security token */
 -	proc_setpidversion(p, OSIncrementAtomic(&nextpidversion));
-+	{
-+		/*
-+		 * (redwood) Except when xpcproxy becomes the service it was spawned for: then the process keeps
-+		 * xpcproxy's identity version, as if launchd had spawned the service itself, which is what launchd
-+		 * means by eliding xpcproxy ("service will attempt to elide xpcproxy"; here it spawns xpcproxy
-+		 * all the same). RunningBoard keeps the audit token of such a process from before the exec and
-+		 * never takes the newer one: every entitlement check it made for it failed (SecTaskLoadEntitlements
-+		 * error 3, a thousand times a minute with Safari open), and Safari's web processes got no
-+		 * assertions ("target is not running or doesn't have entitlement
-+		 * com.apple.runningboard.assertions.webkit"). Boot-arg xpcproxy_idversion=1: a new version, as XNU.
-+		 */
-+		static TUNABLE(uint32_t, xpcproxy_idversion, "xpcproxy_idversion", 0);
-+
-+		if (xpcproxy_idversion || strncmp(p->p_comm, "xpcproxy", sizeof(p->p_comm)) != 0) {
-+			proc_setpidversion(p, OSIncrementAtomic(&nextpidversion));
-+		}
++	if (hakios_exec_bumps_pidversion(p)) {
++		proc_setpidversion(p, OSIncrementAtomic(&nextpidversion));
 +	}
  	task_set_uniqueid(task);
  	set_security_token_task_internal(p, task);
  
-@@ -7538,6 +7745,11 @@ process_signature(proc_t p, struct image_params *imgp)
+@@ -7538,6 +7551,7 @@ process_signature(proc_t p, struct image_params *imgp)
  	}
  
  done:
-+	if (error && exec_trace) {
-+		printf("exectrace: %s[%d]: process_signature failed: %d (csflags 0x%x, mac %d, cs_error %d)\n",
-+		    p->p_comm, proc_getpid(p), error, imgp->ip_csflags, imgp->ip_mac_return,
-+		    signature_failure_reason != OS_REASON_NULL);
-+	}
++	HAKIOS_EXEC_TRACE_SIGNATURE(p, imgp, error, signature_failure_reason != OS_REASON_NULL);
  	if (0 == error) {
  		/*
  		 * Update the new process's signature-dependent process state.
@@ -1253,158 +914,45 @@ index cbaa0b221894..78315a2d54cf 100644
  	int eofflag;
  	uint64_t options;
 diff --git a/bsd/vfs/vfs_conf.c b/bsd/vfs/vfs_conf.c
-index bae70cda3a96..63814100c68f 100644
+index bae70cda3a96..f56003e425a9 100644
 --- a/bsd/vfs/vfs_conf.c
 +++ b/bsd/vfs/vfs_conf.c
-@@ -103,6 +103,19 @@ extern  struct vfsops mockfs_vfsops;
+@@ -103,6 +103,9 @@ extern  struct vfsops mockfs_vfsops;
  extern  int mockfs_mountroot(mount_t, vnode_t, vfs_context_t);
  #endif /* MOCKFS */
  
-+#if RAMFS
-+extern  struct vfsops ramfs_vfsops;
-+#endif /* RAMFS */
-+
-+#if HFS
-+extern  struct vfsops hfs_vfsops;
-+#endif /* HFS */
-+
-+#if APFS
-+extern  struct vfsops apfs_vfsops;
-+extern  int apfs_mountroot(mount_t, vnode_t, vfs_context_t);
-+#endif /* APFS */
++#define HAKIOS_VFS_PART 1
++#include "hakios_vfs_conf.h"
 +
  enum fs_type_num {
  	FT_NFS = 2,
  	FT_DEVFS = 19,
-@@ -110,7 +123,10 @@ enum fs_type_num {
- 	FT_ROUTEFS = 21,
- 	FT_NULLFS = 22,
- 	FT_BINDFS = 23,
--	FT_MOCKFS  = 0x6D6F636B
-+	FT_MOCKFS  = 0x6D6F636B,
-+	FT_RAMFS   = 0x72616D66,
-+	FT_HFS     = 0x11,
-+	FT_APFS    = 0x61706673
- };
- 
- int fstypenumstart = FT_BINDFS + 1;
-@@ -194,6 +210,79 @@ static struct vfstable vfstbllist[] = {
+@@ -194,6 +197,9 @@ static struct vfstable vfstbllist[] = {
  	},
  #endif /* BINDFS */
  
-+#if RAMFS
-+	/* Read-write filesystem in memory (no device, no mount arguments) */
-+	{
-+		.vfc_vfsops = &ramfs_vfsops,
-+		.vfc_name = "ramfs",
-+		.vfc_typenum = FT_RAMFS,
-+		.vfc_refcount = 0,
-+		.vfc_flags = MNT_LOCAL,
-+		.vfc_mountroot = NULL,
-+		.vfc_next = NULL,
-+		.vfc_reserved1 = 0,
-+		.vfc_reserved2 = 0,
-+		.vfc_vfsflags = VFC_VFSGENERICARGS | VFC_VFS64BITREADY | VFC_VFSNATIVEXATTR,
-+		.vfc_descptr = NULL,
-+		.vfc_descsize = 0,
-+		.vfc_sysctl = NULL
-+	},
-+#endif /* RAMFS */
-+
-+#if HFS
-+	/*
-+	 * HFS Plus, read-write, built in rather than a kext (bsd/hfs, Apple's hfs-627.100.6): the data volume on the
-+	 * phone's flash, /private/var, where ramfs keeps it in memory.  Its own arguments (struct hfs_mount_args) and
-+	 * local ones, as the kext registered itself (no VFS_TBLGENERICMNTARGS): the kernel looks up the device named
-+	 * by their first field and hands its vnode to hfs_mount().  Mounted by init, from user space.
-+	 */
-+	{
-+		.vfc_vfsops = &hfs_vfsops,
-+		.vfc_name = "hfs",
-+		.vfc_typenum = FT_HFS,
-+		.vfc_refcount = 0,
-+		.vfc_flags = MNT_LOCAL | MNT_DOVOLFS,
-+		.vfc_mountroot = NULL,
-+		.vfc_next = NULL,
-+		.vfc_reserved1 = 0,
-+		.vfc_reserved2 = 0,
-+		.vfc_vfsflags = VFC_VFSLOCALARGS | VFC_VFSREADDIR_EXTENDED | VFC_VFS64BITREADY | VFC_VFSVNOP_PAGEOUTV2 |
-+		    VFC_VFSVNOP_PAGEINV2 | VFC_VFSNATIVEXATTR,
-+		.vfc_descptr = NULL,
-+		.vfc_descsize = 0,
-+		.vfc_sysctl = NULL
-+	},
-+#endif /* HFS */
-+
-+#if APFS
-+	/*
-+	 * Apple File System, read only: the root and every image of this port's (the RAM
-+	 * disks are APFS containers).  Before mockfs, which accepts any root device: a device
-+	 * that is not APFS comes back EINVAL and vfs_mountroot() goes on to the next.
-+	 */
-+	{
-+		.vfc_vfsops = &apfs_vfsops,
-+		.vfc_name = "apfs",
-+		.vfc_typenum = FT_APFS,
-+		.vfc_refcount = 0,
-+		.vfc_flags = MNT_LOCAL | MNT_RDONLY,
-+		.vfc_mountroot = apfs_mountroot,
-+		.vfc_next = NULL,
-+		.vfc_reserved1 = 0,
-+		.vfc_reserved2 = 0,
-+		/*
-+		 * Generic args, not local: a kernel mount of a filesystem marked
-+		 * VFC_VFSLOCALARGS is refused outright (mount_common), and this one has to be
-+		 * mountable from the kernel.  So apfs_mount() takes the device's path as its
-+		 * mount data and opens it itself.
-+		 */
-+		.vfc_vfsflags = VFC_VFSGENERICARGS | VFC_VFS64BITREADY | VFC_VFSNATIVEXATTR,
-+		.vfc_descptr = NULL,
-+		.vfc_descsize = 0,
-+		.vfc_sysctl = NULL
-+	},
-+#endif /* APFS */
++#define HAKIOS_VFS_PART 2
++#include "hakios_vfs_conf.h"
 +
  #if MOCKFS
  	/* If we are configured for it, mockfs should always be the last standard entry (and thus the last FS we attempt mountroot with) */
  	{
-@@ -298,6 +387,21 @@ extern const struct vnodeopv_desc devfs_fdesc_vnodeop_opv_desc;
+@@ -298,6 +304,9 @@ extern const struct vnodeopv_desc devfs_fdesc_vnodeop_opv_desc;
  extern const struct vnodeopv_desc mockfs_vnodeop_opv_desc;
  #endif /* MOCKFS */
  
-+
-+#if RAMFS
-+extern const struct vnodeopv_desc ramfs_vnodeop_opv_desc;
-+#endif /* RAMFS */
-+
-+#if HFS
-+extern const struct vnodeopv_desc hfs_vnodeop_opv_desc;
-+extern const struct vnodeopv_desc hfs_specop_opv_desc;
-+extern const struct vnodeopv_desc hfs_fifoop_opv_desc;
-+#endif /* HFS */
-+
-+#if APFS
-+extern const struct vnodeopv_desc apfs_vnodeop_opv_desc;
-+#endif /* APFS */
++#define HAKIOS_VFS_PART 3
++#include "hakios_vfs_conf.h"
 +
  extern const struct vnodeopv_desc nullfs_vnodeop_opv_desc;
  extern const struct vnodeopv_desc bindfs_vnodeop_opv_desc;
  
-@@ -327,5 +431,16 @@ const struct vnodeopv_desc *vfs_opv_descs[] = {
+@@ -327,5 +336,7 @@ const struct vnodeopv_desc *vfs_opv_descs[] = {
  #if MOCKFS
  	&mockfs_vnodeop_opv_desc,
  #endif /* MOCKFS */
-+#if RAMFS
-+	&ramfs_vnodeop_opv_desc,
-+#endif /* RAMFS */
-+#if HFS
-+	&hfs_vnodeop_opv_desc,
-+	&hfs_specop_opv_desc,
-+	&hfs_fifoop_opv_desc,
-+#endif /* HFS */
-+#if APFS
-+	&apfs_vnodeop_opv_desc,
-+#endif /* APFS */
++#define HAKIOS_VFS_PART 4
++#include "hakios_vfs_conf.h"
  	NULL
  };
 diff --git a/bsd/vfs/vfs_lookup.c b/bsd/vfs/vfs_lookup.c
@@ -1900,10 +1448,10 @@ index 83259ebf9835..8864e5c7cc41 100644
  DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
  endif
 diff --git a/iokit/conf/files b/iokit/conf/files
-index 5fb0a52062e0..7cfee3142b5b 100644
+index 5fb0a52062e0..332ed8dc090e 100644
 --- a/iokit/conf/files
 +++ b/iokit/conf/files
-@@ -79,6 +79,18 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
+@@ -79,6 +79,14 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
  iokit/Kernel/IOGuardPageMemoryDescriptor.cpp		optional iokitcpp
  
  iokit/Kernel/IOPlatformExpert.cpp			optional iokitcpp
@@ -1911,10 +1459,6 @@ index 5fb0a52062e0..7cfee3142b5b 100644
 +iokit/Kernel/MiniIOSurface.cpp			optional iokitcpp
 +iokit/Kernel/MiniIOMobileFramebuffer.cpp		optional iokitcpp
 +# HakiOS drivers: made by tools/hakios-config.py kernel from drivers/*/conf. Edit those, not these lines.
-+iokit/Kernel/hakios.stubs.cpp            optional iokitcpp
-+iokit/Kernel/hakios.gpu.cpp              optional hakios_adreno iokitcpp
-+iokit/Kernel/hakios.battery.cpp          optional hakios_battery iokitcpp
-+iokit/Kernel/hakios.wlan.cpp             optional hakios_wifi iokitcpp
 +# end of the HakiOS drivers
 +iokit/Kernel/MiniAppleKeyStore.cpp			optional iokitcpp
 +iokit/Kernel/MiniIONetworkStack.cpp			optional iokitcpp
@@ -2092,32 +1636,21 @@ index 0316792a3f42..b9c195b09cd1 100644
  # Assume LTO scaling by default, unless it is being explicitly passed on the command-line
  LARGE_BUILD_FOOTPRINT := $(if $(BUILD_LTO),$(BUILD_LTO),1)
 diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
-index e26a1d70f470..f91095c98d26 100644
+index e26a1d70f470..2b24b2781416 100644
 --- a/osfmk/arm/arm_init.c
 +++ b/osfmk/arm/arm_init.c
-@@ -73,6 +73,9 @@
- #include <sys/kdebug.h>
- 
- #include <pexpert/pexpert.h>
-+#if defined(__arm64__)
-+#include <arm64/psci_smp.h>
-+#endif
- 
- #include <console/serial_protos.h>
- 
-@@ -335,7 +338,11 @@ arm_setup_pre_sign(void)
+@@ -335,7 +335,10 @@ arm_setup_pre_sign(void)
   */
  
  __startup_func
-+/* Bring-up checkpoints, see osfmk/arm64/loader_return.c */
-+extern void loader_checkpoint(uint64_t n);
++#include "hakios_arm_init.h"
 +
  void
 +
  arm_init(
  	boot_args       *args)
  {
-@@ -354,6 +361,7 @@ arm_init(
+@@ -354,6 +357,7 @@ arm_init(
  	const_boot_args = *args;
  	BootArgs = args = &const_boot_args;
  
@@ -2125,11 +1658,12 @@ index e26a1d70f470..f91095c98d26 100644
  	cpu_data_init(&BootCpuData);
  #if defined(HAS_APPLE_PAC)
  	/* bootstrap cpu process dependent key for kernel has been loaded by start.s */
-@@ -362,14 +370,19 @@ arm_init(
+@@ -362,14 +366,20 @@ arm_init(
  #endif /* defined(HAS_APPLE_PAC) */
  
  	PE_init_platform(FALSE, args); /* Get platform expert set up */
 +	loader_checkpoint(11);
++	loader_early_log_init();
  
  #if __arm64__
  	configure_timer_apple_regs();
@@ -2145,7 +1679,7 @@ index e26a1d70f470..f91095c98d26 100644
  
  #if (DEVELOPMENT || DEBUG)
  	unsigned long const *platform_stall_ptr = NULL;
-@@ -385,6 +398,7 @@ arm_init(
+@@ -385,6 +395,7 @@ arm_init(
  	}
  
  	platform_stall_panic_or_spin(PLATFORM_STALL_XNU_LOCATION_ARM_INIT);
@@ -2153,13 +1687,14 @@ index e26a1d70f470..f91095c98d26 100644
  
  	chosen = NULL; // Force a re-lookup later on since VM addresses are not final at this point
  	dt_entry_size = 0;
-@@ -422,10 +436,13 @@ arm_init(
+@@ -422,10 +433,14 @@ arm_init(
  	}
  #endif
  
 +	loader_checkpoint(35);
  	ml_parse_cpu_topology();
 +	loader_checkpoint(12);
++	loader_log_cpu_facts();
  
  
  	master_cpu = ml_get_boot_cpu_number();
@@ -2167,7 +1702,7 @@ index e26a1d70f470..f91095c98d26 100644
  	assert(master_cpu >= 0 && master_cpu <= ml_get_max_cpu_number());
  
  	BootCpuData.cpu_number = (unsigned short)master_cpu;
-@@ -439,11 +456,14 @@ arm_init(
+@@ -439,11 +454,14 @@ arm_init(
  	CpuDataEntries[master_cpu].cpu_data_paddr = (void *)((uintptr_t)(args->physBase)
  	    + ((uintptr_t)&BootCpuData
  	    - (uintptr_t)(args->virtBase)));
@@ -2182,7 +1717,7 @@ index e26a1d70f470..f91095c98d26 100644
  
  	/*
  	 * Preemption is enabled for this thread so that it can lock mutexes without
-@@ -452,12 +472,16 @@ arm_init(
+@@ -452,19 +470,25 @@ arm_init(
  	 * preemption level is not really meaningful for the bootstrap thread.
  	 */
  	thread->machine.preemption_count = 0;
@@ -2199,23 +1734,37 @@ index e26a1d70f470..f91095c98d26 100644
  
  	/*
  	 * Initialize the timer callout world
-@@ -465,6 +489,7 @@ arm_init(
+ 	 */
  	timer_call_init();
++	loader_checkpoint(50);
  
  	cpu_init();
 +	loader_checkpoint(16);
  
  	processor_bootstrap();
  
-@@ -514,6 +539,7 @@ arm_init(
+@@ -510,10 +534,19 @@ arm_init(
+ 	PE_parse_boot_argn("immediate_NMI", &force_immediate_debug_halt, sizeof(force_immediate_debug_halt));
+ 
+ #if __ARM_PAN_AVAILABLE__
+-	__builtin_arm_wsr("pan", 1);
++	{
++		uint32_t pan = 1;
++
++		if (!hakios_cpu_has_pan() || (PE_parse_boot_argn("pan", &pan, sizeof(pan)) && pan == 0)) {
++			hakios_pan_off = 1;
++		}
++	}
++	hakios_pan_apply();
  #endif  /* __ARM_PAN_AVAILABLE__ */
++	hakios_ucache_apply();          /* patch 1511 */
  
  	arm_vm_init(xmaxmem, args);
 +	loader_checkpoint(17);
  
  	if (debug_boot_arg) {
  		patch_low_glo();
-@@ -527,7 +553,9 @@ arm_init(
+@@ -527,7 +560,9 @@ arm_init(
  
  	/* Setup debugging output. */
  	const unsigned int serial_exists = serial_init();
@@ -2225,7 +1774,7 @@ index e26a1d70f470..f91095c98d26 100644
  	kprintf("kprintf initialized\n");
  
  	serialmode = 0;
-@@ -569,6 +597,7 @@ arm_init(
+@@ -569,6 +604,7 @@ arm_init(
  		disableConsoleOutput = FALSE;     /* Allow printfs to happen */
  	}
  	PE_create_console();
@@ -2233,7 +1782,7 @@ index e26a1d70f470..f91095c98d26 100644
  
  	/* setup console output */
  	PE_init_printf(FALSE);
-@@ -647,6 +676,7 @@ arm_init(
+@@ -647,6 +683,7 @@ arm_init(
  	 * against string vulnerabilities
  	 */
  	__stack_chk_guard &= ~(0xFFULL << 8);
@@ -2241,16 +1790,97 @@ index e26a1d70f470..f91095c98d26 100644
  	machine_startup(args);
  }
  
-@@ -673,6 +703,9 @@ arm_init_cpu(
+@@ -661,8 +698,9 @@ arm_init_cpu(
+ 	cpu_data_t      *cpu_data_ptr)
+ {
+ #if __ARM_PAN_AVAILABLE__
+-	__builtin_arm_wsr("pan", 1);
++	hakios_pan_apply();
+ #endif
++	hakios_ucache_apply();          /* patch 1511 */
+ 
+ #ifdef __arm64__
+ 	configure_timer_apple_regs();
+@@ -673,6 +711,10 @@ arm_init_cpu(
  
  
  	machine_set_current_thread(cpu_data_ptr->cpu_active_thread);
 +#if defined(GENERIC_PSCI_SMP)
++	psci_smp_diag_vectors();        /* m3_diag=1: the kernel's vectors only now that it has its thread (patch 1509) */
 +	psci_smp_cpu_reached(PSCI_SMP_CPU_IN_KERNEL);
 +#endif
  
  #if APPLE_ARM64_ARCH_FAMILY
  	configure_late_apple_regs();
+@@ -793,8 +835,9 @@ arm_init_idle_cpu(
+ 	cpu_data_t      *cpu_data_ptr)
+ {
+ #if __ARM_PAN_AVAILABLE__
+-	__builtin_arm_wsr("pan", 1);
++	hakios_pan_apply();
+ #endif
++	hakios_ucache_apply();          /* patch 1511 */
+ 
+ 	machine_set_current_thread(cpu_data_ptr->cpu_active_thread);
+ 
+diff --git a/osfmk/arm/commpage/commpage.c b/osfmk/arm/commpage/commpage.c
+index ee9f8de75a64..486351fa1400 100644
+--- a/osfmk/arm/commpage/commpage.c
++++ b/osfmk/arm/commpage/commpage.c
+@@ -363,6 +363,8 @@ _get_commpage_text_priv_address(void)
+ }
+ 
+ #if defined(__arm64__)
++#include "hakios_commpage.h"
++
+ /**
+  * Initializes all commpage entries and sysctls for EL0 visible features in ID_AA64ISAR0_EL1
+  */
+@@ -370,7 +372,7 @@ static void
+ commpage_init_arm_optional_features_isar0(uint64_t *commpage_bits)
+ {
+ 	uint64_t bits = 0;
+-	uint64_t isar0 = __builtin_arm_rsr64("ID_AA64ISAR0_EL1");
++	uint64_t isar0 = hakios_id_floor(__builtin_arm_rsr64("ID_AA64ISAR0_EL1"), 0x0000000000011120ULL);
+ 
+ 	if ((isar0 & ID_AA64ISAR0_EL1_TS_MASK) >= ID_AA64ISAR0_EL1_TS_FLAGM_EN) {
+ 		gARM_FEAT_FlagM = 1;
+@@ -433,7 +435,7 @@ static void
+ commpage_init_arm_optional_features_isar1(uint64_t *commpage_bits)
+ {
+ 	uint64_t bits = 0;
+-	uint64_t isar1 = __builtin_arm_rsr64("ID_AA64ISAR1_EL1");
++	uint64_t isar1 = hakios_id_floor(__builtin_arm_rsr64("ID_AA64ISAR1_EL1"), 0ULL);
+ 	uint64_t sctlr = __builtin_arm_rsr64("SCTLR_EL1");
+ 
+ 	if ((isar1 & ID_AA64ISAR1_EL1_SPECRES_MASK) >= ID_AA64ISAR1_EL1_SPECRES_EN &&
+@@ -520,7 +522,7 @@ static void
+ commpage_init_arm_optional_features_mmfr2(uint64_t *commpage_bits)
+ {
+ 	uint64_t bits = 0;
+-	uint64_t mmfr2 = __builtin_arm_rsr64("ID_AA64MMFR2_EL1");
++	uint64_t mmfr2 = hakios_id_floor(__builtin_arm_rsr64("ID_AA64MMFR2_EL1"), 0ULL);
+ 
+ 	if ((mmfr2 & ID_AA64MMFR2_EL1_AT_MASK) >= ID_AA64MMFR2_EL1_AT_LSE2_EN) {
+ 		gARM_FEAT_LSE2 = 1;
+@@ -537,7 +539,7 @@ static void
+ commpage_init_arm_optional_features_pfr0(uint64_t *commpage_bits)
+ {
+ 	uint64_t bits = 0;
+-	uint64_t pfr0 = __builtin_arm_rsr64("ID_AA64PFR0_EL1");
++	uint64_t pfr0 = hakios_id_floor(__builtin_arm_rsr64("ID_AA64PFR0_EL1"), 0x000000000000ffffULL);
+ 
+ 	if ((pfr0 & ID_AA64PFR0_EL1_CSV3_MASK) >= ID_AA64PFR0_EL1_CSV3_EN) {
+ 		gARM_FEAT_CSV3 = 1;
+@@ -573,7 +575,7 @@ commpage_init_arm_optional_features_pfr0(uint64_t *commpage_bits)
+ static void
+ commpage_init_arm_optional_features_pfr1(uint64_t *commpage_bits __unused)
+ {
+-	uint64_t pfr1 = __builtin_arm_rsr64("ID_AA64PFR1_EL1");
++	uint64_t pfr1 = hakios_id_floor(__builtin_arm_rsr64("ID_AA64PFR1_EL1"), 0ULL);
+ 
+ 	if ((pfr1 & ID_AA64PFR1_EL1_SSBS_MASK) >= ID_AA64PFR1_EL1_SSBS_EN) {
+ 		gARM_FEAT_SSBS = 1;
 diff --git a/osfmk/arm/model_dep.c b/osfmk/arm/model_dep.c
 index 39daaf8db949..64ceb1a5f201 100644
 --- a/osfmk/arm/model_dep.c
@@ -2361,6 +1991,115 @@ index df672c65b144..d7e1da7c5db2 100644
  #endif /* HAS_APPLE_PAC */
  
  	bool reserved11;
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index d89b0f19cff7..4909994b4ae9 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -361,10 +361,13 @@ typedef struct {
+ 	vm_size_t len;
+ } ptov_table_entry;
+ 
+-#define PTOV_TABLE_SIZE 8
++/* (HakiOS, patch 1512: and one for each range of the boot loader's extra RAM) */
++#define PTOV_TABLE_SIZE (8 + HAKIOS_EXTRA_RAM_MAX)
+ SECURITY_READ_ONLY_LATE(static ptov_table_entry)        ptov_table[PTOV_TABLE_SIZE];
+ SECURITY_READ_ONLY_LATE(static boolean_t)               kva_active = FALSE;
+ 
++#include "hakios_extra_ram.h"
++
+ 
+ vm_map_address_t
+ phystokv(pmap_paddr_t pa)
+@@ -995,7 +998,9 @@ arm_vm_page_granular_helper(vm_offset_t start, vm_offset_t _end, vm_offset_t va,
+ 		va &= ~ARM_TT_L2_OFFMASK;
+ 		pa = va - gVirtBase + gPhysBase - pa_offset;
+ 
+-		if (pa >= real_avail_end) {
++		/* (HakiOS, patch 1512: an extra range may be anywhere, below the window too) */
++		bool extra = hakios_extra_ram_meets(pa, ARM_TT_L2_SIZE);
++		if (pa >= real_avail_end && !extra) {
+ 			return;
+ 		}
+ 
+@@ -1022,10 +1027,10 @@ arm_vm_page_granular_helper(vm_offset_t start, vm_offset_t _end, vm_offset_t va,
+ 		}
+ 
+ 		vm_offset_t len = _end - va;
+-		if ((pa + len) > real_avail_end) {
++		if (!extra && (pa + len) > real_avail_end) {
+ 			_end -= (pa + len - real_avail_end);
+ 		}
+-		assert((start - gVirtBase + gPhysBase - pa_offset) >= gPhysBase);
++		assert(extra || (start - gVirtBase + gPhysBase - pa_offset) >= gPhysBase);
+ 
+ 		/* Round up to the nearest PAGE_SIZE boundary when creating mappings:
+ 		 * PAGE_SIZE may be a multiple of ARM_PGBYTES, and we don't want to leave
+@@ -1116,7 +1121,7 @@ arm_vm_page_granular_prot(vm_offset_t start, unsigned long size, pmap_paddr_t pa
+ 
+ 			tte2 = arm_kva_to_tte(align_start);
+ 
+-			if ((pa >= gPhysBase) && (pa < real_avail_end)) {
++			if (((pa >= gPhysBase) && (pa < real_avail_end)) || hakios_extra_ram_covers(pa, ARM_TT_L2_SIZE)) {
+ 				tmplate = (pa & ARM_TTE_BLOCK_L2_MASK) | ARM_TTE_TYPE_BLOCK
+ 				    | ARM_TTE_VALID | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_NX
+ 				    | ARM_TTE_BLOCK_AP(pte_prot_APX) | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY)
+@@ -1602,6 +1607,16 @@ arm_vm_physmap_init(boot_args *args)
+ 	arm_vm_physmap_slide(temp_ptov_table, (args->topOfKernelData - gPhysBase + gVirtBase),
+ 	    real_avail_end - args->topOfKernelData, AP_RWNA, ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT); // rest of physmem
+ 
++	/*
++	 * HakiOS (patch 1512): the boot loader's extra RAM, each range after the last in the aperture. Its "va" for
++	 * arm_vm_physmap_slide() is where the static formula (pa - gPhysBase + gVirtBase) would put it, which for a range
++	 * below the window is no address at all: it is only ever turned back into the physical address.
++	 */
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		arm_vm_physmap_slide(temp_ptov_table, hakios_extra_ram[i].pa - gPhysBase + gVirtBase,
++		    hakios_extra_ram[i].end - hakios_extra_ram[i].pa, AP_RWNA, ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT);
++	}
++
+ 	assert((temp_ptov_table[ptov_index - 1].va + temp_ptov_table[ptov_index - 1].len) <= physmap_end);
+ 
+ 	// Sort in descending order of segment length.  LUT traversal is linear, so largest (most likely used)
+@@ -1651,6 +1666,8 @@ arm_vm_prot_finalize(boot_args * args __unused)
+ 	arm64_replace_bootstack(&BootCpuData);
+ 	ml_static_mfree(phystokv(segBOOTDATAB - gVirtBase + gPhysBase), segSizeBOOTDATA);
+ 
++	hakios_extra_ram_to_vm();
++
+ #if __ARM_KERNEL_PROTECT__
+ 	arm_vm_populate_kernel_el0_mappings();
+ #endif /* __ARM_KERNEL_PROTECT__ */
+@@ -1853,6 +1870,10 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 		max_mem_actual = memory_size;
+ 	} else {
+ 		max_mem_actual = mem_actual;
++		/* HakiOS (patch 1512): the boot loader's extra RAM beside the window (none with maxmem=) */
++		hakios_extra_ram_init();
++		mem_actual += ptoa((uint64_t)hakios_extra_ram_pages);
++		max_mem_actual += ptoa((uint64_t)hakios_extra_ram_pages);
+ 	}
+ 	if (mem_size >= ((VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / 2)) {
+ 		panic("Unsupported memory configuration %lx", mem_size);
+@@ -1887,6 +1908,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ #else
+ 	static_memory_end = physmap_base + mem_size + (PTOV_TABLE_SIZE * ARM_TT_TWIG_SIZE); // worst possible case for block alignment
+ 	physmap_end = physmap_base + real_phys_size + (PTOV_TABLE_SIZE * ARM_TT_TWIG_SIZE);
++	/* (HakiOS, patch 1512: the extra RAM is in the aperture too) */
++	static_memory_end += ptoa((vm_map_address_t)hakios_extra_ram_pages);
++	physmap_end += ptoa((vm_map_address_t)hakios_extra_ram_pages);
+ #endif // ARM_LARGE_MEMORY
+ #endif
+ 
+@@ -2202,6 +2226,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 
+ 	sane_size = mem_size - (avail_start - gPhysBase);
+ 	max_mem = mem_size;
++	/* (HakiOS, patch 1512: the extra RAM counts as the VM's: it is given to it in arm_vm_prot_finalize()) */
++	sane_size += ptoa((uint64_t)hakios_extra_ram_pages);
++	max_mem += ptoa((uint64_t)hakios_extra_ram_pages);
+ 	vm_kernel_slid_base = segLOWESTTEXT;
+ 	// vm_kernel_slide is set by arm_init()->arm_slide_rebase_and_sign_image()
+ 	vm_kernel_stext = segTEXTB;
 diff --git a/osfmk/arm64/corecrypto/arm64_isa_compatibility.h b/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
 index b9549da357b4..cca31ea32502 100644
 --- a/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
@@ -2393,130 +2132,43 @@ index 94e91306b143..0ec1323086b7 100644
  #endif
  
 diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
-index e76e7e70ab9c..828a51171c7e 100644
+index e76e7e70ab9c..c88ed41fd5ba 100644
 --- a/osfmk/arm64/machine_routines.c
 +++ b/osfmk/arm64/machine_routines.c
-@@ -734,6 +734,9 @@ ml_get_machine_mem(void)
+@@ -734,6 +734,11 @@ ml_get_machine_mem(void)
  	return machine_info.memory_size;
  }
  
 +extern void loader_return(void);
++extern void loader_exit_wanted(bool reset);    /* osfmk/arm64/loader_return.c */
 +extern void hakios_adreno_stop(void);
++extern void hakios_exynos_halt_off(boolean_t reboot);  /* drivers/power/exynos/hakios.exynos_poweroff.c (halt_off=N, the Galaxy S9) */
 +
  __attribute__((noreturn))
  void
  halt_all_cpus(boolean_t reboot)
-@@ -745,6 +748,9 @@ halt_all_cpus(boolean_t reboot)
+@@ -745,6 +750,11 @@ halt_all_cpus(boolean_t reboot)
  		printf("CPU halted\n");
  		PEHaltRestart(kPEHaltCPU);
  	}
 +	/* No platform driver powers the machine off: hand control (and the log) back to the loader. */
 +	hakios_adreno_stop();
++	hakios_exynos_halt_off(reboot); /* a halt with halt_off=N on the S9: panel dark, PS_HOLD low; back here only if not off */
++	loader_exit_wanted(reboot);     /* without a loader: PSCI SYSTEM_RESET or SYSTEM_OFF */
 +	loader_return();
  	while (1) {
  		;
  	}
-@@ -932,6 +938,99 @@ ml_read_chip_revision(unsigned int *rev __unused)
+@@ -932,6 +942,8 @@ ml_read_chip_revision(unsigned int *rev __unused)
  #endif
  }
  
-+/*
-+ * The slower cores (an L2 access penalty, or the loader's "small-core"): each is made the SMT
-+ * sibling ("secondary") of a faster core of its own, and the scheduler then treats it as XNU
-+ * treats the second thread of a hyperthreaded core: a thread is put on it only when no faster
-+ * core is idle or running something of lower priority; it looks for work only when none of
-+ * them is idle; and what runs on it goes back to the run queue at every rescheduling, to be
-+ * put on a faster core that has come free meanwhile. (XNU itself pairs such a core with the
-+ * boot processor, which allows one of them; the phone has three: with cpus=8, cores 3, 2 and
-+ * 1 go with 4, 5 and 6, so that 7, the boot core and the fastest, where real-time threads go
-+ * first, stays alone: the scheduler idles a secondary while its primary runs a real-time
-+ * thread.)
-+ */
-+static uint32_t small_cores_apart = 2;          /* boot-arg small_cores, read in ml_parse_cpu_topology() (before tunables are) */
-+static int ml_slow_core_partner[MAX_CPUS];      /* by cpu_id: the faster core it is paired with, -1 if none */
-+
-+static void
-+ml_choose_slow_core_partners(void)
-+{
-+	bool taken[MAX_CPUS] = { false };
-+
-+	for (int i = 0; i < MAX_CPUS; i++) {
-+		ml_slow_core_partner[i] = -1;
-+	}
-+	for (int i = 0; i < (int)topology_info.num_cpus; i++) {
-+		int partner = -1;
-+
-+		if (topology_info.cpus[i].l2_access_penalty == 0) {
-+			continue;
-+		}
-+		/* the last fast core not yet taken; the boot core only if there is no other */
-+		for (int j = (int)topology_info.num_cpus - 1; j >= 0; j--) {
-+			if (topology_info.cpus[j].l2_access_penalty != 0 || taken[j]) {
-+				continue;
-+			}
-+			if (&topology_info.cpus[j] == topology_info.boot_cpu) {
-+				if (partner < 0) {
-+					partner = j;
-+				}
-+				continue;
-+			}
-+			partner = j;
-+			break;
-+		}
-+		if (partner >= 0) {
-+			taken[partner] = true;
-+			ml_slow_core_partner[i] = partner;
-+		}
-+	}
-+}
-+
-+extern void loader_log_line(const char *line);
-+
-+/* At the registration of each processor: pairs it with its partner, if that one is registered too. */
-+static void
-+ml_pair_slow_processors(int cpu_id)
-+{
-+	for (int i = 0; i < (int)topology_info.num_cpus; i++) {
-+		int partner = ml_slow_core_partner[i];
-+		processor_t slow, fast;
-+		char line[128];
-+
-+		if (partner < 0 || (i != cpu_id && partner != cpu_id)) {
-+			continue;
-+		}
-+		slow = processor_array[i];
-+		fast = processor_array[partner];
-+		if (slow == PROCESSOR_NULL || fast == PROCESSOR_NULL || slow->processor_primary == fast) {
-+			continue;
-+		}
-+		sched_slow_secondaries = small_cores_apart >= 2;
-+		processor_set_primary(slow, fast);
-+		snprintf(line, sizeof(line), "cpu %d (phys id 0x%x) is a slower core: the scheduler uses it after cpu %d (phys id 0x%x)\n",
-+		    i, topology_info.cpus[i].phys_id, partner, topology_info.cpus[partner].phys_id);
-+		printf("%s", line);
-+		loader_log_line(line);          /* (the kernel's own log of a run keeps only its end) */
-+	}
-+}
-+
-+/* How long processor cpu_id has been idle since it started, in mach_absolute_time() units (hakios.cpufreq.c's cpuload). */
-+bool ml_cpu_idle_time(int cpu_id, uint64_t *idle);
-+
-+bool
-+ml_cpu_idle_time(int cpu_id, uint64_t *idle)
-+{
-+	struct recount_usage usage = { 0 };
-+
-+	if (cpu_id < 0 || cpu_id >= MAX_SCHED_CPUS || processor_array[cpu_id] == PROCESSOR_NULL) {
-+		return false;
-+	}
-+	recount_processor_usage(&processor_array[cpu_id]->pr_recount, &usage, idle);
-+	return true;
-+}
++#include "hakios_ml.h"
 +
  void
  ml_parse_cpu_topology(void)
  {
-@@ -945,6 +1044,7 @@ ml_parse_cpu_topology(void)
+@@ -945,6 +957,7 @@ ml_parse_cpu_topology(void)
  	int64_t cluster_max_cpu_phys_id[MAX_CPU_CLUSTER_PHY_ID + 1];
  	const boolean_t cpus_boot_arg_present = PE_parse_boot_argn("cpus", &cpu_boot_arg, sizeof(cpu_boot_arg));
  	const boolean_t cpumask_boot_arg_present = PE_parse_boot_argn("cpumask", &cpumask_boot_arg, sizeof(cpumask_boot_arg));
@@ -2524,36 +2176,45 @@ index e76e7e70ab9c..828a51171c7e 100644
  
  	// The cpus=N and cpumask=N boot args cannot be used simultaneously. Flag this
  	// so that we trigger a panic later in the boot process, once serial is enabled.
-@@ -1005,6 +1105,20 @@ ml_parse_cpu_topology(void)
+@@ -1005,6 +1018,10 @@ ml_parse_cpu_topology(void)
  		cpu->phys_id = (uint32_t)ml_readprop(child, "reg", ML_READPROP_MANDATORY);
  
  		cpu->l2_access_penalty = (uint32_t)ml_readprop(child, "l2-access-penalty", 0);
-+		/*
-+		 * A core the boot loader calls small (on the phone the Cortex-A55s; the Cortex-A78 the
-+		 * kernel boots on is about 2.5 times as fast) is to be used only when the faster ones are all
-+		 * busy: what XNU does with a core that has an L2 access penalty (ml_pair_slow_processors()).
-+		 * The loader gives it a name of its own because a kernel without that function would make
-+		 * every such core the sibling of the boot processor, and stop at the assertion that a
-+		 * processor has only one. Boot-arg small_cores=0: all cores alike, as before; 1: paired as
-+		 * XNU pairs the two threads of a hyperthreaded core (a secondary kept idle while its primary
-+		 * runs a real-time thread, and so on); 2 (the default): as cores of their own (see
-+		 * sched_slow_secondaries in osfmk/kern/sched.h).
-+		 */
++		/* a core the loader calls small is paired with a faster one: see ml_choose_slow_core_partners() (hakios_ml.h) */
 +		if (cpu->l2_access_penalty == 0 && ml_readprop(child, "small-core", 0) != 0 && small_cores_apart) {
 +			cpu->l2_access_penalty = 1;
 +		}
  		cpu->l2_cache_size = (uint32_t)ml_readprop(child, "l2-cache-size", 0);
  		cpu->l2_cache_id = (uint32_t)ml_readprop(child, "l2-cache-id", 0);
  		cpu->l3_cache_size = (uint32_t)ml_readprop(child, "l3-cache-size", 0);
-@@ -1107,6 +1221,7 @@ ml_parse_cpu_topology(void)
+@@ -1107,6 +1124,8 @@ ml_parse_cpu_topology(void)
  	cluster_offsets[0] = 0;
  #endif
  	assert(topology_info.boot_cpu != NULL);
++	ml_mpidr_numbering();
 +	ml_choose_slow_core_partners();
  	ml_read_chip_revision(&topology_info.chip_revision);
  
  	/*
-@@ -1427,17 +1542,15 @@ ml_processor_register(ml_processor_info_t *in_processor_info,
+@@ -1215,7 +1234,7 @@ ml_get_cpu_number_local(void)
+ 
+ 	/* We identify the CPU based on the constant bits of MPIDR_EL1. */
+ 	MRS(mpidr_el1_value, "MPIDR_EL1");
+-	cpu_id = ml_get_cpu_number((uint32_t)mpidr_el1_value);
++	cpu_id = ml_get_cpu_number(ml_phys_id_from_mpidr(mpidr_el1_value));
+ 
+ 	assert(cpu_id <= (unsigned int)ml_get_max_cpu_number());
+ 
+@@ -1230,7 +1249,7 @@ ml_get_cluster_number_local()
+ 
+ 	/* We identify the cluster based on the constant bits of MPIDR_EL1. */
+ 	MRS(mpidr_el1_value, "MPIDR_EL1");
+-	cluster_id = ml_get_cluster_number((uint32_t)mpidr_el1_value);
++	cluster_id = ml_get_cluster_number(ml_phys_id_from_mpidr(mpidr_el1_value));
+ 
+ 	assert(cluster_id <= (unsigned int)ml_get_max_cluster_number());
+ 
+@@ -1427,17 +1446,9 @@ ml_processor_register(ml_processor_info_t *in_processor_info,
  	processor_t processor = PERCPU_GET_RELATIVE(processor, cpu_data, this_cpu_datap);
  	if (!is_boot_cpu) {
  		processor_init(processor, this_cpu_datap->cpu_number, pset);
@@ -2568,18 +2229,12 @@ index e76e7e70ab9c..828a51171c7e 100644
 -			processor_set_primary(processor, master_processor);
 -		}
  	}
-+	/*
-+	 * Cores that have a non-zero L2 access penalty compared
-+	 * to the boot processor should be de-prioritized by the
-+	 * scheduler, so that threads use the cores with better L2
-+	 * preferentially. (Each with a faster core of its own, not all with the boot
-+	 * processor: see ml_choose_slow_core_partners().)
-+	 */
++	/* the cores with an L2 access penalty are de-prioritized, each behind a faster core of its own: ml_pair_slow_processors() (hakios_ml.h) */
 +	ml_pair_slow_processors(this_cpu_datap->cpu_number);
  
  	*processor_out = processor;
  	*ipi_handler_out = cpu_signal_handler;
-@@ -2237,8 +2350,16 @@ _enable_virtual_timer(void)
+@@ -2237,8 +2248,16 @@ _enable_virtual_timer(void)
  	uint64_t cntvctl = CNTV_CTL_EL0_ENABLE; /* One wants to use 32 bits, but "mrs" prefers it this way */
  
  	__builtin_arm_wsr64("CNTV_CTL_EL0", cntvctl);
@@ -2596,8 +2251,64 @@ index e76e7e70ab9c..828a51171c7e 100644
  }
  
  void
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index 2cc442e05791..b7d01d5d1516 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -74,6 +74,9 @@
+ 
+ 
+ #include <arm64/platform_error_handler.h>
++#if defined(GENERIC_PSCI_SMP)
++#include <arm64/psci_smp.h>
++#endif
+ 
+ #if KASAN_TBI
+ #include <san/kasan.h>
+@@ -141,6 +144,7 @@ static void handle_mach_absolute_time_trap(arm_saved_state_t *);
+ static void handle_mach_continuous_time_trap(arm_saved_state_t *);
+ 
+ static void handle_msr_trap(arm_saved_state_t *state, uint32_t esr);
++static bool hakios_user_cache_op(arm_saved_state_t *state, uint32_t esr);
+ #if __has_feature(ptrauth_calls)
+ static void handle_pac_fail(arm_saved_state_t *state, uint32_t esr) __dead2;
+ #endif
+@@ -611,6 +615,14 @@ sleh_synchronous(arm_context_t *context, uint32_t esr, vm_offset_t far)
+ 	uintptr_t saved_expected_fault_addr = 0;
+ #endif /* CONFIG_XNUPOST */
+ 
++#if defined(GENERIC_PSCI_SMP)
++	/* HakiOS (patch 1509): m3_diag=1, a core being started records its first exception here and parks */
++	if (__improbable(psci_smp_diag != 0)) {
++		psci_smp_diag_sleh(esr, far, get_saved_state_pc(state), get_saved_state_cpsr(state), get_saved_state_lr(state),
++		    get_saved_state_sp(state));
++	}
++#endif
++
+ 	ASSERT_CONTEXT_SANITY(context);
+ 
+ 	task_vtimer_check(thread);
+@@ -705,6 +717,9 @@ sleh_synchronous(arm_context_t *context, uint32_t esr, vm_offset_t far)
+ 		break;
+ 
+ 	case ESR_EC_MSR_TRAP:
++		if (hakios_user_cache_op(state, esr)) {    /* patch 1511 */
++			break;
++		}
+ 		handle_msr_trap(state, esr);
+ 		break;
+ /**
+@@ -1695,6 +1710,8 @@ handle_mach_continuous_time_trap(arm_saved_state_t *state)
+ }
+ 
+ 
++#include "hakios_sleh.h"
++
+ __attribute__((noreturn))
+ static void
+ handle_msr_trap(arm_saved_state_t *state, uint32_t esr)
 diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
-index e5336e5a1cce..a54e35035cde 100644
+index e5336e5a1cce..952037926641 100644
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
 @@ -126,6 +126,27 @@ LEXT(LowResetVectorBase)
@@ -2636,18 +2347,29 @@ index e5336e5a1cce..a54e35035cde 100644
  
  
  
-@@ -143,7 +165,9 @@ LEXT(reset_vector)
+@@ -143,8 +165,20 @@ LEXT(reset_vector)
  	adrp	x19, EXT(ResetHandlerData)@page			// Get address of the reset handler data
  	add		x19, x19, EXT(ResetHandlerData)@pageoff
  	mrs		x15, MPIDR_EL1						// Load MPIDR to get CPU number
 -#if HAS_CLUSTER
++#include "hakios_start_ids.h"
 +#if HAS_CLUSTER || defined(GENERIC_PSCI_SMP)
 +	// (generic boards: some number their cores in Affinity1 and leave Affinity0 at zero;
 +	// a cpu data's phys id is both fields, as the device tree's "reg" has them)
  	and		x0, x15, #0xFFFF					// CPU number in Affinity0, cluster ID in Affinity1
++	// HakiOS (patch 1504): a device tree numbering the cores one affinity field lower than an MT MPIDR
++	// does (the Galaxy S9's A55s: 0x81000200 is its core 2), as ml_phys_id_from_mpidr()
++	adrp	x2, EXT(ml_mpidr_mt_aff1)@page
++	add		x2, x2, EXT(ml_mpidr_mt_aff1)@pageoff
++	ldr		w2, [x2]
++	cbz		w2, Lmpidr_numbered
++	tbz		x15, #24, Lmpidr_numbered
++	ubfx	x0, x15, #8, #16
++Lmpidr_numbered:
  #else
  	and		x0, x15, #0xFF						// CPU number is in MPIDR Affinity Level 0
-@@ -233,40 +257,175 @@ LEXT(_start)
+ #endif
+@@ -233,40 +267,42 @@ LEXT(_start)
  	.global	EXT(LowExceptionVectorBase)
  LEXT(LowExceptionVectorBase)
  	/* EL1 SP 0 */
@@ -2702,171 +2424,15 @@ index e5336e5a1cce..a54e35035cde 100644
 -	b		.
 +	b		Lloader_early_exception
 +
-+/*
-+ * Early-boot exceptions used to spin here. When the XNU loader has patched
-+ * the address of its return stub into the slot below, report the exception
-+ * to it instead (see osfmk/arm64/loader_return.c):
-+ *   x0/x1 = PA/length of the captured kernel log, x2 = 1 (early exception),
-+ *   x3 = ESR, x4 = ELR, x5 = FAR, x6 = LR, x7 = SP
-+ * This vector is only installed while VBAR holds a physical address, so
-+ * PC-relative addressing yields physical addresses, MMU on (V=P) or off.
-+ */
-+	.align	3
-+Lloader_early_exception:
-+	mov		x6, lr
-+	mov		x7, sp
-+	mrs		x3, ESR_EL1
-+	mrs		x4, ELR_EL1
-+	mrs		x5, FAR_EL1
-+	adrp	x0, EXT(loader_log)@page
-+	add		x0, x0, EXT(loader_log)@pageoff
-+	adrp	x1, EXT(loader_log_len)@page
-+	add		x1, x1, EXT(loader_log_len)@pageoff
-+	ldr		w1, [x1]
-+	// Write the log back to RAM: cached copies are lost once the MMU is off
-+	mov		x9, x0
-+	add		x10, x0, x1
-+1:
-+	dc		cvac, x9
-+	add		x9, x9, #64
-+	cmp		x9, x10
-+	b.lo	1b
-+	dsb		sy
-+	mov		x2, #1
-+	mrs		x9, SCTLR_EL1
-+	bic		x9, x9, #1
-+	msr		SCTLR_EL1, x9
-+	isb
-+	adr		x9, Lloader_stub_slot
-+	ldr		x9, [x9, #8]
-+	cbz		x9, .
-+	br		x9
-+	.align	3
-+	.globl EXT(loader_stub_slot)
-+LEXT(loader_stub_slot)
-+Lloader_stub_slot:
-+	.ascii	"XNULDRST"				// magic the loader searches for
-+	.quad	0						// PA of the loader's return stub
-+	.quad	0						// checkpoint number to stop at (0 = none)
-+	.quad	0						// (physical - virtual) offset of the static kernel image
-+
-+#if defined(GENERIC_PSCI_SMP)
-+/*
-+ * The same for a core other than the boot processor, from its first
-+ * instruction (reset_vector) until common_start gives it the kernel's
-+ * vectors. The boot loader is not this core's to return to; it leaves a note
-+ * of what happened where the processor that is waiting for it looks
-+ * (psci_smp_start_cpu()) and switches itself off again.
-+ *
-+ * VBAR holds a physical address here too, so the note is addressed
-+ * physically; the store goes straight to memory when the MMU is still off,
-+ * and is sent there when it is not.
-+ */
-+	.align	11
-+	.globl EXT(LowSecondaryExceptionVectorBase)
-+LEXT(LowSecondaryExceptionVectorBase)
-+	/* EL1 SP 0 */
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	/* EL1 SP1 */
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	/* EL0 64 */
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	/* EL0 32 */
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+	.align	7
-+	b		Lsecondary_early_exception
-+
-+	.align	3
-+Lsecondary_early_exception:
-+	// struct psci_smp_start_fault: { valid, MPIDR, ESR, ELR, FAR, LR, SP }
-+	adrp	x9, EXT(psci_smp_start_fault)@page
-+	add		x9, x9, EXT(psci_smp_start_fault)@pageoff
-+	mrs		x10, MPIDR_EL1
-+	str		x10, [x9, #8]
-+	mrs		x10, ESR_EL1
-+	str		x10, [x9, #16]
-+	mrs		x10, ELR_EL1
-+	str		x10, [x9, #24]
-+	mrs		x10, FAR_EL1
-+	str		x10, [x9, #32]
-+	str		lr, [x9, #40]
-+	mov		x10, sp
-+	str		x10, [x9, #48]
-+	mov		x10, #1
-+	str		x10, [x9]
-+	dc		cvac, x9
-+	dsb		sy
-+	// PSCI CPU_OFF, by the firmware's calling convention (psci_smp_hvc)
-+	adrp	x9, EXT(psci_smp_hvc)@page
-+	add		x9, x9, EXT(psci_smp_hvc)@pageoff
-+	ldr		w9, [x9]
-+	mov		x0, #0x0002
-+	movk	x0, #0x8400, lsl #16
-+	cbnz	w9, 1f
-+	smc		#0
-+	b		2f
-+1:
-+	hvc		#0
-+2:
-+	wfi											// it does not return; if it does, stay here
-+	b		2b
-+#endif /* defined(GENERIC_PSCI_SMP) */
++#include "hakios_start_vectors.h"
  	.align 12, 0
  
  #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR)
-@@ -452,22 +611,51 @@ start_cpu:
+@@ -452,22 +488,28 @@ start_cpu:
   * Cold boot init routine.  Called from __start
   *   x0 - Boot args
   */
-+/*
-+ * LOADER_CHECKPOINT n
-+ *   Bring-up aid: if the loader asked to stop at checkpoint n, return to it
-+ *   right here (reason 2, code n). Usable while executing at physical
-+ *   addresses, MMU off or on (V=P). Clobbers x0-x3, x9-x11.
-+ */
-+.macro LOADER_CHECKPOINT
-+	adrp	x9, EXT(loader_stub_slot)@page
-+	add		x9, x9, EXT(loader_stub_slot)@pageoff
-+	ldr		x10, [x9, #16]
-+	cmp		x10, #$0
-+	b.ne	1f
-+	mov		x0, #0
-+	mov		x1, #0
-+	mov		x2, #2
-+	mov		x3, #$0
-+	mrs		x11, SCTLR_EL1
-+	bic		x11, x11, #1
-+	msr		SCTLR_EL1, x11
-+	isb
-+	ldr		x9, [x9, #8]
-+	br		x9
-+1:
-+.endmacro
++#include "hakios_start_checkpoint.h"
 +
  	.align 2
  	.globl EXT(start_first_cpu)
@@ -2894,7 +2460,7 @@ index e5336e5a1cce..a54e35035cde 100644
  
  	// Get the kernel memory parameters from the boot args
  	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
-@@ -612,6 +800,7 @@ Lkernelcache_base_found:
+@@ -612,6 +654,7 @@ Lkernelcache_base_found:
  	/* Ensure TTEs are visible */
  	dsb		ish
  
@@ -2902,7 +2468,7 @@ index e5336e5a1cce..a54e35035cde 100644
  
  	b		common_start
  
-@@ -686,7 +875,10 @@ common_start:
+@@ -686,7 +729,10 @@ common_start:
  	dsb		ish
  
  
@@ -2914,7 +2480,28 @@ index e5336e5a1cce..a54e35035cde 100644
  	// Setup timer interrupt routing; must be done before MMU is enabled
  	mrs		x15, MPIDR_EL1						// Load MPIDR to get CPU number
  	and		x15, x15, #0xFF						// CPU number is in MPIDR Affinity Level 0
-@@ -740,10 +932,17 @@ common_start:
+@@ -734,16 +780,38 @@ common_start:
+ 	add		x0, x0, x22									// Convert exception vector address to KVA
+ 	sub		x0, x0, x23
+ 1:
++#if defined(GENERIC_PSCI_SMP)
++	// HakiOS (patch 1509): with m3_diag=1 a core being started keeps the physical early vectors
++	// (LowSecondaryExceptionVectorBase, reached through the V=P map once the MMU is on) until
++	// arm_init_cpu() has its thread in TPIDR_EL1 (psci_smp_diag_vectors()). Its first exception is then
++	// recorded in full and the core parks, instead of entering sleh with no thread and recursing.
++	cbz		x21, Lvbar_kernel
++	adrp	x9, EXT(psci_smp_diag)@page
++	add		x9, x9, EXT(psci_smp_diag)@pageoff
++	ldr		w9, [x9]
++	cbnz	w9, Lvbar_done
++Lvbar_kernel:
++#endif
+ 	MSR_VBAR_EL1_X0
++#if defined(GENERIC_PSCI_SMP)
++Lvbar_done:
++#endif
+ 
+ #if HAS_APPLE_PAC
  	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
  #endif /* HAS_APPLE_PAC */
  
@@ -3369,6 +2956,65 @@ index 65144c74239c..ab6260d52d84 100644
  	uart_putc(c);
  }
  
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+index 997a4aba65a1..c44f4199eb04 100644
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -681,6 +681,10 @@ SECURITY_READ_ONLY_LATE(static struct pe_serial_functions) vmapple_uart_serial_f
+ 
+ /*****************************************************************************/
+ 
++#include "hakios_pe_serial_ns16550.h"
++
++/*****************************************************************************/
++
+ /**
+  * Output @str onto every registered serial interface by polling.
+  *
+@@ -697,6 +701,8 @@ register_serial_functions(struct pe_serial_functions *fns)
+ 	gPESF = fns;
+ }
+ 
++#include "hakios_pe_serial_vcon.h"
++
+ #if HIBERNATION
+ /**
+  * Transitions the serial driver into a mode that can be run in the hibernation
+@@ -793,11 +799,21 @@ serial_init(void)
+ 
+ #ifdef VMAPPLE_UART
+ 	if (SecureDTFindEntry("name", "uart0", &entryP) == kSuccess) {
++		char const *uart_compat = NULL;
++		unsigned int compat_size = 0;
++
+ 		SecureDTGetProperty(entryP, "reg", (void const **)&reg_prop, &prop_size);
+-		vmapple_uart0_base_vaddr = ml_io_map(soc_base + *reg_prop, *(reg_prop + 1));
++		if (SecureDTGetProperty(entryP, "compatible", (void const **)&uart_compat, &compat_size) == kSuccess &&
++		    compat_size >= sizeof("ns16550a") && strcmp(uart_compat, "ns16550a") == 0) {
++			ns16550_base_vaddr = ml_io_map(soc_base + *reg_prop, *(reg_prop + 1));
++		} else {
++			vmapple_uart0_base_vaddr = ml_io_map(soc_base + *reg_prop, *(reg_prop + 1));
++		}
+ 	}
+ 
+-	if (vmapple_uart0_base_vaddr != 0) {
++	if (ns16550_base_vaddr != 0) {
++		register_serial_functions(&ns16550_serial_functions);
++	} else if (vmapple_uart0_base_vaddr != 0) {
+ 		register_serial_functions(&vmapple_uart_serial_functions);
+ 	}
+ #endif /* VMAPPLE_UART */
+@@ -897,6 +913,10 @@ serial_init(void)
+ 	}
+ #endif /* APPLE_UART */
+ 
++	if (hakios_vcon_probe(gPESF != NULL)) {
++		register_serial_functions(&virtio_console_serial_functions);
++	}
++
+ 	if (gPESF == NULL) {
+ 		return 0;
+ 	}
 diff --git a/pexpert/conf/Makefile b/pexpert/conf/Makefile
 index 050f34a53c49..c58ff62cd419 100644
 --- a/pexpert/conf/Makefile

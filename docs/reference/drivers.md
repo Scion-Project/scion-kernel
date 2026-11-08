@@ -15,6 +15,8 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 | `hakios.version.c` | kern.hakios.version, and the version in the boot log (xnu-12377: patches/xnu-12377/0110) |
 | `hakios.platform.c` | what the drivers share (the locks of the PMIC arbiter, the always-on processor, RPMh and the SMMU), and kern.hakios.drivers, the list of the drivers built in |
 | `hakios.cryptobench.c` | kern.hakios.crypto_bench: the kernel's SHA and AES with the ARMv8 instructions and in C, measured when read |
+| `hakios.systrace.c` | boot-arg systrace=1|2 (systrace_name=): the BSD system calls that fail, or all of them, in the kernel log. unix_syscall() makes one test per call (bsd/dev/arm/systemcalls.c) |
+| `hakios.exec.c` | what exec and posix_spawn do for the bring-up: boot-args applog=, applog_name=, systrace= and xpcproxy_idversion=, the sysctl kern.exec_inject, and the credential of a persona there is none of (bsd/kern/kern_exec.c calls it) |
 | `hakios.stubs.c` | what the rest of the kernel calls in a driver that is left out: nothing, and "not there" |
 | `hakios.stubs.cpp` | the same, for the calls that are C++ (the display asking whether the GPU is done with a surface) (with XNU's `iokitcpp`) |
 | `hakios.physmap.cpp` | physical memory XNU does not manage, mapped write-combined through IOKit (sys/hakios.physmap.h): the S9's DMA buffers below 4 GB (the camera's, UFS's own mode; sys/hakios.exynos9810_mem.h has where each is) (with XNU's `iokitcpp`) |
