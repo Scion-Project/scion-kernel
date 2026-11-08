@@ -2,13 +2,13 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **585 arguments**: 515 read by the kernel, 22 by the loader, 63 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **588 arguments**: 518 read by the kernel, 22 by the loader, 63 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
 Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl kern.bootargs`).
 
-## GPU and display (109)
+## GPU and display (110)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -109,6 +109,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `panel_brightness` | K | `hakios.s6e3ha8.c` | `CONFIG_PANEL_BRIGHTNESS` |  |
 | `panel_gamma` | K | `hakios.s6e3ha8.c` | `CONFIG_PANEL_GAMMA` |  |
 | `panel_gamma_log` | K | `hakios.s6e3ha8.c` | `CONFIG_PANEL_GAMMA_LOG` |  |
+| `panel_sleep` | K | `GenericARMPE.cpp`, `hakios.s6e3ha8.c` | `CONFIG_PANEL_SLEEP` |  |
 | `rec_mb` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_MB` |  |
 | `rec_ring` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_RING` |  |
 | `rec_secs` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_SECS` |  |
@@ -507,7 +508,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `tmu_stop` | K | `hakios.exynos_tmu.c` | `CONFIG_TMU_STOP` |  |
 | `tmu_ungate` | K | `hakios.exynos_tmu.c` | `CONFIG_TMU_UNGATE` |  |
 
-## CPU, memory and boot (26)
+## CPU, memory and boot (28)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -531,6 +532,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `regtrace` | K | `(patch)` | `CONFIG_REGTRACE` |  |
 | `return_cpu` | K | `loader_return.c` | `CONFIG_RETURN_CPU` |  |
 | `return_panic` | K | `loader_return.c` | `CONFIG_RETURN_PANIC` |  |
+| `sleep_cores` | K | `GenericARMPE.cpp` | `CONFIG_SLEEP_CORES` |  |
+| `sleep_cores_after` | K | `GenericARMPE.cpp` | `CONFIG_SLEEP_CORES_AFTER` |  |
 | `small_cores` | K | `(patch)` | `CONFIG_SMALL_CORES` |  |
 | `small_cores_after` | K | `GenericARMPE.cpp` | `CONFIG_SMALL_CORES_AFTER` |  |
 | `syssleep` | K | `(patch)` | `CONFIG_SYSSLEEP` |  |

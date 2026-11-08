@@ -345,6 +345,7 @@ PANEL	arg	panel	GPU and display	k	hakios.s6e3ha8.c	the driver: without it nothin
 PANEL_BRIGHTNESS	arg	panel_brightness	GPU and display	k	hakios.s6e3ha8.c	a brightness of 0-255 set once at start
 PANEL_GAMMA	arg	panel_gamma	GPU and display	k	hakios.s6e3ha8.c	gamma and AOR sent (the default)
 PANEL_GAMMA_LOG	arg	panel_gamma_log	GPU and display	k	hakios.s6e3ha8.c	all 74 rows in the log, as Android's kernel prints them at start ("gamma[nits] : ...") to set beside Android's log of the same phone
+PANEL_SLEEP	arg	panel_sleep	GPU and display	k	GenericARMPE.cpp,hakios.s6e3ha8.c	
 PASSCODE_DEBUG	arg	passcode_debug	User space	u	passcoded.m	
 PASSCODE_RESET	arg	passcode_reset	User space	k	MiniAppleKeyStore.cpp	
 PASSCODE_SELFTEST	arg	passcode_selftest	User space	k	MiniAppleKeyStore.cpp	
@@ -398,6 +399,8 @@ SHUB_MS	arg	shub_ms	Sensors	k	hakios.ssp.c	sample period in ms (default 20; ligh
 SHUB_REQ_LEN	arg	shub_req_len	Sensors	k	hakios.ssp.c	
 SHUB_REQ_RPC	arg	shub_req_rpc	Sensors	k	hakios.ssp.c	RPC that carries SSP to the hub
 SHUB_SENSORS	arg	shub_sensors	Sensors	k	hakios.ssp.c	
+SLEEP_CORES	arg	sleep_cores	CPU, memory and boot	k	GenericARMPE.cpp	sleep_cores_after= seconds (default 10) after the screen went off, the cores of the performance
+SLEEP_CORES_AFTER	arg	sleep_cores_after	CPU, memory and boot	k	GenericARMPE.cpp	
 SMALL_CORES	arg	small_cores	CPU, memory and boot	k	(patch)	
 SMALL_CORES_AFTER	arg	small_cores_after	CPU, memory and boot	k	GenericARMPE.cpp	
 SOC_CMD_DB	hex	soc_cmd_db	Cellular	k	hakios.mpss.c	

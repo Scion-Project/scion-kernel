@@ -87,6 +87,8 @@
  *   panel_gamma=2       gamma and AOR sent (the default)
  *   panel_gamma=1       the panel read and its gamma worked out and logged; the AOR alone sent
  *   panel_gamma=0       the AOR alone, nothing read: the driver as it was
+ *   panel_sleep=1       the screen's off and on from iOS sleep and wake the panel (hakios_s6e3ha8_power(), below;
+ *                       off by default: the screen is then dark by its brightness alone, as before)
  *   panel_gamma_log=1   all 74 rows in the log, as Android's kernel prints them at start ("gamma[nits] : ...")
  *                       to set beside Android's log of the same phone
  *
@@ -576,6 +578,75 @@ hakios_s6e3ha8_blank(int (*say_as)(const char *, ...))
 }
 
 
+/*
+ * panel_sleep=1 (off by default; with panel=1): the screen's off and on from iOS (backboardd's power request to the
+ * display service, MiniIOMobileFramebuffer.cpp, through hakios_display_power() in GenericARMPE.cpp) reach the panel:
+ *   off  9F A5 A5, 28 (display off), 9F 5A 5A; a frame; 9F A5 A5, 10 (sleep-in), 9F 5A 5A; Samsung's wait after sleep-in
+ *        (star_a3_s0_display_off_cmdtbl, then the sleep-in of star_a3_s0_exit_cmdtbl). The supplies stay on, and with
+ *        them what the panel was set to: its DSC and PPS, TE, the gamma.
+ *   on   9F A5 A5, 11 (sleep-out), 9F 5A 5A; Samsung's 10 ms after sleep-out (star_a3_s0_wait_sleep_out) and a frame more;
+ *        the brightness last set, again; then 9F A5 A5, 29 (display on), 9F 5A 5A (star_a3_s0_display_on_cmdtbl).
+ * Android goes further on its screen-off (the supplies off, the panel reset, and its whole init sequence at the next
+ * screen-on: DSC, PPS, sleep-out, TE on, ...). Here nothing of that init is sent again; whether the S6E3HA8 keeps all of
+ * it through a sleep-in is for the phone to show (if the picture comes back wrong or not at all: panel_sleep=0, and the
+ * screen as before -- dark only by its brightness). 0 sent, ENODEV without panel_sleep=1 (or panel=1), EIO if the DSIM
+ * did not take a packet.
+ */
+static uint32_t panel_sleep;
+static bool panel_asleep;
+
+int hakios_s6e3ha8_power(bool on);
+
+int
+hakios_s6e3ha8_power(bool on)
+{
+	static const uint8_t key1_on[] = { 0x9F, 0xA5, 0xA5 }, key1_off[] = { 0x9F, 0x5A, 0x5A };
+	static const uint8_t display_off[] = { 0x28 }, sleep_in[] = { 0x10 }, sleep_out[] = { 0x11 }, display_on[] = { 0x29 };
+	bool first, second;
+	int level;
+
+	if (!panel_sleep || dsim == 0 || panel_lock == NULL) {
+		return ENODEV;
+	}
+	lck_mtx_lock(panel_lock);
+	if (on == !panel_asleep) {
+		lck_mtx_unlock(panel_lock);
+		return 0;                       /* (already so) */
+	}
+	if (!on) {
+		first = dsim_send(key1_on, sizeof(key1_on)) && dsim_send(display_off, sizeof(display_off));
+		first = dsim_send(key1_off, sizeof(key1_off)) && first;
+		delay(20 * 1000);               /* a frame and more at 60 Hz */
+		second = dsim_send(key1_on, sizeof(key1_on)) && dsim_send(sleep_in, sizeof(sleep_in));
+		second = dsim_send(key1_off, sizeof(key1_off)) && second;
+		delay(100 * 1000);              /* Samsung's wait after sleep-in */
+		panel_asleep = true;
+		level = panel_level;
+	} else {
+		first = dsim_send(key1_on, sizeof(key1_on)) && dsim_send(sleep_out, sizeof(sleep_out));
+		first = dsim_send(key1_off, sizeof(key1_off)) && first;
+		delay(30 * 1000);               /* Samsung's 10 ms, and a frame more */
+		panel_asleep = false;
+		level = panel_level;
+		second = true;
+	}
+	lck_mtx_unlock(panel_lock);
+	if (on) {
+		if (level >= 0) {
+			(void)panel_set(level);         /* (logs itself) */
+		}
+		lck_mtx_lock(panel_lock);
+		delay(20 * 1000);
+		second = dsim_send(key1_on, sizeof(key1_on)) && dsim_send(display_on, sizeof(display_on));
+		second = dsim_send(key1_off, sizeof(key1_off)) && second;
+		lck_mtx_unlock(panel_lock);
+	}
+	say("s6e3ha8: panel_sleep: %s: %s %s, %s %s (brightness %d; FIFOCTRL %x, INTSRC %x)\n", on ? "screen on" : "screen off",
+	    on ? "sleep-out (11)" : "display off (28)", first ? "sent" : "NOT SENT", on ? "display on (29)" : "sleep-in (10)",
+	    second ? "sent" : "NOT SENT", level, rd(DSIM_FIFOCTRL), rd(DSIM_INTSRC));
+	return first && second ? 0 : EIO;
+}
+
 void
 hakios_s6e3ha8_init(void)
 {
@@ -597,6 +668,11 @@ hakios_s6e3ha8_init(void)
 		panel_gamma_init(mode);
 	}
 	(void)hakios_panel_register("s6e3ha8", panel_set);
+	(void)PE_parse_boot_argn("panel_sleep", &panel_sleep, sizeof(panel_sleep));
+	if (panel_sleep) {
+		say("s6e3ha8: panel_sleep=%u: the screen's off from iOS puts the panel to sleep (28, 10), its on wakes it (11, 29)\n",
+		    panel_sleep);
+	}
 	if (PE_parse_boot_argn("panel_brightness", &level, sizeof(level))) {
 		int error = panel_set((int)level);
 
