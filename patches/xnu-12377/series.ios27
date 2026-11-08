@@ -288,5 +288,6 @@ starlte/0401-starlte-kauth-group-guid.patch
 starlte/0402-starlte-darwin27-interfaces.patch
 starlte/0403-starlte-shared-region-8gib.patch
 starlte/0404-starlte-sweetacl-bootarg.patch
+starlte/0405-starlte-eacces-trace.patch
 # the iOS-target configuration (tools/ios27/build-xnu-12377-ios.sh) and the GPU track's kernel side (relbuf, IOSurface copy fallback)
 # parity with Scion's iOS 16.5 kernel (docs/ios27-starlte.md): behind boot-args, off by default, built but not booted
