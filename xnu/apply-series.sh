@@ -50,6 +50,8 @@ grep -v '^#' "$SERIESFILE" | while read -r p; do
 	case "$p" in
 	files\ *)	# files the series adds, in the tree's own layout (the directory named, from the repository root)
 		mkdir -p "$DIR" && cp -Rp "$HERE/../${p#files }/." "$DIR/" || { echo "apply-series.sh: $p failed" >&2; exit 1; } ;;
+	copy\ *)	# one of this repository's own files into the tree: copy SOURCE (from the repository root) TARGET (in the tree)
+		set -- $p; mkdir -p "$(dirname "$DIR/$3")" && cp -p "$HERE/../$2" "$DIR/$3" || { echo "apply-series.sh: $p failed" >&2; exit 1; } ;;
 	*.sh)	# a script of the series (it stages sources by commit, ...): run in the tree's root, with the profile's machine
 		MACHINE_CONFIG=$MACHINE MACOS_VERSION=${MACOS_VERSION:-26.5} bash "$SERIES/$p" || { echo "apply-series.sh: $p failed" >&2; exit 1; } ;;
 	*)	git apply --whitespace=nowarn "$SERIES/$p" || { echo "apply-series.sh: $p does not apply" >&2; exit 1; } ;;

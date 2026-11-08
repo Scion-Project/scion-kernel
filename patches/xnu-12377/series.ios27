@@ -17,6 +17,19 @@ starlte/0026-stage-hfs.sh
 starlte/blacktop/00_setup_coreentitlements.sh
 # what the series adds as files (xnu/files-12377/, the tree's own layout): after the staging above, before the patches that hook them in
 files xnu/files-12377
+# Scion's own driver files, from where they live in this repository (drivers/, socs/, xnu/files/), byte for byte as the series booted with them
+copy drivers/soc/exynos/hakios.exynos_hsi2c.c bsd/dev/hakios.exynos_hsi2c.c
+copy drivers/usb/hakios.exynos_usb.c bsd/dev/hakios.exynos_usb.c
+copy drivers/usb/hakios.usb_acm.h bsd/dev/hakios.usb_acm.h
+copy drivers/usb/hakios.usb_glue.h bsd/dev/hakios.usb_glue.h
+copy socs/exynos9810/include/hakios.exynos9810_soc.h bsd/sys/hakios.exynos9810_soc.h
+copy xnu/files/bsd/sys/hakios.exynos_acpm.h bsd/sys/hakios.exynos_acpm.h
+copy xnu/files/bsd/sys/hakios.exynos_hsi2c.h bsd/sys/hakios.exynos_hsi2c.h
+copy xnu/files/bsd/sys/hakios.exynos_pcie.h bsd/sys/hakios.exynos_pcie.h
+copy xnu/files/bsd/sys/hakios.input.h bsd/sys/hakios.input.h
+copy xnu/files/bsd/sys/hakios.log.h bsd/sys/hakios.log.h
+copy xnu/files/bsd/sys/hakios.scion_gov.h bsd/sys/hakios.scion_gov.h
+copy xnu/files/bsd/sys/hakios.xnu.h bsd/sys/hakios.xnu.h
 
 starlte/0003-sweet-framebuffer-serial-console.patch
 starlte/0004-sweet-machine-config.patch
