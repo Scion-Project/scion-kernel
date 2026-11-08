@@ -145,9 +145,10 @@ defconfig:
 devices:
 	@tools/hakios-device.py list
 
+# (the device's OS profile first: the kernel.ver the defconfig prints carries that profile's Darwin)
 %_defconfig:
-	tools/hakios-config.py defconfig $* $(FRAGMENTS)
 	python3 tools/os-profile.py for-device $*
+	tools/hakios-config.py defconfig $* $(FRAGMENTS)
 
 %.config:
 	tools/hakios-config.py merge $*
