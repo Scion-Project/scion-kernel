@@ -282,4 +282,7 @@ starlte/blacktop/dsymutil_no_process_substitution.patch
 starlte/blacktop/guard_sptm_user_pointer_ops_with_pac.patch
 starlte/blacktop/simplify_san_lipo.patch
 
-# Scion's iOS 27 changes on the S9
+# Scion's iOS 27 changes on the S9: the USB console, kauth, Darwin 27's interfaces, the 8 GiB shared region, boot-args
+starlte/0400-starlte-usb-gadget-console.patch
+# the iOS-target configuration (tools/ios27/build-xnu-12377-ios.sh) and the GPU track's kernel side (relbuf, IOSurface copy fallback)
+# parity with Scion's iOS 16.5 kernel (docs/ios27-starlte.md): behind boot-args, off by default, built but not booted
