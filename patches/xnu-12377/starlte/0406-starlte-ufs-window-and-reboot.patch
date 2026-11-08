@@ -1,0 +1,56 @@
+From da59a395b5cdaee3324304ded67a6fedbf7dd0ec Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:33:20 +0000
+Subject: [PATCH] starlte: boot-arg ufsrootoff/ufsrootlen: use a window of the
+ root partition; sweetreboot also fires when the log thread hangs
+
+ufsrootoff=<MiB> [ufsrootlen=<MiB>] put the root image at the start of the window and the console log ring at its end, so
+another system's data before it survives. The sweetreboot timer resets into recovery 60 s after the log thread, if that is stuck.
+---
+ bsd/dev/herolte_ufs.c | 25 +++++++++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/bsd/dev/herolte_ufs.c b/bsd/dev/herolte_ufs.c
+index b54929b66..4d3551261 100644
+--- a/bsd/dev/herolte_ufs.c
++++ b/bsd/dev/herolte_ufs.c
+@@ -442,6 +442,23 @@ ufs_find_partition(const char *want)
+ 		}
+ 		su.first_block = first;
+ 		su.nblocks = last - first + 1;
++		/* ufsrootoff=<MiB> [ufsrootlen=<MiB>] use only that window of the partition
++		 * (root image at its start, the console log ring at its end), so another system's data before it survives */
++		uint32_t off_mb = 0, len_mb = 0;
++		PE_parse_boot_argn("ufsrootoff", &off_mb, sizeof(off_mb));
++		PE_parse_boot_argn("ufsrootlen", &len_mb, sizeof(len_mb));
++		uint64_t off = ((uint64_t)off_mb << 20) / UFS_BLOCK, len = ((uint64_t)len_mb << 20) / UFS_BLOCK;
++		if (off && off < su.nblocks) {
++			su.first_block += off;
++			su.nblocks -= off;
++		}
++		if (len && len < su.nblocks) {
++			su.nblocks = len;
++		}
++		if (off || len) {
++			printf("HEROLTE UFS: window: %u MiB in, %llu MiB long (first block 0x%llx)\n",
++			    off_mb, su.nblocks * UFS_BLOCK >> 20, su.first_block);
++		}
+ 		return 0;
+ 	}
+ 	printf("HEROLTE UFS: no GPT partition named \"%s\"\n", want);
+@@ -1057,9 +1074,13 @@ starlte_reboot_timer_thread(__unused void *arg, __unused wait_result_t wr)
+ 	PE_parse_boot_argn("sweetreboot", &secs, sizeof(secs));
+ 	(void)tsleep(&chan, PZERO, "sweetreboot", (int)(secs * hz));
+ 	if (herolte_log_started) {
+-		return;                 /* herolte_log_thread flushes and resets itself */
++		/* herolte_log_thread flushes and resets itself; iOS 27 on STARLTE: if it
++		 * is stuck (UFS write hung, or it stopped on a write error), reset anyway
++		 * 60 s later with the console tail in pmsg. */
++		(void)tsleep(&chan, PZERO, "sweetreboot", (int)(60 * hz));
+ 	}
+-	printf("HEROLTE LOG: sweetreboot=%u reached with no UFS log: console tail to pmsg, reset to recovery\n", secs);
++	printf("HEROLTE LOG: sweetreboot=%u reached, log thread %s: console tail to pmsg, reset to recovery\n",
++	    secs, herolte_log_started ? "did not reset in 60 s" : "never started");
+ 	{
+ 		/* sdlog=1: the whole kernel log ring to the card's test range too (starlte_sd.c) */
+ 		extern struct msgbuf *msgbufp;
