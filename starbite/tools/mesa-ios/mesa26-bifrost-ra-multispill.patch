@@ -1,0 +1,81 @@
+--- a/src/panfrost/compiler/bifrost/bi_ra.c
++++ b/src/panfrost/compiler/bifrost/bi_ra.c
+@@ -603,7 +603,7 @@
+ /* If register allocation fails, find the best spill node */
+ 
+ static signed
+-bi_choose_spill_node(bi_context *ctx, struct lcra_state *l)
++bi_choose_spill_node(bi_context *ctx, struct lcra_state *l, const BITSET_WORD *exclude)
+ {
+    /* Pick a node satisfying bi_spill_register's preconditions */
+    BITSET_WORD *no_spill = BITSET_CALLOC(l->node_count);
+@@ -620,6 +620,10 @@
+               ins->src[0].value ==
+                  bi_preload_reg(BI_PRELOAD_CUMULATIVE_COVERAGE, ctx->arch))) {
+-            BITSET_SET(no_spill, ins->dest[d].value);
++            /* Starbite: several spills a round (below) add spill temporaries past the graph's
++             * node_count; they are never candidates, and setting their bit overran no_spill
++             * (heap corruption, WindowServer SIGSEGV in malloc from bi_register_allocate) */
++            if (ins->dest[d].value < l->node_count)
++               BITSET_SET(no_spill, ins->dest[d].value);
+          }
+       }
+    }
+@@ -638,7 +638,7 @@
+          if (!constraint)
+             continue;
+ 
+-         if (BITSET_TEST(no_spill, i))
++         if (BITSET_TEST(no_spill, i) || (exclude && BITSET_TEST(exclude, i)))
+             continue;
+ 
+          unsigned benefit = lcra_count_constraints(l, i);
+@@ -657,7 +657,7 @@
+          if (!row[i])
+             continue;
+ 
+-         if (BITSET_TEST(no_spill, i))
++         if (BITSET_TEST(no_spill, i) || (exclude && BITSET_TEST(exclude, i)))
+             continue;
+ 
+          unsigned benefit = lcra_count_constraints(l, i);
+@@ -1296,18 +1296,32 @@
+       if (success) {
+          ctx->info.work_reg_count = BI_MAX_REGS;
+       } else {
+-         signed spill_node = bi_choose_spill_node(ctx, l);
+-
+-         if (spill_node == -1)
+-            UNREACHABLE("Failed to choose spill node\n");
++         /* Starbite: a huge shader (macOS WindowServer's, on a Mali-G72) took minutes here,
++          * one spill per round and the whole interference graph rebuilt each time. After 4
++          * rounds, spill up to 2, 4, ... 32 nodes a round (best first, each distinct). */
++         unsigned per_round = iter_count <= 4 ? 1 : MIN2(32, 1u << MIN2((iter_count - 4) / 2 + 1, 5));
++         BITSET_WORD *taken = BITSET_CALLOC(l->node_count);
++         unsigned spilled = 0;
+ 
+          if (ctx->inputs->is_blend)
+             UNREACHABLE("Blend shaders may not spill");
+ 
+-         spill_count =
+-            bi_spill_register(ctx, bi_get_index(spill_node), spill_count,
+-                              bi_get_index(l->spill_node));
++         for (unsigned k = 0; k < per_round; ++k) {
++            signed spill_node = bi_choose_spill_node(ctx, l, taken);
+ 
++            if (spill_node == -1)
++               break;
++            BITSET_SET(taken, spill_node);
++            spill_count =
++               bi_spill_register(ctx, bi_get_index(spill_node), spill_count,
++                                 bi_get_index(l->spill_node));
++            spilled++;
++         }
++         free(taken);
++
++         if (spilled == 0)
++            UNREACHABLE("Failed to choose spill node\n");
++
+          lcra_free(l);
+          l = NULL;
+          /* In case the spill affected an instruction with tied

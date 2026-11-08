@@ -1,0 +1,552 @@
+From 53c9783499d557a612c420313b760e17299345da Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Sun, 1 Nov 2026 15:38:00 +0200
+Subject: [PATCH] patch: 0318-port-12377-build-fixes.patch
+
+Compile fixes for xnu-12377 found by the first builds (kept apart from the
+patches they touch so later patches' context is not disturbed):
+- sleh.c (0004): INTERRUPT_MASKED_DEBUG_START/END became
+  ml_interrupt_masked_debug_start/end.
+- cpu.c (0065): sysreg_restore is gone (the reset path loads the constant TCR_EL1_BOOT), its PoC clean dropped
+- exception.c (0309/0111): the VM map uses range/entry locks now (no vm_map_lock_read/vm_map_lookup_entry); the crash log looks regions up with vm_map_region_recurse_64. vm_kern.c (HEROLTE KMEM log): largest_free_size is now free_size (the kmem range size)
+- amcc_rorgn_pv_ctrr.c (0008): new closed-source file in files.arm64 for nos_arm_asm, stubbed like the ppl ones
+- exclaves.c, machine_routines.c (0009/0008): tightbeam_startup needs Apple's closed libTightbeam, compiled out for our boards; ml_device_is_prod_fused (closed, new caller in kern_mib.c) answers TRUE
+- arm_vm_init.c: progress marks 21-28 between marks 7 and 10 (first 12377 boot stopped after mark 7)
+- sweet_early.c, arm_vm_init.c: on the A5XELTE boards the early console stayed off from mark 7 (the 11417 port's assumption), so marks 21-28 never showed; it now stays on until arm_vm_init drops TTBR0 (mark 29), prints two-digit stages, and marks 8/9 bracket the first early_random
+- arm_vm_init.c: the dynamic_memory_begin > VM_MAX panic prints the layout on the A5XELTE boards
+- MakeInc.def (0093): 12377 selects the layout with ARM64_LARGE_MEMORY (into ARM64_EXTRA_BUILD_FLAGS), LARGE_MEMORY_DEFINE is unused; our boards set ARM64_LARGE_MEMORY = 0 (the first boots panicked: ARM_LARGE_MEMORY physmap below a kernel at 0xfffffff006000000)
+- pmap.c: 12377 maps WCOMB/RT pages outside the kernel's DRAM as Device-GRE; on our boards the framebuffer, /pram and Mali buffers are RAM outside it, and bzero's DC ZVA on the Device-mapped panic region faulted in PE_create_console (boot f). WCOMB/RT stay Normal-NC on our boards (pmap_wcomb_normal)
+- machine_routines.c: ml_unsafe_kernel_text asserts on iBoot's /chosen kernel-ctrr-to-be-enabled (boot g panicked after dlil_init); our boards have no CTRR and report unlocked text when the property is absent
+- vm_map_store.c: VM map guard objects stay off on our boards (launchd faulted with KERN_INVALID_GUARD_OBJECT_SLOT in its first plist buffer, boot h)
+- sleh.c: log failing copyio faults on user memory (diagnostic for launchd's KERN_INVALID_GUARD_OBJECT_SLOT exit)
+- vm_map_lock.c: log which guard-object check rejects a user range (diagnostic)
+- vm_map_lock.c: diagnostic helper moved above its users
+- vm_map_store.c: guard objects were still used for user maps (the enable switch only covers the kernel); vm_guard_object_should_fallback now always falls back on our boards, so the fault range of a 4 KiB-kernel/16 KiB-user fault can no longer spill into the next slot
+---
+ makedefs/MakeInc.def             |  2 +-
+ osfmk/arm/pmap/pmap.c            | 19 +++++++--
+ osfmk/arm64/amcc_rorgn_pv_ctrr.c |  9 ++++
+ osfmk/arm64/arm_vm_init.c        | 21 ++++++++++
+ osfmk/arm64/cpu.c                |  1 -
+ osfmk/arm64/machine_routines.c   | 19 +++++++++
+ osfmk/arm64/sleh.c               | 21 +++++++++-
+ osfmk/arm64/sweet_early.c        | 16 ++++---
+ osfmk/kern/exception.c           | 71 +++++++++++++++++---------------
+ osfmk/kern/exclaves.c            |  4 +-
+ osfmk/vm/vm_kern.c               |  4 +-
+ osfmk/vm/vm_map_lock.c           | 24 +++++++++++
+ osfmk/vm/vm_map_store.c          | 10 +++++
+ 13 files changed, 171 insertions(+), 50 deletions(-)
+ create mode 100644 osfmk/arm64/amcc_rorgn_pv_ctrr.c
+
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index 1820ea38..d5a93073 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -460,7 +460,7 @@ endif
+ # ARM_LARGE_MEMORY link address at -2 TiB is outside that range. Keep this
+ # board inside the existing compact kernel VA layout instead.
+ ifneq ($(filter $(CURRENT_MACHINE_CONFIG),A5XELTE HEROLTE STARLTE),)
+-LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY
++ARM64_LARGE_MEMORY = 0
+ ARM64_PLKSEG_ADDR  =0xfffffff004004000
+ ARM64_LINK_ADDR    =0xfffffff007004000
+ endif
+diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
+index 2379e237..87b38987 100644
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -1912,6 +1912,19 @@ pmap_construct_io_pte(pmap_paddr_t paddr, pt_entry_t tmplate)
+ }
+ #endif /* XNU_MONITOR */
+ 
++/*
++ * sweet (12377 port): 12377 maps write-combined / RT pages that lie outside
++ * the kernel-managed DRAM as Device-GRE. On the Exynos boards the
++ * framebuffer, the panic region (/pram) and the Mali buffers are ordinary
++ * RAM outside that range; as device memory, DC ZVA (bzero) takes an
++ * alignment fault. Keep them Normal Non-Cacheable, as xnu-11417 did.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++#define pmap_wcomb_normal(pa) ((void)(pa), true)
++#else
++#define pmap_wcomb_normal(pa) is_dram_addr(pa)
++#endif
++
+ vm_map_address_t
+ pmap_map_bd_with_options(
+ 	vm_map_address_t virt,
+@@ -1944,7 +1957,7 @@ pmap_map_bd_with_options(
+ 
+ 	switch (options & PMAP_MAP_BD_MASK) {
+ 	case PMAP_MAP_BD_WCOMB:
+-		if (is_dram_addr(start)) {
++		if (pmap_wcomb_normal(start)) {
+ 			mem_attr = ARM_PTE_ATTRINDX(CACHE_ATTRINDX_WRITECOMB);
+ 		} else {
+ #if HAS_FEAT_XS
+@@ -6001,7 +6014,7 @@ wimg_to_pte(unsigned int wimg, pmap_paddr_t pa)
+ 		pte |= ARM_PTE_NX | ARM_PTE_PNX;
+ 		break;
+ 	case VM_WIMG_RT:
+-		if (is_dram_addr(pa)) {
++		if (pmap_wcomb_normal(pa)) {
+ 			pte = ARM_PTE_ATTRINDX(CACHE_ATTRINDX_RT);
+ 		} else {
+ #if HAS_FEAT_XS
+@@ -6041,7 +6054,7 @@ wimg_to_pte(unsigned int wimg, pmap_paddr_t pa)
+ 		pte |= ARM_PTE_NX | ARM_PTE_PNX;
+ 		break;
+ 	case VM_WIMG_WCOMB:
+-		if (is_dram_addr(pa)) {
++		if (pmap_wcomb_normal(pa)) {
+ 			pte = ARM_PTE_ATTRINDX(CACHE_ATTRINDX_WRITECOMB);
+ 		} else {
+ #if HAS_FEAT_XS
+diff --git a/osfmk/arm64/amcc_rorgn_pv_ctrr.c b/osfmk/arm64/amcc_rorgn_pv_ctrr.c
+new file mode 100644
+index 00000000..f0feaaf1
+--- /dev/null
++++ b/osfmk/arm64/amcc_rorgn_pv_ctrr.c
+@@ -0,0 +1,9 @@
++/*
++ * sweet: (12377 adds the paravirtualized-CTRR part) files.arm64 builds this for nos_arm_asm, but the source only ships
++ * in Apple's closed per-SoC library. It implements the AMCC read-only region
++ * (KTRR/CTRR kernel text lockdown), which needs Apple memory controller
++ * hardware; nothing references it on SWEET (no KERNEL_INTEGRITY_KTRR/CTRR).
++ */
++#include <stdint.h>
++
++static const uint8_t sweet_no_amcc_rorgn __attribute__((unused)) = 0;
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index ce16f45c..3cf71a82 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1862,6 +1862,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	/*
+ 	 * Get the virtual and physical kernel-managed memory base from boot_args.
+ 	 */
++	sweet_early_mark(8, "arm_vm_init entered");
+ 	gVirtBase = args->virtBase;
+ 	gPhysBase = args->physBase;
+ #if KASAN
+@@ -1901,6 +1902,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ #endif
+ 
+ 	// Slide the physical aperture to a random page-aligned location within the slide range
++	sweet_early_mark(9, "arm_vm_init: first early_random");
+ 	uint64_t physmap_slide = early_random() & ARM64_PHYSMAP_SLIDE_MASK & ~((uint64_t)PAGE_MASK);
+ 	assert(physmap_slide < ARM64_PHYSMAP_SLIDE_RANGE);
+ 
+@@ -1948,9 +1950,17 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ #endif
+ #endif
+ 	if (dynamic_memory_begin > VM_MAX_KERNEL_ADDRESS) {
++#if defined(A5XELTE)
++		panic("Unsupported memory configuration %lx: virt %llx phys %llx top %llx physmap %llx static_end %llx dyn %llx max %llx",
++		    mem_size, (uint64_t)gVirtBase, (uint64_t)gPhysBase, (uint64_t)args->topOfKernelData,
++		    (uint64_t)physmap_base, (uint64_t)static_memory_end, (uint64_t)dynamic_memory_begin,
++		    (uint64_t)VM_MAX_KERNEL_ADDRESS);
++#else
+ 		panic("Unsupported memory configuration %lx", mem_size);
++#endif
+ 	}
+ 
++	sweet_early_mark(21, "arm_vm_init: physmap layout set");
+ 	boot_tte = (tt_entry_t *)&bootstrap_pagetables;
+ 	boot_ttep = kvtophys((vm_offset_t)boot_tte);
+ 
+@@ -1994,6 +2004,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	cpu_tte = (tt_entry_t *)alloc_ptpage(TRUE);
+ 	cpu_ttep = kvtophys((vm_offset_t)cpu_tte);
+ 	bzero(cpu_tte, ARM_PGBYTES);
++	sweet_early_mark(22, "arm_vm_init: cpu_tte allocated");
+ 	avail_end = gPhysBase + mem_size;
+ 	assert(!(avail_end & PAGE_MASK));
+ 
+@@ -2011,6 +2022,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	 *   the so called physical aperture should be statically mapped
+ 	 */
+ 	init_ptpages(cpu_tte, gVirtBase, dynamic_memory_begin, TRUE, ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
++	sweet_early_mark(23, "arm_vm_init: static tables built");
+ 
+ #if defined(ARM_LARGE_MEMORY)
+ 	/*
+@@ -2126,6 +2138,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	edata = (vm_offset_t) segDATAB + segSizeDATA;
+ 	end_kern = round_page(segHIGHESTKC ? segHIGHESTKC : getlastkerneladdr()); /* Force end to next page */
+ 
++	sweet_early_mark(24, "arm_vm_init: kernel segments found");
+ 	vm_set_page_size();
+ 
+ 	vm_kernel_base = segTEXTB;
+@@ -2160,7 +2173,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	vm_prelink_sdata = segPRELINKDATAB;
+ 	vm_prelink_edata = segPRELINKDATAB + segSizePRELINKDATA;
+ 
++	sweet_early_mark(25, "arm_vm_init: calling arm_vm_prot_init");
+ 	arm_vm_prot_init(args);
++	sweet_early_mark(26, "arm_vm_init: arm_vm_prot_init done");
+ 
+ 	/*
+ 	 * Initialize the page tables for the low globals:
+@@ -2204,14 +2219,20 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	/* phystokv() must still refer to the bootstrap aperture here. */
+ 	sweet_early_map_final();
+ #endif
++	sweet_early_mark(27, "arm_vm_init: calling arm_vm_physmap_init");
+ 	arm_vm_physmap_init(args);
+ 	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
++	sweet_early_mark(28, "arm_vm_init: TTBR1 switched");
+ 
+ 	ml_enable_monitor();
+ 
+ #if defined(SWEET) && !defined(A5XELTE)
+ 	/* The final TTBR1 is live; leave the outgoing VA=PA framebuffer alias. */
+ 	sweet_early_relocate(SWEET_EARLY_FB_VA);
++#elif defined(A5XELTE)
++	/* The early console writes the scanout through TTBR0's VA=PA map. */
++	sweet_early_mark(29, "arm_vm_init: dropping TTBR0, early console off");
++	sweet_early_disable();
+ #endif
+ 	set_mmu_ttb(invalid_ttep & TTBR_BADDR_MASK);
+ 
+diff --git a/osfmk/arm64/cpu.c b/osfmk/arm64/cpu.c
+index a8cc5f00..db3bb0b4 100644
+--- a/osfmk/arm64/cpu.c
++++ b/osfmk/arm64/cpu.c
+@@ -942,7 +942,6 @@ cpu_start(int cpu)
+ 		CleanPoC_DcacheRegion_Force((vm_offset_t)cpu_data_ptr, sizeof(cpu_data_t));
+ 		CleanPoC_DcacheRegion_Force((vm_offset_t)&ResetHandlerData, sizeof(ResetHandlerData));
+ 		CleanPoC_DcacheRegion_Force((vm_offset_t)BootArgs, sizeof(*BootArgs));
+-		CleanPoC_DcacheRegion_Force((vm_offset_t)&sysreg_restore, sizeof(sysreg_restore));
+ 		CleanPoC_DcacheRegion_Force((vm_offset_t)&cpu_ttep, sizeof(cpu_ttep));
+ 		CleanPoC_DcacheRegion_Force((vm_offset_t)bootstrap_pagetables, BOOTSTRAP_TABLE_SIZE);
+ 		__builtin_arm_dsb(DSB_SY);
+diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
+index 1ab9e420..1604738a 100644
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -3441,6 +3441,13 @@ ml_unsafe_kernel_text_init(void)
+ 		_unsafe_kernel_text_initialized = true;
+ 		_unsafe_kernel_text = (0 == *(const int *)value);
+ 	}
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++	/* sweet: no iBoot property and no CTRR here; kernel text is not locked. */
++	if (!_unsafe_kernel_text_initialized) {
++		_unsafe_kernel_text_initialized = true;
++		_unsafe_kernel_text = true;
++	}
++#endif
+ }
+ STARTUP(TUNABLES, STARTUP_RANK_FIRST, ml_unsafe_kernel_text_init);
+ 
+@@ -3452,3 +3459,15 @@ ml_unsafe_kernel_text(void)
+ 	return false;
+ }
+ #endif /* DEVELOPMENT || DEBUG || CONFIG_DTRACE || CONFIG_CSR_FROM_DT */
++
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++/*
++ * sweet: Apple's closed per-SoC library reads the fuses for this. Answer as a
++ * retail (production-fused) device, so kern.eng_sample_dev_fused stays 0.
++ */
++boolean_t
++ml_device_is_prod_fused(void)
++{
++	return TRUE;
++}
++#endif
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index 626279bf..b33fae1c 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -2693,6 +2693,23 @@ handle_kernel_abort(arm_saved_state_t *state, uint64_t esr, vm_offset_t fault_ad
+ 			}
+ 		}
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++		/* 12377 port: why copyio faults on user memory fail (launchd, boot h/i). */
++		if (recover && (fault_addr & TTBR_SELECTOR) == 0) {
++			static int sweet_copyio_fault_logs;
++			if (sweet_copyio_fault_logs++ < 8) {
++				printf("SWEET COPYIO FAULT: addr 0x%llx type %d code 0x%x result %d map pgshift %d voids %d\n",
++				    (uint64_t)fault_addr, fault_type, fault_code, result,
++				    VM_MAP_PAGE_SHIFT(map),
++#if CONFIG_MAP_RANGES
++				    (int)vm_map_in_user_range_voids(map, fault_addr, 1)
++#else
++				    -1
++#endif
++				    );
++			}
++		}
++#endif
+ 		if (recover) {
+ 			/*
+ 			 *  Handle guard object faults during copyio() routines
+@@ -3039,9 +3056,9 @@ sleh_irq(arm_saved_state_t *state)
+ 	if (intid == timer_intid) {
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
+ 		cdp->cpu_decrementer = -1; /* Large */
+-		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
++		ml_interrupt_masked_debug_start(rtclock_intr, DBG_INTR_TYPE_TIMER);
+ 		rtclock_intr(TRUE);
+-		INTERRUPT_MASKED_DEBUG_END();
++		ml_interrupt_masked_debug_end();
+ 		A5_IRQ_EOI(iar);
+ 	} else if (intid < 16) {
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_IPI);
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 159b9662..375258f6 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -78,19 +78,23 @@ a5_string(const char *s)
+ void
+ sweet_early_mark(unsigned int stage, const char *label)
+ {
+-	if (!a5_active || stage > 7) {
++	if (!a5_active) {
+ 		return;
+ 	}
+ 	a5_string("A5 XNU STAGE ");
+-	sweet_early_putc((char)('0' + stage));
++	if (stage >= 10) {
++		sweet_early_putc((char)('0' + stage / 10 % 10));
++	}
++	sweet_early_putc((char)('0' + stage % 10));
+ 	a5_string(": ");
+ 	a5_string(label);
+ 	sweet_early_putc('\n');
+ 	__asm__ volatile("dsb sy" ::: "memory");
+-	/* arm_vm_init replaces TTBR0; low physical aliases then cease to exist. */
+-	if (stage == 7) {
+-		a5_active = 0;
+-	}
++	/*
++	 * 12377 port: stay on through arm_vm_init (the bootstrap TTBR0 still maps
++	 * the scanout VA=PA); arm_vm_init calls sweet_early_disable() right
++	 * before it drops TTBR0.
++	 */
+ }
+ 
+ void
+diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
+index 1586e751..9b6b3efd 100644
+--- a/osfmk/kern/exception.c
++++ b/osfmk/kern/exception.c
+@@ -977,40 +977,49 @@ exception_triage(
+ void sweet_crash_log(const char *name, int pid, int sig, uint64_t code, uint64_t subcode);
+ /* sweet (0309): which mapping holds addr (descending into the shared
+  * region submap), and the first 32 bytes there. */
++/*
++ * 12377: the VM map locks are range/entry locks now, so look the address up
++ * through vm_map_region_recurse_64 (it locks and descends itself). Returns
++ * the region holding addr, or the next one above it.
++ */
++static kern_return_t
++sweet_crash_region(vm_map_t map, uint64_t addr, natural_t depth,
++    mach_vm_address_t *start, mach_vm_size_t *size, struct vm_region_submap_info_64 *info)
++{
++	mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
++	*start = addr;
++	*size = 0;
++	return vm_map_region_recurse_64(map, vm_sanitize_wrap_addr_ref(start),
++	           (vm_map_size_ut *)size, &depth, info, &count);
++}
++
+ static void
+ sweet_crash_where(const char *name, const char *what, uint64_t addr)
+ {
+ 	vm_map_t map = current_map();
+-	vm_map_entry_t entry;
++	struct vm_region_submap_info_64 info;
++	mach_vm_address_t start;
++	mach_vm_size_t size;
+ 	uint64_t data[4] = { 0 };
+ 	int rc = copyin((user_addr_t)addr, data, sizeof(data));
+-	vm_map_lock_read(map);
+-	if (!vm_map_lookup_entry(map, (vm_map_offset_t)addr, &entry)) {
+-		vm_map_unlock_read(map);
++	if (sweet_crash_region(map, addr, 0, &start, &size, &info) != KERN_SUCCESS || start > addr) {
+ 		printf("CRASH %s %s 0x%llx: not mapped\n", name, what, addr);
+ 		return;
+ 	}
+ 	printf("CRASH %s %s 0x%llx in 0x%llx-0x%llx prot %d/%d tag %d off 0x%llx%s copyin %d: %016llx %016llx %016llx %016llx\n",
+-	    name, what, addr, (uint64_t)entry->vme_start, (uint64_t)entry->vme_end,
+-	    entry->protection, entry->max_protection, (int)VME_ALIAS(entry),
+-	    (uint64_t)VME_OFFSET(entry), entry->is_sub_map ? " SUBMAP" : "", rc,
++	    name, what, addr, (uint64_t)start, (uint64_t)(start + size),
++	    info.protection, info.max_protection, (int)info.user_tag,
++	    (uint64_t)info.offset, info.is_submap ? " SUBMAP" : "", rc,
+ 	    data[0], data[1], data[2], data[3]);
+-	if (entry->is_sub_map) {
+-		vm_map_t sub = VME_SUBMAP(entry);
+-		vm_map_offset_t saddr = addr - entry->vme_start + VME_OFFSET(entry);
+-		vm_map_entry_t se;
+-		vm_map_lock_read(sub);
+-		if (vm_map_lookup_entry(sub, saddr, &se)) {
+-			printf("CRASH %s %s submap 0x%llx in 0x%llx-0x%llx prot %d/%d off 0x%llx object %p%s\n",
+-			    name, what, (uint64_t)saddr, (uint64_t)se->vme_start, (uint64_t)se->vme_end,
+-			    se->protection, se->max_protection, (uint64_t)VME_OFFSET(se),
+-			    se->is_sub_map ? NULL : (void *)VME_OBJECT(se), se->is_sub_map ? " SUBMAP" : "");
++	if (info.is_submap) {
++		if (sweet_crash_region(map, addr, 1, &start, &size, &info) == KERN_SUCCESS && start <= addr) {
++			printf("CRASH %s %s submap 0x%llx-0x%llx prot %d/%d off 0x%llx object 0x%x\n",
++			    name, what, (uint64_t)start, (uint64_t)(start + size),
++			    info.protection, info.max_protection, (uint64_t)info.offset, info.object_id);
+ 		} else {
+-			printf("CRASH %s %s submap 0x%llx: hole\n", name, what, (uint64_t)saddr);
++			printf("CRASH %s %s submap: hole\n", name, what);
+ 		}
+-		vm_map_unlock_read(sub);
+ 	}
+-	vm_map_unlock_read(map);
+ }
+ 
+ static void sweet_crash_strings(const char *name);
+@@ -1063,23 +1072,17 @@ sweet_crash_log(const char *name, int pid, int sig, uint64_t code, uint64_t subc
+ 	sweet_crash_where(name, "x19", get_saved_state_reg(ss, 19));
+ 
+ 	if (sig == 11 || sig == 10) {
+-		/* Which mapping the faulting address is in, or which two it falls between. */
++		/* Which mapping the faulting address is in, or the next one above it. */
+ 		uint64_t far = (uint64_t)saved_state64(ss)->far;
+-		vm_map_t map = current_map();
+-		vm_map_entry_t entry;
+-		vm_map_lock_read(map);
+-		bool inside = vm_map_lookup_entry(map, (vm_map_offset_t)far, &entry);
+-		for (int i = 0; i < 2 && entry != vm_map_to_entry(map); i++) {
++		struct vm_region_submap_info_64 info;
++		mach_vm_address_t start;
++		mach_vm_size_t size;
++		if (sweet_crash_region(current_map(), far, 0, &start, &size, &info) == KERN_SUCCESS) {
+ 			printf("CRASH %s map%s 0x%llx-0x%llx prot %d/%d tag %d\n", name,
+-			    inside && i == 0 ? " (far inside)" : (i == 0 ? " before far" : " after far"),
+-			    (uint64_t)entry->vme_start, (uint64_t)entry->vme_end, entry->protection,
+-			    entry->max_protection, (int)VME_ALIAS(entry));
+-			if (inside) {
+-				break;
+-			}
+-			entry = entry->vme_next;
++			    start <= far ? " (far inside)" : " after far",
++			    (uint64_t)start, (uint64_t)(start + size), info.protection,
++			    info.max_protection, (int)info.user_tag);
+ 		}
+-		vm_map_unlock_read(map);
+ 	}
+ 	if (sig == 6 || sig == 5) {
+ 		sweet_crash_strings(name);
+diff --git a/osfmk/kern/exclaves.c b/osfmk/kern/exclaves.c
+index 6247d298..40eb1380 100644
+--- a/osfmk/kern/exclaves.c
++++ b/osfmk/kern/exclaves.c
+@@ -3328,7 +3328,9 @@ STARTUP(TUNABLES, STARTUP_RANK_MIDDLE, exclaves_requirement_startup);
+ 
+ #endif /* CONFIG_EXCLAVES */
+ 
+-#if __has_include(<Tightbeam/tightbeam.h>)
++/* sweet: the generic boards do not link Apple's closed libTightbeam (0009). */
++#if __has_include(<Tightbeam/tightbeam.h>) && \
++    !defined(ARM64_BOARD_CONFIG_SWEET) && !defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 
+ #include <Tightbeam/tightbeam.h>
+ 
+diff --git a/osfmk/vm/vm_kern.c b/osfmk/vm/vm_kern.c
+index 2d950928..0131230a 100644
+--- a/osfmk/vm/vm_kern.c
++++ b/osfmk/vm/vm_kern.c
+@@ -3045,9 +3045,9 @@ kmem_add_extra_claims(struct mach_vm_range km_range)
+ 	assert((total_claims & PAGE_MASK) == 0);
+ #if defined(ARM64_BOARD_CONFIG_HEROLTE)
+ 	/* 2 GiB of RAM failed in kmem_range_init: record what is claimed. */
+-	printf("HEROLTE KMEM: kernel_map %#llx-%#llx largest_free %#llx claims %#llx (%u) mem %#llx\n",
++	printf("HEROLTE KMEM: kernel_map %#llx-%#llx free %#llx claims %#llx (%u) mem %#llx\n",
+ 	    (uint64_t)kernel_map->min_offset, (uint64_t)kernel_map->max_offset,
+-	    (uint64_t)largest_free_size, (uint64_t)total_claims, kmem_claim_count,
++	    (uint64_t)free_size, (uint64_t)total_claims, kmem_claim_count,
+ 	    (uint64_t)sane_size);
+ 	for (uint32_t i = 0; i < kmem_claim_count; i++) {
+ 		printf("HEROLTE KMEM: claim %s %#llx\n", kmem_claims[i].kc_name,
+diff --git a/osfmk/vm/vm_map_lock.c b/osfmk/vm/vm_map_lock.c
+index 987c9d55..313caf9e 100644
+--- a/osfmk/vm/vm_map_lock.c
++++ b/osfmk/vm/vm_map_lock.c
+@@ -41,6 +41,26 @@
+ #include <vm/vm_object_internal.h>
+ #include <vm/vm_stackshot_utils_xnu.h>
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++/* 12377 port: which guard-object check rejects a user range, and with what. */
++static void
++sweet_vmgo_reject(int site, vm_map_entry_t entry, vm_map_address_t start, vm_map_address_t end)
++{
++	static int logs;
++	if (logs++ >= 8) {
++		return;
++	}
++	vm_guard_object_chunk_t chunk = vms_chunk(entry->vme_chunk);
++	printf("SWEET VMGO REJECT %d: entry 0x%llx-0x%llx chunk 0x%llx-0x%llx bitmap 0x%llx req 0x%llx-0x%llx\n",
++	    site, (uint64_t)entry->vme_start, (uint64_t)entry->vme_end,
++	    (uint64_t)vmgo_chunk_start(chunk), (uint64_t)vmgo_chunk_end(chunk),
++	    (uint64_t)vmgo_bitmap(chunk), (uint64_t)start, (uint64_t)end);
++}
++#define SWEET_VMGO_REJECT(site, e, s, x) sweet_vmgo_reject(site, e, s, x)
++#else
++#define SWEET_VMGO_REJECT(site, e, s, x) ((void)0)
++#endif
++
+ uint64_t vm_map_lookup_and_lock_object_copy_slowly_count = 0;
+ uint64_t vm_map_lookup_and_lock_object_copy_slowly_size = 0;
+ uint64_t vm_map_lookup_and_lock_object_copy_slowly_max = 0;
+@@ -2659,6 +2679,7 @@ __vmrl_atomic_lock_and_iunlock(vm_map_lock_ctx_t vml_ctx)
+ 		    VME_IN_CHUNK(entry) &&
+ 		    vmgo_chunk_start(vms_chunk(entry->vme_chunk)) < end &&
+ 		    !vm_guard_object_check_op_range(entry, start, end)) {
++			SWEET_VMGO_REJECT(1, entry, start, end);
+ 			kr = KERN_INVALID_GUARD_OBJECT_SLOT;
+ 			release_assert(!vmrl_is_kernel_pmap(flags));
+ 			break;
+@@ -2684,6 +2705,7 @@ __vmrl_atomic_lock_and_iunlock(vm_map_lock_ctx_t vml_ctx)
+ 			    VME_IN_CHUNK(VME_PREV(entry)) &&
+ 			    vmgo_chunk_end(vms_chunk(VME_PREV(entry)->vme_chunk)) > start &&
+ 			    !vm_guard_object_check_op_range(VME_PREV(entry), start, end)) {
++				SWEET_VMGO_REJECT(2, VME_PREV(entry), start, end);
+ 				kr = KERN_INVALID_GUARD_OBJECT_SLOT;
+ 				release_assert(!vmrl_is_kernel_pmap(flags));
+ 				break;
+@@ -2941,6 +2963,7 @@ restart:
+ 		if (VME_IN_CHUNK(next_entry) &&
+ 		    !vm_guard_object_check_op_range(next_entry,
+ 		    vml_ctx->__original_req_start, end)) {
++			SWEET_VMGO_REJECT(3, next_entry, vml_ctx->__original_req_start, end);
+ 			kr = KERN_INVALID_GUARD_OBJECT_SLOT;
+ 			release_assert(!vmrl_is_kernel_pmap(flags));
+ 			goto out_abort;
+@@ -3745,4 +3768,5 @@ vm_map_found_entry_ex_unlock(
+  */
+ #if DEVELOPMENT || DEBUG
+ #include <vm/vm_map_lock_tests.c>
++
+ #endif /* DEVELOPMENT || DEBUG */
+diff --git a/osfmk/vm/vm_map_store.c b/osfmk/vm/vm_map_store.c
+index df5a7458..ea2e23a2 100644
+--- a/osfmk/vm/vm_map_store.c
++++ b/osfmk/vm/vm_map_store.c
+@@ -1765,6 +1765,16 @@ vm_guard_object_should_fallback(
+ 	vm_map_size_t           size,
+ 	vm_map_offset_t         mask)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++	/*
++	 * sweet: no guard objects, kernel or user. The 4 KiB-page kernel faults
++	 * user (16 KiB-page) memory one 16 KiB page from the 4 KiB-aligned fault
++	 * address; the guard-object range check then sees the fault spill into
++	 * the next slot (launchd: req 0x10217d000-0x102181000 against a slot
++	 * ending at 0x102180000) and fails it with KERN_INVALID_GUARD_OBJECT_SLOT.
++	 */
++	return true;
++#endif
+ 	/*
+ 	 * Various things that do not support or do not need guard objects:
+ 	 *

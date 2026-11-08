@@ -1,0 +1,93 @@
+From 4c40ac6b63f769e286fbc742f1114cb844c0ad6f Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Mon, 2 Nov 2026 07:44:46 +0200
+Subject: [PATCH] patch: 0340-starlte-top-memory.patch - starlte_smp.c: STARLTE
+ MEM line every 30 s (page queues, compressor, six largest footprints)
+
+---
+ bsd/dev/starlte_smp.c | 44 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+
+diff --git a/bsd/dev/starlte_smp.c b/bsd/dev/starlte_smp.c
+index 05103a5e..13b51550 100644
+--- a/bsd/dev/starlte_smp.c
++++ b/bsd/dev/starlte_smp.c
+@@ -96,6 +96,10 @@ starlte_cpu_clock_report(void)
+ extern processor_t thread_bind(processor_t processor);   /* (sched_prim.h: MACH_KERNEL_PRIVATE only) */
+ 
+ static void st_top_a64e(uint64_t window_ns);
++extern unsigned int vm_page_free_count, vm_page_wire_count, vm_page_active_count, vm_page_inactive_count;
++extern uint32_t c_segment_pages_compressed, c_segment_pages_compressed_nearing_limit;
++extern uint64_t get_task_phys_footprint(task_t);
++static void st_top_mem(void);
+ 
+ /*
+  * Which processes use the CPU (the S7 and S9 ports found a Bluetooth audio plug-in polling a
+@@ -107,6 +111,7 @@ static void st_top_a64e(uint64_t window_ns);
+ static struct st_top_entry {
+ 	int pid;
+ 	uint64_t ticks;
++	uint64_t footprint;
+ 	char name[24];
+ } st_top_now[ST_TOP_PROCS], st_top_last[ST_TOP_PROCS];
+ static unsigned st_top_n, st_top_last_n;
+@@ -124,6 +129,7 @@ st_top_one(proc_t p, __unused void *arg)
+ 	struct st_top_entry *e = &st_top_now[st_top_n++];
+ 	e->pid = proc_pid(p);
+ 	e->ticks = info.pti_total_user + info.pti_total_system;
++	e->footprint = get_task_phys_footprint(task);
+ 	strlcpy(e->name, proc_best_name(p), sizeof(e->name));
+ 	return PROC_RETURNED;
+ }
+@@ -174,6 +180,7 @@ st_top(void)
+ 			}
+ 			printf("%s\n", line);
+ 			st_top_a64e(window_ns);
++			st_top_mem();
+ 		}
+ 		bcopy(st_top_now, st_top_last, sizeof(st_top_now[0]) * st_top_n);
+ 		st_top_last_n = st_top_n;
+@@ -182,6 +189,43 @@ st_top(void)
+ 	}
+ }
+ 
++/*
++ * Where the RAM goes (the iOS 26 port runs out of it with two Metal clients): every 30 s, the
++ * page queues and the compressor, then the six largest physical footprints:
++ * "STARLTE MEM: free 40 wired 600 active 300 inactive 200 compressed 450 (near 700) MiB; top: ...".
++ */
++
++static void
++st_top_mem(void)
++{
++	static unsigned tick;
++	if (tick++ % 3 != 0) {
++		return;
++	}
++	char line[512];
++	int n = snprintf(line, sizeof(line), "STARLTE MEM: free %llu wired %llu active %llu inactive %llu "
++	    "compressed %llu (near %llu) MiB; top:", (uint64_t)vm_page_free_count * PAGE_SIZE >> 20,
++	    (uint64_t)vm_page_wire_count * PAGE_SIZE >> 20, (uint64_t)vm_page_active_count * PAGE_SIZE >> 20,
++	    (uint64_t)vm_page_inactive_count * PAGE_SIZE >> 20, (uint64_t)c_segment_pages_compressed * PAGE_SIZE >> 20,
++	    (uint64_t)c_segment_pages_compressed_nearing_limit * PAGE_SIZE >> 20);
++	bool taken[ST_TOP_PROCS] = { false };
++	for (unsigned k = 0; k < 6; k++) {
++		unsigned best = ST_TOP_PROCS;
++		for (unsigned i = 0; i < st_top_n; i++) {
++			if (!taken[i] && (best == ST_TOP_PROCS || st_top_now[i].footprint > st_top_now[best].footprint)) {
++				best = i;
++			}
++		}
++		if (best == ST_TOP_PROCS || n >= (int)sizeof(line) - 40) {
++			break;
++		}
++		taken[best] = true;
++		n += snprintf(line + n, sizeof(line) - (size_t)n, " %s[%d] %llu", st_top_now[best].name,
++		    st_top_now[best].pid, st_top_now[best].footprint >> 20);
++	}
++	printf("%s\n", line);
++}
++
+ /* arm64e instructions emulated in the window (osfmk/arm64/sweet_a64e.c), and by whom */
+ struct sweet_a64e_pid { int pid; uint64_t count; };
+ extern uint64_t sweet_a64e_counts[8];

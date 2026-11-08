@@ -1,0 +1,122 @@
+From 187cc0778ea80a8a962bdc97f2389c37a22628d2 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Wed, 4 Nov 2026 15:22:37 +0200
+Subject: [PATCH] patch: 0378-sweet-hid-trackpad-macos.patch - macOS touch as a
+ trackpad (sweettouchrel=1, default): relative pointer motion from the first
+ finger, short tap = click; the absolute pointer never moved WindowServer's
+ cursor
+
+---
+ iokit/Kernel/arm/hid/SweetHID.cpp | 82 +++++++++++++++++++++++++++++++
+ 1 file changed, 82 insertions(+)
+
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+index 3f7b45ba..45f573b4 100644
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -369,6 +369,7 @@ protected:
+ 	virtual UInt32 getProductID() APPLE_KEXT_OVERRIDE { return 2; }
+ private:
+ 	void mouseTouch(int finger, bool down, int x, int y, IOFixed nx, IOFixed ny);
++	void trackpadTouch(int finger, bool down, int x, int y);
+ 	IOLock *fLock;
+ 	int fLogicalW, fLogicalH, fOffX, fOffY, fPanelW, fPanelH;
+ 	bool fDown[SWEET_TOUCH_FINGERS];
+@@ -594,6 +595,82 @@ SweetHIDTouch::start(IOService *provider)
+  *   - a second finger while one is down releases the button and turns finger movement into
+  *     scroll-wheel lines (two-finger scroll) until every finger is up.
+  */
++/*
++ * Trackpad mode (sweettouchrel=1, the default on macOS; =0 is the absolute pointer below): the
++ * absolute events reached WindowServer's event system but never moved the pointer (boots 141658,
++ * 151456), so the first finger drives it the way every Mac mouse does, with relative motion: a drag
++ * moves the pointer by the finger's movement (panel pixels -> the 828x1792 canvas' points), a short
++ * tap (< 300 ms, < 40 px of travel) clicks button 1. Other fingers are ignored.
++ */
++static bool
++sweet_touch_relative(void)
++{
++	static int rel = -1;
++	if (rel < 0) {
++		rel = 1;
++		PE_parse_boot_argn("sweettouchrel", &rel, sizeof(rel));
++	}
++	return rel != 0;
++}
++
++void
++SweetHIDTouch::trackpadTouch(int finger, bool down, int x, int y)
++{
++	static int primary = -1, lastX, lastY, travel, remX, remY;
++	static uint64_t downAt;
++	static uint32_t moves;
++	uint64_t now = mach_absolute_time();
++	IOHIDEvent *events[2] = { NULL, NULL };
++	const char *what = NULL;
++
++	IOLockLock(fLock);
++	if (down && primary < 0) {
++		primary = finger;
++		lastX = x;
++		lastY = y;
++		travel = 0;
++		downAt = now;
++		what = "down";
++	} else if (down && finger == primary) {
++		int dx = x - lastX, dy = y - lastY;
++		lastX = x;
++		lastY = y;
++		travel += (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
++		/* 1440 -> 828 and 2960 -> 1792: about 0.575 and 0.605 points a panel pixel */
++		int px = dx * 575 + remX, py = dy * 605 + remY;
++		int ox = px / 1000, oy = py / 1000;
++		remX = px - ox * 1000;
++		remY = py - oy * 1000;
++		if (ox || oy) {
++			events[0] = IOHIDEvent::relativePointerEvent(now, ox, oy, 0, 0, 0);
++			if (moves++ < 200 || (moves % 100) == 0) {
++				IOLog("SWEET HID: trackpad move %d,%d (move %u)\n", ox, oy, moves);
++			}
++		}
++	} else if (!down && finger == primary) {
++		primary = -1;
++		uint64_t ns = 0;
++		absolutetime_to_nanoseconds(now - downAt, &ns);
++		if (ns < 300000000ULL && travel < 40) {
++			events[0] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 1, 0);
++			events[1] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 0, 1);
++			what = "tap = click";
++		} else {
++			what = "up";
++		}
++	}
++	IOLockUnlock(fLock);
++	if (what) {
++		IOLog("SWEET HID: trackpad %s (finger %d) at %d,%d travel %d\n", what, finger, x, y, travel);
++	}
++	for (int i = 0; i < 2; i++) {
++		if (events[i]) {
++			dispatchEvent(events[i]);
++			events[i]->release();
++		}
++	}
++}
++
+ void
+ SweetHIDTouch::mouseTouch(int finger, bool down, int x, int y, IOFixed nx, IOFixed ny)
+ {
+@@ -601,6 +678,11 @@ SweetHIDTouch::mouseTouch(int finger, bool down, int x, int y, IOFixed nx, IOFix
+ 	IOHIDEvent *event = NULL, *scroll = NULL;
+ 	const char *what = NULL;
+ 
++	if (sweet_touch_relative()) {
++		trackpadTouch(finger, down, x, y);
++		return;
++	}
++
+ 	IOLockLock(fLock);
+ 	bool was = fDown[finger];
+ 	if (was == down && (!down || (nx == fX[finger] && ny == fY[finger]))) {
+-- 
+2.53.0
+

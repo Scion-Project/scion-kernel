@@ -1,0 +1,77 @@
+From 1bbb0d8021a653c2dd414499b0c5628838f01cac Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Mon, 2 Nov 2026 07:36:01 +0200
+Subject: [PATCH] patch: 0339-starbite-mali-memory-stats.patch - StarbiteMali:
+ wired GPU memory (buffers, surfaces, host imports) in the 10 s CALLS line
+
+---
+ iokit/Kernel/arm/StarbiteMali.cpp | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/iokit/Kernel/arm/StarbiteMali.cpp b/iokit/Kernel/arm/StarbiteMali.cpp
+index b4d07208..7d7d2a5f 100644
+--- a/iokit/Kernel/arm/StarbiteMali.cpp
++++ b/iokit/Kernel/arm/StarbiteMali.cpp
+@@ -186,6 +186,21 @@ sbm_va_free(uint64_t va, uint64_t bytes)
+ 	IOLockUnlock(sbm_va_lock);
+ }
+ 
++/* 4 KiB pages the GPU holds wired, all clients: buffers of ours, imported surfaces, imported host memory. */
++static int64_t sbm_live_pages[3];
++
++static unsigned
++sbm_bo_kind(const sbm_bo *bo)
++{
++	return bo->host ? 2 : bo->surface != 0 ? 1 : 0;
++}
++
++static void
++sbm_count_pages(const sbm_bo *bo, int64_t sign)
++{
++	OSAddAtomic64(sign * (int64_t)bo->pages, &sbm_live_pages[sbm_bo_kind(bo)]);
++}
++
+ class StarbiteMali : public IOService {
+ 	OSDeclareDefaultStructors(StarbiteMali);
+ };
+@@ -248,6 +263,7 @@ StarbiteMaliUserClient::lookup(uint32_t handle)
+ void
+ StarbiteMaliUserClient::closeBO(sbm_bo *bo)
+ {
++	sbm_count_pages(bo, -1);
+ 	starlte_gpu_user_unmap(bo->va, bo->pages);
+ 	sbm_va_free(bo->va, (uint64_t)bo->pages * 0x1000);
+ 	OSSafeReleaseNULL(bo->map);
+@@ -333,6 +349,7 @@ StarbiteMaliUserClient::createBO(sbm_create_bo *a)
+ 		return kIOReturnVMError;
+ 	}
+ 	fBos[handle - 1] = (sbm_bo){ .mem = mem, .map = NULL, .va = va, .pages = pages };
++	sbm_count_pages(&fBos[handle - 1], 1);
+ 	a->handle = handle;
+ 	a->offset = va;
+ 	return kIOReturnSuccess;
+@@ -420,6 +437,7 @@ StarbiteMaliUserClient::importSurface(sbm_surface *a)
+ 	s->memory->retain();
+ 	fBos[handle - 1] = (sbm_bo){ .mem = s->memory, .map = NULL, .va = va, .pages = pages,
+ 		                     .surface = a->surface };
++	sbm_count_pages(&fBos[handle - 1], 1);
+ 	a->handle = handle;
+ 	s->release();
+ 	return kIOReturnSuccess;
+@@ -486,6 +504,7 @@ StarbiteMaliUserClient::importHost(sbm_import_host *a)
+ 		return va ? kIOReturnVMError : kIOReturnNoSpace;
+ 	}
+ 	fBos[handle - 1] = (sbm_bo){ .mem = mem, .map = NULL, .va = va, .pages = pages, .surface = 0, .host = true };
++	sbm_count_pages(&fBos[handle - 1], 1);
+ 	a->handle = handle;
+ 	a->va = va;
+ 	return kIOReturnSuccess;
+@@ -682,6 +701,8 @@ StarbiteMaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArgume
+ 			    sbm_call_ns[i] / 1000000);
+ 			sbm_calls[i] = sbm_call_ns[i] = sbm_call_max[i] = 0;
+ 		}
++		snprintf(line + n, sizeof(line) - (size_t)n, " wired: buffers %lld MiB, surfaces %lld MiB, host %lld MiB",
++		    sbm_live_pages[0] / 256, sbm_live_pages[1] / 256, sbm_live_pages[2] / 256);
+ 		sbm_calls_since = t1;
+ 		IOLockUnlock(sbm_va_lock);
+ 		IOLog("%s\n", line);

@@ -1,0 +1,238 @@
+From 47cd4da635d3c4ddca8f04f78c5ccffd76a44cb7 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Tue, 3 Nov 2026 22:06:22 +0200
+Subject: [PATCH] patch: 0351-sweet-a64e-fhm.patch - arm64e emulation:
+ FMLAL/FMLAL2/FMLSL/FMLSL2 (FEAT_FHM, vector and by element) with FPMulAddH's
+ exact IEEE rules: halves widened in integer code (AHP 0, FZ16 flush), NaNs
+ picked as FPProcessNaNs3H, one single-precision FMADD under the user's FPCR
+ (ARMv8.0 FP: M3-safe, IRQs masked)
+
+---
+ osfmk/arm64/sweet_a64e.c    | 149 ++++++++++++++++++++++++++++++++++++
+ osfmk/arm64/sweet_a64e_fp.s |  33 +++++++-
+ 2 files changed, 181 insertions(+), 1 deletion(-)
+
+diff --git a/osfmk/arm64/sweet_a64e.c b/osfmk/arm64/sweet_a64e.c
+index 1c2f069f..b49f7567 100644
+--- a/osfmk/arm64/sweet_a64e.c
++++ b/osfmk/arm64/sweet_a64e.c
+@@ -13,6 +13,9 @@
+  *   FJCVTZS                               -> JavaScript ToInt32, Z = exact
+  *   FCADD (vector, H/S/D)                 -> lane-wise FADD/FSUB, user FPCR
+  *
++ * And the ARMv8.4+ classes macOS (built for M1+) uses: MSR/MRS DIT, STLUR/LDAPUR (LRCPC2),
++ *   FMLAL{2}/FMLSL{2} (FHM)               -> exact half->single widening, one FMADD, user FPCR
++ *
+  * And for the Mongoose M3 (ARMv8.0: no LSE, no LRCPC), so iOS 26 runs on the big cores too:
+  *   CAS*, CASP*, LD<op>*, ST<op>*, SWP*   -> compare-and-swap loop on the aligned 8 (16) bytes
+  *                                            around the target (sweet_copy_cas64/128, copyio.c),
+@@ -187,6 +190,140 @@ emulate_fcadd(arm_saved_state_t *ss, uint32_t w)
+ 	return true;
+ }
+ 
++/* ---- FEAT_FHM: FMLAL, FMLAL2, FMLSL, FMLSL2 (vector and by element) ------------------------ */
++
++/* sweet_a64e_fp.s: a + n * m in single precision, one rounding, under fpcr. */
++extern uint32_t sweet_a64e_fp_fmadd_s(uint32_t a, uint32_t n, uint32_t m, uint32_t fpcr, uint32_t *fpsr);
++
++#define SWEET_FPCR_FZ16 (1u << 19)
++#define SWEET_FPCR_FZ   (1u << 24)
++#define SWEET_FPCR_DN   (1u << 25)
++#define SWEET_FPSR_IOC  (1u << 0)
++#define SWEET_FPSR_IDC  (1u << 7)
++
++static bool h_nan(uint16_t h)  { return (h & 0x7c00) == 0x7c00 && (h & 0x3ff) != 0; }
++static bool h_snan(uint16_t h) { return h_nan(h) && (h & 0x200) == 0; }
++static bool h_inf(uint16_t h)  { return (h & 0x7fff) == 0x7c00; }
++static bool h_zero(uint16_t h) { return (h & 0x7fff) == 0; }
++static bool s_nan(uint32_t s)  { return (s & 0x7f800000) == 0x7f800000 && (s & 0x7fffff) != 0; }
++static bool s_snan(uint32_t s) { return s_nan(s) && (s & 0x400000) == 0; }
++
++/* An IEEE half (not a NaN) as the single with the same value: every half is exact in single. */
++static uint32_t
++h_to_s(uint16_t h)
++{
++	uint32_t sign = (uint32_t)(h & 0x8000) << 16, exp = (h >> 10) & 0x1f, frac = h & 0x3ff;
++	if (exp == 0x1f) {
++		return sign | 0x7f800000;               /* infinity */
++	}
++	if (exp == 0) {
++		if (frac == 0) {
++			return sign;
++		}
++		int e = -14;                            /* subnormal 0.frac * 2^-14: normalize */
++		while ((frac & 0x400) == 0) {
++			frac <<= 1;
++			e--;
++		}
++		return sign | (uint32_t)(e + 127) << 23 | (frac & 0x3ff) << 13;
++	}
++	return sign | (exp - 15 + 127) << 23 | frac << 13;
++}
++
++/*
++ * One lane of FMLAL/FMLSL: FPMulAddH(a, n, m) of the ARM ARM (n already negated for FMLSL).
++ * The halves are unpacked with AHP = 0 and flushed by FZ16 (not FZ, and without IDC), the
++ * addend by FZ (with IDC) even when a NaN wins; NaNs are picked as FPProcessNaNs3H does:
++ * signalling first, in the order addend, n, m, and a half NaN is widened by FPConvertNaN. Without NaNs, n * m of two halves is exact in single precision
++ * (22-bit significand, exponent -48..32), so a single FMADD of the widened values rounds exactly
++ * once, like FPMulAddH, with the same infinity, zero-sign, FZ (addend and result) and flag rules.
++ */
++static uint32_t
++fmlal_lane(uint32_t a, uint16_t n, uint16_t m, uint32_t fpcr, uint32_t *fpsr)
++{
++	if (fpcr & SWEET_FPCR_FZ16) {
++		if ((n & 0x7c00) == 0) {
++			n &= 0x8000;
++		}
++		if ((m & 0x7c00) == 0) {
++			m &= 0x8000;
++		}
++	}
++	if (s_nan(a) || h_nan(n) || h_nan(m)) {
++		if ((fpcr & SWEET_FPCR_FZ) && (a & 0x7f800000) == 0 && (a & 0x7fffff) != 0) {
++			*fpsr |= SWEET_FPSR_IDC;        /* FPUnpack flushed the addend before the NaN pick */
++		}
++		unsigned pick = s_snan(a) ? 0 : h_snan(n) ? 1 : h_snan(m) ? 2 : s_nan(a) ? 0 : h_nan(n) ? 1 : 2;
++		bool snan = pick == 0 ? s_snan(a) : h_snan(pick == 1 ? n : m);
++		if (snan) {
++			*fpsr |= SWEET_FPSR_IOC;
++		}
++		/* addend a quiet NaN and n * m = 0 * inf: the default NaN, Invalid */
++		if (!snan && pick == 0 && ((h_inf(n) && h_zero(m)) || (h_zero(n) && h_inf(m)))) {
++			*fpsr |= SWEET_FPSR_IOC;
++			return 0x7fc00000;
++		}
++		if (fpcr & SWEET_FPCR_DN) {
++			return 0x7fc00000;
++		}
++		if (pick == 0) {
++			return a | 0x400000;
++		}
++		uint16_t h = pick == 1 ? n : m;
++		return (uint32_t)(h & 0x8000) << 16 | 0x7fc00000 | (uint32_t)(h & 0x1ff) << 13;
++	}
++	return sweet_a64e_fp_fmadd_s(a, h_to_s(n), h_to_s(m), fpcr, fpsr);
++}
++
++/*
++ * FMLAL{2} / FMLSL{2} Vd.2S|4S, Vn.2H|4H, Vm.2H|4H   (vector)
++ * FMLAL{2} / FMLSL{2} Vd.2S|4S, Vn.2H|4H, Vm.H[i]    (by element, Vm in V0-V15, i = H:L:M)
++ * Each single lane d[e] += n[e] * m[e] (or m[i]), with n negated for FMLSL. The 2 forms take
++ * the upper half of the Vn (and Vm vector) halfwords that the plain forms take the lower half of.
++ */
++static bool
++emulate_fmlal(uint32_t w)
++{
++	thread_t th = current_thread();
++	if (th->machine.uNeon == NULL) {
++		return false;
++	}
++	arm_neon_saved_state64_t *ns = &th->machine.uNeon->ns_64;
++	bool q = (w >> 30) & 1, upper = (w >> 29) & 1, elem = (w >> 24) & 1;
++	unsigned rd = w & 31, rn = (w >> 5) & 31;
++	unsigned lanes = q ? 4 : 2, base = upper ? lanes : 0;
++	bool sub;
++	uint16_t n[8], m[8];
++	uint32_t d[4], r[4] = { 0, 0, 0, 0 };
++
++	memcpy(n, &ns->v.q[rn], 16);
++	memcpy(d, &ns->v.q[rd], 16);
++	if (elem) {
++		unsigned rm = (w >> 16) & 15;
++		unsigned idx = ((w >> 11) & 1) << 2 | ((w >> 21) & 1) << 1 | ((w >> 20) & 1);
++		uint16_t v[8];
++		memcpy(v, &ns->v.q[rm], 16);
++		for (unsigned e = 0; e < 8; e++) {
++			m[e] = v[idx];
++		}
++		sub = (w >> 14) & 1;
++	} else {
++		memcpy(m, &ns->v.q[(w >> 16) & 31], 16);
++		sub = (w >> 23) & 1;
++	}
++	uint32_t fpsr = 0;
++	for (unsigned e = 0; e < lanes; e++) {
++		uint16_t a = n[base + e];
++		if (sub) {
++			a ^= 0x8000;                    /* FPNeg, before the NaN checks (FEAT_AFP absent) */
++		}
++		r[e] = fmlal_lane(d[e], a, elem ? m[0] : m[base + e], ns->fpcr, &fpsr);
++	}
++	memcpy(&ns->v.q[rd], r, 16);            /* the 2S form clears the top half */
++	ns->fpsr |= fpsr;
++	return true;
++}
++
+ 
+ /* ---- LSE and LRCPC for the Mongoose M3 ------------------------------------------------------ */
+ 
+@@ -493,6 +630,18 @@ sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
+ 		sweet_a64e_counts[7]++;
+ 		return true;
+ 	}
++	/* FEAT_FHM (ARMv8.2 optional, every Apple M1+): FMLAL/FMLAL2/FMLSL/FMLSL2 */
++	if ((w & 0xBF60FC00) == 0x0E20EC00 ||                   /* FMLAL, FMLSL (vector) */
++	    (w & 0xBF60FC00) == 0x2E20CC00 ||                   /* FMLAL2, FMLSL2 (vector) */
++	    (w & 0xBFC0B400) == 0x0F800000 ||                   /* FMLAL, FMLSL (by element) */
++	    (w & 0xBFC0B400) == 0x2F808000) {                   /* FMLAL2, FMLSL2 (by element) */
++		if (!emulate_fmlal(w)) {
++			return false;
++		}
++		set_saved_state_pc(ss, pc + 4);
++		sweet_a64e_counts[7]++;
++		return true;
++	}
+ 	return false;
+ }
+ #endif /* SWEET || A5XELTE */
+diff --git a/osfmk/arm64/sweet_a64e_fp.s b/osfmk/arm64/sweet_a64e_fp.s
+index 577f8e4d..88da1bc6 100644
+--- a/osfmk/arm64/sweet_a64e_fp.s
++++ b/osfmk/arm64/sweet_a64e_fp.s
+@@ -1,5 +1,5 @@
+ /*
+- * sweet: FP helper for sweet_a64e.c (FCADD emulation). The kernel C code is
++ * sweet: FP helpers for sweet_a64e.c (FCADD and FMLAL emulation). The kernel C code is
+  * built without FP; this runs one scalar FADD or FSUB with the user's FPCR.
+  *   uint64_t sweet_a64e_fp_addsub(uint64_t a, uint64_t b, uint32_t op_size,
+  *       uint32_t fpcr, uint32_t *fpsr)
+@@ -49,4 +49,35 @@ Ldone:	fmov	x0, d0
+ 	msr	FPCR, x9
+ 	msr	FPSR, x10
+ 	ret
++
++/*
++ *   uint32_t sweet_a64e_fp_fmadd_s(uint32_t a, uint32_t n, uint32_t m, uint32_t fpcr, uint32_t *fpsr)
++ *   a + n * m in single precision with one rounding (FMADD) under fpcr, for FMLAL/FMLSL
++ *   (sweet_a64e.c converts the half-precision operands exactly and handles NaNs and FZ16).
++ *   *fpsr |= the exception flags raised. ARMv8.0 FP only, so it also runs on the Mongoose M3.
++ *   IRQ/FIQ stay masked while the user's FPCR and v0-v2 are live: kernel NEON state is not kept
++ *   across a context switch.
++ */
++	.globl	EXT(sweet_a64e_fp_fmadd_s)
++LEXT(sweet_a64e_fp_fmadd_s)
++	mrs	x11, DAIF
++	msr	DAIFSet, #3                     /* IRQ | FIQ */
++	mrs	x9, FPCR
++	mrs	x10, FPSR
++	mov	w3, w3                          /* the upper half of a 32-bit argument is undefined */
++	msr	FPCR, x3
++	msr	FPSR, xzr
++	fmov	s0, w0
++	fmov	s1, w1
++	fmov	s2, w2
++	fmadd	s0, s1, s2, s0
++	fmov	w0, s0
++	mrs	x12, FPSR
++	ldr	w13, [x4]
++	orr	w13, w13, w12
++	str	w13, [x4]
++	msr	FPCR, x9
++	msr	FPSR, x10
++	msr	DAIF, x11
++	ret
+ #endif
+-- 
+2.53.0
+

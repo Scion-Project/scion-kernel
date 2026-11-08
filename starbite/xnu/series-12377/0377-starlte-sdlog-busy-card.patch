@@ -1,0 +1,43 @@
+From cdd6587b84cd05be5cadc85fd22fd1ae0d380653 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Wed, 4 Nov 2026 15:12:18 +0200
+Subject: [PATCH] patch: 0377-starlte-sdlog-busy-card.patch - sdlog: wait up to
+ 500 ms for a card transfer in progress at the reset, then write the log
+ anyway (was -2, no log)
+
+---
+ bsd/dev/starlte_sd.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/bsd/dev/starlte_sd.c b/bsd/dev/starlte_sd.c
+index 2b5fb094..df412cfe 100644
+--- a/bsd/dev/starlte_sd.c
++++ b/bsd/dev/starlte_sd.c
+@@ -820,8 +820,11 @@ starlte_sd_dump_log(const void *ring, uint32_t size, uint32_t bufx)
+ 	    size == 0 || size > (64u << 20) - SECTOR) {
+ 		return -1;
+ 	}
+-	if (!lck_mtx_try_lock(&starlte_sd_lock)) {
+-		return -2;
++	/* a busy desktop is often mid-transfer at the reset (boot 150628: -2, no log): wait up to
++	 * 500 ms for the lock, then write anyway; the interrupted transfer is lost to the reset regardless */
++	bool locked = false;
++	for (int i = 0; i < 500 && !(locked = lck_mtx_try_lock(&starlte_sd_lock)); i++) {
++		delay(1000);
+ 	}
+ 	const uint64_t first = 249868288ULL, count = 131072ULL;
+ 	uint64_t hdr[SECTOR / 8] = { 0 };
+@@ -848,7 +851,9 @@ starlte_sd_dump_log(const void *ring, uint32_t size, uint32_t bufx)
+ 		r = write_chunk(first + 1 + done, n, (const uint64_t *)(const void *)(p + (size_t)done * SECTOR));
+ 		done += n;
+ 	}
+-	lck_mtx_unlock(&starlte_sd_lock);
++	if (locked) {
++		lck_mtx_unlock(&starlte_sd_lock);
++	}
+ 	return r;
+ }
+ 
+-- 
+2.53.0
+

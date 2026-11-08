@@ -1,0 +1,64 @@
+From f27d8ed1aa01c5bc0bbc8ae87756604f9f418659 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 4 Nov 2026 01:45:47 +0200
+Subject: [PATCH] patch: 0358-sweet-surface-debug.patch - sweetsurfdbg=1 logs
+ every IOSurface user-client call (first 60) with sizes and result
+
+---
+ iokit/Kernel/arm/SweetSurface.cpp | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.cpp
+index 3f221f86..ef88257e 100644
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -33,6 +33,7 @@
+ #include <IOKit/IOUserClient.h>
+ #include <IOKit/IOKitKeys.h>
+ #include <IOKit/IOLib.h>
++#include <pexpert/pexpert.h>
+ #include <IOKit/IOLocks.h>
+ #include <IOKit/system.h>
+ #include <libkern/c++/OSArray.h>
+@@ -472,6 +473,8 @@ public:
+ 	IOReturn externalMethod(uint32_t selector, IOExternalMethodArguments *args,
+ 	    IOExternalMethodDispatch *dispatch, OSObject *target,
+ 	    void *reference) APPLE_KEXT_OVERRIDE;
++	IOReturn externalMethodInner(uint32_t selector, IOExternalMethodArguments *args,
++	    IOExternalMethodDispatch *dispatch, OSObject *target, void *reference);
+ 	IOExternalTrap *getTargetAndTrapForIndex(IOService **targetP, UInt32 index) APPLE_KEXT_OVERRIDE;
+ 
+ 	IOReturn trapUseCount(void *id, void *category, void *, void *, void *, void *);
+@@ -975,6 +978,29 @@ IOSurfaceRootUserClient::wrap(uint32_t selector, IOExternalMethodArguments *args
+ 
+ IOReturn
+ IOSurfaceRootUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
++    IOExternalMethodDispatch *dispatch, OSObject *target, void *reference)
++{
++	/* sweetsurfdbg=1: every call (first 60) with its sizes and result, for new userlands */
++	static int dbg = -1, left = 60;
++	if (dbg < 0) {
++		dbg = 0;
++		PE_parse_boot_argn("sweetsurfdbg", &dbg, sizeof(dbg));
++	}
++	if (dbg && left > 0) {
++		left--;
++		IOReturn r = externalMethodInner(selector, args, dispatch, target, reference);
++		IOLog("SWEET SURF dbg: sel %u sin %u [%#llx %#llx] in %u%s out %u%s osc %u -> %#x\n", selector,
++		    args->scalarInputCount, args->scalarInputCount > 0 ? args->scalarInput[0] : 0,
++		    args->scalarInputCount > 1 ? args->scalarInput[1] : 0, args->structureInputSize,
++		    args->structureInputDescriptor ? "(desc)" : "", args->structureOutputSize,
++		    args->structureOutputDescriptor ? "(desc)" : "", args->scalarOutputCount, r);
++		return r;
++	}
++	return externalMethodInner(selector, args, dispatch, target, reference);
++}
++
++IOReturn
++IOSurfaceRootUserClient::externalMethodInner(uint32_t selector, IOExternalMethodArguments *args,
+     __unused IOExternalMethodDispatch *dispatch, __unused OSObject *target,
+     __unused void *reference)
+ {
+-- 
+2.53.0
+

@@ -1,0 +1,58 @@
+From 58bfa1d58fe70095ae7dede24616f652520cca38 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Tue, 3 Nov 2026 19:41:23 +0200
+Subject: [PATCH] patch: 0347-starlte-microsd-cmu-div.patch - microSD:
+ DIV_CLKCMU_FSYS1_MMC_CARD /16 -> /1 as Linux (sddiv=0 keeps S-Boot's),
+ busy-bit wait, printed
+
+---
+ bsd/dev/starlte_sd.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/bsd/dev/starlte_sd.c b/bsd/dev/starlte_sd.c
+index 3dad7a0e..3161e4a3 100644
+--- a/bsd/dev/starlte_sd.c
++++ b/bsd/dev/starlte_sd.c
+@@ -60,6 +60,7 @@ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ extern bool starlte_pmic_read(uint32_t type, uint32_t reg, uint8_t *val);
+ extern bool starlte_pmic_write(uint32_t type, uint32_t reg, uint8_t val);
+ extern void IOSleep(unsigned milliseconds);
++extern void IODelay(unsigned microseconds);
+ extern void sweet_sample_start(void);
+ 
+ #define SD_PA           0x11500000UL
+@@ -367,7 +368,10 @@ sd_hw_up(void)
+ 		    sd.gpa1_con, (sd.gpa1_con >> 20) & 0xfU, sd.gpa1_dat & 0xffU);
+ 		return ENXIO;
+ 	}
+-	/* 2 the three gates, manual + on; 3 the divider, read only */
++	/* 2 the three gates, manual + on; 3 the divider: S-Boot leaves DIV_CLKCMU_FSYS1_MMC_CARD at
++	 * /16 (a 12.6 MHz bus, 6.3 MHz card clock, measured 2026-11-03); Linux writes it to /1
++	 * (tools/linux/mk-starlte-dts.py, a 201.5 MHz bus), so do the same unless sddiv=0. This is
++	 * the card's own divider in CMU top, not a MIF / INT clock. */
+ 	static const uint32_t gate_off[3] = { 0x2070, 0x2030, 0x2034 };
+ 	for (unsigned i = 0; i < 3; i++) {
+ 		vm_offset_t b = i == 0 ? sd.cmu : sd.fsys1;
+@@ -375,6 +379,19 @@ sd_hw_up(void)
+ 		sd.gate[i] = mrd(b, gate_off[i]);
+ 	}
+ 	sd.cmu_div = mrd(sd.cmu, 0x1864);
++	{
++		uint32_t setdiv = 1;
++		PE_parse_boot_argn("sddiv", &setdiv, sizeof(setdiv));
++		if (setdiv && (sd.cmu_div & 0xfU)) {
++			uint32_t was = sd.cmu_div;
++			mwr(sd.cmu, 0x1864, sd.cmu_div & ~0xfU);
++			for (unsigned i = 0; i < 1000 && (mrd(sd.cmu, 0x1864) & (1U << 16)); i++) {
++				IODelay(1);     /* the divider's busy bit while it switches */
++			}
++			sd.cmu_div = mrd(sd.cmu, 0x1864);
++			printf("STARBITE SD: cmu div 0x%x -> 0x%x (/1, as Linux)\n", was, sd.cmu_div);
++		}
++	}
+ 	sd.bus_hz = PLL_MMC_HZ / ((sd.cmu_div & 0xfU) + 1U) / 4U;
+ 	/* Printed before the controller is first read: a read of an unclocked 0x11500000 can stall
+ 	 * the bus or take an SError, and then this line is the last evidence. */
+-- 
+2.53.0
+

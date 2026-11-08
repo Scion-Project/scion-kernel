@@ -1,0 +1,184 @@
+From d00f055b0a5270a7920f1acf418d06e8700a76e4 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:35:14 +0200
+Subject: [PATCH] patch: 0302-starlte-acpm-pmic-api.patch
+
+---
+ bsd/dev/starlte_touch.c | 108 ++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 105 insertions(+), 3 deletions(-)
+
+diff --git a/bsd/dev/starlte_touch.c b/bsd/dev/starlte_touch.c
+index c45c0f0e..9e89b19a 100644
+--- a/bsd/dev/starlte_touch.c
++++ b/bsd/dev/starlte_touch.c
+@@ -16,7 +16,8 @@
+  * 0x62, READ_ONE_EVENT 0x60 (8 bytes, byte 0 = 0 when the stack is empty):
+  * byte 0 EID [1:0] (0 = coordinate), TID [5:2] - 1, state [7:6] (1 press,
+  * 2 move, 3 release); x = b1 << 4 | b3 >> 4, y = b2 << 4 | b3 & 0xf.
+- * Boot-arg startouch=0 disables everything here.
++ * Boot-arg startouch=0 disables everything here; sweetswipe=1 plays scripted
++ * input (st_script) for unattended test boots.
+  */
+ #if defined(ARM64_BOARD_CONFIG_STARLTE)
+ #include <sys/param.h>
+@@ -24,6 +25,7 @@
+ #include <kern/clock.h>
+ #include <kern/thread.h>
+ #include <kern/sched_prim.h>
++#include <kern/locks.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
+ 
+@@ -131,6 +133,10 @@ static vm_offset_t acpm_mbox, acpm_sram;
+ static uint32_t acpm_ch;                /* SRAM offset of channel 2 */
+ static uint32_t acpm_chans, acpm_ap_max;
+ static uint32_t acpm_seq;
++/* One ACPM command at a time: touch power and DVFS here, vdd_g3d from
++ * bsd/dev/starlte_gpu.c (starlte_pmic_read/write below). */
++static LCK_GRP_DECLARE(acpm_lck_grp, "starlte_acpm");
++static LCK_MTX_DECLARE(acpm_lock, &acpm_lck_grp);
+ 
+ static inline uint32_t
+ acpm_rd(uint32_t off)
+@@ -200,7 +206,7 @@ acpm_find(uint32_t id)
+ 
+ /* One command on channel id (descriptor c), polled; reply copied back. */
+ static bool
+-acpm_send_on(uint32_t c, uint32_t id, uint32_t cmd[4])
++acpm_send_on_locked(uint32_t c, uint32_t id, uint32_t cmd[4])
+ {
+ 	uint32_t qlen = acpm_rd(c + 0x34), esz = acpm_rd(c + 0x38);
+ 	uint32_t tx_rear = acpm_rd(c + 0x10), tx_front = acpm_rd(c + 0x14), tx_base = acpm_rd(c + 0x18);
+@@ -259,6 +265,15 @@ acpm_send_on(uint32_t c, uint32_t id, uint32_t cmd[4])
+ 	return false;
+ }
+ 
++static bool
++acpm_send_on(uint32_t c, uint32_t id, uint32_t cmd[4])
++{
++	lck_mtx_lock(&acpm_lock);
++	bool ok = acpm_send_on_locked(c, id, cmd);
++	lck_mtx_unlock(&acpm_lock);
++	return ok;
++}
++
+ static bool
+ acpm_send(uint32_t cmd[4])
+ {
+@@ -340,12 +355,41 @@ pmic_write(uint32_t type, uint32_t reg, uint8_t val)
+ 	return true;
+ }
+ 
++/*
++ * PMIC registers for other drivers (type 1 = PMIC, 0 = TOP), through the
++ * same ACPM channel; the channel is looked up on first use if the touch
++ * thread has not done it yet.
++ */
++bool starlte_pmic_read(uint32_t type, uint32_t reg, uint8_t *val);
++bool starlte_pmic_write(uint32_t type, uint32_t reg, uint8_t val);
++
++static bool
++acpm_ready(void)
++{
++	lck_mtx_lock(&acpm_lock);
++	bool ok = acpm_ch || acpm_init();
++	lck_mtx_unlock(&acpm_lock);
++	return ok;
++}
++
++bool
++starlte_pmic_read(uint32_t type, uint32_t reg, uint8_t *val)
++{
++	return acpm_ready() && pmic_read(type, reg, val);
++}
++
++bool
++starlte_pmic_write(uint32_t type, uint32_t reg, uint8_t val)
++{
++	return acpm_ready() && pmic_write(type, reg, val);
++}
++
+ /* Returns true once both touch rails are on (or were already). */
+ static bool
+ st_power_on(void)
+ {
+ 	uint8_t id = 0, l35 = 0, l43 = 0;
+-	if (!acpm_init() || !pmic_read(0, 0x00, &id)) {
++	if (!acpm_ready() || !pmic_read(0, 0x00, &id)) {
+ 		return false;
+ 	}
+ 	(void)pmic_read(1, 0x6c, &l35);
+@@ -648,12 +692,70 @@ st_thread(__unused void *arg, __unused wait_result_t wr)
+ 	}
+ }
+ 
++/*
++ * Boot-arg sweetswipe=1: scripted input for unattended test boots (screenshots of what is past the
++ * lock screen). The phone UI is the home-button iPhone's (8 Plus canvas): a swipe up from the
++ * bottom edge opens Control Center (on the home screen it did not, boot54), Home closes it and
++ * unlocks (single presses 5 s apart, not a double press), a swipe left shows the applications'
++ * page, a tap opens Settings. Times are since boot. Swipes use finger 9 in panel pixels through
++ * sweet_hid_touch(), 24 steps of 12 ms, like the real ones; Home goes through sweet_hid_key().
++ */
++extern void sweet_hid_key(int key, int down);
++
++static const struct {
++	unsigned at_s;
++	int home;                       /* 1: press Home; 0: swipe x0,y0 -> x1,y1 */
++	int x0, y0, x1, y1;
++} st_script[] = {
++	{ 50, 0, 720, 2950, 720, 1300 },        /* Control Center over the lock screen (sbca shot at 62 s) */
++	{ 66, 1, 0, 0, 0, 0 },                  /* closes it */
++	{ 71, 1, 0, 0, 0, 0 },                  /* unlocks */
++	{ 80, 0, 1300, 1500, 150, 1500 },       /* home screen page 2, the applications (shot at 95 s) */
++	{ 100, 0, 534, 1790, 534, 1790 },       /* a tap on Settings (shot at 135 s) */
++};
++
++static void
++st_script_thread(__unused void *arg, __unused wait_result_t wr)
++{
++	const int f = ST_FINGERS - 1, steps = 24;
++
++	for (unsigned i = 0; i < sizeof(st_script) / sizeof(st_script[0]); i++) {
++		uint64_t now_ns;
++		absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
++		uint64_t at_ns = (uint64_t)st_script[i].at_s * NSEC_PER_SEC;
++		if (now_ns < at_ns) {
++			st_msleep((unsigned)((at_ns - now_ns) / NSEC_PER_MSEC));
++		}
++		if (st_script[i].home) {
++			printf("STARLTE TOUCH: scripted Home press\n");
++			sweet_hid_key(3, 1);
++			st_msleep(80);
++			sweet_hid_key(3, 0);
++			continue;
++		}
++		printf("STARLTE TOUCH: scripted swipe %u: %d,%d -> %d,%d\n", i, st_script[i].x0, st_script[i].y0,
++		    st_script[i].x1, st_script[i].y1);
++		for (int k = 0; k <= steps; k++) {
++			int x = st_script[i].x0 + (st_script[i].x1 - st_script[i].x0) * k / steps;
++			int y = st_script[i].y0 + (st_script[i].y1 - st_script[i].y0) * k / steps;
++			sweet_hid_touch(f, 1, x, y);
++			st_msleep(12);
++		}
++		sweet_hid_touch(f, 0, st_script[i].x1, st_script[i].y1);
++	}
++}
++
+ void
+ starlte_touch_probe(void)
+ {
+ 	uint32_t on = 1;
+ 	thread_t thread;
+ 
++	uint32_t script = 0;
++	if (PE_parse_boot_argn("sweetswipe", &script, sizeof(script)) && script &&
++	    kernel_thread_start(st_script_thread, NULL, &thread) == KERN_SUCCESS) {
++		thread_deallocate(thread);
++	}
+ 	PE_parse_boot_argn("startouch", &on, sizeof(on));
+ 	if (!on) {
+ 		return;
+-- 
+2.53.0
+

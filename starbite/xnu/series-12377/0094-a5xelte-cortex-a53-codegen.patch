@@ -1,0 +1,26 @@
+From 68d52e87034b7f967fdfa2abaffb0739f20166b4 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:33:00 +0200
+Subject: [PATCH] patch: 0094-a5xelte-cortex-a53-codegen.patch
+
+port: same flag change on the ported line
+---
+ makedefs/MakeInc.def | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index 9a68db92..b6785bd7 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -94,7 +94,7 @@ MACHINE_FLAGS_ARM64_T8142 = -DARM64_BOARD_CONFIG_T8142 			-mcpu=apple-m4+memtag+
+ 
+ MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a+sme2
+ MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET                -march=armv8.2-a+crypto
+-MACHINE_FLAGS_ARM64_A5XELTE = -DARM64_BOARD_CONFIG_A5XELTE            -march=armv8-a+crypto
++MACHINE_FLAGS_ARM64_A5XELTE = -DARM64_BOARD_CONFIG_A5XELTE            -mcpu=cortex-a53 -march=armv8-a+crypto
+ 
+ 
+ #
+-- 
+2.53.0
+

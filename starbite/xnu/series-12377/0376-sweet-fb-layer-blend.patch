@@ -1,0 +1,78 @@
+From a1a4083c66745f5de7511a27d7788ee67f4f1a35 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Wed, 4 Nov 2026 14:44:56 +0200
+Subject: [PATCH] patch: 0376-sweet-fb-layer-blend.patch - layers above the
+ first (the pointer) alpha-blended over the frame instead of copied (the black
+ box), and the pointer layer's position logged as it moves
+
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 39 +++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 50ace11f..85f2021f 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -638,6 +638,8 @@ AppleCLCD::swap(const uint8_t *rec, uint32_t size)
+  * whose source row equals the previous one is copied from it. Called only
+  * from present(), which the vsync timer serializes.
+  */
++static bool sweet_fb_blend;	/* scaledCopy() of a layer above the first: blend, do not copy */
++
+ uint64_t
+ AppleCLCD::scaledCopy(uintptr_t src, uint32_t srcRowBytes, int32_t dx, int32_t dy,
+     int32_t w, int32_t h)
+@@ -682,6 +684,28 @@ AppleCLCD::scaledCopy(uintptr_t src, uint32_t srcRowBytes, int32_t dx, int32_t d
+ 		int32_t r = (int32_t)((int64_t)(py - barY) * lh / outH) - dy;
+ 		r = r < 0 ? 0 : (r >= h ? h - 1 : r);
+ 		uint32_t *out = (uint32_t *)(fPixels + (uint64_t)py * fRowBytes + (uint64_t)spx0 * 4);
++		if (sweet_fb_blend) {
++			/* layers above the first (the pointer, overlays): premultiplied BGRA over what is
++			 * there, so a transparent pixel leaves the frame below instead of a black box */
++			const uint32_t *in = (const uint32_t *)(src + (uint64_t)r * srcRowBytes);
++			for (int32_t x = 0; x < spw; x++) {
++				uint32_t v = in[column[x]], a = v >> 24;
++				if (a == 0) {
++					continue;
++				}
++				if (a == 255) {
++					out[x] = v;
++					continue;
++				}
++				uint32_t o = out[x], k = 255 - a, res = 0xff000000u;
++				for (uint32_t sh = 0; sh < 24; sh += 8) {
++					uint32_t c = ((v >> sh) & 0xff) + (((o >> sh) & 0xff) * k + 127) / 255;
++					res |= (c > 255 ? 255 : c) << sh;
++				}
++				out[x] = res;
++			}
++			continue;
++		}
+ 		if (r == sprev && sprevRow != NULL) {
+ 			memcpy(out, sprevRow, (size_t)spw * 4);
+ 		} else {
+@@ -905,6 +929,21 @@ AppleCLCD::present(const uint8_t *rec)
+ 			s->release();
+ 			continue;
+ 		}
++#endif
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++		if (layer > 0 && src != 0) {
++			/* where the pointer layer goes (does touch move it?): each new position, up to 400 */
++			static int32_t lastX = -1, lastY = -1;
++			static uint32_t moves;
++			if ((dx != lastX || dy != lastY) && moves < 400) {
++				moves++;
++				lastX = dx;
++				lastY = dy;
++				IOLog("SWEET FB: layer %u surface %u at %d,%d %dx%d (swap %u)\n", layer, id, dx, dy, w, h,
++				    get32(rec, 0x50 + sh));
++			}
++		}
++		sweet_fb_blend = layer > 0;
+ #endif
+ 		if (src != 0 && bpe == 4 && fScaled) {
+ 			copied += scaledCopy(src + s->offset + (uint64_t)sy * s->bytesPerRow + (uint64_t)sx * 4,
+-- 
+2.53.0
+

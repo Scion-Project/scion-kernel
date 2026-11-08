@@ -1,0 +1,504 @@
+From d9a0f86e2c880d178bdc26c21528c9c25e6fb211 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:35:14 +0200
+Subject: [PATCH] patch: 0303-starlte-gpu-present.patch
+
+---
+ bsd/dev/starlte_gpu.c                 |  54 +++++++++
+ bsd/dev/starlte_touch.c               | 166 +++++++++++++++++---------
+ iokit/Kernel/arm/SweetFramebuffer.cpp |  56 ++++++---
+ iokit/Kernel/arm/SweetSurface.cpp     |  31 +++++
+ iokit/Kernel/arm/SweetSurface.h       |   3 +
+ 5 files changed, 241 insertions(+), 69 deletions(-)
+
+diff --git a/bsd/dev/starlte_gpu.c b/bsd/dev/starlte_gpu.c
+index e1b67e37..0a0c2be7 100644
+--- a/bsd/dev/starlte_gpu.c
++++ b/bsd/dev/starlte_gpu.c
+@@ -30,6 +30,8 @@
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern bool starlte_pmic_read(uint32_t type, uint32_t reg, uint8_t *val);
+ extern bool starlte_pmic_write(uint32_t type, uint32_t reg, uint8_t val);
++extern bool starlte_acpm_dvfs(uint32_t domain, uint32_t khz);
++static void sg_clock_up(void);
+ /* SweetFramebuffer.cpp: no CPU copies to the panel before this mach time. */
+ extern uint64_t sweet_fb_hold_until;
+ void starlte_gpu_probe(void);
+@@ -1122,6 +1124,7 @@ sg_jobs(vm_offset_t pmu)
+ 			bool drawn = sg_gpu_up(shaders) && sg_stage4(shaders);
+ 			sweet_fb_hold_until = 0;
+ 			if (drawn && sg_gpu_up(shaders)) {
++				sg_clock_up();
+ 				sgp_shaders = shaders;
+ 				__atomic_thread_fence(__ATOMIC_RELEASE);
+ 				sgp_ready = true;
+@@ -1144,6 +1147,57 @@ restore:
+ 	}
+ }
+ 
++/*
++ * The GPU's clock: S-Boot leaves PLL_G3D at 260 MHz, the lowest level of the DT's gpu_dvfs_table
++ * (572000 546000 455000 338000 299000 260000 kHz). Apps' frames wait for their jobs synchronously
++ * (~340 us each, ~50 a frame while scrolling: half of every second, boot67), so the clock goes up
++ * through ACPM DVFS (domain g3d = 4) before the present and apps start, and vdd_g3d is put back to
++ * 950 mV in case ACPM's own table set it lower (the top of what this GPU is run at). Not locked
++ * afterwards: back to 260 MHz. Boot-arg stargpu=0: S-Boot's clock; stargpu=KHZ: a level above.
++ */
++static uint32_t
++sg_clock_khz(void)
++{
++	static vm_offset_t cmu;
++	if (!cmu) {
++		cmu = ml_io_map(SG_CMU_PA, 0x2000);
++	}
++	uint32_t con0 = cmu ? sg_rd(cmu, 0x140) : 0;
++	uint64_t m = (con0 >> 16) & 0x3ff, p = (con0 >> 8) & 0x3f, s = con0 & 7;
++	if (!(con0 & (1u << 29)) || !p) {
++		return 0;                       /* not locked */
++	}
++	return (con0 & 0x10) ? (uint32_t)(26000ull * m / (p << s)) : 26000;
++}
++
++static void
++sg_clock_up(void)
++{
++	static const uint32_t levels[] = { 572000, 546000, 455000, 338000, 299000, 260000 };
++	uint32_t want = 572000;
++	PE_parse_boot_argn("stargpu", &want, sizeof(want));
++	bool listed = false;
++	for (unsigned i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
++		listed |= levels[i] == want;
++	}
++	if (want == 0 || !listed) {
++		printf("STARLTE GPU: clock left at %u kHz (stargpu=%u)\n", sg_clock_khz(), want);
++		return;
++	}
++	uint32_t before = sg_clock_khz();
++	bool sent = starlte_acpm_dvfs(4, want);
++	delay(1000);
++	uint8_t volt = 0;
++	bool v = starlte_pmic_write(1, SG_BUCK6, SG_BUCK6_950MV) && starlte_pmic_read(1, SG_BUCK6, &volt);
++	uint32_t after = sg_clock_khz();
++	printf("STARLTE GPU: clock %u -> %u kHz (asked %u, %s), vdd_g3d %s %u uV\n", before, after, want,
++	    sent ? "sent" : "no reply", v ? "at" : "NOT SET,", 300000u + volt * 6250u);
++	if (sent && after == 0) {
++		(void)starlte_acpm_dvfs(4, 260000);
++		printf("STARLTE GPU: PLL not locked at %u kHz: back to 260000 (%u kHz)\n", want, sg_clock_khz());
++	}
++}
++
+ static void
+ sg_thread(void *arg, __unused wait_result_t wr)
+ {
+diff --git a/bsd/dev/starlte_touch.c b/bsd/dev/starlte_touch.c
+index 9e89b19a..fbd879a5 100644
+--- a/bsd/dev/starlte_touch.c
++++ b/bsd/dev/starlte_touch.c
+@@ -22,6 +22,7 @@
+ #if defined(ARM64_BOARD_CONFIG_STARLTE)
+ #include <sys/param.h>
+ #include <sys/systm.h>
++#include <sys/sysctl.h>
+ #include <kern/clock.h>
+ #include <kern/thread.h>
+ #include <kern/sched_prim.h>
+@@ -281,55 +282,63 @@ acpm_send(uint32_t cmd[4])
+ }
+ 
+ /*
+- * CPU cluster 0 (Cortex-A55) clock through ACPM DVFS (vendor
+- * cal-if/acpm_dvfs.c): cmd = { domain, kHz, 0 = FREQ_REQ | 1 = FREQ_GET, 0 },
+- * FREQ_GET returns kHz in reply word 1; ACPM sets the voltage itself.
+- * Domain cpucl0 = 2 (acpm_dvfs_exynos9810.h). Linux sends these on the
+- * ch_num it never initialises (0), so try channel 0 first. Levels
+- * (exynos9810.dtsi): 1950000 1898000 1794000 1690000 1456000 1248000
+- * 1053000 949000 832000 715000 598000 455000 kHz.
++ * CPU clocks through ACPM DVFS (vendor cal-if/acpm_dvfs.c): cmd = { domain, kHz, 0 = FREQ_REQ |
++ * 1 = FREQ_GET, 0 }; ACPM sets the voltage itself. Domains (acpm_dvfs_exynos9810.h): cpucl0 = 2 (the
++ * Cortex-A55s), cpucl1 = 3 (the Mongoose M3s). Linux sends these on ipc channel *index* 0 (its
++ * acpm_dvfs.ch_num is never set), the DT names channel 5. S-Boot leaves both clusters at ~1.05 GHz
++ * (measured, starlte_smp.c), where Settings' scrolling is CPU-bound (sbca's profile, boot65). So
++ * by default: A55s 1690000 kHz, M3s 1794000 kHz, levels of exynos9810.dtsi (the M3s' limit with all
++ * four busy and no OCP, max-freq-wo-ocp; there is no thermal control here, so not the 2.7 GHz
++ * single-core level). Boot-arg starcpu=0: leave them; starcpu=LITTLE[,BIG] in kHz: those.
++ * FREQ_GET answered 0 kHz on channel 0 earlier, so the result is judged by the clock survey.
+  */
+ extern void starlte_cpu_clock_report(void);
+ 
+ static void
+ st_cpu_dvfs(void)
+ {
+-	static const uint32_t levels[] = { 1950000, 1898000, 1794000, 1690000, 1456000, 1248000,
+-		                           1053000, 949000, 832000, 715000, 598000, 455000 };
+-	uint32_t want = 0;
+-	PE_parse_boot_argn("starfreq", &want, sizeof(want));
+-	/* FREQ_GET on channel 0 answered 0 kHz on the S9: the channel or the
+-	 * command is not the right one. Send nothing unless asked. */
+-	if (!want) {
+-		return;
+-	}
+-	uint32_t c = acpm_find(0);
+-	if (!c) {
+-		printf("STARLTE DVFS: no ACPM channel 0\n");
+-		return;
++	char arg[32] = "";
++	uint32_t little = 1690000, big = 1794000;
++	if (PE_parse_boot_argn("starcpu", arg, sizeof(arg))) {
++		if (arg[0] == '0' && arg[1] == 0) {
++			printf("STARLTE DVFS: starcpu=0: CPU clocks left as S-Boot set them\n");
++			return;
++		}
++		char *end = arg;
++		little = (uint32_t)strtoul(arg, &end, 10);
++		big = *end == ',' ? (uint32_t)strtoul(end + 1, NULL, 10) : big;
+ 	}
+-	uint32_t get[4] = { 2, 0, 1, 0 };
+-	bool ok = acpm_send_on(c, 0, get);
+-	printf("STARLTE DVFS: cpucl0 FREQ_GET %s: %u kHz (reply %#x %#x %#x)\n",
+-	    ok ? "ok" : "FAILED", get[1], get[0], get[2], get[3]);
+-	starlte_cpu_clock_report();
+-	if (!want || !ok) {
++	if (little > 1794000 || big > 1794000) {
++		printf("STARLTE DVFS: %u/%u kHz above 1794000: not without thermal control\n", little, big);
+ 		return;
+ 	}
+-	bool listed = false;
+-	for (unsigned i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
+-		listed |= levels[i] == want;
+-	}
+-	if (!listed || want > 1794000) {
+-		printf("STARLTE DVFS: starfreq %u kHz is not an allowed cpucl0 level (max 1794000 here)\n", want);
+-		return;
++	/* channel index 0 as Linux, then the descriptor whose id is 5 as the DT says */
++	uint32_t descs[2] = { acpm_chans, acpm_find(5) };
++	for (unsigned d = 0; d < 2; d++) {
++		uint32_t c = descs[d];
++		if (c == 0) {
++			continue;
++		}
++		uint32_t id = acpm_rd(c);
++		uint32_t set0[4] = { 2, little, 0, 0 }, set1[4] = { 3, big, 0, 0 };
++		bool ok0 = acpm_send_on(c, id, set0), ok1 = ok0 && acpm_send_on(c, id, set1);
++		uint32_t get0[4] = { 2, 0, 1, 0 }, get1[4] = { 3, 0, 1, 0 };
++		if (ok1) {
++			(void)acpm_send_on(c, id, get0);
++			(void)acpm_send_on(c, id, get1);
++		}
++		printf("STARLTE DVFS: channel id %u: cpucl0 %u kHz %s (reply %#x %#x %#x), cpucl1 %u kHz %s (reply %#x %#x "
++		    "%#x); FREQ_GET says %u / %u kHz\n", id, little, ok0 ? "sent" : "no reply", set0[0], set0[1], set0[2], big,
++		    ok1 ? "sent" : "no reply", set1[0], set1[1], set1[2], get0[1], get1[1]);
++		if (ok1) {
++			break;
++		}
+ 	}
+-	uint32_t set[4] = { 2, want, 0, 0 };
+-	ok = acpm_send_on(c, 0, set);
+-	uint32_t again[4] = { 2, 0, 1, 0 };
+-	(void)acpm_send_on(c, 0, again);
+-	printf("STARLTE DVFS: cpucl0 FREQ_REQ %u kHz %s, now %u kHz\n", want, ok ? "sent" : "FAILED", again[1]);
+-	starlte_cpu_clock_report();
++	/*
++	 * Not the buses: asking ACPM for MIF 2093000 / INT 667000 kHz here (DT levels) froze the phone
++	 * at once, the display going green (boot69): the memory clock changes under the display's DMA
++	 * with nothing coordinating it. Left as S-Boot set them.
++	 */
+ }
+ 
+ static bool
+@@ -384,6 +393,25 @@ starlte_pmic_write(uint32_t type, uint32_t reg, uint8_t val)
+ 	return acpm_ready() && pmic_write(type, reg, val);
+ }
+ 
++/*
++ * One ACPM DVFS request (cmd { domain, kHz, FREQ_REQ, 0 } on ipc channel index 0, as st_cpu_dvfs()):
++ * for other drivers, the GPU's clock (domain g3d = 4) from bsd/dev/starlte_gpu.c.
++ */
++bool starlte_acpm_dvfs(uint32_t domain, uint32_t khz);
++
++bool
++starlte_acpm_dvfs(uint32_t domain, uint32_t khz)
++{
++	if (!acpm_ready() || acpm_chans == 0) {
++		return false;
++	}
++	uint32_t cmd[4] = { domain, khz, 0, 0 };
++	bool ok = acpm_send_on(acpm_chans, acpm_rd(acpm_chans), cmd);
++	printf("STARLTE DVFS: domain %u %u kHz %s (reply %#x %#x %#x)\n", domain, khz, ok ? "sent" : "no reply",
++	    cmd[0], cmd[1], cmd[2]);
++	return ok;
++}
++
+ /* Returns true once both touch rails are on (or were already). */
+ static bool
+ st_power_on(void)
+@@ -694,35 +722,63 @@ st_thread(__unused void *arg, __unused wait_result_t wr)
+ 
+ /*
+  * Boot-arg sweetswipe=1: scripted input for unattended test boots (screenshots of what is past the
+- * lock screen). The phone UI is the home-button iPhone's (8 Plus canvas): a swipe up from the
+- * bottom edge opens Control Center (on the home screen it did not, boot54), Home closes it and
+- * unlocks (single presses 5 s apart, not a double press), a swipe left shows the applications'
+- * page, a tap opens Settings. Times are since boot. Swipes use finger 9 in panel pixels through
+- * sweet_hid_touch(), 24 steps of 12 ms, like the real ones; Home goes through sweet_hid_key().
++ * lock screen). Control Center opens with a swipe down from the top right corner, as on the iPhone X
++ * (a swipe up from the bottom edge does nothing, boot57; the user's own swipe down worked, boot58),
++ * Home closes it and unlocks (single presses 5 s apart, not a double press), a swipe left shows the
++ * applications' page, a tap opens Settings, which is scrolled up and down for 20 s (frames for
++ * sbca's profiler), Home and the swipe down give Control Center over the home screen. Times count from the first frame on the panel
++ * (sweet_fb_first_present, SweetFramebuffer.cpp: 70-85 s after boot in boot55-56, when absolute
++ * times had most of the script run before there was a UI). Swipes use finger 9 in panel pixels
++ * through sweet_hid_touch(), like the real ones; Home goes through sweet_hid_key().
+  */
+ extern void sweet_hid_key(int key, int down);
++extern uint64_t sweet_fb_first_present;
++/* for sbca (backboardd), whose screenshots are to be timed like this script */
++SYSCTL_QUAD(_kern, OID_AUTO, sweet_first_present, CTLFLAG_RD | CTLFLAG_LOCKED, &sweet_fb_first_present,
++    "mach_absolute_time() of the first frame on the panel, 0 before");
+ 
+ static const struct {
+ 	unsigned at_s;
+ 	int home;                       /* 1: press Home; 0: swipe x0,y0 -> x1,y1 */
+ 	int x0, y0, x1, y1;
+ } st_script[] = {
+-	{ 50, 0, 720, 2950, 720, 1300 },        /* Control Center over the lock screen (sbca shot at 62 s) */
+-	{ 66, 1, 0, 0, 0, 0 },                  /* closes it */
+-	{ 71, 1, 0, 0, 0, 0 },                  /* unlocks */
+-	{ 80, 0, 1300, 1500, 150, 1500 },       /* home screen page 2, the applications (shot at 95 s) */
+-	{ 100, 0, 534, 1790, 534, 1790 },       /* a tap on Settings (shot at 135 s) */
++	{ 15, 0, 1380, 6, 1380, 1500 },         /* Control Center over the lock screen (sbca shots at 17-25 s) */
++	{ 30, 1, 0, 0, 0, 0 },                  /* closes it */
++	{ 35, 1, 0, 0, 0, 0 },                  /* unlocks */
++	{ 45, 0, 1300, 1500, 150, 1500 },       /* home screen page 2, the applications (shot at 55 s) */
++	{ 60, 0, 534, 1790, 534, 1790 },        /* a tap on Settings (shot at 68 s, while it scrolls) */
++	{ 64, 0, 720, 2300, 720, 1000 },         /* scrolling Settings up and down: frames to profile */
++	{ 66, 0, 720, 1000, 720, 2300 },
++	{ 68, 0, 720, 2300, 720, 1000 },
++	{ 70, 0, 720, 1000, 720, 2300 },
++	{ 72, 0, 720, 2300, 720, 1000 },
++	{ 74, 0, 720, 1000, 720, 2300 },
++	{ 76, 0, 720, 2300, 720, 1000 },
++	{ 78, 0, 720, 1000, 720, 2300 },
++	{ 80, 0, 720, 2300, 720, 1000 },
++	{ 82, 0, 720, 1000, 720, 2300 },
++	{ 84, 0, 720, 2300, 720, 1000 },
++	{ 88, 1, 0, 0, 0, 0 },                  /* back to the home screen */
++	{ 92, 0, 1380, 6, 1380, 1500 },         /* Control Center over the home screen (shots at 97, 103 s) */
+ };
+ 
+ static void
+ st_script_thread(__unused void *arg, __unused wait_result_t wr)
+ {
+-	const int f = ST_FINGERS - 1, steps = 24;
++	/* 50 samples 6 ms apart, eased in and out (smoothstep): 24 even steps of 60 px were not taken
++	 * for a swipe from the top edge (boot59), where the user's own swipe was */
++	const int f = ST_FINGERS - 1, steps = 50;
+ 
++	while (sweet_fb_first_present == 0) {
++		st_msleep(250);
++	}
++	uint64_t start_ns;
++	absolutetime_to_nanoseconds(sweet_fb_first_present, &start_ns);
++	printf("STARLTE TOUCH: first frame on the panel; scripted input starts\n");
+ 	for (unsigned i = 0; i < sizeof(st_script) / sizeof(st_script[0]); i++) {
+ 		uint64_t now_ns;
+ 		absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
+-		uint64_t at_ns = (uint64_t)st_script[i].at_s * NSEC_PER_SEC;
++		uint64_t at_ns = start_ns + (uint64_t)st_script[i].at_s * NSEC_PER_SEC;
+ 		if (now_ns < at_ns) {
+ 			st_msleep((unsigned)((at_ns - now_ns) / NSEC_PER_MSEC));
+ 		}
+@@ -736,10 +792,12 @@ st_script_thread(__unused void *arg, __unused wait_result_t wr)
+ 		printf("STARLTE TOUCH: scripted swipe %u: %d,%d -> %d,%d\n", i, st_script[i].x0, st_script[i].y0,
+ 		    st_script[i].x1, st_script[i].y1);
+ 		for (int k = 0; k <= steps; k++) {
+-			int x = st_script[i].x0 + (st_script[i].x1 - st_script[i].x0) * k / steps;
+-			int y = st_script[i].y0 + (st_script[i].y1 - st_script[i].y0) * k / steps;
++			int t = k * 1000 / steps;                       /* 0..1000 */
++			int e = t * t / 1000 * (3000 - 2 * t) / 1000;   /* smoothstep, 0..1000 */
++			int x = st_script[i].x0 + (st_script[i].x1 - st_script[i].x0) * e / 1000;
++			int y = st_script[i].y0 + (st_script[i].y1 - st_script[i].y0) * e / 1000;
+ 			sweet_hid_touch(f, 1, x, y);
+-			st_msleep(12);
++			st_msleep(6);
+ 		}
+ 		sweet_hid_touch(f, 0, st_script[i].x1, st_script[i].y1);
+ 	}
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index b6537c08..2163ad65 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -63,13 +63,26 @@ extern "C" uint64_t sweet_fb_hold_until;
+ uint64_t sweet_fb_hold_until;
+ /* Last surface copied full-screen to the panel (GPU copy test). */
+ static uint32_t sweet_fb_last_surface_id;
++/* mach_absolute_time() of the first swap that put pixels on the panel (0: none yet), for scripted
++ * test input (starlte_touch.c, sweetswipe=1) */
++extern "C" uint64_t sweet_fb_first_present;
++uint64_t sweet_fb_first_present;
+ extern "C" bool sweet_fb_last_surface(uint64_t *pages, unsigned max_pages, unsigned *npages,
+     uint32_t *offset, uint32_t *stride, uint32_t *width, uint32_t *height, uintptr_t *kva);
+-/* bsd/dev/herolte_gpu.c: the Mali scales a surface to the whole panel. */
++/* bsd/dev/herolte_gpu.c: the Mali scales a surface to the whole panel. On
++ * STARLTE (whose board config also defines HEROLTE) the S9's Mali-G72 does
++ * it instead: bsd/dev/starlte_gpu.c, ready once its boot-time GPU tests
++ * have passed. */
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++#define herolte_gpu_present_slot starlte_gpu_present_slot
++#define herolte_gpu_present_map starlte_gpu_present_map
++#define herolte_gpu_present_draw starlte_gpu_present_draw
++extern "C" int starlte_gpu_present_ready(void);
++#endif
+ extern "C" int herolte_gpu_present_slot(uint32_t id, uint64_t first_pa);
+ extern "C" int herolte_gpu_present_map(uint32_t id, const uint64_t *pages, unsigned n);
+ extern "C" bool herolte_gpu_present_draw(int s, uint32_t off, uint32_t stride, uint32_t w, uint32_t h);
+-#define SWEET_FB_GPU_MAX_PAGES 2048     /* one 8 MiB GPU slot */
++#define SWEET_FB_GPU_MAX_PAGES 3072     /* one 12 MiB GPU slot (starlte_gpu.c): 1242x2208 x 5120 B */
+ #endif
+ 
+ enum {
+@@ -264,22 +277,24 @@ AppleCLCD::start(IOService *provider)
+ 	fLock = IOLockAlloc();
+ 	fClients = OSArray::withCapacity(4);
+ 	/* The default surface must have the presented size (a mismatch left
+-	 * every swap layer empty); scaled, it is the panel's top-left part. */
+-	fSurface = sweet_surface_create_physical(fPhys, fScaled ? fLogicalW : fWidth,
+-	    fScaled ? fLogicalH : fHeight, fRowBytes, SWEET_FB_FORMAT_BGRA);
+-	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
+-#if defined(ARM64_BOARD_CONFIG_STARLTE)
+-	/* Scaled, the default surface covers only the logical rows (1792 of
+-	 * 2960): scaledCopy() writes the whole panel, so it needs a mapping of
+-	 * all of it, or the lower rows go past the end (black lower third and
+-	 * stray writes, seen on the S9). */
++	 * every swap layer empty). Scaled, it is a buffer of its own, presented
++	 * like any other: CoreAnimation double-buffers between it and a surface
++	 * of its own, and when it was the panel's top-left part every other
++	 * frame landed on the panel unscaled (iPadOS 18 boot52: the doubled
++	 * band above the scaled picture). */
++	fSurface = fScaled ? sweet_surface_create_buffer(fLogicalW, fLogicalH, SWEET_FB_FORMAT_BGRA) :
++	    sweet_surface_create_physical(fPhys, fWidth, fHeight, fRowBytes, SWEET_FB_FORMAT_BGRA);
++	fPixels = fSurface != NULL && !fScaled ? fSurface->kernelAddress() : 0;
++	/* Scaled, scaledCopy() writes the whole panel, so it needs a mapping of
++	 * all of it (with the panel's top-left part as the default surface, the
++	 * lower rows went past its end: black lower third and stray writes, seen
++	 * on the S9). */
+ 	if (fScaled && fSurface != NULL) {
+ 		SweetSurface *panel = sweet_surface_create_physical(fPhys, fWidth, fHeight, fRowBytes,
+ 		    SWEET_FB_FORMAT_BGRA);
+ 		fPixels = panel != NULL ? panel->kernelAddress() : 0;
+ 		IOLog("SWEET FB: scaled: panel mapping %ux%u for the scaler\n", fWidth, fHeight);
+ 	}
+-#endif
+ 	fWorkLoop = IOWorkLoop::workLoop();
+ 	if (fLock == NULL || fClients == NULL || fPixels == 0 || fWorkLoop == NULL) {
+ 		IOLog("SWEET FB: setup failed\n");
+@@ -760,7 +775,7 @@ AppleCLCD::present(const uint8_t *rec)
+ 			    s ? s->pixelFormat : 0, s ? s->bytesPerRow : 0, sx, sy, get32(a, 8),
+ 			    get32(a, 12), dx, dy, w, h);
+ 		}
+-		if (s == NULL || s == fSurface) {
++		if (s == NULL || (s == fSurface && !fScaled)) {
+ 			OSSafeReleaseNULL(s);
+ 			continue;
+ 		}
+@@ -840,6 +855,9 @@ AppleCLCD::present(const uint8_t *rec)
+ 		}
+ 		s->release();
+ 	}
++	if (copied != 0 && sweet_fb_first_present == 0) {
++		sweet_fb_first_present = mach_absolute_time();
++	}
+ 	return copied;
+ }
+ 
+@@ -856,6 +874,12 @@ AppleCLCD::gpuPresent(SweetSurface *s, int32_t sx, int32_t sy, int32_t w, int32_
+ {
+ 	static uint64_t pages[SWEET_FB_GPU_MAX_PAGES];
+ 	static uint32_t failures;
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	/* Until the G72 is up (about 8 s into boot) the CPU copies, uncounted. */
++	if (!starlte_gpu_present_ready()) {
++		return false;
++	}
++#endif
+ 	if (failures >= 8 || s->memory == NULL) {
+ 		return false;
+ 	}
+@@ -874,7 +898,9 @@ AppleCLCD::gpuPresent(SweetSurface *s, int32_t sx, int32_t sy, int32_t w, int32_
+ 		slot = ok ? herolte_gpu_present_map(s->id, pages, n) : -1;
+ 	}
+ 	if (slot < 0) {
+-		failures++;
++		/* (eight of these and the CPU copies for good: say why, as it used to happen silently) */
++		IOLog("SWEET FB: GPU present: surface %u (%llu bytes, first page %#llx) not mapped (%u of 8)\n", s->id,
++		    (unsigned long long)s->memory->getLength(), (unsigned long long)pa0, ++failures);
+ 		return false;
+ 	}
+ 	uint64_t off = (uint64_t)s->offset + (uint64_t)sy * s->bytesPerRow + (uint64_t)sx * 4;
+@@ -885,7 +911,7 @@ AppleCLCD::gpuPresent(SweetSurface *s, int32_t sx, int32_t sy, int32_t w, int32_
+ 	}
+ 	__asm__ volatile ("dsb sy" ::: "memory");
+ 	if (!herolte_gpu_present_draw(slot, (uint32_t)off, s->bytesPerRow, (uint32_t)w, (uint32_t)h)) {
+-		failures++;
++		IOLog("SWEET FB: GPU present: %dx%d stride %u not drawn (%u of 8)\n", w, h, s->bytesPerRow, ++failures);
+ 		return false;
+ 	}
+ 	return true;
+diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.cpp
+index ef508793..b9aa6ff9 100644
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -255,6 +255,37 @@ sweet_surface_create_physical(uint64_t phys, uint32_t width, uint32_t height,
+ 	return s;
+ }
+ 
++SweetSurface *
++sweet_surface_create_buffer(uint32_t width, uint32_t height, uint32_t pixelFormat)
++{
++	SweetSurface *s = sweet_surface_alloc();
++	if (s == NULL) {
++		return NULL;
++	}
++	s->width = width;
++	s->height = height;
++	s->bytesPerRow = (width * 4 + SWEET_SURFACE_ROW_ALIGN - 1) & ~(uint32_t)(SWEET_SURFACE_ROW_ALIGN - 1);
++	s->bytesPerElement = 4;
++	s->elementWidth = s->elementHeight = 1;
++	s->pixelFormat = pixelFormat;
++	s->allocSize = (uint32_t)round_page((uint64_t)s->bytesPerRow * height);
++	IOBufferMemoryDescriptor *mem = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
++	    kIODirectionInOut | kIOMemoryKernelUserShared, s->allocSize, page_size);
++	if (mem == NULL) {
++		s->release();
++		return NULL;
++	}
++	OSAddAtomic64(s->allocSize, (volatile SInt64 *)&sweet_surface_wired);
++	bzero(mem->getBytesNoCopy(), s->allocSize);
++	s->memory = mem;
++	s->mapCache = kIOMapDefaultCache;
++	if (!sweet_surface_publish(s)) {
++		s->release();
++		return NULL;
++	}
++	return s;
++}
++
+ mach_port_name_t
+ sweet_surface_port_in_task(SweetSurface *s, task_t task)
+ {
+diff --git a/iokit/Kernel/arm/SweetSurface.h b/iokit/Kernel/arm/SweetSurface.h
+index f1f816ed..7dbcd98e 100644
+--- a/iokit/Kernel/arm/SweetSurface.h
++++ b/iokit/Kernel/arm/SweetSurface.h
+@@ -59,6 +59,9 @@ SweetSurface *sweet_surface_copy(uint32_t id);
+ SweetSurface *sweet_surface_create_physical(uint64_t phys, uint32_t width,
+     uint32_t height, uint32_t bytesPerRow, uint32_t pixelFormat);
+ 
++/* Publish a zeroed kernel buffer as a surface (retained, as above). */
++SweetSurface *sweet_surface_create_buffer(uint32_t width, uint32_t height, uint32_t pixelFormat);
++
+ /* Send right for the surface in task (IOSurfaceLookupFromMachPort). */
+ mach_port_name_t sweet_surface_port_in_task(SweetSurface *surface, task_t task);
+ 
+-- 
+2.53.0
+

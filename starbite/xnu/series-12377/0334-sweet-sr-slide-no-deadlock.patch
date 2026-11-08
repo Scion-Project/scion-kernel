@@ -1,0 +1,53 @@
+From 03e9de880e5d81921a3f3472aa2cc136fcc348f4 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Sun, 1 Nov 2026 22:27:33 +0200
+Subject: [PATCH] patch: 0334-sweet-sr-slide-no-deadlock.patch
+
+sweet: the 16 KiB slide-page path releases its source page before it reads the page's three neighbours. It held the source busy while faulting them, so two threads paging in different 4 KiB pieces of one 16 KiB slide page each waited for the other's busy page: backboardd and SpringBoard asleep in vm_page_sleep (shared_region_pager_data_request), the UI frozen (GPU boot 9, speed boot 1).
+- vm_shared_region_pager.c: release the source page before the neighbours
+---
+ osfmk/vm/vm_shared_region_pager.c | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/osfmk/vm/vm_shared_region_pager.c b/osfmk/vm/vm_shared_region_pager.c
+index 9ed50842..c4fc6878 100644
+--- a/osfmk/vm/vm_shared_region_pager.c
++++ b/osfmk/vm/vm_shared_region_pager.c
+@@ -807,15 +807,36 @@ retry_src_fault:
+ 		 */
+ #if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 		if (slide_info_page_size > PAGE_SIZE) {
++			/*
++			 * Copy the source page and let it go before its neighbours in the 16 KiB
++			 * slide page are faulted in: holding it busy meanwhile deadlocked two
++			 * threads paging in different pieces of one slide page.
++			 */
++			void *copy = kalloc_data(PAGE_SIZE, Z_WAITOK | Z_NOFAIL);
++			bcopy((const void *)src_vaddr, copy, PAGE_SIZE);
++			vm_object_lock(src_page_object);
++			vm_page_wakeup_done(src_page_object, src_page);
++			src_page = VM_PAGE_NULL;
++			vm_object_paging_end(src_page_object);
++			vm_object_unlock(src_page_object);
++			if (top_page != VM_PAGE_NULL) {
++				vm_object_lock(src_top_object);
++				VM_PAGE_FREE(top_page);
++				vm_object_paging_end(src_top_object);
++				vm_object_unlock(src_top_object);
++				top_page = VM_PAGE_NULL;
++			}
+ 			kr = sweet_sr_slide_subpage(pager, src_top_object, &fault_info,
+-			    offset + cur_offset, src_vaddr, dst_vaddr, slide_info_page_size,
++			    offset + cur_offset, (vm_offset_t)copy, dst_vaddr, slide_info_page_size,
+ 			    slide_start_address);
++			kfree_data(copy, PAGE_SIZE);
+ 			if (kr != KERN_SUCCESS) {
+ 				shared_region_pager_slid_error++;
+ 				retval = KERN_MEMORY_ERROR;
+ 			} else {
+ 				shared_region_pager_slid++;
+ 			}
++			continue;       /* (the source page is already cleaned up) */
+ 		} else
+ #endif
+ 		for (offset_in_page = 0;

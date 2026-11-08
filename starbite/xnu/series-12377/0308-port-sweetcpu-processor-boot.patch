@@ -1,0 +1,83 @@
+From 94c36113667be7cf9358c3dedfbdca424df59245 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 17:01:47 +0200
+Subject: [PATCH] patch: 0308-port-sweetcpu-processor-boot.patch
+
+port: xnu-11417 boots CPUs through processor_boot(). processor_start()
+from IOKit is now a no-op returning KERN_FAILURE (Unsupported.exports
+aliases it to processor_start_from_kext), and without USE_APPLEARMSMP
+ml_processor_register() calls processor_boot() itself, while SweetCPU::start
+is still registering that CPU. The generic boards keep SweetCPU's order
+instead (register all, then boot CPU 0..n and wait for each), as
+AppleARMSMP's cpu_boot_thread does: ml_processor_register leaves booting
+to SweetCPU::startAll, which calls processor_boot() in place of
+processor_start(). First boot of the 11417 kernel panicked with
+"SWEET CPU: cpu=0 processor_start failed".
+---
+ iokit/Kernel/arm/SweetCPU.cpp  | 25 ++++++++++---------------
+ osfmk/arm64/machine_routines.c |  5 ++++-
+ 2 files changed, 14 insertions(+), 16 deletions(-)
+
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+index c73ece08..de27f48a 100644
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -248,11 +248,11 @@ SweetCPU::startAll(void *arg __unused, wait_result_t result __unused)
+ 	}
+ 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
+ 		SweetCPU *cpu = __atomic_load_n(&sweet_cpus[i], __ATOMIC_ACQUIRE);
+-		kern_return_t kr = processor_start(cpu->machProcessor);
+-		if (kr != KERN_SUCCESS) {
+-			panic(CPU_PORT_NAME " CPU: cpu=%u processor_start failed: %d", i, kr);
+-		}
+-		/* processor_start() is asynchronous for secondaries in this XNU. */
++		/* xnu-11417: processor_start from IOKit is a no-op (KERN_FAILURE) and
++		 * ml_processor_register leaves booting to us on these boards
++		 * (machine_routines.c): boot each CPU here, as AppleARMSMP does.
++		 * processor_boot() is asynchronous for secondaries. */
++		processor_boot(cpu->machProcessor);
+ 		nanoseconds_to_deadline(5 * NSEC_PER_SEC, &deadline);
+ 		while (__atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE) == 0 ||
+ 		    !sweet_cpu_signal_is_enabled(i)) {
+@@ -328,16 +328,11 @@ SweetCPU::initCPU(bool boot)
+ 	 * Waiting here with DAIF.I set would deadlock every secondary. */
+ 	signalCPU(this);
+ 	setCPUState(kIOCPUStateRunning);
+-#if defined(HEROLTE)
+-	if (getCPUNumber() != 0) {
+-		/* As on the A5 (GICv2): a secondary enters at splsched with DAIF.I
+-		 * set; take the queued self-SGI here, then restore the mask that
+-		 * cpu_machine_init() expects. */
+-		boolean_t old_irq = ml_set_interrupts_enabled(TRUE);
+-		__builtin_arm_isb(ISB_SY);
+-		ml_set_interrupts_enabled(old_irq);
+-	}
+-#endif
++	/* xnu-11417: no IRQ window here any more (the S7 port took the queued
++	 * self-SGI in initCPU because 8796's processor_start_thread never
++	 * unmasked). processor_cpu_reinit() now asserts SIGPdisabled is still
++	 * set after this returns, then unmasks and waits for the self-IPI
++	 * itself; taking it here tripped that assert on the first M3 core. */
+ 	kprintf(CPU_PORT_NAME " CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u\n",
+ 	    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL,
+ 	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled());
+diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
+index c37d05c0..1ab9e420 100644
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -1789,8 +1789,11 @@ ml_processor_register(ml_processor_info_t *in_processor_info,
+ 
+ 	os_atomic_or(&this_cpu_datap->cpu_flags, InitState, relaxed);
+ 
+-#if !USE_APPLEARMSMP
++#if !USE_APPLEARMSMP && !defined(ARM64_BOARD_CONFIG_SWEET) && !defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 	/*
++	 * sweet: SweetCPU::startAll boots the CPUs itself, once all are
++	 * registered and in logical order (as AppleARMSMP does).
++	 *
+ 	 * AppleARMCPU's external processor_start call is now a no-op, so
+ 	 * boot the processor directly when it's registered.
+ 	 *
+-- 
+2.53.0
+

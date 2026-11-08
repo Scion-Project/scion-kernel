@@ -1,0 +1,84 @@
+From da120d2d1fcbeff618e49c5e46e9b4c7464e680d Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Sun, 1 Nov 2026 23:07:13 +0200
+Subject: [PATCH] patch: 0335-sweet-script-ios26-tour.patch
+
+sweet: sweetswipe=4, an iOS 26 tour for unattended screenshot boots (sbca shots every 30 s from 60 s): unlock, Control Center, Settings and its scrolled header, the second page, Clock, Notes. The scripts are one table each, picked by number.
+- sweetswipe=4 tour
+---
+ bsd/dev/starlte_touch.c | 45 ++++++++++++++++++++++++++++++-----------
+ 1 file changed, 33 insertions(+), 12 deletions(-)
+
+diff --git a/bsd/dev/starlte_touch.c b/bsd/dev/starlte_touch.c
+index 02157ab4..9eb69ffd 100644
+--- a/bsd/dev/starlte_touch.c
++++ b/bsd/dev/starlte_touch.c
+@@ -775,17 +775,37 @@ static const struct {
+ 	{ 60, 0, 720, 2955, 720, 1500 },        /* swipe up again */
+ };
+ /* sweetswipe=3: unlock with Home, then touches on the home screen (iOS 26 touch debugging). */
+-static const struct {
++struct st_step {
+ 	unsigned at_s;
+ 	int home;
+ 	int x0, y0, x1, y1;
+-} st_script_home[] = {
++};
++static const struct st_step st_script_home[] = {
+ 	{ 15, 1, 0, 0, 0, 0 },                  /* Home: unlock to the home screen */
+ 	{ 25, 0, 380, 500, 380, 500 },          /* tap the first widget */
+ 	{ 35, 1, 0, 0, 0, 0 },                  /* Home: back */
+ 	{ 40, 0, 1300, 1500, 150, 1500 },       /* swipe to the next page */
+ 	{ 50, 0, 380, 500, 380, 500 },          /* tap */
+ };
++/*
++ * sweetswipe=4: an iOS 26 tour for unattended screenshot boots, timed against sbca's shots (every
++ * 30 s from 60 s after the first frame). Panel pixels: the 828x1792 canvas is drawn at x 36..1403,
++ * full height, so canvas (x, y) is panel (36 + 1.652 x, 1.652 y). Icons from boot s1's home screen.
++ */
++static const struct st_step st_script_tour[] = {
++	{ 50, 1, 0, 0, 0, 0 },                  /* Home: unlock (shots 60, 90: home screen) */
++	{ 95, 0, 1380, 6, 1380, 1500 },         /* Control Center (shot 120) */
++	{ 125, 1, 0, 0, 0, 0 },                 /* closes it */
++	{ 135, 0, 556, 1406, 556, 1406 },       /* tap Settings (shot 150) */
++	{ 165, 0, 720, 2300, 720, 1200 },       /* scroll: the blurred header (shot 180) */
++	{ 195, 1, 0, 0, 0, 0 },                 /* home screen (shot 210) */
++	{ 215, 0, 1300, 1500, 150, 1500 },      /* next page (shot 240) */
++	{ 245, 1, 0, 0, 0, 0 },                 /* back to the first page */
++	{ 255, 0, 248, 1406, 248, 1406 },       /* tap Clock: its glass tab bar (shot 270) */
++	{ 285, 1, 0, 0, 0, 0 },                 /* home (shot 300) */
++	{ 305, 0, 868, 1008, 868, 1008 },       /* tap Notes (shot 330) */
++	{ 335, 1, 0, 0, 0, 0 },                 /* home (shot 360) */
++};
+ 
+ static void
+ st_script_thread(void *arg, __unused wait_result_t wr)
+@@ -800,17 +820,18 @@ st_script_thread(void *arg, __unused wait_result_t wr)
+ 	uint64_t start_ns;
+ 	absolutetime_to_nanoseconds(sweet_fb_first_present, &start_ns);
+ 	printf("STARLTE TOUCH: first frame on the panel; scripted input starts\n");
+-	bool phone = (uintptr_t)arg == 2, homes = (uintptr_t)arg == 3;
+-	unsigned count = homes ? sizeof(st_script_home) / sizeof(st_script_home[0]) :
+-	    phone ? sizeof(st_script_phone) / sizeof(st_script_phone[0]) :
+-	    sizeof(st_script) / sizeof(st_script[0]);
++	const struct st_step *script;
++	unsigned count;
++	switch ((uintptr_t)arg) {
++	case 2: script = (const struct st_step *)st_script_phone; count = sizeof(st_script_phone) / sizeof(st_script_phone[0]); break;
++	case 3: script = st_script_home; count = sizeof(st_script_home) / sizeof(st_script_home[0]); break;
++	case 4: script = st_script_tour; count = sizeof(st_script_tour) / sizeof(st_script_tour[0]); break;
++	default: script = (const struct st_step *)st_script; count = sizeof(st_script) / sizeof(st_script[0]); break;
++	}
+ 	for (unsigned i = 0; i < count; i++) {
+-		unsigned at_s = homes ? st_script_home[i].at_s : phone ? st_script_phone[i].at_s : st_script[i].at_s;
+-		int home = homes ? st_script_home[i].home : phone ? st_script_phone[i].home : st_script[i].home;
+-		int x0 = homes ? st_script_home[i].x0 : phone ? st_script_phone[i].x0 : st_script[i].x0;
+-		int y0 = homes ? st_script_home[i].y0 : phone ? st_script_phone[i].y0 : st_script[i].y0;
+-		int x1 = homes ? st_script_home[i].x1 : phone ? st_script_phone[i].x1 : st_script[i].x1;
+-		int y1 = homes ? st_script_home[i].y1 : phone ? st_script_phone[i].y1 : st_script[i].y1;
++		unsigned at_s = script[i].at_s;
++		int home = script[i].home;
++		int x0 = script[i].x0, y0 = script[i].y0, x1 = script[i].x1, y1 = script[i].y1;
+ 		uint64_t now_ns;
+ 		absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
+ 		uint64_t at_ns = start_ns + (uint64_t)at_s * NSEC_PER_SEC;

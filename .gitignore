@@ -3,6 +3,13 @@
 # is named here.
 /*
 !/hakios-metal/
+# the iOS 27 port to the Galaxy S9 (starbite/README.md); its builds, images and references stay out
+!/starbite/
+/starbite/build/
+/starbite/out/
+/starbite/ref/
+/starbite/**/out/
+*.ipsw
 !/.gitignore
 !/.gitattributes
 !/VERSION

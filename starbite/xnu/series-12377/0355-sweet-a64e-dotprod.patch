@@ -1,0 +1,82 @@
+From 700620d7314f4f17e8ce83ece55b5a0ecb5a8c51 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 4 Nov 2026 00:56:44 +0200
+Subject: [PATCH] patch: 0355-sweet-a64e-dotprod.patch - arm64e emulation:
+ SDOT/UDOT (vector and by element); they trap on every core here (macOS
+ opendirectoryd)
+
+---
+ osfmk/arm64/sweet_a64e.c | 50 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
+
+diff --git a/osfmk/arm64/sweet_a64e.c b/osfmk/arm64/sweet_a64e.c
+index 18a0010a..f8a83e8a 100644
+--- a/osfmk/arm64/sweet_a64e.c
++++ b/osfmk/arm64/sweet_a64e.c
+@@ -199,6 +199,51 @@ emulate_fcadd(arm_saved_state_t *ss, uint32_t w)
+ 	return true;
+ }
+ 
++/* ---- FEAT_DotProd: SDOT / UDOT (vector and by element). macOS 26's opendirectoryd and others use
++ * them; on this SoC they trap on every core (2026-11-04: opendirectoryd SIGILL 0x6e819440 with no
++ * M3 pin). Integer only: d.s[i] += sum of n.b[4i+j] * m.b[4i+j] (or m.b[4*index+j]), wrapping. */
++static bool
++emulate_dot(uint32_t w)
++{
++	bool vec = (w & 0xBFA0FC00) == 0x0E809400 || (w & 0xBFA0FC00) == 0x2E809400;   /* size 10 */
++	bool elem = (w & 0xBFC0F400) == 0x0F80E000 || (w & 0xBFC0F400) == 0x2F80E000;
++	if (!vec && !elem) {
++		return false;
++	}
++	thread_t th = current_thread();
++	if (th->machine.uNeon == NULL) {
++		return false;
++	}
++	arm_neon_saved_state64_t *ns = &th->machine.uNeon->ns_64;
++	unsigned q = (w >> 30) & 1, u = (w >> 29) & 1, rd = w & 31, rn = (w >> 5) & 31;
++	unsigned rm, index = 0;
++	if (vec) {
++		rm = (w >> 16) & 31;
++	} else {
++		rm = (w >> 16) & 31;                    /* M:Rm (size 10: M is bit 20, part of Rm) */
++		index = ((w >> 11) & 1) << 1 | ((w >> 21) & 1);
++	}
++	uint8_t n[16], m[16];
++	uint32_t d[4];
++	memcpy(n, &ns->v.q[rn], 16);
++	memcpy(m, &ns->v.q[rm], 16);
++	memcpy(d, &ns->v.q[rd], 16);
++	unsigned lanes = q ? 4 : 2;
++	for (unsigned i = 0; i < lanes; i++) {
++		int64_t acc = 0;
++		for (unsigned j = 0; j < 4; j++) {
++			unsigned mi = vec ? 4 * i + j : 4 * index + j;
++			acc += u ? (int64_t)n[4 * i + j] * m[mi] : (int64_t)(int8_t)n[4 * i + j] * (int8_t)m[mi];
++		}
++		d[i] = (uint32_t)(d[i] + (uint32_t)acc);
++	}
++	if (!q) {
++		d[2] = d[3] = 0;
++	}
++	memcpy(&ns->v.q[rd], d, 16);
++	return true;
++}
++
+ /* ---- FEAT_FHM: FMLAL, FMLAL2, FMLSL, FMLSL2 (vector and by element) ------------------------ */
+ 
+ /* sweet_a64e_fp.s: a + n * m in single precision, one rounding, under fpcr. */
+@@ -651,6 +696,11 @@ sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
+ 		sweet_a64e_counts[5]++;
+ 		return true;
+ 	}
++	if (emulate_dot(w)) {                                   /* SDOT / UDOT */
++		set_saved_state_pc(ss, pc + 4);
++		sweet_a64e_counts[7]++;
++		return true;
++	}
+ 	if ((w & 0xBF20EC00) == 0x2E00E400) {                   /* FCADD (vector) */
+ 		if (!emulate_fcadd(ss, w)) {
+ 			return false;
+-- 
+2.53.0
+

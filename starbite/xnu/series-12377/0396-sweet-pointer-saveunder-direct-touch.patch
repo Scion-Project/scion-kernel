@@ -1,0 +1,515 @@
+From 92e3d372fe6380802c54ca8d36fdc0fc282a5a03 Mon Sep 17 00:00:00 2001
+From: Starbite author <starbite@local>
+Date: Thu, 5 Nov 2026 14:48:47 +0200
+Subject: [PATCH] patch: 0396-0397 - pointer save-under (no trails); direct
+ touch: the pointer follows the finger (closed loop on the drawn pointer), tap
+ = click there, touch-hold-move = drag
+
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 124 ++++++++----
+ iokit/Kernel/arm/hid/SweetHID.cpp     | 278 +++++++++++++++++++-------
+ 2 files changed, 295 insertions(+), 107 deletions(-)
+
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 96a5cc1d..c008b6bd 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -173,6 +173,8 @@ public:
+ 	void removeClient(IOMobileFramebufferUserClient *client);
+ 	void swap(const uint8_t *rec, uint32_t size);
+ 	uint64_t present(const uint8_t *rec);
++	void sweetSaveUnderRect(int32_t dx, int32_t dy, int32_t w, int32_t h);
++	void sweetSaveUnder(bool save);
+ 	uint64_t scaledCopy(uintptr_t src, uint32_t srcRowBytes, int32_t dx, int32_t dy,
+ 	    int32_t w, int32_t h);
+ #if defined(ARM64_BOARD_CONFIG_HEROLTE)
+@@ -757,6 +759,61 @@ AppleCLCD::scaledCopy(uintptr_t src, uint32_t srcRowBytes, int32_t dx, int32_t d
+ 	return (uint64_t)pw * (uint64_t)(py1 - py0) * 4;
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++/* 0396: the panel pixels under the pointer (at most 320 x 320 panel pixels: the 128-point pointer at 1.65x) */
++#define SWEET_SU_MAX 320
++static uint32_t sweet_su_buf[SWEET_SU_MAX * SWEET_SU_MAX];
++static int32_t sweet_su_x, sweet_su_y, sweet_su_w, sweet_su_h;
++static bool sweet_su_have;
++volatile int32_t sweet_fb_cur_x, sweet_fb_cur_y;
++volatile uint32_t sweet_fb_cur_seq;
++
++/* the panel rectangle scaledCopy() writes for logical (dx, dy, w, h) */
++void
++AppleCLCD::sweetSaveUnderRect(int32_t dx, int32_t dy, int32_t w, int32_t h)
++{
++	int32_t lw = (int32_t)fLogicalW, lh = (int32_t)fLogicalH;
++	int32_t outW = (int32_t)((int64_t)lw * fHeight / lh), outH = (int32_t)fHeight;
++	if (outW > (int32_t)fWidth) {
++		outW = (int32_t)fWidth;
++		outH = (int32_t)((int64_t)lh * fWidth / lw);
++	}
++	int32_t barX = ((int32_t)fWidth - outW) / 2, barY = ((int32_t)fHeight - outH) / 2;
++	int32_t x0 = barX + (int32_t)((int64_t)dx * outW / lw);
++	int32_t x1 = barX + (int32_t)(((int64_t)(dx + w) * outW + lw - 1) / lw);
++	int32_t y0 = barY + (int32_t)((int64_t)dy * outH / lh);
++	int32_t y1 = barY + (int32_t)(((int64_t)(dy + h) * outH + lh - 1) / lh);
++	x0 = x0 < 0 ? 0 : x0;
++	y0 = y0 < 0 ? 0 : y0;
++	x1 = x1 > barX + outW ? barX + outW : x1;
++	y1 = y1 > barY + outH ? barY + outH : y1;
++	sweet_su_x = x0;
++	sweet_su_y = y0;
++	sweet_su_w = x1 - x0 > SWEET_SU_MAX ? SWEET_SU_MAX : (x1 > x0 ? x1 - x0 : 0);
++	sweet_su_h = y1 - y0 > SWEET_SU_MAX ? SWEET_SU_MAX : (y1 > y0 ? y1 - y0 : 0);
++}
++
++/* save (true) the panel pixels of the current rectangle, or put the saved ones back (false) */
++void
++AppleCLCD::sweetSaveUnder(bool save)
++{
++	if (sweet_su_w <= 0 || sweet_su_h <= 0) {
++		sweet_su_have = false;
++		return;
++	}
++	for (int32_t y = 0; y < sweet_su_h; y++) {
++		uint32_t *panel = (uint32_t *)(fPixels + (uint64_t)(sweet_su_y + y) * fRowBytes + (uint64_t)sweet_su_x * 4);
++		uint32_t *buf = &sweet_su_buf[y * SWEET_SU_MAX];
++		if (save) {
++			memcpy(buf, panel, (size_t)sweet_su_w * 4);
++		} else {
++			memcpy(panel, buf, (size_t)sweet_su_w * 4);
++		}
++	}
++	sweet_su_have = save;
++}
++#endif
++
+ uint64_t
+ AppleCLCD::present(const uint8_t *rec)
+ {
+@@ -985,45 +1042,26 @@ AppleCLCD::present(const uint8_t *rec)
+ 		}
+ 		sweet_fb_blend = layer > 0;
+ 		/*
+-		 * Pointer trails (0392): a pointer move is a swap of layer 1 alone, so the panel still held
+-		 * the pointer drawn at its old place. Before drawing it at the new one, the old rectangle is
+-		 * copied back from the last full-screen layer 0 (macOS: the desktop composite).
++		 * Pointer save-under (0396, replaces 0392's restore from the last layer 0, which WindowServer's
++		 * double buffering left stale: trails for ~30 s). Before the pointer layer is blended in, the
++		 * panel pixels under it are saved; a pointer-only swap first puts them back. A swap with layer 0
++		 * covers everything, so the saved copy is dropped.
+ 		 */
+-		{
+-			static uint32_t baseId;                 /* last layer 0 surface (logical 0,0 full screen) */
+-			static int32_t curX, curY, curW, curH;  /* where the pointer was last drawn, logical */
+-			static bool haveCur;
+-			if (layer == 0 && src != 0 && dx == 0 && dy == 0) {
+-				baseId = id;
+-				haveCur = false;        /* the full copy below covers any old pointer */
+-			} else if (layer > 0 && src != 0 && fScaled && bpe == 4) {
+-				if (haveCur && baseId != 0 && !(mask & 1u) &&
+-				    (curX != dx || curY != dy)) {
+-					SweetSurface *b = sweet_surface_copy(baseId);
+-					uintptr_t bsrc = b ? b->kernelAddress() : 0;
+-					if (bsrc != 0 && b->bytesPerElement <= 4) {
+-						int32_t rx = curX, ry = curY, rw = curW, rh = curH;
+-						if (rx + rw > (int32_t)b->width) {
+-							rw = (int32_t)b->width - rx;
+-						}
+-						if (ry + rh > (int32_t)b->height) {
+-							rh = (int32_t)b->height - ry;
+-						}
+-						if (rw > 0 && rh > 0) {
+-							sweet_fb_blend = false;
+-							scaledCopy(bsrc + b->offset + (uint64_t)ry * b->bytesPerRow + (uint64_t)rx * 4,
+-							    b->bytesPerRow, rx, ry, rw, rh);
+-							sweet_fb_blend = true;
+-						}
+-					}
+-					OSSafeReleaseNULL(b);
+-				}
+-				curX = dx;
+-				curY = dy;
+-				curW = w;
+-				curH = h;
+-				haveCur = true;
++		if (layer == 1 && src != 0) {
++			/* 0397: where the pointer layer is drawn (logical), for the touch driver's direct touch */
++			extern volatile int32_t sweet_fb_cur_x, sweet_fb_cur_y;
++			extern volatile uint32_t sweet_fb_cur_seq;
++			sweet_fb_cur_x = dx - sx;      /* unclipped origin: sx grew by what the left edge cut */
++			sweet_fb_cur_y = dy - sy;
++			__atomic_fetch_add(&sweet_fb_cur_seq, 1, __ATOMIC_RELEASE);
++		}
++		if (layer > 0 && src != 0 && fScaled && bpe == 4) {
++			bool l0 = (mask & 1u) && get32(rec, 0x54 + sh) != 0;
++			if (sweet_su_have && !l0) {
++				sweetSaveUnder(false);
+ 			}
++			sweetSaveUnderRect(dx, dy, w, h);
++			sweetSaveUnder(true);
+ 		}
+ #endif
+ 		if (src != 0 && bpe == 4 && fScaled) {
+@@ -1048,6 +1086,18 @@ AppleCLCD::present(const uint8_t *rec)
+ 		}
+ 		s->release();
+ 	}
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	{
++		bool l0 = (mask & 1u) && get32(rec, 0x54 + sh) != 0;
++		bool l1 = (mask & 2u) && get32(rec, 0x58 + sh) != 0;
++		if (l0 && !l1) {
++			sweet_su_have = false;          /* the new frame has no pointer on it */
++		} else if (!l0 && !l1 && sweet_su_have) {
++			sweetSaveUnder(false);          /* pointer hidden: put the frame back */
++			sweet_su_have = false;
++		}
++	}
++#endif
+ 	if (copied != 0 && sweet_fb_first_present == 0) {
+ 		sweet_fb_first_present = mach_absolute_time();
+ 	}
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+index 2fc14be3..06e29e57 100644
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -373,6 +373,10 @@ private:
+ 	/* sweettouchtest=N: N s after boot, then every 60 s, a synthetic one-finger drag (0390): the
+ 	 * trackpad path checked on an unattended boot (the frame dumps show the pointer move) */
+ 	static void touchTestFired(OSObject *owner, IOTimerEventSource *sender);
++	/* 0397 direct touch: the pointer is steered to the finger (closed loop on the drawn pointer) */
++	static void steerFired(OSObject *owner, IOTimerEventSource *sender);
++	void steerTick(void);
++	IOTimerEventSource *fSteer;
+ 	IOTimerEventSource *fTouchTest;
+ 	int fTouchTestStep;
+ 	IOLock *fLock;
+@@ -591,6 +595,13 @@ SweetHIDTouch::start(IOService *provider)
+ 	}
+ 	gSweetTouch = this;
+ 	registerService();
++	if (fMouse) {
++		fSteer = IOTimerEventSource::timerEventSource(this, &SweetHIDTouch::steerFired);
++		if (fSteer && _hidWorkLoop->addEventSource(fSteer) != kIOReturnSuccess) {
++			fSteer->release();
++			fSteer = NULL;
++		}
++	}
+ 	int testSecs = 0;
+ 	if (fMouse && PE_parse_boot_argn("sweettouchtest", &testSecs, sizeof(testSecs)) && testSecs > 0) {
+ 		fTouchTest = IOTimerEventSource::timerEventSource(this, &SweetHIDTouch::touchTestFired);
+@@ -644,108 +655,232 @@ SweetHIDTouch::touchTestFired(OSObject *owner, IOTimerEventSource *sender)
+ 	if (i <= 40) {
+ 		self->touch(0, true, 300 + 15 * i, 600 + 20 * i);
+ 		sender->setTimeoutMS(16);
+-	} else {
++	} else if (i == 41) {
+ 		self->touch(0, false, 300 + 15 * 40, 600 + 20 * 40);
++		sender->setTimeoutMS(1000);
++	} else if (i == 42) {
++		self->touch(0, true, 700, 1800);        /* then a tap (0397: a click where the finger is) */
++		sender->setTimeoutMS(80);
++	} else {
++		self->touch(0, false, 700, 1800);
+ 		self->fTouchTestStep = 0;
+ 		sender->setTimeoutMS(60 * 1000);
+ 	}
+ }
+ 
++/*
++ * Direct touch (0397, replaces 0394's trackpad; macOS only moves the pointer for relative events):
++ *   one finger: the pointer goes where the finger is and follows it; a short tap (< 300 ms, < 40 px)
++ *     clicks there; touch, hold still 350 ms, then move = drag (button 1 held until the finger lifts)
++ *   two fingers: drag = scroll (natural), a short tap = secondary click (0394)
++ * The pointer is steered by relative events: every 16 ms the driver compares the pointer layer's drawn
++ * origin (SweetFramebuffer.cpp, sweet_fb_cur_*) plus the hotspot with the finger and sends the
++ * difference, once per drawn frame. The hotspot is measured once: the pointer pushed into the top-left
++ * corner (position 0,0) is drawn at -hotspot.
++ */
++extern volatile int32_t sweet_fb_cur_x, sweet_fb_cur_y;
++extern volatile uint32_t sweet_fb_cur_seq;
++static struct {
++	int primary, lastX, lastY, travel, accX, accY;
++	uint32_t downMask;
++	bool two, dragging, active;
++	uint64_t downAt;
++	int32_t tgtX, tgtY;             /* the finger, logical points */
++	int cal;                        /* 0 hotspot unknown, 1 pushed to the corner, 2 known */
++	int calTicks;
++	int32_t hotX, hotY;
++	uint32_t sentSeq;
++	UInt32 buttons;
++	UInt32 clickButton;             /* a click to make once the pointer is there */
++	int clickTicks;
++	int canvasW, canvasH;
++} st = { -1 };
++
++static void
++sweet_canvas(int *w, int *h)
++{
++	if (st.canvasW == 0) {
++		uint32_t lw = 828, lh = 1792;
++		PE_parse_boot_argn("sweetfb_lw", &lw, sizeof(lw));
++		PE_parse_boot_argn("sweetfb_lh", &lh, sizeof(lh));
++		st.canvasW = (int)lw;
++		st.canvasH = (int)lh;
++	}
++	*w = st.canvasW;
++	*h = st.canvasH;
++}
++
++void
++SweetHIDTouch::steerFired(OSObject *owner, IOTimerEventSource *sender)
++{
++	(void)sender;
++	((SweetHIDTouch *)owner)->steerTick();
++}
++
++void
++SweetHIDTouch::steerTick(void)
++{
++	IOHIDEvent *events[3] = { NULL, NULL, NULL };
++	uint64_t now = mach_absolute_time();
++	bool again;
++
++	IOLockLock(fLock);
++	uint32_t seq = __atomic_load_n(&sweet_fb_cur_seq, __ATOMIC_ACQUIRE);
++	if (st.cal == 0) {
++		/* into the top-left corner: the pointer is then at 0,0 */
++		events[0] = IOHIDEvent::relativePointerEvent(now, -4000, -4000, 0, st.buttons, st.buttons);
++		st.cal = 1;
++		st.calTicks = 0;
++		st.sentSeq = seq;
++	} else if (st.cal == 1) {
++		if (seq != st.sentSeq && ++st.calTicks >= 3) {
++			st.hotX = -sweet_fb_cur_x;
++			st.hotY = -sweet_fb_cur_y;
++			st.cal = 2;
++			IOLog("SWEET HID: pointer hotspot %d,%d\n", st.hotX, st.hotY);
++		} else if (st.calTicks++ > 60) {
++			st.cal = 0;     /* no pointer drawn in a second: try again */
++		}
++	} else if (seq != st.sentSeq || st.sentSeq == 0) {
++		/* one correction per drawn frame */
++		int32_t px = sweet_fb_cur_x + st.hotX, py = sweet_fb_cur_y + st.hotY;
++		int32_t ex = st.tgtX - px, ey = st.tgtY - py;
++		bool there = (ex < 0 ? -ex : ex) <= 2 && (ey < 0 ? -ey : ey) <= 2;
++		if (!there && !st.two) {
++			events[0] = IOHIDEvent::relativePointerEvent(now, ex, ey, 0, st.buttons, st.buttons);
++			st.sentSeq = seq;
++		}
++		if (st.clickButton && (there || ++st.clickTicks > 20)) {
++			events[1] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, st.clickButton, st.buttons);
++			events[2] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, st.buttons, st.clickButton);
++			IOLog("SWEET HID: click %u at %d,%d\n", (unsigned)st.clickButton, st.tgtX, st.tgtY);
++			st.clickButton = 0;
++		}
++	}
++	/* touch, hold still, then move: drag */
++	if (st.primary >= 0 && !st.two && !st.dragging && st.travel < 20) {
++		uint64_t ns = 0;
++		absolutetime_to_nanoseconds(now - st.downAt, &ns);
++		if (ns > 350000000ULL) {
++			st.dragging = true;
++			st.buttons = 1;
++			if (!events[1]) {
++				events[1] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 1, 0);
++			}
++			IOLog("SWEET HID: drag start at %d,%d\n", st.tgtX, st.tgtY);
++		}
++	}
++	again = st.primary >= 0 || st.clickButton != 0 || st.cal == 1;
++	st.active = again;
++	IOLockUnlock(fLock);
++	for (int i = 0; i < 3; i++) {
++		if (events[i]) {
++			dispatchEvent(events[i]);
++			events[i]->release();
++		}
++	}
++	if (again && fSteer) {
++		fSteer->setTimeoutMS(16);
++	}
++}
++
+ void
+ SweetHIDTouch::trackpadTouch(int finger, bool down, int x, int y)
+ {
+-	/*
+-	 * One finger: relative pointer motion; a short tap (< 300 ms, < 40 px) clicks button 1.
+-	 * Two fingers (0394): the first finger's movement scrolls (24 panel px a line, natural direction
+-	 * like a Mac trackpad); a short two-finger tap clicks button 2 (secondary click / context menu).
+-	 */
+-	static int primary = -1, lastX, lastY, travel, remX, remY, accX, accY;
+-	static uint32_t downMask;
+-	static bool two;
+-	static uint64_t downAt;
+-	static uint32_t moves;
+ 	uint64_t now = mach_absolute_time();
+ 	IOHIDEvent *events[2] = { NULL, NULL };
+ 	const char *what = NULL;
++	bool kick = false;
++	int cw, ch;
++	sweet_canvas(&cw, &ch);
++	/* panel pixels -> logical points: the canvas is the panel's full height, centred (fLogicalW wide) */
++	int strip = fLogicalW > 0 ? fLogicalW : fPanelW;
++	int bar = (fPanelW - strip) / 2;
++	int32_t lx = (int32_t)((int64_t)(x - bar) * cw / strip), ly = (int32_t)((int64_t)y * ch / fPanelH);
++	lx = lx < 0 ? 0 : (lx >= cw ? cw - 1 : lx);
++	ly = ly < 0 ? 0 : (ly >= ch ? ch - 1 : ly);
+ 
+ 	IOLockLock(fLock);
+ 	uint32_t bit = 1u << finger;
+-	bool was = (downMask & bit) != 0;
++	bool was = (st.downMask & bit) != 0;
+ 	if (down) {
+-		downMask |= bit;
++		st.downMask |= bit;
+ 	} else {
+-		downMask &= ~bit;
+-	}
+-	if (down && !was && primary < 0) {
+-		primary = finger;
+-		lastX = x;
+-		lastY = y;
+-		travel = 0;
+-		two = false;
+-		downAt = now;
++		st.downMask &= ~bit;
++	}
++	if (down && !was && st.primary < 0) {
++		st.primary = finger;
++		st.lastX = x;
++		st.lastY = y;
++		st.travel = 0;
++		st.two = false;
++		st.dragging = false;
++		st.downAt = now;
++		st.tgtX = lx;
++		st.tgtY = ly;
++		st.clickButton = 0;
++		kick = true;
+ 		what = "down";
+-	} else if (down && !was && finger != primary && primary >= 0 && !two) {
+-		two = true;
+-		accX = accY = 0;
++	} else if (down && !was && finger != st.primary && st.primary >= 0 && !st.two) {
++		st.two = true;
++		st.accX = st.accY = 0;
+ 		what = "two fingers";
+-	} else if (down && finger == primary && lastX == -100000) {
+-		lastX = x;              /* a new primary finger: its first report only sets the reference */
+-		lastY = y;
+-	} else if (down && finger == primary) {
+-		int dx = x - lastX, dy = y - lastY;
+-		lastX = x;
+-		lastY = y;
+-		travel += (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
+-		if (two) {
+-			accX += dx;
+-			accY += dy;
+-			int lx = accX / 24, ly = accY / 24;
+-			if (lx || ly) {
+-				accX -= lx * 24;
+-				accY -= ly * 24;
+-				events[0] = IOHIDEvent::scrollEvent(now, -lx, -ly, 0);
++	} else if (down && finger == st.primary) {
++		int dx = x - st.lastX, dy = y - st.lastY;
++		st.lastX = x;
++		st.lastY = y;
++		st.travel += (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
++		if (st.two) {
++			st.accX += dx;
++			st.accY += dy;
++			int sx = st.accX / 24, sy = st.accY / 24;
++			if (sx || sy) {
++				st.accX -= sx * 24;
++				st.accY -= sy * 24;
++				events[0] = IOHIDEvent::scrollEvent(now, -sx, -sy, 0);
+ 			}
+ 		} else {
+-			/* 1440 -> 828 and 2960 -> 1792: about 0.575 and 0.605 points a panel pixel */
+-			int px = dx * 575 + remX, py = dy * 605 + remY;
+-			int ox = px / 1000, oy = py / 1000;
+-			remX = px - ox * 1000;
+-			remY = py - oy * 1000;
+-			if (ox || oy) {
+-				events[0] = IOHIDEvent::relativePointerEvent(now, ox, oy, 0, 0, 0);
+-				if (moves++ < 200 || (moves % 100) == 0) {
+-					IOLog("SWEET HID: trackpad move %d,%d (move %u)\n", ox, oy, moves);
+-				}
+-			}
++			st.tgtX = lx;
++			st.tgtY = ly;
++			kick = !st.active;
+ 		}
+-	} else if (!down && was && downMask == 0 && primary >= 0) {
+-		/* every finger up: the gesture ends */
++	} else if (!down && was && st.downMask == 0 && st.primary >= 0) {
+ 		uint64_t ns = 0;
+-		absolutetime_to_nanoseconds(now - downAt, &ns);
+-		bool tap = ns < 300000000ULL && travel < 40;
+-		UInt32 button = two ? 2 : 1;
+-		if (tap) {
+-			events[0] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, button, 0);
+-			events[1] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 0, button);
+-			what = two ? "two-finger tap = secondary click" : "tap = click";
++		absolutetime_to_nanoseconds(now - st.downAt, &ns);
++		bool tap = ns < 300000000ULL && st.travel < 40;
++		if (st.dragging) {
++			events[0] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 0, st.buttons);
++			st.buttons = 0;
++			st.dragging = false;
++			what = "drag end";
++		} else if (tap && st.two) {
++			events[0] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 2, 0);
++			events[1] = IOHIDEvent::relativePointerEvent(now, 0, 0, 0, 0, 2);
++			what = "two-finger tap = secondary click";
++		} else if (tap) {
++			st.clickButton = 1;     /* once the pointer is under the finger */
++			st.clickTicks = 0;
++			kick = !st.active;
++			what = "tap = click";
+ 		} else {
+-			what = two ? "scroll end" : "up";
++			what = st.two ? "scroll end" : "up";
+ 		}
+-		primary = -1;
+-		two = false;
+-	} else if (!down && was && finger == primary) {
+-		/* the first finger lifts while another stays: the other one carries on */
++		st.primary = -1;
++		st.two = false;
++	} else if (!down && was && finger == st.primary) {
+ 		for (int i = 0; i < SWEET_TOUCH_FINGERS; i++) {
+-			if (downMask & (1u << i)) {
+-				primary = i;
++			if (st.downMask & (1u << i)) {
++				st.primary = i;
+ 				break;
+ 			}
+ 		}
+-		lastX = lastY = -100000;
++	}
++	if (kick) {
++		st.active = true;
+ 	}
+ 	IOLockUnlock(fLock);
+ 	if (what) {
+-		IOLog("SWEET HID: trackpad %s (finger %d) at %d,%d travel %d\n", what, finger, x, y, travel);
++		IOLog("SWEET HID: touch %s (finger %d) at %d,%d -> %d,%d travel %d\n", what, finger, x, y, lx, ly, st.travel);
+ 	}
+ 	for (int i = 0; i < 2; i++) {
+ 		if (events[i]) {
+@@ -753,6 +888,9 @@ SweetHIDTouch::trackpadTouch(int finger, bool down, int x, int y)
+ 			events[i]->release();
+ 		}
+ 	}
++	if (kick && fSteer) {
++		fSteer->setTimeoutMS(1);
++	}
+ }
+ 
+ void
+-- 
+2.53.0
+

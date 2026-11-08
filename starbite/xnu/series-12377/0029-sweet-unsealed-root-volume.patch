@@ -1,0 +1,37 @@
+From 263aad16418ebb9cf8a40003c9e70ebbbb4aaf82 Mon Sep 17 00:00:00 2001
+From: starbite <starbite@local>
+Date: Wed, 28 Oct 2026 16:30:19 +0200
+Subject: [PATCH] patch: 0029-sweet-unsealed-root-volume.patch
+
+---
+ bsd/kern/bsd_init.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 54679c13..f139b128 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -953,9 +953,20 @@ bsd_init(void)
+ 		if (require_rootauth) {
+ 			/* enforce sealedness */
+ 			int autherr = VNOP_IOCTL(rootvnode, FSIOC_KERNEL_ROOTAUTH, NULL, 0, vfs_context_kernel());
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++			/*
++			 * SWEET has no chain of trust to extend: the kernel itself is
++			 * booted unsigned and there is no Image4/AMFI, and its HFS root
++			 * cannot be a sealed volume. Report it instead of panicking.
++			 */
++			if (autherr) {
++				printf("SWEET: root volume is not authenticated (error %d); continuing unsealed\n", autherr);
++			}
++#else
+ 			if (autherr) {
+ 				panic("rootvp not authenticated after mounting");
+ 			}
++#endif
+ 		}
+ 	}
+ 
+-- 
+2.53.0
+
