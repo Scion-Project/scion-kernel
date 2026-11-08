@@ -53,5 +53,13 @@ screen comes back, `GenericARMPE: sleep_cores: cpu N taken off` / `started again
 
 - Core power-down in idle (PSCI `CPU_SUSPEND` from `cpu_idle()`, waking through the reset vector as Apple's deep idle
   does) and the SoC's own idle states through ACPM: bigger, and riskier than taking cores off while nothing runs.
+  What the phone's device tree says (`exynos9810-starlte_eur_open_26.dts`, `idle-states`, read for these numbers):
+  entry by PSCI; one core state, "c2", `arm,psci-suspend-param` 0x10000 on both clusters; the boot (little) cluster
+  70 us in, 160 us out, worth it from 2 ms idle; the big cluster 235 us in, 220 us out, from 3.5 ms. The cluster
+  power-down (CPD) and the system's idle clock-down (SICD, through ACPM) are on with 10 ms residencies
+  (`cpd_enabled`, `sicd_enabled`, `exynos-powermode`). A first step that needs no new wake path: `CPU_SUSPEND` with
+  0x10000 only when the next timer is more than the residency away, the core's context saved as `cpu_sleep()` saves
+  it and restored through `LowResetVectorBase` as a `CPU_ON` start is (the code that patch 1517 exercises), behind a
+  boot-arg, measured against `sleep_cores=`.
 - The DECON and DSIM clocks while the panel sleeps; the touch controller's scan rate (tap-to-wake costs a scanning
   controller); the frame thread's behaviour with a sleeping panel (no TE).
