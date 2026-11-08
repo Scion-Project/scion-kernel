@@ -222,6 +222,7 @@ ustacks_task(task_t task, struct proc *proc, bool on_abort)
 {
 	static struct {
 		uint64_t tid, pc, lr, fp, x16;
+		uint64_t arg[6];        /* x0-x5: a psynch call's arguments (on_abort) */
 		int state;
 		char name[64];          /* (bsd_getthreadname() copies MAXTHREADNAMESIZE, 64) */
 	} snap[USTACKS_MAX_THREADS];
@@ -256,6 +257,9 @@ ustacks_task(task_t task, struct proc *proc, bool on_abort)
 		snap[count].lr = get_saved_state_lr(state);
 		snap[count].fp = get_saved_state_fp(state);
 		snap[count].x16 = get_saved_state_reg(state, 16);
+		for (int r = 0; r < 6; r++) {
+			snap[count].arg[r] = get_saved_state_reg(state, r);
+		}
 		count++;
 	}
 	map = task->map;
@@ -307,6 +311,31 @@ ustacks_task(task_t task, struct proc *proc, bool on_abort)
 		}
 		snprintf(line + at, sizeof(line) - at, "\n");
 		ustacks_say(line, on_abort);
+		/*
+		 * Scion: a thread waiting in psynch_mutexwait (301) or psynch_cvwait (305) when its program aborted -- bluetoothd's
+		 * stack watchdog, with every thread but one in 301 -- says what it waits on: the call's arguments as it made them
+		 * (301: the mutex, mgen, ugen, the owner's thread id as user space saw it, flags; 305: the condition, its L and S
+		 * words, U, the mutex, its generation, flags) and the mutex's first 64 bytes now (its lock word, sequence words and
+		 * owner id: libpthread's layout). The owner id against the threads above tells a dead or waiting owner (user space)
+		 * from a mutex nobody holds (a wake-up lost).
+		 */
+		if (on_abort && (snap[i].x16 == 301 || snap[i].x16 == 305)) {
+			uint32_t words[16];
+			user_addr_t mutex = (user_addr_t)(snap[i].x16 == 301 ? snap[i].arg[0] : snap[i].arg[3]);
+
+			snprintf(line, sizeof(line), "ustacks:   %s(0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx)\n",
+			    snap[i].x16 == 301 ? "psynch_mutexwait" : "psynch_cvwait", snap[i].arg[0], snap[i].arg[1], snap[i].arg[2],
+			    snap[i].arg[3], snap[i].arg[4], snap[i].arg[5]);
+			ustacks_say(line, on_abort);
+			if (plausible_user_address(mutex) && (mutex & 7) == 0 && copyin(mutex, words, sizeof(words)) == 0) {
+				at = snprintf(line, sizeof(line), "ustacks:   mutex 0x%llx:", (unsigned long long)mutex);
+				for (int w = 0; w < 16; w++) {
+					at += snprintf(line + at, sizeof(line) - at, " %08x", words[w]);
+				}
+				snprintf(line + at, sizeof(line) - at, "\n");
+				ustacks_say(line, on_abort);
+			}
+		}
 	}
 	vm_map_switch(old_map);
 	vm_map_deallocate(map);
