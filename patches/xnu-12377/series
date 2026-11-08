@@ -24,3 +24,5 @@
 ../xnu-8796/0280-osfmk-minicrypto.patch
 0100-minicrypto.patch
 0110-hakios-core.patch
+# Darwin 27 (iOS 27) system calls on this base (docs/ios27-starlte.md)
+0120-darwin27-syscalls.patch

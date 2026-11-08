@@ -31,6 +31,7 @@ Debug Kit, and includes headers it does not publish. Scion's drivers have their 
 | `../xnu-8796/0280-osfmk-minicrypto.patch` | minicrypto, the xnu-8796 series' own crypto provider, the same file (one copy in the repository) |
 | `0100-minicrypto.patch` | minicrypto's digests, AES and HMAC-DRBG built on this base (not the key store's parts); registered at the end of `SYSCTL`, because this base runs `EARLY_BOOT` after `PE_init_iokit`, whose platform UUID already takes a SHA-1 |
 | `0110-hakios-core.patch` | what `drivers/core/hakios.version.c` needs here: `sys/hakios.version.h`, the `kern.hakios` sysctl node (`bsd/dev/hakios.base.c`, until `hakios.platform.c` builds on this base) and the call in `bsd_init()`; the first file of `drivers/` with `bases xnu-12377` |
+| `0120-darwin27-syscalls.patch` | Darwin 27's eight new system calls (`pipe2`, `dup3`, `fchflagsat`, `getumask`, `aio_readv`, `aio_writev`, `fsctlat`, `guarded_ftruncate_np`), numbered as in iOS 27.0.1's kernel, so iOS 27's `libsystem_kernel` finds them on this base; `aio_readv`/`aio_writev` answer ENOTSUP for now. Scion's own code (`docs/ios27-starlte.md`) |
 
 0090 to 0095 and 0098 to 0100 change what a kernel does only when it is built with `make kernel SCION_NATIVE_PAC=1` (off by default; 0100's
 files are built either way, and register nothing without it). They came from Scion-Project/scion-avf's `vmapple/patches`
