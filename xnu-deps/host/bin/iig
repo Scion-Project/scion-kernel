@@ -1,9 +1,13 @@
 #!/bin/bash
 # Stand-in for Apple's closed-source iig (DriverKit interface generator).
-# Headers: taken pre-generated from the macOS 13.3 SDK (same xnu-8796 family).
+# XNU_IIG set (xnu-env.sh, a base after xnu-8796 on macOS): Apple's own iig, which Xcode has, makes both files.
+# Otherwise:
+# Headers: taken pre-generated from a macOS SDK of the same XNU family: XNU_IIG_HEADERS, else the macOS 13.3
+#   SDK's (xnu-8796; for xnu-12377 xnu-env.sh names the macOS 26.1 SDK's).
 # Implementation: taken from $XNUDEPS/iig-impl/<name>.iig.cpp if present, else an empty TU.
+[ -n "$XNU_IIG" ] && exec "$XNU_IIG" "$@"
 XNUDEPS=${XNUDEPS:-$(cd "$(dirname "$0")/../.." && pwd)}
-SDKH="$XNUDEPS/MacOSX13.3.sdk/System/Library/Frameworks/Kernel.framework/Headers"
+SDKH=${XNU_IIG_HEADERS:-"$XNUDEPS/MacOSX13.3.sdk/System/Library/Frameworks/Kernel.framework/Headers"}
 def=""; hdr=""; impl=""
 while [ $# -gt 0 ]; do case "$1" in
   --def) def="$2"; shift 2;; --header) hdr="$2"; shift 2;; --impl) impl="$2"; shift 2;;

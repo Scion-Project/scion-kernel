@@ -40,6 +40,7 @@ driver SOUND
 | `file PATH [OPTION...]` | one of its files, as its path in Apple's tree; a `.cpp` of `iokit/Kernel` also wants `iokitcpp` |
 | `requires NAME...` | drivers it cannot be built without (it calls them, and nothing could stand in for them) |
 | `default y\|n` | what a configuration that does not name it gets; `y` if not said |
+| `bases BASE...` | the XNU bases it is built on (`xnu-8796`, `xnu-12377`); `xnu-8796` if not said. On a base it does not name the driver is left out of the kernel tree whatever the configuration says (`tools/hakios-config.py kernel` says which), and the drivers table does not mark it built for a device on that base. A `standard` file takes it too. [One tree, two XNU bases](two-bases.md) |
 | `help TEXT` | what it is, and which boot-argument starts it; more `help` lines go on |
 
 Every `.c` and `.cpp` of `drivers/map` is built by exactly one `standard` line or `driver`, of the conf of its own subsystem;
