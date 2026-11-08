@@ -111,8 +111,43 @@ and 8 of the build time in the two copies of the version string. The pull reques
    read-only region (`amcc_rorgn_scion.c`: none is locked), `ml_enable_monitor` and `ml_device_is_prod_fused`, the forced
    cache clean, `CPU_OVRD`, and three calls of `pmap.c` into the monitor.
 
-What the kernel does not do yet, and is not claimed to: `VMAPPLE` expects Apple's hypervisor for its paravirtualized pointer
-authentication and read-only region, which QEMU and crosvm do not offer, so booting it elsewhere is its own work. The series
+`VMAPPLE` expects Apple's hypervisor for its paravirtualized pointer authentication and read-only region, which QEMU and crosvm
+do not offer. `make kernel SCION_NATIVE_PAC=1` builds a kernel that does without them (below); the default build does not change.
+
+### Booting on QEMU (`SCION_NATIVE_PAC=1`)
+
+`OS_PROFILE=ios-26 make kernel SCION_NATIVE_PAC=1` adds what a VM without Apple's hypervisor needs (patches 0090-0095: the PAC keys
+in the architectural registers, the chained-fixup rebase in `arm_init`, BTI on `__chkstk_darwin`, no Apple registers, the physical
+aperture's slack, a 16550 console) and registers minicrypto (0100). It boots on QEMU `virt` the way crosvm starts a VM on the Pixel
+10: avfboot (`avf/shim/`) as the Linux image, the kernel in an XNUP payload (`xnuloader/mkpayload.py --no-version`) as the initrd,
+`-M virt,gic-version=3 -cpu max,pauth-qarma3=on` (TCG; QARMA3 is the Pixel's PAC algorithm), one CPU, 2 GB, boot-args
+`-v serial=3 debug=0x8 cpus=1 -noprogress sched_preemption_disable_debug_mode=0 interrupt-masked-debug-mode=0
+sched_hygiene_debug_pmc=0`. The last three turn off the scheduler-hygiene timeouts, which an emulated CPU does not meet: their
+defaults count ticks of a 24 MHz timebase, QEMU's counter runs at 1 GHz (an interrupt handler's 500 us is 12 us there).
+`-noprogress`: there is no framebuffer for the boot progress a macOS-style kernel draws.
+
+Where it stops, Mac mini, QEMU 11.1, 8 November 2026 (not run on a phone):
+
+| Kernel | Stop |
+|---|---|
+| without minicrypto (as Scion-Project/scion-avf#23 left it) | data abort in `SHA1Init`, from `IOPlatformExpertDevice::generatePlatformUUID` in `PE_init_iokit`: no crypto table; the panic then faults again reading its own header, so nothing is printed |
+| with minicrypto (0100) | past `PE_init_iokit`, NVRAM, the swap threads and lockdown mode, to `panic: image4 interface not available @kern_trustcache.c:584` (MAC policy start), and the panic log prints in full |
+
+The panic log needs avfboot to report all of RAM in `/chosen/dram-size` for an arm64e kernel: `/pram` lies above XNU's window,
+and xnu-12377 maps it as memory, not as a device, only inside `dram-size`; as a device its panic header's unaligned fields
+fault.
+
+**The kernel's crypto, and why not Apple's corecrypto.** XNU calls its digests, ciphers and random generator through a table
+that Apple's corecrypto kext registers; there is no kext here. Apple publishes corecrypto's source (github.com/apple/corecrypto),
+but under its evaluation-only Internal Use License: internal use, "for the sole purpose of verifying the security characteristics
+and correct functioning" of it. That rules out building it into Scion's kernel or shipping it, so Scion does not use it. minicrypto, Scion's
+own provider from the xnu-8796 series (with BearSSL, MIT, and Monocypher, CC0-1.0, for the key store's parts that this base
+does not build), gives MD5, SHA-1, SHA-256/384/512, HMAC, AES-ECB/CBC/CTR (the ARMv8 instructions where there are any) and an
+HMAC-DRBG; it self-tests at boot. Not provided: AES-XTS and GCM, DES, ChaCha20-Poly1305, RSA.
+
+**Next stop.** Trust caches need the AMFI and image4 interface tables that their kexts register. The xnu-8796 series has an AMFI
+stand-in (`libkern/amfi/miniamfi.c`, 0180); an image4 one would be new and sits in code signing, so it waits for a decision on
+how far a stand-in may go. The series
 after this is the Tensor G5 platform, written fresh (gaps, below).
 
 ## ios-on-pixel-10: what Scion may take
