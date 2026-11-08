@@ -2102,7 +2102,7 @@ control_center_fades(const char *arguments)
  * The frame rates SpringBoard's display links ask for. After a page of the home screen settles, something of
  * SpringBoard's goes on drawing at exactly 30 a second for most of a second (its run loop and the window server's
  * frames 33.3 ms apart, tl: a and tl: g). It is UIKit's: the display link of UIViewInProcessAnimationManager, which
- * runs the animations done in the application's own process, asks for 20..30. With dl_max=1 (the default) the rates
+ * runs the animations done in the application's own process, asks for 20..30. With dl_max=1 (off by default here; HakiOS has it on) the rates
  * asked of that one are dropped and it runs at the panel's rate; on an iPhone with ProMotion the lower rate saves
  * power, here the panel refreshes at 120 whatever is drawn. The other display links keep what they ask (the clock's
  * 10 and 60, the motion effects' 32): run at 120 they woke SpringBoard six times as often for nothing.
@@ -2115,7 +2115,7 @@ typedef struct {
 static id (*original_display_link_with)(id self, SEL selector, id target, SEL action);
 static void (*original_set_fps)(id self, SEL selector, long fps);
 static void (*original_set_range)(id self, SEL selector, frame_rate_range range);
-static bool dl_say, dl_max = true;
+static bool dl_say, dl_max;             /* (Scion: dl_max is off unless dl_max=1 is given; upstream HakiOS has it on) */
 static unsigned dl_said;
 #define DL_SAY_MAX 300
 #define DL_FULL_FOR "UIViewInProcessAnimationManager"
@@ -2253,7 +2253,7 @@ display_link_rates(void)
 		return;
 	}
 	dl_say = boot_arg(arguments, "touch_lat=1");
-	dl_max = !boot_arg(arguments, "dl_max=0");
+	dl_max = boot_arg(arguments, "dl_max=1");
 	animation_rates(arguments);
 	if (!dl_say && !dl_max) {
 		return;
