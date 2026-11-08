@@ -95,7 +95,7 @@ measurements are the source. The rows about the lock screen and the apps describ
 | Touch, multitouch, buttons | yes | yes (the mouse and the keyboard) |
 | All 8 CPU cores, the big one at 2.4 GHz | yes | no |
 | GPU (OpenGL ES through Mesa) | yes | no |
-| Metal | partly: the window server draws through it, on two paths ([Metal](reference/metal.md)), off by default; swipes 100 to 104 frames a second, not 120; other programs not shown | partly: a device Metal loads; no GPU, nothing drawn |
+| Metal | partly: the window server draws through it, on two paths ([Metal](reference/metal.md)), off by default; swipes 100 to 104 frames a second, not 120; other programs not shown | partly: a device Metal loads; no GPU, nothing drawn; on the S9's Mali-G72 through PanVK, not Adreno: [metal.md](metal.md) |
 | Wi-Fi | yes | yes (virtio-net) |
 | Sound, microphone | yes | sound only (virtio) |
 | The battery's level | yes | no |

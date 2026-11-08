@@ -501,3 +501,9 @@ freedreno and panfrost never did: device enumeration (`drmGetDevices2`), `drmSyn
 descriptors. So the S9's Metal takes the first route instead, parts A to C over Mesa's Gallium: `libhakiosair` opens
 HakiosMali through panfrost when there is no HakiosGPU, and the AIR frontend's NIR goes to panfrost's Bifrost compiler
 rather than ir3. `devices/starlte/GPU.md` in the S9's repository has the comparison and the runs (`RC_JOBS=rc.jobs.malimetal`).
+
+**Revisited 7 November 2026: [metal.md](metal.md).** The shim's missing calls (device enumeration, `drmSyncobjSignal`) are now
+in `tools/mesa/hakios-drm`, PanVK 25.0.7 builds for the userland (`tools/mk-panvk.sh`) and runs on a Mac against a no-op G72;
+the 26.2.6 release reports Vulkan 1.0 below v10 (not 1.3 as written above) but exposes timeline semaphores, and another S9
+project runs metal2vulkan on PanVK on this GPU with the version overridden to 1.2. metal.md has the licences, the comparison
+and a phased plan that makes PanVK the S9's main Metal route; nothing of it has run on the phone yet.

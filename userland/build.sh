@@ -16,6 +16,12 @@
 #                                   tools/gfxstream/VULKAN.md) and its test, built by tools/gfxstream/mk-vk.sh ios
 #                                   (which needs Xcode's clang): DIR/libhakios.vk.dylib into lib/, DIR/vk_test
 #                                   into bin/ (rc.jobs runs it once; without it that line just says "not found")
+#                      PANVK_DIR=DIR with PanVK, Mesa's Vulkan driver for the Mali (the S9's G72), and its test, built by
+#                                   tools/mk-panvk.sh (DIR is xnu-deps/build/panvk/out): DIR/libvulkan_panfrost.dylib into
+#                                   lib/, DIR/vk_smoke into bin/. Nothing uses the driver but vk_smoke
+#                                   (RC_JOBS=rc.jobs.vksmoke) and, with METAL=vk METAL_ICD=/redwood/lib/libvulkan_panfrost.dylib,
+#                                   the Metal plug-in behind boot-arg metal=N. PanVK refuses the G72 unless the program sets
+#                                   PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1 (vk_smoke --mali-v6). docs/metal.md.
 #                      RC=<file>    etc/rc: rc.launchd (default) hands process 1 to the Darwin launchd
 #                                   after init's checks; rc.darwin runs a few Darwin programs and halts
 #                      JOBS="..."   labels of the stock Darwin launchd jobs to load (default: DARWIN_JOBS)
@@ -242,6 +248,14 @@ if [ -n "$VK_DIR" ]; then
 	install -m 0755 "$VK_DIR/libhakios.vk.dylib" root/lib/libhakios.vk.dylib
 	install -m 0755 "$VK_DIR/vk_test" root/bin/vk_test
 	echo "build.sh: the guest's Vulkan (libhakios.vk.dylib, vk_test) from $VK_DIR"
+fi
+if [ -n "$PANVK_DIR" ]; then
+	[ -f "$PANVK_DIR/libvulkan_panfrost.dylib" ] && [ -f "$PANVK_DIR/vk_smoke" ] ||
+		{ echo "build.sh: PANVK_DIR=$PANVK_DIR has no libvulkan_panfrost.dylib and vk_smoke (tools/mk-panvk.sh)" >&2; exit 1; }
+	mkdir -p root/lib
+	install -m 0755 "$PANVK_DIR/libvulkan_panfrost.dylib" root/lib/libvulkan_panfrost.dylib
+	install -m 0755 "$PANVK_DIR/vk_smoke" root/bin/vk_smoke
+	echo "build.sh: PanVK (libvulkan_panfrost.dylib, vk_smoke) from $PANVK_DIR"
 fi
 # ALONE=1: the kernel starts this image's /sbin/launchd as process 1 (rd=md0), with no stage0 to mount it on /redwood:
 # so init is that file too, and finds its image at / (src/init.c, base); /redwood is the image again for the paths

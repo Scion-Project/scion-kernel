@@ -1,0 +1,9 @@
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# PanVK, Mesa's Vulkan driver for the Mali, on the Galaxy S9's G72 (an image built with PANVK_DIR=, tools/mk-panvk.sh;
+# docs/metal.md). vk_smoke goes one step at a time -- instance, the Mali, extensions, features, a device, a clear read back,
+# a timeline semaphore, a compute shader read back -- and says on one line what each got; its last line says how many of
+# the eight passed. --mali-v6 is PanVK's own gate for a Bifrost v6 GPU, set for this program only. Nothing else in the
+# system uses the driver: the window server stays on OpenGL ES. Needs the GPU up (boot-arg mali=9).
+/redwood/bin/rwtouch wait 20
+/redwood/bin/vk_smoke --mali-v6 /redwood/lib/libvulkan_panfrost.dylib
+/redwood/bin/vk_smoke --mali-v6 --api 1.2 /redwood/lib/libvulkan_panfrost.dylib
