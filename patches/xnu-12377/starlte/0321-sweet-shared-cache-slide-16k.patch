@@ -18,20 +18,6 @@ arm64e (iOS 26) shared cache on the 4 KiB, non-PAC kernel:
  osfmk/vm/vm_shared_region_pager.c | 111 ++++++++++++++++++++++++++++++
  3 files changed, 119 insertions(+), 1 deletion(-)
 
-diff --git a/bsd/dev/starlte_smp.c b/bsd/dev/starlte_smp.c
-index f0f57289..d9dab4b4 100644
---- a/bsd/dev/starlte_smp.c
-+++ b/bsd/dev/starlte_smp.c
-@@ -183,7 +183,8 @@ static void
- st_cpu_survey(__unused void *arg, __unused wait_result_t wr)
- {
- 	delay(30 * 1000 * 1000);
--	for (int cpu = 0; cpu < 8; cpu++) {
-+	/* only the CPUs this boot has (cpus=4: the A55s; cpu_to_processor asserts) */
-+	for (int cpu = 0; cpu <= ml_get_max_cpu_number() && cpu < 8; cpu++) {
- 		processor_t p = cpu_to_processor(cpu);
- 		if (p == PROCESSOR_NULL) {
- 			continue;
 diff --git a/osfmk/vm/vm_shared_region.c b/osfmk/vm/vm_shared_region.c
 index 528ca86f..636b0945 100644
 --- a/osfmk/vm/vm_shared_region.c

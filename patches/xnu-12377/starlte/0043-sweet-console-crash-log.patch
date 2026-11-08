@@ -27,34 +27,6 @@ index b5633e45..5f8202ff 100644
  		/* Defualt to EXC_CRASH if the exception is not an EXC_RESOURCE or EXC_GUARD */
  		if (etype != EXC_RESOURCE && etype != EXC_GUARD) {
  			etype = EXC_CRASH;
-diff --git a/iokit/Kernel/arm/SweetKeyStore.cpp b/iokit/Kernel/arm/SweetKeyStore.cpp
-index 58f43d68..b92e609a 100644
---- a/iokit/Kernel/arm/SweetKeyStore.cpp
-+++ b/iokit/Kernel/arm/SweetKeyStore.cpp
-@@ -45,6 +45,7 @@ enum {
- 	kAKSAssertDrop       = 27,
- 	kAKSUnloadSessionBags = 55,
- 	kAKSNotifyStateSet   = 102,
-+	kAKSNotifyStateIsSet = 103,
- };
- 
- /* The system (device) bag handle. */
-@@ -209,6 +210,15 @@ AppleKeyStoreUserClient::externalMethod(uint32_t selector, IOExternalMethodArgum
- 		args->scalarOutput[0] = SWEET_AKS_LOCK_STATE;
- 		args->scalarOutputCount = 1;
- 		break;
-+	case kAKSNotifyStateIsSet:
-+		/* Nothing was ever set: answer "not set". */
-+		if (out_scalars < 1) {
-+			ret = kIOReturnBadArgument;
-+			break;
-+		}
-+		args->scalarOutput[0] = 0;
-+		args->scalarOutputCount = 1;
-+		break;
- 	case kAKSGetDeviceState:
- 		args->scalarOutputCount = 0;
- 		ret = sweet_aks_device_state(args);
 diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
 index 29d7dbe7..d89b49be 100644
 --- a/osfmk/kern/exception.c

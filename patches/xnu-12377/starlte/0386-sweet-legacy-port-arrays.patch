@@ -86,23 +86,6 @@ index a555ffa8..17422121 100644
  kern_return_t
  _kernelrpc_mach_ports_register3(
  	task_t                  task,
-diff --git a/osfmk/mach/sweet_ports_compat.h b/osfmk/mach/sweet_ports_compat.h
-new file mode 100644
-index 00000000..d2e71121
---- /dev/null
-+++ b/osfmk/mach/sweet_ports_compat.h
-@@ -0,0 +1,11 @@
-+/*
-+ * Starbite: which form the kernel serves mach_ports_register / mach_ports_lookup (task.defs ids 3403, 3404) in.
-+ * 0: this kernel's own (three ports inline: _kernelrpc_mach_ports_register3 / _lookup3), what iOS 26 and macOS 26
-+ *    user space send. 1: the older out-of-line port array, what macOS 13 (Ventura) user space sends; its launchd
-+ *    could not register its inheritance port and every process's libxpc died in mach_ports_lookup with
-+ *    MACH_RCV_TOO_LARGE (boots 2026-11-04 23:24-23:49). The Ventura kernel is built with 1
-+ *    (tools/build-xnu-12377.sh with SWEET_LEGACY_PORTS=1), every other one with 0.
-+ */
-+#ifndef SWEET_LEGACY_PORT_ARRAYS
-+#define SWEET_LEGACY_PORT_ARRAYS 0
-+#endif
 diff --git a/osfmk/mach/task.defs b/osfmk/mach/task.defs
 index f3449802..e1476d8d 100644
 --- a/osfmk/mach/task.defs

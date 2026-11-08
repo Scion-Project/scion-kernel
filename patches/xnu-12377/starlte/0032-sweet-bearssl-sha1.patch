@@ -125,36 +125,3 @@ index 5fd982b7..409533d5 100644
  /* This is not publicised in header, but exported in libkern.exports */
  void SHA1Final_r(SHA1_CTX *context, void *digest);
  void
-diff --git a/libkern/crypto/sweet_dec32be.c b/libkern/crypto/sweet_dec32be.c
-new file mode 100644
-index 00000000..7415ae83
---- /dev/null
-+++ b/libkern/crypto/sweet_dec32be.c
-@@ -0,0 +1,4 @@
-+/* BearSSL sources are fetched at an immutable commit by 0020-stage-bearssl.sh. */
-+#if defined(ARM64_BOARD_CONFIG_SWEET)
-+#include "sweet_bearssl/src/codec/dec32be.c"
-+#endif
-diff --git a/libkern/crypto/sweet_enc32be.c b/libkern/crypto/sweet_enc32be.c
-new file mode 100644
-index 00000000..179919bc
---- /dev/null
-+++ b/libkern/crypto/sweet_enc32be.c
-@@ -0,0 +1,4 @@
-+/* BearSSL sources are fetched at an immutable commit by 0020-stage-bearssl.sh. */
-+#if defined(ARM64_BOARD_CONFIG_SWEET)
-+#include "sweet_bearssl/src/codec/enc32be.c"
-+#endif
-diff --git a/libkern/crypto/sweet_sha1.c b/libkern/crypto/sweet_sha1.c
-new file mode 100644
-index 00000000..77365ed1
---- /dev/null
-+++ b/libkern/crypto/sweet_sha1.c
-@@ -0,0 +1,4 @@
-+/* BearSSL sources are fetched at an immutable commit by 0020-stage-bearssl.sh. */
-+#if defined(ARM64_BOARD_CONFIG_SWEET)
-+#include "sweet_bearssl/src/hash/sha1.c"
-+#endif
--- 
-2.53.0
-

@@ -103,21 +103,6 @@ index 2379e237..87b38987 100644
  			pte = ARM_PTE_ATTRINDX(CACHE_ATTRINDX_WRITECOMB);
  		} else {
  #if HAS_FEAT_XS
-diff --git a/osfmk/arm64/amcc_rorgn_pv_ctrr.c b/osfmk/arm64/amcc_rorgn_pv_ctrr.c
-new file mode 100644
-index 00000000..f0feaaf1
---- /dev/null
-+++ b/osfmk/arm64/amcc_rorgn_pv_ctrr.c
-@@ -0,0 +1,9 @@
-+/*
-+ * sweet: (12377 adds the paravirtualized-CTRR part) files.arm64 builds this for nos_arm_asm, but the source only ships
-+ * in Apple's closed per-SoC library. It implements the AMCC read-only region
-+ * (KTRR/CTRR kernel text lockdown), which needs Apple memory controller
-+ * hardware; nothing references it on SWEET (no KERNEL_INTEGRITY_KTRR/CTRR).
-+ */
-+#include <stdint.h>
-+
-+static const uint8_t sweet_no_amcc_rorgn __attribute__((unused)) = 0;
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 index ce16f45c..3cf71a82 100644
 --- a/osfmk/arm64/arm_vm_init.c
@@ -297,40 +282,6 @@ index 626279bf..b33fae1c 100644
  		A5_IRQ_EOI(iar);
  	} else if (intid < 16) {
  		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_IPI);
-diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
-index 159b9662..375258f6 100644
---- a/osfmk/arm64/sweet_early.c
-+++ b/osfmk/arm64/sweet_early.c
-@@ -78,19 +78,23 @@ a5_string(const char *s)
- void
- sweet_early_mark(unsigned int stage, const char *label)
- {
--	if (!a5_active || stage > 7) {
-+	if (!a5_active) {
- 		return;
- 	}
- 	a5_string("A5 XNU STAGE ");
--	sweet_early_putc((char)('0' + stage));
-+	if (stage >= 10) {
-+		sweet_early_putc((char)('0' + stage / 10 % 10));
-+	}
-+	sweet_early_putc((char)('0' + stage % 10));
- 	a5_string(": ");
- 	a5_string(label);
- 	sweet_early_putc('\n');
- 	__asm__ volatile("dsb sy" ::: "memory");
--	/* arm_vm_init replaces TTBR0; low physical aliases then cease to exist. */
--	if (stage == 7) {
--		a5_active = 0;
--	}
-+	/*
-+	 * 12377 port: stay on through arm_vm_init (the bootstrap TTBR0 still maps
-+	 * the scanout VA=PA); arm_vm_init calls sweet_early_disable() right
-+	 * before it drops TTBR0.
-+	 */
- }
- 
- void
 diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
 index 1586e751..9b6b3efd 100644
 --- a/osfmk/kern/exception.c

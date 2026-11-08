@@ -31,19 +31,6 @@ index e0001262..a470fc84 100644
  done:
  	return rvalue;
  }
-diff --git a/config/MASTER.arm64.sweet b/config/MASTER.arm64.sweet
-index 4c384edf..52567855 100644
---- a/config/MASTER.arm64.sweet
-+++ b/config/MASTER.arm64.sweet
-@@ -31,7 +31,7 @@
- #  BSD_RELEASE =    [ BSD_BASE ]
- #  BSD_DEV =        [ BSD_BASE config_vnguard ]
- #  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
--#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_ext_resolver config_searchfs config_volfs config_appledouble nullfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
-+#  FILESYS_BASE =   [ devfs fdesc fifo mockfs fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_ext_resolver config_searchfs config_volfs config_appledouble nullfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
- #  FILESYS_RELEASE= [ FILESYS_BASE ]
- #  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
- #  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
 diff --git a/iokit/Kernel/IOService.cpp b/iokit/Kernel/IOService.cpp
 index 6824ed8c..3a0fa8b8 100644
 --- a/iokit/Kernel/IOService.cpp

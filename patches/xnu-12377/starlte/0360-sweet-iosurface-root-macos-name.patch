@@ -7,31 +7,6 @@ of the same class: one surface table, one lock, the same user client. Without it
 macOS userland returns NULL (WindowServer, CoreAnimation, the Metal layer, sbmtltest step 2).
 (docs/MACOS-METAL.md; not compiled here: written against build/xnu-12377 at f1e38734.)
 ---
---- a/iokit/Kernel/arm/SweetSurface.cpp	2026-11-03 22:22:18
-+++ b/iokit/Kernel/arm/SweetSurface.cpp	2026-11-03 22:22:31
-@@ -448,9 +448,21 @@
- 	sweet_surface_init_lock();
- 	setProperty(kIOUserClientClassKey, "IOSurfaceRootUserClient");
- 	registerService();
--	IOLog("SWEET SURF: IOCoreSurfaceRoot registered\n");
-+	IOLog("SWEET SURF: %s registered\n", getName());
- 	return true;
- }
-+
-+/*
-+ * macOS IOSurface.framework (26.x; read in macOS 27.2's ____ioSurfaceConnectInternal_block_invoke)
-+ * finds the root with IOServiceNameMatching("IOSurfaceRoot"); iOS 16-26 use "IOCoreSurfaceRoot". The
-+ * same root under the macOS name: a second personality of the same code (one surface table, one lock,
-+ * the same IOSurfaceRootUserClient). iOS never asks for this name.
-+ */
-+class IOSurfaceRoot : public IOCoreSurfaceRoot {
-+	OSDeclareDefaultStructors(IOSurfaceRoot);
-+};
-+
-+OSDefineMetaClassAndStructors(IOSurfaceRoot, IOCoreSurfaceRoot);
- 
- class IOSurfaceRootUserClient : public IOUserClient {
- 	OSDeclareDefaultStructors(IOSurfaceRootUserClient);
 --- a/iokit/KernelConfigTables.cpp	2026-11-03 22:22:18
 +++ b/iokit/KernelConfigTables.cpp	2026-11-03 22:23:22
 @@ -71,6 +71,11 @@

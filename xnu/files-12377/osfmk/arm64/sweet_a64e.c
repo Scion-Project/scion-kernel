@@ -1,0 +1,796 @@
+/*
+ * sweet: user-mode emulation of the arm64e (ARMv8.3+) instructions the S9's
+ * cores lack (A55 is ARMv8.2, Mongoose M3 ARMv8.0), so iOS 26 userland, which
+ * is arm64e only, can run. Pointers are never signed on this kernel, so the
+ * pointer-authentication instructions reduce to their unauthenticated forms.
+ * This is the safety net behind the host-side translator (which rewrites
+ * these instructions in place) and covers code generated at run time (JIT).
+ *
+ *   PAC*, AUT*, XPAC* (register forms)    -> no change to the register
+ *   RETAA/RETAB, BRA*, BLRA*              -> RET / BR / BLR
+ *   LDRAA/LDRAB                           -> LDR (offset and pre-index forms)
+ *   PACGA                                 -> deterministic 32-bit hash << 32
+ *   FJCVTZS                               -> JavaScript ToInt32, Z = exact
+ *   FCADD (vector, H/S/D)                 -> lane-wise FADD/FSUB, user FPCR
+ *
+ * And the ARMv8.4+ classes macOS (built for M1+) uses: MSR/MRS DIT, STLUR/LDAPUR (LRCPC2),
+ *   FMLAL{2}/FMLSL{2} (FHM)               -> exact half->single widening, one FMADD, user FPCR
+ *   EOR3, BCAX, RAX1, XAR (SHA3)          -> 64-bit integer lane operations
+ *   SHA512H/H2/SU0/SU1 (SHA512)           -> the ARM ARM's SHA-512 round/schedule steps
+ *   SB                                    -> nothing (the trap's ERET is context synchronizing)
+ *
+ * And for the Mongoose M3 (ARMv8.0: no LSE, no LRCPC), so iOS 26 runs on the big cores too:
+ *   CAS*, CASP*, LD<op>*, ST<op>*, SWP*   -> compare-and-swap loop on the aligned 8 (16) bytes
+ *                                            around the target (sweet_copy_cas64/128, copyio.c),
+ *                                            full barriers (stronger than any A/L form)
+ *   LDAPR{B,H,,}                          -> load + DMB ISH
+ */
+#include <pexpert/arm64/board_config.h>
+
+#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
+#include <mach/mach_types.h>
+#include <mach/arm/thread_status.h>
+#include <arm64/proc_reg.h>
+#include <kern/thread.h>
+#include <kern/misc_protos.h>
+#include <libkern/OSAtomic.h>
+#include <arm/thread.h>
+
+bool sweet_a64e_emulate(arm_saved_state_t *state, uint32_t instr);
+/* sweet_a64e_fp.s: one FP add/sub of `size` (1 = H, 2 = S, 3 = D) under fpcr. */
+extern uint64_t sweet_a64e_fp_addsub(uint64_t a, uint64_t b, uint32_t op_size, uint32_t fpcr,
+    uint32_t *fpsr);
+
+uint64_t sweet_a64e_counts[8];
+
+/* Traps by process, for the STARLTE TOP report (bsd/dev/starlte_smp.c): a small open table. */
+#define SWEET_A64E_PIDS 32
+struct sweet_a64e_pid { int pid; uint64_t count; };
+struct sweet_a64e_pid sweet_a64e_pids[SWEET_A64E_PIDS];
+extern int proc_selfpid(void);
+
+static void
+sweet_a64e_count_pid(void)
+{
+	int pid = proc_selfpid();
+	unsigned h = (unsigned)pid % SWEET_A64E_PIDS;
+	for (unsigned i = 0; i < SWEET_A64E_PIDS; i++) {
+		struct sweet_a64e_pid *e = &sweet_a64e_pids[(h + i) % SWEET_A64E_PIDS];
+		if (e->pid == pid || e->pid == 0) {
+			e->pid = pid;
+			e->count++;
+			return;
+		}
+	}
+}
+
+/* r = 31 reads as XZR (sp31 false) or SP (sp31 true). */
+static uint64_t
+reg_get(arm_saved_state_t *ss, unsigned r, bool sp31)
+{
+	arm_saved_state64_t *s = saved_state64(ss);
+	if (r < 29) {
+		return s->x[r];
+	}
+	switch (r) {
+	case 29: return s->fp;
+	case 30: return s->lr;
+	default: return sp31 ? s->sp : 0;
+	}
+}
+
+static void
+reg_set(arm_saved_state_t *ss, unsigned r, bool sp31, uint64_t v)
+{
+	arm_saved_state64_t *s = saved_state64(ss);
+	if (r < 29) {
+		s->x[r] = v;
+	} else if (r == 29) {
+		s->fp = v;
+	} else if (r == 30) {
+		s->lr = v;
+	} else if (sp31) {
+		s->sp = v;
+	}
+}
+
+static uint64_t
+pacga_hash(uint64_t a, uint64_t b)
+{
+	uint64_t h = a * 0x9e3779b97f4a7c15ULL ^ (b + 0x632be59bd9b4e019ULL);
+	h ^= h >> 31;
+	h *= 0xbf58476d1ce4e5b9ULL;
+	h ^= h >> 29;
+	return h & 0xffffffff00000000ULL;
+}
+
+/* JavaScript ToInt32 of an IEEE double, integer arithmetic only. */
+static uint32_t
+fjcvtzs(uint64_t bits, bool *exact)
+{
+	int exp = (int)((bits >> 52) & 0x7ff);
+	uint64_t mant = bits & ((1ULL << 52) - 1);
+	bool neg = (bits >> 63) != 0;
+	uint32_t r;
+
+	*exact = false;
+	if (exp == 0x7ff) {
+		return 0;                       /* NaN, Inf */
+	}
+	if (exp == 0) {
+		*exact = (mant == 0 && !neg);   /* +0 exact; -0 and denormals not */
+		return 0;
+	}
+	int e = exp - 1075;                     /* value = (mant|1<<52) * 2^e */
+	mant |= 1ULL << 52;
+	bool frac = false;
+	if (e <= -53) {
+		frac = true;
+		r = 0;
+	} else if (e < 0) {
+		frac = (mant & ((1ULL << -e) - 1)) != 0;
+		r = (uint32_t)(mant >> -e);
+	} else if (e < 32) {
+		r = (uint32_t)(mant << e);
+	} else {
+		r = 0;                          /* multiple of 2^32 */
+	}
+	/* magnitude fits int32 exactly? (before the modulo) */
+	bool in_range;
+	if (e >= 32) {
+		in_range = false;
+	} else if (e >= 0) {
+		in_range = e <= 11 && (mant << e) <= (neg ? 0x80000000ULL : 0x7fffffffULL);
+	} else {
+		uint64_t m = mant >> -e;
+		in_range = m <= (neg ? 0x80000000ULL : 0x7fffffffULL);
+	}
+	if (neg) {
+		r = (uint32_t)(0u - r);
+	}
+	*exact = in_range && !frac;
+	return r;
+}
+
+static bool
+emulate_fcadd(arm_saved_state_t *ss, uint32_t w)
+{
+	thread_t th = current_thread();
+	if (th->machine.uNeon == NULL) {
+		return false;
+	}
+	arm_neon_saved_state64_t *ns = &th->machine.uNeon->ns_64;
+	unsigned size = (w >> 22) & 3, q = (w >> 30) & 1, rot270 = (w >> 12) & 1;
+	unsigned rd = w & 31, rn = (w >> 5) & 31, rm = (w >> 16) & 31;
+	if (size == 0 || (size == 3 && !q)) {
+		return false;
+	}
+	/* The helper's FADD/FSUB H needs FP16 arithmetic, which the Mongoose M3 lacks: at EL1 that
+	 * is an undefined kernel instruction (a panic). Refuse, so sleh.c pins the thread to an
+	 * A55, where the FCADD traps again and is emulated. */
+	if (size == 1 && (__builtin_arm_rsr64("MIDR_EL1") >> 24) == 0x53) {
+		return false;
+	}
+	unsigned esize = 8u << size;            /* 16, 32, 64 bits */
+	unsigned lanes = (q ? 128 : 64) / esize;
+	uint64_t mask = esize == 64 ? ~0ULL : ((1ULL << esize) - 1);
+	uint8_t n[16], m[16], d[16];
+	memcpy(n, &ns->v.q[rn], 16);
+	memcpy(m, &ns->v.q[rm], 16);
+	memset(d, 0, 16);
+	uint32_t fpsr = 0;
+	for (unsigned i = 0; i < lanes; i += 2) {
+		uint64_t nre = 0, nim = 0, mre = 0, mim = 0;
+		memcpy(&nre, n + i * esize / 8, esize / 8);
+		memcpy(&nim, n + (i + 1) * esize / 8, esize / 8);
+		memcpy(&mre, m + i * esize / 8, esize / 8);
+		memcpy(&mim, m + (i + 1) * esize / 8, esize / 8);
+		/* rot 90: re = n.re - m.im, im = n.im + m.re; rot 270: re = n.re + m.im, im = n.im - m.re */
+		uint64_t re = sweet_a64e_fp_addsub(nre, mim, (rot270 ? 0 : 1) << 4 | size, ns->fpcr, &fpsr);
+		uint64_t im = sweet_a64e_fp_addsub(nim, mre, (rot270 ? 1 : 0) << 4 | size, ns->fpcr, &fpsr);
+		re &= mask;
+		im &= mask;
+		memcpy(d + i * esize / 8, &re, esize / 8);
+		memcpy(d + (i + 1) * esize / 8, &im, esize / 8);
+	}
+	memcpy(&ns->v.q[rd], d, 16);            /* 64-bit form clears the top half */
+	ns->fpsr |= fpsr;
+	(void)ss;
+	return true;
+}
+
+/* ---- FEAT_DotProd: SDOT / UDOT (vector and by element). macOS 26's opendirectoryd and others use
+ * them; on this SoC they trap on every core (2026-11-04: opendirectoryd SIGILL 0x6e819440 with no
+ * M3 pin). Integer only: d.s[i] += sum of n.b[4i+j] * m.b[4i+j] (or m.b[4*index+j]), wrapping. */
+static bool
+emulate_dot(uint32_t w)
+{
+	bool vec = (w & 0xBFA0FC00) == 0x0E809400 || (w & 0xBFA0FC00) == 0x2E809400;   /* size 10 */
+	bool elem = (w & 0xBFC0F400) == 0x0F80E000 || (w & 0xBFC0F400) == 0x2F80E000;
+	if (!vec && !elem) {
+		return false;
+	}
+	thread_t th = current_thread();
+	if (th->machine.uNeon == NULL) {
+		return false;
+	}
+	arm_neon_saved_state64_t *ns = &th->machine.uNeon->ns_64;
+	unsigned q = (w >> 30) & 1, u = (w >> 29) & 1, rd = w & 31, rn = (w >> 5) & 31;
+	unsigned rm, index = 0;
+	if (vec) {
+		rm = (w >> 16) & 31;
+	} else {
+		rm = (w >> 16) & 31;                    /* M:Rm (size 10: M is bit 20, part of Rm) */
+		index = ((w >> 11) & 1) << 1 | ((w >> 21) & 1);
+	}
+	uint8_t n[16], m[16];
+	uint32_t d[4];
+	memcpy(n, &ns->v.q[rn], 16);
+	memcpy(m, &ns->v.q[rm], 16);
+	memcpy(d, &ns->v.q[rd], 16);
+	unsigned lanes = q ? 4 : 2;
+	for (unsigned i = 0; i < lanes; i++) {
+		int64_t acc = 0;
+		for (unsigned j = 0; j < 4; j++) {
+			unsigned mi = vec ? 4 * i + j : 4 * index + j;
+			acc += u ? (int64_t)n[4 * i + j] * m[mi] : (int64_t)(int8_t)n[4 * i + j] * (int8_t)m[mi];
+		}
+		d[i] = (uint32_t)(d[i] + (uint32_t)acc);
+	}
+	if (!q) {
+		d[2] = d[3] = 0;
+	}
+	memcpy(&ns->v.q[rd], d, 16);
+	return true;
+}
+
+/* ---- FEAT_FHM: FMLAL, FMLAL2, FMLSL, FMLSL2 (vector and by element) ------------------------ */
+
+/* sweet_a64e_fp.s: a + n * m in single precision, one rounding, under fpcr. */
+extern uint32_t sweet_a64e_fp_fmadd_s(uint32_t a, uint32_t n, uint32_t m, uint32_t fpcr, uint32_t *fpsr);
+
+#define SWEET_FPCR_FZ16 (1u << 19)
+#define SWEET_FPCR_FZ   (1u << 24)
+#define SWEET_FPCR_DN   (1u << 25)
+#define SWEET_FPSR_IOC  (1u << 0)
+#define SWEET_FPSR_IDC  (1u << 7)
+
+static bool h_nan(uint16_t h)  { return (h & 0x7c00) == 0x7c00 && (h & 0x3ff) != 0; }
+static bool h_snan(uint16_t h) { return h_nan(h) && (h & 0x200) == 0; }
+static bool h_inf(uint16_t h)  { return (h & 0x7fff) == 0x7c00; }
+static bool h_zero(uint16_t h) { return (h & 0x7fff) == 0; }
+static bool s_nan(uint32_t s)  { return (s & 0x7f800000) == 0x7f800000 && (s & 0x7fffff) != 0; }
+static bool s_snan(uint32_t s) { return s_nan(s) && (s & 0x400000) == 0; }
+
+/* An IEEE half (not a NaN) as the single with the same value: every half is exact in single. */
+static uint32_t
+h_to_s(uint16_t h)
+{
+	uint32_t sign = (uint32_t)(h & 0x8000) << 16, exp = (h >> 10) & 0x1f, frac = h & 0x3ff;
+	if (exp == 0x1f) {
+		return sign | 0x7f800000;               /* infinity */
+	}
+	if (exp == 0) {
+		if (frac == 0) {
+			return sign;
+		}
+		int e = -14;                            /* subnormal 0.frac * 2^-14: normalize */
+		while ((frac & 0x400) == 0) {
+			frac <<= 1;
+			e--;
+		}
+		return sign | (uint32_t)(e + 127) << 23 | (frac & 0x3ff) << 13;
+	}
+	return sign | (exp - 15 + 127) << 23 | frac << 13;
+}
+
+/*
+ * One lane of FMLAL/FMLSL: FPMulAddH(a, n, m) of the ARM ARM (n already negated for FMLSL).
+ * The halves are unpacked with AHP = 0 and flushed by FZ16 (not FZ, and without IDC), the
+ * addend by FZ (with IDC) even when a NaN wins; NaNs are picked as FPProcessNaNs3H does:
+ * signalling first, in the order addend, n, m, and a half NaN is widened by FPConvertNaN. Without NaNs, n * m of two halves is exact in single precision
+ * (22-bit significand, exponent -48..32), so a single FMADD of the widened values rounds exactly
+ * once, like FPMulAddH, with the same infinity, zero-sign, FZ (addend and result) and flag rules.
+ */
+static uint32_t
+fmlal_lane(uint32_t a, uint16_t n, uint16_t m, uint32_t fpcr, uint32_t *fpsr)
+{
+	if (fpcr & SWEET_FPCR_FZ16) {
+		if ((n & 0x7c00) == 0) {
+			n &= 0x8000;
+		}
+		if ((m & 0x7c00) == 0) {
+			m &= 0x8000;
+		}
+	}
+	if (s_nan(a) || h_nan(n) || h_nan(m)) {
+		if ((fpcr & SWEET_FPCR_FZ) && (a & 0x7f800000) == 0 && (a & 0x7fffff) != 0) {
+			*fpsr |= SWEET_FPSR_IDC;        /* FPUnpack flushed the addend before the NaN pick */
+		}
+		unsigned pick = s_snan(a) ? 0 : h_snan(n) ? 1 : h_snan(m) ? 2 : s_nan(a) ? 0 : h_nan(n) ? 1 : 2;
+		bool snan = pick == 0 ? s_snan(a) : h_snan(pick == 1 ? n : m);
+		if (snan) {
+			*fpsr |= SWEET_FPSR_IOC;
+		}
+		/* addend a quiet NaN and n * m = 0 * inf: the default NaN, Invalid */
+		if (!snan && pick == 0 && ((h_inf(n) && h_zero(m)) || (h_zero(n) && h_inf(m)))) {
+			*fpsr |= SWEET_FPSR_IOC;
+			return 0x7fc00000;
+		}
+		if (fpcr & SWEET_FPCR_DN) {
+			return 0x7fc00000;
+		}
+		if (pick == 0) {
+			return a | 0x400000;
+		}
+		uint16_t h = pick == 1 ? n : m;
+		return (uint32_t)(h & 0x8000) << 16 | 0x7fc00000 | (uint32_t)(h & 0x1ff) << 13;
+	}
+	return sweet_a64e_fp_fmadd_s(a, h_to_s(n), h_to_s(m), fpcr, fpsr);
+}
+
+/*
+ * FMLAL{2} / FMLSL{2} Vd.2S|4S, Vn.2H|4H, Vm.2H|4H   (vector)
+ * FMLAL{2} / FMLSL{2} Vd.2S|4S, Vn.2H|4H, Vm.H[i]    (by element, Vm in V0-V15, i = H:L:M)
+ * Each single lane d[e] += n[e] * m[e] (or m[i]), with n negated for FMLSL. The 2 forms take
+ * the upper half of the Vn (and Vm vector) halfwords that the plain forms take the lower half of.
+ */
+static bool
+emulate_fmlal(uint32_t w)
+{
+	thread_t th = current_thread();
+	if (th->machine.uNeon == NULL) {
+		return false;
+	}
+	arm_neon_saved_state64_t *ns = &th->machine.uNeon->ns_64;
+	bool q = (w >> 30) & 1, upper = (w >> 29) & 1, elem = (w >> 24) & 1;
+	unsigned rd = w & 31, rn = (w >> 5) & 31;
+	unsigned lanes = q ? 4 : 2, base = upper ? lanes : 0;
+	bool sub;
+	uint16_t n[8], m[8];
+	uint32_t d[4], r[4] = { 0, 0, 0, 0 };
+
+	memcpy(n, &ns->v.q[rn], 16);
+	memcpy(d, &ns->v.q[rd], 16);
+	if (elem) {
+		unsigned rm = (w >> 16) & 15;
+		unsigned idx = ((w >> 11) & 1) << 2 | ((w >> 21) & 1) << 1 | ((w >> 20) & 1);
+		uint16_t v[8];
+		memcpy(v, &ns->v.q[rm], 16);
+		for (unsigned e = 0; e < 8; e++) {
+			m[e] = v[idx];
+		}
+		sub = (w >> 14) & 1;
+	} else {
+		memcpy(m, &ns->v.q[(w >> 16) & 31], 16);
+		sub = (w >> 23) & 1;
+	}
+	uint32_t fpsr = 0;
+	for (unsigned e = 0; e < lanes; e++) {
+		uint16_t a = n[base + e];
+		if (sub) {
+			a ^= 0x8000;                    /* FPNeg, before the NaN checks (FEAT_AFP absent) */
+		}
+		r[e] = fmlal_lane(d[e], a, elem ? m[0] : m[base + e], ns->fpcr, &fpsr);
+	}
+	memcpy(&ns->v.q[rd], r, 16);            /* the 2S form clears the top half */
+	ns->fpsr |= fpsr;
+	return true;
+}
+
+
+/* ---- FEAT_SHA3 (EOR3, BCAX, RAX1, XAR) and FEAT_SHA512 ---------------------------------------- */
+
+static uint64_t
+ror64(uint64_t x, unsigned r)
+{
+	return r == 0 ? x : (x >> r) | (x << (64 - r));
+}
+
+/*
+ * Integer operations on whole vectors, so they run on either core. EOR3/BCAX/XAR also come
+ * from the compiler (three-way XOR, and-not, xor-rotate patterns with +sha3: libsystem_m,
+ * Foundation, CoreGraphics, BoringSSL), not only from crypto code.
+ */
+static bool
+emulate_sha3_sha512(uint32_t w)
+{
+	thread_t th = current_thread();
+	if (th->machine.uNeon == NULL) {
+		return false;
+	}
+	arm_neon_saved_state64_t *ns = &th->machine.uNeon->ns_64;
+	unsigned rd = w & 31, rn = (w >> 5) & 31, rm = (w >> 16) & 31, ra = (w >> 10) & 31;
+	uint64_t n[2], m[2], d[2], a[2], r[2];
+	memcpy(n, &ns->v.q[rn], 16);
+	memcpy(m, &ns->v.q[rm], 16);
+	memcpy(d, &ns->v.q[rd], 16);
+	memcpy(a, &ns->v.q[ra], 16);
+#define SHA512_S0(x)    (ror64(x, 28) ^ ror64(x, 34) ^ ror64(x, 39))
+#define SHA512_S1(x)    (ror64(x, 14) ^ ror64(x, 18) ^ ror64(x, 41))
+#define SHA512_s0(x)    (ror64(x, 1) ^ ror64(x, 8) ^ ((x) >> 7))
+#define SHA512_s1(x)    (ror64(x, 19) ^ ror64(x, 61) ^ ((x) >> 6))
+#define SHA512_CH(x, y, z)  (((x) & (y)) ^ (~(x) & (z)))
+#define SHA512_MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+	if ((w & 0xFFE08000) == 0xCE000000) {                   /* EOR3 Vd.16B, Vn, Vm, Va */
+		r[0] = n[0] ^ m[0] ^ a[0];
+		r[1] = n[1] ^ m[1] ^ a[1];
+	} else if ((w & 0xFFE08000) == 0xCE200000) {            /* BCAX Vd.16B, Vn, Vm, Va: n ^ (m & ~a) */
+		r[0] = n[0] ^ (m[0] & ~a[0]);
+		r[1] = n[1] ^ (m[1] & ~a[1]);
+	} else if ((w & 0xFFE0FC00) == 0xCE608C00) {            /* RAX1 Vd.2D, Vn, Vm: n ^ rol(m, 1) */
+		r[0] = n[0] ^ ror64(m[0], 63);
+		r[1] = n[1] ^ ror64(m[1], 63);
+	} else if ((w & 0xFFE00000) == 0xCE800000) {            /* XAR Vd.2D, Vn, Vm, #imm6: ror(n ^ m) */
+		unsigned imm = (w >> 10) & 63;
+		r[0] = ror64(n[0] ^ m[0], imm);
+		r[1] = ror64(n[1] ^ m[1], imm);
+	} else if ((w & 0xFFE0FC00) == 0xCE608000) {            /* SHA512H Qd, Qn, Vm.2D */
+		r[1] = d[1] + SHA512_S1(m[1]) + SHA512_CH(m[1], n[0], n[1]);
+		uint64_t t = r[1] + m[0];
+		r[0] = d[0] + SHA512_S1(t) + SHA512_CH(t, m[1], n[0]);
+	} else if ((w & 0xFFE0FC00) == 0xCE608400) {            /* SHA512H2 Qd, Qn, Vm.2D */
+		r[1] = d[1] + SHA512_S0(m[0]) + SHA512_MAJ(n[0], m[1], m[0]);
+		r[0] = d[0] + SHA512_S0(r[1]) + SHA512_MAJ(r[1], m[0], m[1]);
+	} else if ((w & 0xFFE0FC00) == 0xCE608800) {            /* SHA512SU1 Vd.2D, Vn.2D, Vm.2D */
+		r[0] = d[0] + SHA512_s1(n[0]) + m[0];
+		r[1] = d[1] + SHA512_s1(n[1]) + m[1];
+	} else if ((w & 0xFFFFFC00) == 0xCEC08000) {            /* SHA512SU0 Vd.2D, Vn.2D */
+		r[0] = d[0] + SHA512_s0(d[1]);
+		r[1] = d[1] + SHA512_s0(n[0]);
+	} else {
+		return false;
+	}
+#undef SHA512_S0
+#undef SHA512_S1
+#undef SHA512_s0
+#undef SHA512_s1
+#undef SHA512_CH
+#undef SHA512_MAJ
+	memcpy(&ns->v.q[rd], r, 16);
+	return true;
+}
+
+/* ---- LSE and LRCPC for the Mongoose M3 ------------------------------------------------------ */
+
+extern int sweet_copy_cas64(user_addr_t user_addr, uint64_t expected, uint64_t desired, uint64_t *old);
+extern int sweet_copy_cas128(user_addr_t user_addr, const uint64_t expected[2], const uint64_t desired[2],
+    uint64_t old[2]);
+extern int copyin_atomic64(const user_addr_t user_addr, uint64_t *kernel_addr);
+
+uint64_t sweet_lse_counts[4];   /* CAS, CASP, LD<op>/SWP, LDAPR */
+uint64_t sweet_m3_pins;          /* threads pinned to an A55 (sleh.c) */
+
+/* Where the traps come from: an open table of user PCs (racy counts are fine), read and reset by the
+ * STARLTE TOP report (bsd/dev/starlte_smp.c). Shared-cache PCs are the same in every process. */
+#define SWEET_LSE_SITES 512
+struct sweet_lse_site { uint64_t pc, count; };
+struct sweet_lse_site sweet_lse_sites[SWEET_LSE_SITES];
+
+static void
+lse_site(uint64_t pc)
+{
+	unsigned h = (unsigned)((pc >> 2) * 0x9E3779B1u) % SWEET_LSE_SITES;
+	for (unsigned i = 0; i < 8; i++) {
+		struct sweet_lse_site *e = &sweet_lse_sites[(h + i) % SWEET_LSE_SITES];
+		if (e->pc == pc || e->pc == 0) {
+			e->pc = pc;
+			e->count++;
+			return;
+		}
+	}
+}
+
+static int64_t
+sext(uint64_t v, unsigned bits)
+{
+	return bits == 64 ? (int64_t)v : (int64_t)(v << (64 - bits)) >> (64 - bits);
+}
+
+/* An atomic op on the `bytes`-wide field at addr: *old = the field before; false = fault/misaligned. */
+static bool
+lse_rmw(user_addr_t addr, unsigned bytes, unsigned op, uint64_t operand, uint64_t compare, uint64_t *old)
+{
+	if (addr & (bytes - 1)) {
+		return false;
+	}
+	unsigned bits = bytes * 8;
+	user_addr_t base = addr & ~7ULL;
+	unsigned shift = (unsigned)(addr & 7) * 8;
+	uint64_t mask = bits == 64 ? ~0ULL : ((1ULL << bits) - 1) << shift;
+	uint64_t word;
+	if (copyin_atomic64(base, &word) != 0) {
+		return false;
+	}
+	for (int tries = 0; tries < 100000; tries++) {
+		uint64_t field = (word & mask) >> shift, next;
+		switch (op) {
+		case 0: next = field + operand; break;                                   /* ADD */
+		case 1: next = field & ~operand; break;                                  /* CLR */
+		case 2: next = field ^ operand; break;                                   /* EOR */
+		case 3: next = field | operand; break;                                   /* SET */
+		case 4: next = sext(field, bits) > sext(operand, bits) ? field : operand; break; /* SMAX */
+		case 5: next = sext(field, bits) < sext(operand, bits) ? field : operand; break; /* SMIN */
+		case 6: next = field > (operand & (mask >> shift)) ? field : operand; break;     /* UMAX */
+		case 7: next = field < (operand & (mask >> shift)) ? field : operand; break;     /* UMIN */
+		case 8: next = operand; break;                                           /* SWP */
+		default:                                                                 /* CAS */
+			if (field != (compare & (mask >> shift))) {
+				/* no store, but the same ordering as a successful one */
+				__asm__ volatile ("dmb ish" ::: "memory");
+				*old = field;
+				return true;
+			}
+			next = operand;
+			break;
+		}
+		uint64_t desired = (word & ~mask) | ((next << shift) & mask), seen = 0;
+		if (sweet_copy_cas64(base, word, desired, &seen) != 0) {
+			return false;
+		}
+		if (seen == word) {
+			*old = field;
+			return true;
+		}
+		word = seen;
+	}
+	return false;
+}
+
+static bool
+sweet_lse_emulate(arm_saved_state_t *ss, uint32_t w)
+{
+	uint64_t pc = get_saved_state_pc(ss);
+	unsigned rt = w & 31, rn = (w >> 5) & 31, rs = (w >> 16) & 31;
+	if ((w & 0x3fa07c00) == 0x08a07c00 || (w & 0xbfa07c00) == 0x08207c00 || (w & 0x3f200c00) == 0x38200000) {
+		lse_site(pc);
+	}
+	user_addr_t addr = (user_addr_t)reg_get(ss, rn, true);
+
+	if ((w & 0x3fa07c00) == 0x08a07c00) {                   /* CAS{A,L,AL}{B,H,,} */
+		unsigned bytes = 1u << (w >> 30);
+		uint64_t old;
+		if (bytes == 8) {                                   /* the common case: one CAS on the word itself */
+			if ((addr & 7) || sweet_copy_cas64(addr, reg_get(ss, rs, false), reg_get(ss, rt, false), &old) != 0) {
+				return false;
+			}
+			reg_set(ss, rs, false, old);
+			sweet_lse_counts[0]++;
+			set_saved_state_pc(ss, pc + 4);
+			return true;
+		}
+		if (!lse_rmw(addr, bytes, 9, reg_get(ss, rt, false), reg_get(ss, rs, false), &old)) {
+			return false;
+		}
+		reg_set(ss, rs, false, old);
+		sweet_lse_counts[0]++;
+	} else if ((w & 0xbfa07c00) == 0x08207c00) {            /* CASP{A,L,AL} Ws/Xs pairs */
+		if ((rs & 1) || (rt & 1)) {
+			return false;
+		}
+		bool x = (w >> 30) & 1;
+		if (!x) {
+			uint64_t cmp = (reg_get(ss, rs, false) & 0xffffffffULL) | reg_get(ss, rs + 1, false) << 32;
+			uint64_t nv = (reg_get(ss, rt, false) & 0xffffffffULL) | reg_get(ss, rt + 1, false) << 32;
+			uint64_t old;
+			if (!lse_rmw(addr, 8, 9, nv, cmp, &old)) {
+				return false;
+			}
+			reg_set(ss, rs, false, old & 0xffffffffULL);
+			reg_set(ss, rs + 1, false, old >> 32);
+		} else {
+			uint64_t cmp[2] = { reg_get(ss, rs, false), reg_get(ss, rs + 1, false) };
+			uint64_t nv[2] = { reg_get(ss, rt, false), reg_get(ss, rt + 1, false) };
+			uint64_t old[2];
+			if (sweet_copy_cas128(addr, cmp, nv, old) != 0) {
+				return false;
+			}
+			reg_set(ss, rs, false, old[0]);
+			reg_set(ss, rs + 1, false, old[1]);
+		}
+		sweet_lse_counts[1]++;
+	} else if ((w & 0x3f200c00) == 0x38200000) {            /* LD<op>, SWP, LDAPR */
+		unsigned bytes = 1u << (w >> 30), o3 = (w >> 15) & 1, opc = (w >> 12) & 7;
+		uint64_t old;
+		if (o3 && opc == 4 && rs == 31) {                   /* LDAPR{B,H,,} */
+			uint64_t word;
+			if ((addr & (bytes - 1)) || copyin_atomic64(addr & ~7ULL, &word) != 0) {
+				return false;
+			}
+			__asm__ volatile ("dmb ish" ::: "memory");
+			unsigned shift = (unsigned)(addr & 7) * 8;
+			old = bytes == 8 ? word : (word >> shift) & ((1ULL << (bytes * 8)) - 1);
+			reg_set(ss, rt, false, old);
+			sweet_lse_counts[3]++;
+			set_saved_state_pc(ss, pc + 4);
+			return true;
+		}
+		if (o3 && opc != 0) {
+			return false;
+		}
+		if (!lse_rmw(addr, bytes, o3 ? 8 : opc, reg_get(ss, rs, false), 0, &old)) {
+			return false;
+		}
+		reg_set(ss, rt, false, old);                        /* Rt = 31: ST<op>, the result goes to XZR */
+		sweet_lse_counts[2]++;
+	} else {
+		return false;
+	}
+	set_saved_state_pc(ss, pc + 4);
+	return true;
+}
+
+bool
+sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
+{
+	/* LSE/LRCPC (the M3s, millions a second) first: they are not arm64e and not counted per pid */
+	if (((w & 0x3f200c00) == 0x38200000 || (w & 0x3fa07c00) == 0x08a07c00 || (w & 0xbfa07c00) == 0x08207c00) &&
+	    sweet_lse_emulate(ss, w)) {
+		return true;
+	}
+	sweet_a64e_count_pid();
+	uint64_t pc = get_saved_state_pc(ss);
+
+	if ((w & 0xFFFFFBFF) == 0xD65F0BFF) {                   /* RETAA, RETAB */
+		set_saved_state_pc(ss, reg_get(ss, 30, false));
+		sweet_a64e_counts[0]++;
+		return true;
+	}
+	if ((w & 0xFE9FF800) == 0xD61F0800) {                   /* BRA*, BLRA* (Z and register forms) */
+		unsigned op = (w >> 21) & 3;
+		uint64_t target = reg_get(ss, (w >> 5) & 31, false);
+		if (op == 1) {
+			reg_set(ss, 30, false, pc + 4);
+		} else if (op != 0) {
+			return false;
+		}
+		set_saved_state_pc(ss, target);
+		sweet_a64e_counts[1]++;
+		return true;
+	}
+	if ((w & 0xFF200400) == 0xF8200400) {                   /* LDRAA, LDRAB */
+		unsigned rt = w & 31, rn = (w >> 5) & 31;
+		int64_t imm = (int64_t)(((w >> 12) & 0x1ff) | ((w >> 22) & 1) << 9);
+		if (imm & 0x200) {
+			imm -= 0x400;
+		}
+		uint64_t addr = reg_get(ss, rn, true) + (uint64_t)(imm * 8);
+		uint64_t val;
+		if (copyin((user_addr_t)addr, &val, sizeof(val)) != 0) {
+			return false;                           /* let the fault become a crash */
+		}
+		if (w & (1u << 11)) {
+			reg_set(ss, rn, true, addr);
+		}
+		reg_set(ss, rt, false, val);
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[2]++;
+		return true;
+	}
+	if ((w & 0xFFFF8000) == 0xDAC10000 && ((w >> 10) & 0x3f) <= 17) {
+		/* PACIA..AUTDB, PACIZA..AUTDZB, XPACI, XPACD: no signature to add or check */
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[3]++;
+		return true;
+	}
+	if ((w & 0xFFE0FC00) == 0x9AC03000) {                   /* PACGA Xd, Xn, Xm|SP */
+		uint64_t v = pacga_hash(reg_get(ss, (w >> 5) & 31, false), reg_get(ss, (w >> 16) & 31, true));
+		reg_set(ss, w & 31, false, v);
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[4]++;
+		return true;
+	}
+	if ((w & 0xFFFFFC00) == 0x1E7E0000) {                   /* FJCVTZS Wd, Dn */
+		thread_t th = current_thread();
+		if (th->machine.uNeon == NULL) {
+			return false;
+		}
+		uint64_t bits;
+		memcpy(&bits, &th->machine.uNeon->ns_64.v.q[(w >> 5) & 31], sizeof(bits));
+		bool exact;
+		uint32_t r = fjcvtzs(bits, &exact);
+		reg_set(ss, w & 31, false, r);
+		uint32_t cpsr = get_saved_state_cpsr(ss) & ~PSR64_NZCV_MASK;
+		set_saved_state_cpsr(ss, cpsr | (exact ? PSR64_Z : 0));
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[5]++;
+		return true;
+	}
+	if (emulate_dot(w)) {                                   /* SDOT / UDOT */
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[7]++;
+		return true;
+	}
+	if ((w & 0xBF20EC00) == 0x2E00E400) {                   /* FCADD (vector) */
+		if (!emulate_fcadd(ss, w)) {
+			return false;
+		}
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[6]++;
+		return true;
+	}
+	/* FEAT_DIT (ARMv8.4; macOS's corecrypto sets and restores it around every operation): data-
+	 * independent timing is a hint, so MSR DIT is dropped and MRS DIT reads 0. */
+	if ((w & 0xFFFFF0FF) == 0xD503405F ||                   /* MSR DIT, #imm */
+	    (w & 0xFFFFFFE0) == 0xD51B42A0) {                   /* MSR DIT, Xt */
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[7]++;
+		return true;
+	}
+	if ((w & 0xFFFFFFE0) == 0xD53B42A0) {                   /* MRS Xt, DIT */
+		reg_set(ss, w & 31, false, 0);
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[7]++;
+		return true;
+	}
+	/* FEAT_LRCPC2 (ARMv8.4): STLUR, LDAPUR, LDAPURS* (unscaled signed 9-bit offset). One access
+	 * through copyin / copyout with a full barrier on the release / acquire side. */
+	if ((w & 0x3F200C00) == 0x19000000) {
+		unsigned size = w >> 30, opc = (w >> 22) & 3, rt = w & 31, rn = (w >> 5) & 31;
+		unsigned bytes = 1U << size;
+		if (opc >= 2 && size == 3) {
+			return false;                           /* unallocated */
+		}
+		int64_t imm = (int64_t)((w >> 12) & 0x1ff);
+		if (imm & 0x100) {
+			imm -= 0x200;
+		}
+		uint64_t addr = reg_get(ss, rn, true) + (uint64_t)imm;
+		uint64_t v = 0;
+		if (opc == 0) {                                 /* STLUR: release */
+			v = reg_get(ss, rt, false);
+			__asm__ volatile ("dmb ish" ::: "memory");
+			if (copyout(&v, (user_addr_t)addr, bytes) != 0) {
+				return false;
+			}
+		} else {                                        /* LDAPUR / LDAPURS: acquire */
+			if (copyin((user_addr_t)addr, &v, bytes) != 0) {
+				return false;
+			}
+			__asm__ volatile ("dmb ish" ::: "memory");
+			if (opc >= 2 && bytes < 8) {            /* sign extend to 64 (opc 2) or 32 (opc 3) bits */
+				unsigned sh = 64 - 8 * bytes;
+				v = (uint64_t)((int64_t)(v << sh) >> sh);
+				if (opc == 3) {
+					v &= 0xffffffffULL;
+				}
+			}
+			reg_set(ss, rt, false, v);
+		}
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[7]++;
+		return true;
+	}
+	/* FEAT_FHM (ARMv8.2 optional, every Apple M1+): FMLAL/FMLAL2/FMLSL/FMLSL2 */
+	if ((w & 0xBF60FC00) == 0x0E20EC00 ||                   /* FMLAL, FMLSL (vector) */
+	    (w & 0xBF60FC00) == 0x2E20CC00 ||                   /* FMLAL2, FMLSL2 (vector) */
+	    (w & 0xBFC0B400) == 0x0F800000 ||                   /* FMLAL, FMLSL (by element) */
+	    (w & 0xBFC0B400) == 0x2F808000) {                   /* FMLAL2, FMLSL2 (by element) */
+		if (!emulate_fmlal(w)) {
+			return false;
+		}
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[7]++;
+		return true;
+	}
+	/* FEAT_SHA3 / FEAT_SHA512 (ARMv8.2 optional, every Apple M1+; both S9 cores lack them) */
+	if ((w & 0xFFC08000) == 0xCE000000 ||                   /* EOR3, BCAX */
+	    (w & 0xFFE0F000) == 0xCE608000 ||                   /* SHA512H, SHA512H2, SHA512SU1, RAX1 */
+	    (w & 0xFFE00000) == 0xCE800000 ||                   /* XAR */
+	    (w & 0xFFFFFC00) == 0xCEC08000) {                   /* SHA512SU0 */
+		if (!emulate_sha3_sha512(w)) {
+			return false;
+		}
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[7]++;
+		return true;
+	}
+	/* FEAT_SB (ARMv8.5): the trap and its exception return already synchronize the context */
+	if (w == 0xD50330FF) {
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[7]++;
+		return true;
+	}
+	return false;
+}
+#endif /* SWEET || A5XELTE */

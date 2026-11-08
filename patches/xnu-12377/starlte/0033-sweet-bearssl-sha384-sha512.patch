@@ -125,36 +125,3 @@ index ec2cf85e..c954dd27 100644
  #else
  
  /* As these are part of the KPI, we need to stub them out for any kernel configuration that does not support SHA2. */
-diff --git a/libkern/crypto/sweet_dec64be.c b/libkern/crypto/sweet_dec64be.c
-new file mode 100644
-index 00000000..15d924c7
---- /dev/null
-+++ b/libkern/crypto/sweet_dec64be.c
-@@ -0,0 +1,4 @@
-+/* BearSSL sources are fetched at an immutable commit by 0020-stage-bearssl.sh. */
-+#if defined(ARM64_BOARD_CONFIG_SWEET)
-+#include "sweet_bearssl/src/codec/dec64be.c"
-+#endif
-diff --git a/libkern/crypto/sweet_enc64be.c b/libkern/crypto/sweet_enc64be.c
-new file mode 100644
-index 00000000..b9a8e87d
---- /dev/null
-+++ b/libkern/crypto/sweet_enc64be.c
-@@ -0,0 +1,4 @@
-+/* BearSSL sources are fetched at an immutable commit by 0020-stage-bearssl.sh. */
-+#if defined(ARM64_BOARD_CONFIG_SWEET)
-+#include "sweet_bearssl/src/codec/enc64be.c"
-+#endif
-diff --git a/libkern/crypto/sweet_sha2big.c b/libkern/crypto/sweet_sha2big.c
-new file mode 100644
-index 00000000..a4052546
---- /dev/null
-+++ b/libkern/crypto/sweet_sha2big.c
-@@ -0,0 +1,4 @@
-+/* BearSSL sources are fetched at an immutable commit by 0020-stage-bearssl.sh. */
-+#if defined(ARM64_BOARD_CONFIG_SWEET)
-+#include "sweet_bearssl/src/hash/sha2big.c"
-+#endif
--- 
-2.53.0
-

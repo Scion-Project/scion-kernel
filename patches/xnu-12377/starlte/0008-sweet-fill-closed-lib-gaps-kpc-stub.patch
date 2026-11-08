@@ -21,30 +21,6 @@ port: clean_mmu_dcache label placed before the new ARM64_PROLOG. kpc.c stub drop
  create mode 100644 osfmk/arm64/amcc_rorgn_ppl_amcc.c
  create mode 100644 osfmk/arm64/amcc_rorgn_ppl_ctrr3.c
 
-diff --git a/config/MASTER.arm64.sweet b/config/MASTER.arm64.sweet
-index 347efeef..4c384edf 100644
---- a/config/MASTER.arm64.sweet
-+++ b/config/MASTER.arm64.sweet
-@@ -2,8 +2,8 @@
- # sweet (Redmi Note 10 Pro, SM7150): MASTER.arm64.MacOSX plus the open-source
- # arm64 assembly and pmap (nos_arm_asm, nos_arm_pmap). Apple's own SoC configs
- # link those from the KDK's closed lib<SOC>.os.<CONFIG>.a instead, which is
--# arm64e and Apple-silicon specific. kpc is dropped: it programs Apple's PMU
--# (and kperf does not build without it).
-+# arm64e and Apple-silicon specific. kperf/kpc stay (xnu does not build without
-+# kperf); osfmk/arm64/kpc.c is a stub with no hardware counters.
- #
- #
- # Mach Operating System
-@@ -60,7 +60,7 @@
- #  LIBKERN_RELEASE =[ LIBKERN_BASE zlib ]
- #  LIBKERN_DEV =    [ LIBKERN_BASE zlib iotracking ]
- #  LIBKERN_DEBUG =  [ LIBKERN_BASE zlib iotracking ]
--#  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption config_pervasive_energy PERFMON_BASE ]
-+#  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption config_pervasive_energy PERFMON_BASE kperf kpc ]
- #  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
- #  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
- #  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
 diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
 index 19e7e67a..76a7e1e2 100644
 --- a/osfmk/arm/pmap/pmap.c
@@ -114,66 +90,6 @@ index dacf3b5f..471f6c3c 100644
  void
  pmap_abandon_measurement(void)
  {
-diff --git a/osfmk/arm64/amcc_rorgn_common.c b/osfmk/arm64/amcc_rorgn_common.c
-new file mode 100644
-index 00000000..963cdc1b
---- /dev/null
-+++ b/osfmk/arm64/amcc_rorgn_common.c
-@@ -0,0 +1,9 @@
-+/*
-+ * sweet: files.arm64 builds this for nos_arm_asm, but the source only ships
-+ * in Apple's closed per-SoC library. It implements the AMCC read-only region
-+ * (KTRR/CTRR kernel text lockdown), which needs Apple memory controller
-+ * hardware; nothing references it on SWEET (no KERNEL_INTEGRITY_KTRR/CTRR).
-+ */
-+#include <stdint.h>
-+
-+static const uint8_t sweet_no_amcc_rorgn __attribute__((unused)) = 0;
-diff --git a/osfmk/arm64/amcc_rorgn_ppl.c b/osfmk/arm64/amcc_rorgn_ppl.c
-new file mode 100644
-index 00000000..963cdc1b
---- /dev/null
-+++ b/osfmk/arm64/amcc_rorgn_ppl.c
-@@ -0,0 +1,9 @@
-+/*
-+ * sweet: files.arm64 builds this for nos_arm_asm, but the source only ships
-+ * in Apple's closed per-SoC library. It implements the AMCC read-only region
-+ * (KTRR/CTRR kernel text lockdown), which needs Apple memory controller
-+ * hardware; nothing references it on SWEET (no KERNEL_INTEGRITY_KTRR/CTRR).
-+ */
-+#include <stdint.h>
-+
-+static const uint8_t sweet_no_amcc_rorgn __attribute__((unused)) = 0;
-diff --git a/osfmk/arm64/amcc_rorgn_ppl_amcc.c b/osfmk/arm64/amcc_rorgn_ppl_amcc.c
-new file mode 100644
-index 00000000..f8ad3db5
---- /dev/null
-+++ b/osfmk/arm64/amcc_rorgn_ppl_amcc.c
-@@ -0,0 +1,9 @@
-+/*
-+ * sweet: (11417 splits the PPL part into _amcc / _ctrr3) files.arm64 builds this for nos_arm_asm, but the source only ships
-+ * in Apple's closed per-SoC library. It implements the AMCC read-only region
-+ * (KTRR/CTRR kernel text lockdown), which needs Apple memory controller
-+ * hardware; nothing references it on SWEET (no KERNEL_INTEGRITY_KTRR/CTRR).
-+ */
-+#include <stdint.h>
-+
-+static const uint8_t sweet_no_amcc_rorgn __attribute__((unused)) = 0;
-diff --git a/osfmk/arm64/amcc_rorgn_ppl_ctrr3.c b/osfmk/arm64/amcc_rorgn_ppl_ctrr3.c
-new file mode 100644
-index 00000000..f8ad3db5
---- /dev/null
-+++ b/osfmk/arm64/amcc_rorgn_ppl_ctrr3.c
-@@ -0,0 +1,9 @@
-+/*
-+ * sweet: (11417 splits the PPL part into _amcc / _ctrr3) files.arm64 builds this for nos_arm_asm, but the source only ships
-+ * in Apple's closed per-SoC library. It implements the AMCC read-only region
-+ * (KTRR/CTRR kernel text lockdown), which needs Apple memory controller
-+ * hardware; nothing references it on SWEET (no KERNEL_INTEGRITY_KTRR/CTRR).
-+ */
-+#include <stdint.h>
-+
-+static const uint8_t sweet_no_amcc_rorgn __attribute__((unused)) = 0;
 diff --git a/osfmk/arm64/caches_asm.s b/osfmk/arm64/caches_asm.s
 index 1588830a..945046a9 100644
 --- a/osfmk/arm64/caches_asm.s
