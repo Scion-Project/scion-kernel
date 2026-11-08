@@ -19,6 +19,13 @@ changes to it; the scripts named fetch the release and put the changes on.
 - the build tools: Apple's [libdispatch](https://github.com/apple-oss-distributions/libdispatch), [libpthread](https://github.com/apple-oss-distributions/libpthread) and [AvailabilityVersions](https://github.com/apple-oss-distributions/AvailabilityVersions), [bootstrap_cmds](https://github.com/markmentovai/bootstrap_cmds), [unifdef](https://github.com/fanf2/unifdef), the [macOS 13.3 SDK](https://github.com/joseluisq/macosx-sdks) and the [iPhoneOS 16.5 SDK](https://github.com/theos/sdks) -- `xnu-deps/setup.sh`
 - not fetched by anything here: the Darwin 16.5 user space, which you lay out from your own IPSW (`sysimage/`), and the phone's own firmware, pulled from its Android (`fw-*`)
 
+## 2026-11-08
+
+- HakiOS (oosexgang/hakios-xnu-kernel) merged up to its `63fc2b46`: 276 commits, below under their own dates. What stays Scion's: `VERSION`, the Galaxy S9's framebuffer paths, panfrost beside msm in `tools/mesa/hakios-drm`, the S9's SpringBoard defaults. What is new here and off for the S9: `fb_beam` starts no look on a SoC with no known display interface, `dl_max` (display-link rates) is opt-in, `wallpaper_freeze=1|2` and the Metal arguments are as upstream's, off unless given
+- `hakios-metal/` is in this tree now (MIT, its own LICENSE and NOTICE; the repository beside it has moved here upstream), with `userland/build.sh METAL_PLUGIN=ca`, `TURNIP=1` and `M2V=1`, `tools/mk-turnip.sh`, `tools/mk-m2v.sh`, `tools/ca-metallib.py` and the AIR front end of `tools/mesa/air`. Nothing of it is in the S9's configuration. `userland/src/vk_test.c` stays the gfxstream test; upstream's Turnip test is `vk_turnip_test.c` (`rc.jobs.vkturnip`). HakiosGPU's userptr request is 0x7d as upstream has it, so Scion's GPU-time request is 0x7c now
+- ios-26 base: three small fixes from UniXNU's series, credited (`patches/xnu-12377/0096` the PAR_EL1 ISB, `0097` the 64-bit physical address in the pmap's page-data sync, `0098` arm64 processes with the PAC keys off, only with `SCION_NATIVE_PAC=1`). Their notice: `patches/xnu-12377/LICENSE.UniXNU`
+- licences to settle before any distribution of a Metal-on-Vulkan binary (`M2V=1`), and for `userland/src/HakiosMetalCA.m`, whose origin states none: `THIRD_PARTY_LICENSES.md`, `COMPLIANCE.md`
+
 ## 2026-11-05
 
 - Galaxy S9: the front camera's stream (`cam_s9=7`) starts when something reads `/dev/hakios-camera` or a camshot is asked for, and the camera is powered down again at the last close or 2 s after the last read; it was streaming at 30 frames a second from boot to power off with nobody using it. `cam_s9_always=1` keeps the old behaviour
