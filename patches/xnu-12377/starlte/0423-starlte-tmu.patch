@@ -1,0 +1,731 @@
+From 6dfa40e3837c44f19dc8d07f61a0fd4adbd5edab Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:11:36 +0000
+Subject: [PATCH] parity: Scion TMU steps 1-2 (tmu=1|2, reads only) wired to
+ the governor
+
+---
+ bsd/conf/files                  |   1 +
+ bsd/dev/hakios.exynos_cpufreq.c |  30 +--
+ bsd/dev/hakios.exynos_tmu.c     | 397 ++++++++++++++++++++++++++++++++
+ bsd/sys/hakios.exynos_tmu.h     | 231 +++++++++++++++++++
+ iokit/bsddev/IOKitBSDInit.cpp   |   4 +
+ 5 files changed, 643 insertions(+), 20 deletions(-)
+ create mode 100644 bsd/dev/hakios.exynos_tmu.c
+ create mode 100644 bsd/sys/hakios.exynos_tmu.h
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 113de214a..2e7f727a3 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -119,6 +119,7 @@ bsd/dev/starlte_overlay.c		standard
+ bsd/dev/starlte_sd.c			standard
+ bsd/dev/hakios.exynos_acpm_dvfs.c	standard
+ bsd/dev/hakios.exynos_cpufreq.c	standard
++bsd/dev/hakios.exynos_tmu.c		standard
+ bsd/dev/hakios.scion_gov.c		standard
+ bsd/dev/hakios.exynos_pcie.c		standard
+ bsd/dev/herolte_battery.c		standard
+diff --git a/bsd/dev/hakios.exynos_cpufreq.c b/bsd/dev/hakios.exynos_cpufreq.c
+index aff6cae5a..c7135e4bc 100644
+--- a/bsd/dev/hakios.exynos_cpufreq.c
++++ b/bsd/dev/hakios.exynos_cpufreq.c
+@@ -11,8 +11,9 @@
+  *   - The cores: logical 0-3 are the A55s (phys id 0x000-0x300, the core in Aff1), 4-7 the M3s (0x10100-0x10103,
+  *     SweetCPU.cpp): a core's cluster is phys id bits 23:16 here, not 15:8. With cpus=4 only the A55s run: the M3s'
+  *     cluster has no core online and is left alone after the first request (its ceiling, as the fixed rates did).
+- *   - No TMU driver in this tree: no temperatures, so the M3s stay at or below 1794000 (Scion's own rule without them),
+- *     the thermal ceilings never move, and the scion policies (2-4) run at their safe rates.
++ *   - The TMU driver is bsd/dev/hakios.exynos_tmu.c (Scion's steps 1-2 only, tmu=1 or 2; no step 3). Without tmu= no
++ *     temperatures: the M3s stay at or below 1794000 (Scion's own rule without them), the thermal ceilings never move,
++ *     and the scion policies (2-4) run at their safe rates.
+  *   - No loader log: the lines go to printf (the console and the USB console's log).
+  *   - The touch boost from starlte_touch.c, the frame boost from SweetFramebuffer.cpp's present (AppleCLCD::present).
+  */
+@@ -201,24 +202,13 @@ extern kern_return_t thread_wakeup_prim(event_t event, boolean_t one_thread, wai
+ #define MOVING_MS       50      /* frames closer than this are moving something */
+ #define STARTUP_MS      3000    /* (Starbite) the thread's wait before its first request: after the touch thread's ACPM start */
+ 
+-/* (Starbite) no TMU driver in this tree: no reading, ever (Scion's behaviour without tmu=) */
+-static int32_t
+-hakios_exynos_tmu_zone_mc(__unused unsigned zone)
+-{
+-	return NOT_READ_MC;
+-}
+-
+-static uint64_t
+-hakios_exynos_tmu_age_ms(void)
+-{
+-	return UINT64_MAX;
+-}
+-
+-static int32_t
+-hakios_exynos_tmu_zone_now_mc(__unused unsigned zone)
+-{
+-	return NOT_READ_MC;
+-}
++/*
++ * (Starbite) the TMU driver, bsd/dev/hakios.exynos_tmu.c (Scion's, steps 1-2): its last reading of a zone, how old it is,
++ * and a zone read now; NOT_READ_MC (and an age of UINT64_MAX) without tmu= or before its first reading.
++ */
++extern int32_t hakios_exynos_tmu_zone_mc(unsigned zone);
++extern uint64_t hakios_exynos_tmu_age_ms(void);
++extern int32_t hakios_exynos_tmu_zone_now_mc(unsigned zone);
+ 
+ /* (Starbite) a core's cluster: phys id bits 23:16 (A55s 0x000-0x300, M3s 0x10100-0x10103; SweetCPU.cpp) */
+ static inline uint32_t
+diff --git a/bsd/dev/hakios.exynos_tmu.c b/bsd/dev/hakios.exynos_tmu.c
+new file mode 100644
+index 000000000..a32f55527
+--- /dev/null
++++ b/bsd/dev/hakios.exynos_tmu.c
+@@ -0,0 +1,397 @@
++/*
++ * Ported to the Starbite iOS 27 (xnu-12377) STARLTE tree from HakiOS/Scion (Scion-Project/scion-kernel,
++ * drivers/power/exynos/hakios.exynos_tmu.c, APSL), keeping Scion's notes below. What differs here:
++ *   - Steps 1 and 2 only (reads; kern.hakios.temp.* and the functions the CPU governor calls). Step 3 (ending a hot run
++ *     through the loader, or PS_HOLD with tmu_off=1) is not here: this tree has no loader_return and none of the drivers
++ *     it stops first. tmu=3 is taken as tmu=2: NOTHING STOPS A HOT RUN in this tree.
++ *   - No writes at all: tmu_enable= and tmu_ungate= are not here. A block the boot left stopped reads nothing; a closed
++ *     PCLK gate means the TMU's registers are never touched.
++ *   - No battery temperature (no battery driver in this tree): kern.hakios.temp.battery_c is not published.
++ *   - No kern.hakios.thermal_* (the POCO's names; hakios.thermal_provider.c is not in this tree).
++ *   - Started from IOKitBSDInit (just before the CPU governor, hakios_exynos_cpufreq_gov_start), not by STARTUP().
++ *   - The registers' facts and arithmetic: bsd/sys/hakios.exynos_tmu.h (Scion's, unchanged).
++ *   The rest of Scion's notes follow, step 3 and the writes included, as they were.
++ *
++ * The Galaxy S9's temperatures: the Exynos 9810's TMU, read by the kernel itself, published, and a stop for a phone that
++ * gets too hot. Nothing without boot-arg tmu=N, and then only its first N steps, each said in the log before it is taken.
++ *
++ * Why. Under Android the S9 is kept cool by Linux's thermal framework and Samsung's APM firmware (ACPM): they slow the
++ * big cores from 83 degrees, take them away at 96, slow the GPU from 88. HakiOS has none of that. With bootcpu=4 cpus=8
++ * the four M3s run at the loader's clock, the Mali-G72 at whatever mali=N set, and nothing would notice the heat. This
++ * driver is the S9's counterpart of the POCO's drivers/power/hakios.thermal.c (whose sysctls it also fills, so that
++ * whatever reads those on the POCO reads the same here) and battguard.c's way of ending a run.
++ *
++ * The hardware (hakios.exynos_tmu.h has every register, field and line of the BSP it comes from). Two TMU blocks:
++ * TMU_TOP at 0x10070000 (the BIG zone: sensors 1, 2, 3, 4, 6; LITTLE: sensor 5) and TMU_SUB at 0x10074000 (G3D: sensor 1;
++ * ISP: sensor 2). Each sensor gives a 9-bit code, all the time while the block's CORE_EN is set, in CURRENT_TEMP
++ * (0x40/0x44/0x48). The codes are made degrees with each sensor's fuses, which the block shows as its TRIMINFO registers
++ * (one per sensor: [8:0] the code at 25 degrees, [17:9] the code at 85; bit 23 of TRIMINFO0 says one- or two-point
++ * calibration), as exynos9810_tmu_initialize() and code_to_temp_with_sensorinfo() do. Android itself never reads the codes
++ * this way in normal use: with CONFIG_EXYNOS_ACPM_THERMAL (the S9's defconfig) the temperature comes from the APM firmware
++ * over IPC (exynos9810_tmu_read -> exynos_acpm_tmu_set_read_temp). The register path used here is the BSP's own all_temp
++ * sysfs file (all_temp_show), which reads the same CURRENT_TEMP registers with the same arithmetic. The APM's IPC is not
++ * used: it needs Linux's TMU_IPC_INIT first, and its "balance" mode for BIG is the firmware's and not written down; this
++ * driver takes the hottest sensor of each zone, which is never cooler than Android's figure.
++ *
++ * The clock. The TMU's bus clock is CMU_PERIS's BUSIF_TMU PCLK (gate +0x2014, Q-channel +0x3004 of 0x10020000;
++ * cmucal-sfr.c:36, 1656, 1675, 7016-7018, 7070-7073). A gate forced shut (MANUAL set, CG_VAL clear) would make a read of
++ * the TMU stop the bus, so step 1 reads the gate first and does not touch the TMU behind a closed one (tmu_ungate=1 opens
++ * it, read back).
++ *
++ * THE STEPS (tmu=N does the first N):
++ *   1  reads only, once at start and then every tmu_poll ms: the CMU gate; of each block CONTROL (CORE_EN, THERM_TRIP_EN,
++ *      TRIP_MODE), CONTROL1, STATUS, AVG_CON, TRIM0, EMUL_CON; of each sensor of the four zones (and sensor 0) its TRIMINFO,
++ *      its calibration, its code and temperature, its RISE7/RISE6 thresholds and interrupt enables as the boot left them
++ *      (Android writes its "hot" trip, 115 degrees, as RISE7: a value there says the boot loader armed the block's own
++ *      thermal trip); then a summary line every tmu_log seconds and at once when the hottest zone passes a multiple of 5
++ *      from 60, or the point where Android would start to cool that zone
++ *   2  publishes: sysctl kern.hakios.temp.* (big_mc, little_mc, g3d_mc, isp_mc, max_mc in millidegrees; hottest, sensors,
++ *      reads, battery_c) and the POCO's kern.hakios.thermal_max_mc, thermal_hottest, thermal_sensors, thermal_reads, and
++ *      hakios_thermal_max_mc() for other drivers; -273000 is "not read"
++ *   3  acts: (not in this port; see above)
++ *
++ * Status (Scion): run on the phone with tmu=3 since 1 November (the zones read, kern.hakios.temp; the S9's default).
++ * Not known: whether S-Boot leaves the TMU running and its PCLK open (step 1 says), whether the APM, which owns the TMU
++ * under Android, changes its registers while HakiOS runs, and the BIG zone's "balance" mode.
++ * Status (this port): built and linked; not yet run in this tree (S-Boot -> shim -> XNU, not Scion's loader).
++ *
++ * Boot-args (this port):
++ *   tmu=<1-2>            the steps: 1 reads, 2 publishes (0, or none: nothing mapped, nothing read; 3 is taken as 2)
++ *   tmu_poll=<ms>        how often to read (200 to 60000; 1000, the BIG zone's polling-delay)
++ *   tmu_log=<s>          a summary this often (0: only on a rise; 60)
++ */
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++#include <stdint.h>
++#include <kern/clock.h>
++#include <kern/thread_call.h>
++#include <libkern/libkern.h>
++#include <mach/mach_time.h>
++#include <mach/mach_types.h>
++#include <pexpert/pexpert.h>
++#include <sys/param.h>
++#include <sys/sysctl.h>
++#include <sys/systm.h>
++#include <sys/hakios.exynos_soc.h>
++#include <sys/hakios.exynos_tmu.h>
++#include <sys/hakios.log.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++
++SYSCTL_DECL(_kern_hakios);
++
++#define CMU_PERIS_PA            ((uint32_t)EXYNOS_CMU_PERIS_PA)     /* cmucal-sfr.c:36 */
++#define CMU_PERIS_TMU_GATE      EXYNOS_TMU_CMU_PERIS_TMU_GATE         /* :1656 CLK_CON_GAT_GOUT_BLK_PERIS_UID_BUSIF_TMU_IPCLKPORT_PCLK */
++#define CMU_PERIS_TMU_QCH       EXYNOS_TMU_CMU_PERIS_TMU_QCH         /* :1675 QCH_CON_BUSIF_TMU_QCH */
++#define GATE_MANUAL             (1u << 20)      /* :7017 */
++#define GATE_CG_VAL             (1u << 21)      /* :7016 */
++#define NOT_READ_MC             (-273000)
++
++static vm_offset_t block_va[2], cmu_va;
++static const uint32_t block_pa[2] = { TMU_TOP_PA, TMU_SUB_PA };
++static const char *const block_name[2] = { "TMU_TOP", "TMU_SUB" };
++static struct tmu_cal cal[2][8];
++static uint32_t steps, poll_ms = 1000, log_seconds = 60;
++static uint64_t last_log;
++static volatile uint64_t reads;
++static int last_step;
++static bool warned_cools[TMU_NZONES];
++static thread_call_t call;
++
++/* step 2's values (sysctl) */
++static int temp_zone_mc[TMU_NZONES] = { NOT_READ_MC, NOT_READ_MC, NOT_READ_MC, NOT_READ_MC };
++static int temp_max_mc = NOT_READ_MC, temp_reads;
++static char temp_hottest[16] = "", temp_sensors[400] = "";
++
++SYSCTL_NODE(_kern_hakios, OID_AUTO, temp, CTLFLAG_RW | CTLFLAG_LOCKED, 0, "the Exynos 9810's TMU (bsd/dev/hakios.exynos_tmu.c, tmu=2)");
++SYSCTL_INT(_kern_hakios_temp, OID_AUTO, big_mc, CTLFLAG_RD | CTLFLAG_LOCKED, &temp_zone_mc[0], 0, "the big cores' hottest sensor, millidegrees");
++SYSCTL_INT(_kern_hakios_temp, OID_AUTO, little_mc, CTLFLAG_RD | CTLFLAG_LOCKED, &temp_zone_mc[1], 0, "the little cores' sensor, millidegrees");
++SYSCTL_INT(_kern_hakios_temp, OID_AUTO, g3d_mc, CTLFLAG_RD | CTLFLAG_LOCKED, &temp_zone_mc[2], 0, "the GPU's sensor, millidegrees");
++SYSCTL_INT(_kern_hakios_temp, OID_AUTO, isp_mc, CTLFLAG_RD | CTLFLAG_LOCKED, &temp_zone_mc[3], 0, "the camera ISP's sensor, millidegrees");
++SYSCTL_INT(_kern_hakios_temp, OID_AUTO, max_mc, CTLFLAG_RD | CTLFLAG_LOCKED, &temp_max_mc, 0, "the hottest zone, millidegrees (-273000: none read)");
++SYSCTL_STRING(_kern_hakios_temp, OID_AUTO, hottest, CTLFLAG_RD | CTLFLAG_LOCKED, temp_hottest, 0, "the hottest zone's name");
++SYSCTL_STRING(_kern_hakios_temp, OID_AUTO, sensors, CTLFLAG_RD | CTLFLAG_LOCKED, temp_sensors, 0,
++    "every sensor in degrees: \"big1=41.0 big2=40.5 ...\"");
++SYSCTL_INT(_kern_hakios_temp, OID_AUTO, reads, CTLFLAG_RD | CTLFLAG_LOCKED, &temp_reads, 0, "how many times the sensors were read");
++
++/*
++ * Every zone's last reading for other drivers (the CPU governor, bsd/dev/hakios.exynos_cpufreq.c), whatever the step:
++ * the zones in tmu_zones' order (0 BIG, 1 LITTLE, 2 G3D, 3 ISP), millidegrees, NOT_READ_MC before the first reading.
++ * Asked directly: the governor read kern.hakios.temp.* through kernel_sysctlbyname at first, and got nothing on the phone.
++ */
++static volatile int32_t last_zone_mc[TMU_NZONES] = { NOT_READ_MC, NOT_READ_MC, NOT_READ_MC, NOT_READ_MC };
++static volatile uint64_t last_zone_at;
++
++int32_t hakios_exynos_tmu_zone_mc(unsigned zone);
++
++int32_t
++hakios_exynos_tmu_zone_mc(unsigned zone)
++{
++	return zone < TMU_NZONES ? last_zone_mc[zone] : NOT_READ_MC;
++}
++
++/* for the CPU governor's fall-back: how long ago the zones were last read, ms */
++uint64_t hakios_exynos_tmu_age_ms(void);
++
++uint64_t
++hakios_exynos_tmu_age_ms(void)
++{
++	uint64_t ns;
++
++	if (last_zone_at == 0) {
++		return UINT64_MAX;      /* (Starbite) never read: as old as can be */
++	}
++	absolutetime_to_nanoseconds(mach_absolute_time() - last_zone_at, &ns);
++	return ns / NSEC_PER_MSEC;
++}
++
++static inline uint32_t
++rd(vm_offset_t base, uint32_t off)
++{
++	return *(volatile uint32_t *)(base + off);
++}
++
++static void
++text_of(char *out, size_t size, int32_t mc)
++{
++	int32_t tenth = mc / 100, whole = tenth / 10, frac = tenth % 10;
++
++	snprintf(out, size, "%s%d.%d", (tenth < 0 && whole == 0) ? "-" : "", whole, frac < 0 ? -frac : frac);
++}
++
++static uint32_t
++code_of(unsigned block, unsigned sensor)
++{
++	return (rd(block_va[block], tmu_temp_reg(sensor)) >> tmu_temp_shift(sensor)) & 0x1ffu;
++}
++
++/* step 1's look at what the boot left, once */
++static void
++describe(void)
++{
++	char one[16], two[16];
++
++	for (unsigned b = 0; b < 2; b++) {
++		vm_offset_t va = block_va[b];
++		uint32_t ctrl = rd(va, TMU_CONTROL), t0 = rd(va, TMU_TRIMINFO(0));
++
++		say("tmu: 1: %s %#x: CONTROL %08x (CORE_EN %u, THERM_TRIP_EN %u, TRIP_MODE %u, VREF %u, SLOPE %u), CONTROL1 %08x "
++		    "(NUM_PROBE %u, LPI %u), STATUS %08x, AVG_CON %08x, COUNTER %08x/%08x, TRIM0 %08x, EMUL_CON %08x; %s-point calibration\n",
++		    block_name[b], block_pa[b], ctrl, ctrl & TMU_CTRL_CORE_EN ? 1 : 0, ctrl & TMU_CTRL_TRIP_EN ? 1 : 0,
++		    TMU_CTRL_TRIP_MODE(ctrl), (ctrl >> TMU_CTRL_VREF_SHIFT) & 0x1f, (ctrl >> TMU_CTRL_SLOPE_SHIFT) & 0xf,
++		    rd(va, TMU_CONTROL1), TMU_CON1_NUM_PROBE(rd(va, TMU_CONTROL1)), rd(va, TMU_CONTROL1) & TMU_CON1_LPI ? 1 : 0,
++		    rd(va, TMU_STATUS), rd(va, TMU_AVG_CON), rd(va, TMU_COUNTER_VALUE0), rd(va, TMU_COUNTER_VALUE1), rd(va, TMU_TRIM0),
++		    rd(va, TMU_EMUL_CON), TMU_TRIM_CAL_TYPE(t0) ? "two" : "one");
++		if (rd(va, TMU_EMUL_CON) & TMU_EMUL_ENABLE) {
++			say("tmu: 1: %s: EMULATION IS ON: its readings are a made-up temperature, not the chip's\n", block_name[b]);
++		}
++		if (!(ctrl & TMU_CTRL_CORE_EN)) {
++			say("tmu: 1: %s: CORE_EN is clear: the boot left it stopped and this port never starts it; its zones read nothing\n",
++			    block_name[b]);
++		}
++		for (unsigned s = 0; s < 8; s++) {
++			uint16_t used = 0;
++
++			for (unsigned z = 0; z < TMU_NZONES; z++) {
++				if (tmu_zones[z].block == b && (tmu_zones[z].sensors & (1u << s))) {
++					used = 1;
++				}
++			}
++			if (!used && s != 0) {
++				continue;
++			}
++			uint32_t trim = rd(va, TMU_TRIMINFO(s)), code = code_of(b, s), thd = rd(va, tmu_thd_reg(s));
++			uint32_t r7 = (thd >> 16) & 0x1ff, r6 = thd & 0x1ff;
++			const struct tmu_cal *c = &cal[b][s];
++
++			text_of(one, sizeof(one), tmu_code_to_mc(c, code));
++			text_of(two, sizeof(two), tmu_code_to_mc(c, r7));
++			say("tmu: 1: %s sensor %u%s: TRIMINFO %08x (25 C = %u, 85 C = %u%s), code %u = %s C; RISE7 %u (%s C) RISE6 %u, "
++			    "INTEN %08x\n", block_name[b], s, used ? "" : " (in no zone)", trim, c->error1, c->error2,
++			    c->fell_back == 1 ? ", fuse empty: the dt's 55" : c->fell_back == 2 ? ", second point unusable: one-point" : "",
++			    code, one, r7, r7 ? two : "-", r6, rd(va, tmu_inten_reg(s)));
++		}
++	}
++}
++
++int32_t hakios_exynos_tmu_zone_now_mc(unsigned zone);
++
++/*
++ * A zone's hottest sensor, read now, for the CPU governor above its all-core rates: two M3s at 2314000 kHz go from 46 C to 92 C
++ * in the few seconds that a reading a second sees five of (phone 2, 5 November). Registers only; nothing changes.
++ */
++int32_t
++hakios_exynos_tmu_zone_now_mc(unsigned zone)
++{
++	int32_t hottest = NOT_READ_MC;
++
++	if (zone >= TMU_NZONES || reads == 0) {
++		return NOT_READ_MC;
++	}
++	for (unsigned s = 0; s < 8; s++) {
++		if (tmu_zones[zone].sensors & (1u << s)) {
++			uint32_t code = code_of(tmu_zones[zone].block, s);
++			int32_t mc = tmu_code_to_mc(&cal[tmu_zones[zone].block][s], code);
++
++			if (tmu_reading_ok(code, mc) && mc > hottest) {
++				hottest = mc;
++			}
++		}
++	}
++	return hottest;
++}
++
++static void
++look(void)
++{
++	int32_t zone_mc[TMU_NZONES], hottest = INT32_MIN;
++	unsigned hot = 0, good = 0;
++	char list[sizeof(temp_sensors)], one[16], item[32];
++
++	list[0] = 0;
++	for (unsigned z = 0; z < TMU_NZONES; z++) {
++		const struct tmu_zone *zone = &tmu_zones[z];
++
++		zone_mc[z] = INT32_MIN;
++		for (unsigned s = 0; s < 8; s++) {
++			if (!(zone->sensors & (1u << s))) {
++				continue;
++			}
++			uint32_t code = code_of(zone->block, s);
++			int32_t mc = tmu_code_to_mc(&cal[zone->block][s], code);
++
++			if (!tmu_reading_ok(code, mc)) {
++				snprintf(item, sizeof(item), "%s%u=? ", zone->name, s);
++			} else {
++				text_of(one, sizeof(one), mc);
++				snprintf(item, sizeof(item), "%s%u=%s ", zone->name, s, one);
++				good++;
++				if (mc > zone_mc[z]) {
++					zone_mc[z] = mc;
++				}
++			}
++			strlcat(list, item, sizeof(list));
++		}
++		if (zone_mc[z] != INT32_MIN && zone_mc[z] > hottest) {
++			hottest = zone_mc[z];
++			hot = z;
++		}
++	}
++
++	reads++;
++	for (unsigned z = 0; z < TMU_NZONES; z++) {
++		last_zone_mc[z] = zone_mc[z] == INT32_MIN ? NOT_READ_MC : zone_mc[z];
++	}
++	last_zone_at = mach_absolute_time();
++	if (steps >= 2) {
++		for (unsigned z = 0; z < TMU_NZONES; z++) {
++			temp_zone_mc[z] = zone_mc[z] == INT32_MIN ? NOT_READ_MC : zone_mc[z];
++		}
++		temp_reads = (int)reads;
++		strlcpy(temp_sensors, list, sizeof(temp_sensors));
++		if (good != 0) {
++			temp_max_mc = hottest;
++			strlcpy(temp_hottest, tmu_zones[hot].name, sizeof(temp_hottest));
++		}
++	}
++	if (good == 0) {
++		if (reads == 1 || reads % 60 == 0) {
++			say("tmu: no sensor gives a reading (%s): is the block running? (step 1's CORE_EN)\n", list);
++		}
++		return;
++	}
++
++	uint64_t now = mach_absolute_time(), ns;
++	int step = hottest >= 60000 ? hottest / 5000 : 0;       /* a step each 5 degrees from 60 */
++
++	absolutetime_to_nanoseconds(now - last_log, &ns);
++	text_of(one, sizeof(one), hottest);
++	if (step > last_step || last_log == 0 || (log_seconds != 0 && ns / NSEC_PER_SEC >= log_seconds)) {
++		say("tmu: %u sensors read; hottest %s at %s C; %s\n", good, tmu_zones[hot].name, one, list);
++		last_log = now;
++	}
++	last_step = step;
++	for (unsigned z = 0; z < TMU_NZONES; z++) {
++		if (zone_mc[z] != INT32_MIN && zone_mc[z] >= tmu_zones[z].android_cools_mc && !warned_cools[z]) {
++			warned_cools[z] = true;
++			text_of(one, sizeof(one), zone_mc[z]);
++			say("tmu: WARNING: %s at %s C: Android would be cooling it from %d C; only the CPU governor (cpufreq_gov=1) "
++			    "does anything here, and nothing stops the run\n", tmu_zones[z].name, one, tmu_zones[z].android_cools_mc / 1000);
++		} else if (zone_mc[z] != INT32_MIN && zone_mc[z] < tmu_zones[z].android_cools_mc - 5000) {
++			warned_cools[z] = false;
++		}
++	}
++}
++
++static void
++tick(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
++{
++	uint64_t deadline;
++
++	look();
++	clock_interval_to_deadline(poll_ms, NSEC_PER_MSEC, &deadline);
++	thread_call_enter_delayed(call, deadline);
++}
++
++/* (Starbite) from IOKitBSDInit, before hakios_exynos_cpufreq_gov_start(); with no tmu= (or tmu=0) nothing at all */
++void hakios_exynos_tmu_start(void);
++
++void
++hakios_exynos_tmu_start(void)
++{
++	uint32_t value = 0;
++
++	if (!PE_parse_boot_argn("tmu", &steps, sizeof(steps)) || steps == 0) {
++		steps = 0;
++		return;
++	}
++	steps = steps > 2 ? 2 : steps;
++	if (PE_parse_boot_argn("tmu_poll", &value, sizeof(value)) && value >= 200 && value <= 60000) {
++		poll_ms = value;
++	}
++	if (PE_parse_boot_argn("tmu_log", &value, sizeof(value)) && value <= 86400) {
++		log_seconds = value;
++	}
++	say("tmu: steps 1-%u (1 reads, 2 publishes kern.hakios.temp); every %u ms; NOTHING STOPS A HOT RUN (no step 3 in this tree)\n",
++	    steps, poll_ms);
++
++	say("tmu: 1: reading CMU_PERIS's TMU gate (%#x +%#x) and Q-channel (+%#x)\n", CMU_PERIS_PA, CMU_PERIS_TMU_GATE, CMU_PERIS_TMU_QCH);
++	cmu_va = ml_io_map(CMU_PERIS_PA, 0x4000);
++	if (cmu_va == 0) {
++		say("tmu: could not map CMU_PERIS; off\n");
++		return;
++	}
++	uint32_t gate = rd(cmu_va, CMU_PERIS_TMU_GATE), qch = rd(cmu_va, CMU_PERIS_TMU_QCH);
++	bool closed = (gate & GATE_MANUAL) && !(gate & GATE_CG_VAL);
++
++	say("tmu: 1: gate %08x (MANUAL %u, CG_VAL %u)%s, Q-channel %08x (ENABLE %u, CLOCK_REQ %u)\n", gate, gate & GATE_MANUAL ? 1 : 0,
++	    gate & GATE_CG_VAL ? 1 : 0, closed ? ": CLOSED" : ": open", qch, qch & 1, (qch >> 1) & 1);
++	if (closed) {
++		say("tmu: the TMU's clock is shut: its registers are not touched (this port never opens it); off\n");
++		return;
++	}
++	for (unsigned b = 0; b < 2; b++) {
++		block_va[b] = ml_io_map(block_pa[b], TMU_SIZE);
++		if (block_va[b] == 0) {
++			say("tmu: could not map %s at %#x; off\n", block_name[b], block_pa[b]);
++			return;
++		}
++	}
++	for (unsigned b = 0; b < 2; b++) {
++		uint32_t t0 = rd(block_va[b], TMU_TRIMINFO(0));
++
++		for (unsigned s = 0; s < 8; s++) {
++			cal[b][s] = tmu_cal_of(rd(block_va[b], TMU_TRIMINFO(s)), t0);
++		}
++	}
++	describe();
++	if (steps >= 2) {
++		say("tmu: 2: publishing kern.hakios.temp.*\n");
++	}
++	call = thread_call_allocate(tick, NULL);
++	if (call == NULL) {
++		say("tmu: no thread call; off\n");
++		return;
++	}
++	tick(NULL, NULL);
++}
++#endif /* ARM64_BOARD_CONFIG_STARLTE */
+diff --git a/bsd/sys/hakios.exynos_tmu.h b/bsd/sys/hakios.exynos_tmu.h
+new file mode 100644
+index 000000000..4d9ee94d8
+--- /dev/null
++++ b/bsd/sys/hakios.exynos_tmu.h
+@@ -0,0 +1,231 @@
++/*
++ * Ported to the Starbite iOS 27 (xnu-12377) STARLTE tree from HakiOS/Scion (Scion-Project/scion-kernel,
++ * drivers/power/exynos/hakios.exynos_tmu.h, APSL), unchanged but for this note and its place (bsd/sys/).
++ *
++ * The Exynos 9810's TMU (its thermal management unit): the registers, the sensors and the arithmetic that turns a sensor's
++ * code into degrees. Plain C, nothing of the kernel, so that tools/exynos_tmu_test.c checks the same arithmetic the driver
++ * (hakios.exynos_tmu.c) runs. Only facts are taken from Samsung's kernel (GPL-2.0); none of its code is here.
++ *
++ * Sources (the S9's kernel fork, Scion-Project/android_kernel_samsung_exynos9810, lineage-24.0 at e5906667068e):
++ *   drivers/thermal/samsung/exynos_tmu.c   the register map (69-187), the code-to-degrees arithmetic
++ *                                           (code_to_temp_with_sensorinfo, 317-344, and its inverse 252-278), the trim
++ *                                           read from TRIMINFO (exynos9810_tmu_initialize, 389-422), the start
++ *                                           (exynos9810_tmu_control, 554-627; tmu_core_enable, 471-481), the trims of
++ *                                           TMU_TOP that both blocks take (exynos_tmu_probe, 1581-1592), where each
++ *                                           sensor's code is (all_temp_show, 1244-1255), the thresholds (432-460)
++ *   include/soc/samsung/tmu.h:15-16        EXYNOS_MAX_TEMP 125, EXYNOS_MIN_TEMP 10 (the BSP's clamp)
++ *   include/dt-bindings/thermal/thermal_exynos.h:22-24   calibration types: 0 one point, 1 two points
++ *   arch/arm64/boot/dts/exynos/exynos9810-starlte_eur_open_26.dts   the four TMU nodes (10597-10690) and thermal-zones
++ *                                           (10696-11070); the same in Silicium's Resources/DTBs/starlte.dts (10519-10610,
++ *                                           10618 on), the phone's own tree
++ */
++#ifndef _HAKIOS_EXYNOS_TMU_H_
++#define _HAKIOS_EXYNOS_TMU_H_
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <sys/hakios.exynos_soc.h>
++/* the two blocks: TMU_TOP (the BIG and LITTLE zones) and TMU_SUB (G3D and ISP); reg = <0 0x10070000 0x700> and 0x10074000 */
++#define TMU_TOP_PA              ((uint32_t)EXYNOS_TMU_TOP_PA)
++#define TMU_SUB_PA              ((uint32_t)EXYNOS_TMU_SUB_PA)
++#define TMU_SIZE                0x700u
++
++/* registers (exynos_tmu.c:69-187) */
++#define TMU_TRIMINFO(s)         ((s) <= 7 ? (uint32_t)(s) * 4 : ((uint32_t)(s) - 8) * 4 + 0x400)       /* 69-73 */
++#define TMU_CONTROL             0x20u           /* 74: [28:24] BUF_VREF_SEL, [15:13] TRIP_MODE, 12 THERM_TRIP_EN, [11:8] BUF_SLOPE_SEL, 0 CORE_EN */
++#define TMU_CONTROL1            0x24u           /* 75: [19:16] NUM_PROBE, 10 LPI_MODE_EN */
++#define TMU_STATUS              0x28u           /* 76 */
++#define TMU_COUNTER_VALUE0      0x30u           /* 173: [15:0] EN_TEMP_SEN_OFF */
++#define TMU_COUNTER_VALUE1      0x34u           /* 176: [31:16] CLK_SENSE_ON */
++#define TMU_AVG_CON             0x38u           /* 162: [2:0] AVG_MODE, 4 EN_DEM */
++#define TMU_TRIM0               0x3Cu           /* 146: [23:20] BGRI_TRIM, [15:12] VREF_TRIM, [11:8] VBEI_TRIM */
++#define TMU_EMUL_CON            0x160u          /* 160: 0 the emulation on; its code at [15:7] */
++
++#define TMU_CTRL_CORE_EN        (1u << 0)       /* 94 */
++#define TMU_CTRL_TRIP_EN        (1u << 12)      /* 104 */
++#define TMU_CTRL_TRIP_MODE(v)   (((v) >> 13) & 0x7u)            /* 102-103 */
++#define TMU_CTRL_VREF_SHIFT     24              /* 90-91, mask 0x1f */
++#define TMU_CTRL_SLOPE_SHIFT    8               /* 92-93, mask 0xf */
++#define TMU_CON1_NUM_PROBE(v)   (((v) >> 16) & 0xfu)            /* 182-183 */
++#define TMU_CON1_LPI            (1u << 10)      /* 184-185 */
++#define TMU_AVG_MODE_MASK       0x7u            /* 165 */
++#define TMU_AVG_DEM             (1u << 4)       /* 170-171 */
++#define TMU_SENSE_VALUE         0x028Au         /* 180: EXYNOS_TMU_TEM1051X_SENSE_VALUE (the dt's tmu_sensor_type 8 is TEM1051X) */
++#define TMU_EMUL_ENABLE         1u              /* 114 */
++
++/* TRIMINFO fields */
++#define TMU_TRIM_CAL_TYPE(v)    (((v) >> 23) & 0x1u)            /* 132-133, of TRIMINFO(0): the block's calibration */
++#define TMU_TRIM_ERROR1(v)      ((v) & 0x1ffu)                  /* 134-135, 399: the code at 25 degrees */
++#define TMU_TRIM_ERROR2(v)      (((v) >> 9) & 0x1ffu)           /* 136, 400: the code at 85 degrees */
++#define TMU_TRIM_FIELD(v)       (((v) >> 18) & 0x1fu)           /* 139-147: VREF_SEL (TRIMINFO0, 5 bits) */
++#define TMU_TRIM_FIELD4(v)      (((v) >> 18) & 0xfu)            /* SLOPE_SEL (TRIMINFO1); BGRI/VREF/VBEI (TRIMINFO3/4/5) */
++#define TMU_TRIM_AVG_MODE(v)    (((v) >> 18) & 0x7u)            /* 163-165, 576: of TRIMINFO(2) */
++
++/* the current codes, 9 bits each (77-82; all_temp_show 1244-1255): 0 and 1 in 0x40, 2-4 in 0x44, 5-7 in 0x48 */
++static inline uint32_t
++tmu_temp_reg(unsigned sensor)
++{
++	if (sensor < 2) {
++		return 0x40u;
++	}
++	if (sensor < 8) {
++		return 0x40u + ((sensor - 2) / 3 + 1) * 4;
++	}
++	return sensor < 10 ? 0x440u : 0x444u + ((sensor - 10) / 3) * 4;       /* 80-82: 8-9, 10-12, 13-15 */
++}
++
++static inline unsigned
++tmu_temp_shift(unsigned sensor)
++{
++	if (sensor < 2) {
++		return 9 * sensor;
++	}
++	if (sensor < 8) {
++		return 9 * ((sensor - 2) % 3);
++	}
++	return sensor < 10 ? 9 * (sensor - 8) : 9 * ((sensor - 10) % 3);
++}
++
++/* the rising thresholds of a sensor: RISE7 in [24:16] of this word, RISE6 in [8:0]; the falling ones 0x10 on (432-460) */
++static inline uint32_t
++tmu_thd_reg(unsigned sensor)
++{
++	if (sensor == 0) {
++		return 0x50u;                           /* 116, 436 */
++	}
++	if (sensor < 8) {
++		return 0x170u + (sensor - 1) * 0x20;    /* 117, 438 */
++	}
++	return 0x450u + (sensor - 8) * 0x20;            /* 118, 440 */
++}
++
++/* a sensor's interrupt enables (523-528): bit 7 RISE7 ... bit 0 RISE0, the falling ones 16 up */
++static inline uint32_t
++tmu_inten_reg(unsigned sensor)
++{
++	if (sensor < 5) {
++		return 0x110u + 0x10 * sensor;
++	}
++	if (sensor < 8) {
++		return 0x310u + 0x10 * (sensor - 5);
++	}
++	return 0x650u + 0x10 * (sensor - 8);
++}
++
++/* the calibration (the dt's samsung,tmu_* of all four nodes) */
++#define TMU_FIRST_POINT         25              /* tmu_first_point_trim */
++#define TMU_SECOND_POINT        85              /* tmu_second_point_trim */
++#define TMU_EFUSE_VALUE         55              /* tmu_efuse_value: error1 when the fuse holds 0 (411-412) */
++#define TMU_BSP_MIN             10              /* tmu.h: what the BSP clamps to */
++#define TMU_BSP_MAX             125
++
++struct tmu_cal {
++	uint16_t        error1;         /* the code at 25 degrees */
++	uint16_t        error2;         /* the code at 85 degrees (two-point only) */
++	uint8_t         two_point;      /* TRIMINFO(0) bit 23 */
++	uint8_t         fell_back;      /* 1: error1 from the dt (the fuse read 0); 2: two-point not usable, one-point used */
++};
++
++/*
++ * A sensor's calibration from its TRIMINFO word and the block's type, as exynos9810_tmu_initialize() (389-422) takes it,
++ * with one difference: where the BSP would divide by error2 - error1 <= 0 (a two-point block whose second fuse is empty:
++ * its fallback, the dt's efuse value 55 >> 9, is 0), this uses one-point arithmetic and says so (fell_back 2).
++ */
++static inline struct tmu_cal
++tmu_cal_of(uint32_t triminfo, uint32_t triminfo0)
++{
++	struct tmu_cal c = { 0, 0, 0, 0 };
++
++	c.two_point = (uint8_t)TMU_TRIM_CAL_TYPE(triminfo0);
++	c.error1 = (uint16_t)TMU_TRIM_ERROR1(triminfo);
++	if (c.error1 == 0) {
++		c.error1 = TMU_EFUSE_VALUE & 0x1ff;
++		c.fell_back = 1;
++	}
++	if (c.two_point) {
++		c.error2 = (uint16_t)TMU_TRIM_ERROR2(triminfo);
++		if (c.error2 == 0) {
++			c.error2 = (TMU_EFUSE_VALUE >> 9) & 0x1ff;
++		}
++		if (c.error2 <= c.error1) {
++			c.two_point = 0;
++			c.fell_back = 2;
++		}
++	}
++	return c;
++}
++
++/*
++ * A code in millidegrees, unclamped (code_to_temp_with_sensorinfo, 322-335, worked in millidegrees: the BSP's integer
++ * degrees are this divided by 1000 and truncated toward zero).
++ */
++static inline int32_t
++tmu_code_to_mc(const struct tmu_cal *c, uint32_t code)
++{
++	int32_t d = (int32_t)code - (int32_t)c->error1;
++
++	if (c->two_point) {
++		return (int32_t)((int64_t)d * (TMU_SECOND_POINT - TMU_FIRST_POINT) * 1000 / ((int32_t)c->error2 - (int32_t)c->error1)) +
++		       TMU_FIRST_POINT * 1000;
++	}
++	return (d + TMU_FIRST_POINT) * 1000;
++}
++
++/* the BSP's own result for a code: integer degrees, clamped to 10-125 (317-344) */
++static inline int32_t
++tmu_code_to_bsp_c(const struct tmu_cal *c, uint32_t code)
++{
++	int32_t d = (int32_t)code - (int32_t)c->error1, t;
++
++	if (c->two_point) {
++		t = d * (TMU_SECOND_POINT - TMU_FIRST_POINT) / ((int32_t)c->error2 - (int32_t)c->error1) + TMU_FIRST_POINT;
++	} else {
++		t = d + TMU_FIRST_POINT;
++	}
++	return t > TMU_BSP_MAX ? TMU_BSP_MAX : (t < TMU_BSP_MIN ? TMU_BSP_MIN : t);
++}
++
++/* degrees to a code (temp_to_code_with_sensorinfo, 252-278): to decode a threshold the boot left, and for the test */
++static inline int32_t
++tmu_c_to_code(const struct tmu_cal *c, int32_t temp)
++{
++	temp = temp > TMU_BSP_MAX ? TMU_BSP_MAX : (temp < TMU_BSP_MIN ? TMU_BSP_MIN : temp);
++	if (c->two_point) {
++		return (temp - TMU_FIRST_POINT) * ((int32_t)c->error2 - (int32_t)c->error1) / (TMU_SECOND_POINT - TMU_FIRST_POINT) +
++		       (int32_t)c->error1;
++	}
++	return temp + (int32_t)c->error1 - TMU_FIRST_POINT;
++}
++
++/* a reading believed: a code that is neither all zeros nor all ones, and -40 to 160 degrees */
++static inline bool
++tmu_reading_ok(uint32_t code, int32_t mc)
++{
++	return code != 0 && code != 0x1ff && mc >= -40000 && mc <= 160000;
++}
++
++/*
++ * The zones: which sensors of which block (the dt's "sensors" masks: BIG 94 = 1,2,3,4,6 and LITTLE 32 = 5 of TMU_TOP; G3D 2
++ * = 1 and ISP 4 = 2 of TMU_SUB), and two of each zone's trips from thermal-zones: where Android starts to cool it (BIG
++ * big-control-temp 83, the power allocator's target, and hotplug_out_threshold 96 takes the big cores away; LITTLE
++ * little-alert1 76; G3D gpu-control-temp 88; ISP isp-alert1 91), and its "hot" trip, 115 for all four, the one
++ * exynos9810_tmu_initialize() writes as RISE7.
++ */
++enum { TMU_BLOCK_TOP = 0, TMU_BLOCK_SUB = 1 };
++
++static const struct tmu_zone {
++	const char *    name;
++	uint8_t         block;
++	uint16_t        sensors;        /* the dt's mask */
++	int32_t         android_cools_mc;
++	int32_t         android_hot_mc;
++} tmu_zones[] = {
++	{ "big", TMU_BLOCK_TOP, 0x5e, 83000, 115000 },
++	{ "little", TMU_BLOCK_TOP, 0x20, 76000, 115000 },
++	{ "g3d", TMU_BLOCK_SUB, 0x02, 88000, 115000 },
++	{ "isp", TMU_BLOCK_SUB, 0x04, 91000, 115000 },
++};
++#define TMU_NZONES      (sizeof(tmu_zones) / sizeof(tmu_zones[0]))
++#define TMU_ANDROID_HOT_MC      115000
++
++#endif /* _HAKIOS_EXYNOS_TMU_H_ */
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index e3cfb9ce2..d4ea537ac 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -812,6 +812,10 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+ 	{
+ 		extern void starlte_touch_probe(void);
+ 		starlte_touch_probe();
++		/* Boot-arg tmu=1|2: the TMU's temperatures, read only (bsd/dev/hakios.exynos_tmu.c), before the
++		 * governor that reads them; off: nothing mapped, nothing read. */
++		extern void hakios_exynos_tmu_start(void);
++		hakios_exynos_tmu_start();
+ 		/* Boot-arg cpufreq_gov=1: the CPU governor (bsd/dev/hakios.exynos_cpufreq.c); off: nothing. */
+ 		extern bool hakios_exynos_cpufreq_gov_start(void);
+ 		(void)hakios_exynos_cpufreq_gov_start();
