@@ -56,7 +56,8 @@ HakiOS block of `bsd/conf/files` say so (`tools/hakios-config.py kernel`). Both 
 and a driver says which bases it is built on with a `bases` line in its `drivers/<class>/conf` (`xnu-8796` when it says none;
 a `standard` file takes it too). `tools/hakios-config.py kernel` puts into a tree only the drivers of that tree's base, and says
 which it left out; the drivers table (`docs/reference/drivers.md`) marks a driver built for a device only on the base of the
-device's profile. No driver names `xnu-12377` yet, so the ios-26 kernel has none.
+device's profile. The first file on xnu-12377 is `drivers/core/hakios.version.c` (`kern.hakios.version`), with
+`patches/xnu-12377/0110` as its shim; no other driver names `xnu-12377` yet.
 
 What is left, in order, each step on its own:
 
