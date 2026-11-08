@@ -32,8 +32,12 @@
 #include "identity.h"		/* xnuloader/identity.h: who iOS shall think we are */
 
 #define PAYLOAD_MAGIC		0x50554E58u	/* "XNUP" */
-#define KERNEL_VIRT_BASE	0xFFFFFFF004000000ULL
+#define KERNEL_VIRT_BASE_IOS	0xFFFFFFF004000000ULL
+/* The kernel's virtual base. iOS kernels link __TEXT at 0xFFFFFFF007004000, macOS ones (VMAPPLE)
+ * at 0xFFFFFE0007004000: both KERNEL_LINK_OFFSET + 16 KB above their base. */
+static uint64_t KERNEL_VIRT_BASE = KERNEL_VIRT_BASE_IOS;
 #define KERNEL_LINK_OFFSET	0x03000000ULL
+#define UART0_PHANDLE		0x5c0100u	/* AAPL,phandle of /arm-io/uart0 */
 #define BASE_ALIGN		0x02000000ULL	/* 32 MB: L2 block with 16K pages */
 #define MAX_MEM_SIZE		0x180000000ULL
 #define PAGE_SIZE_MAX		0x4000ULL
@@ -679,6 +683,8 @@ void avfboot_main(uint64_t fdt_pa)
 			entry_va = ((const uint64_t *)((const uint8_t *)lc + 16))[32];
 		}
 	}
+	if (entry_va && (vm_lo >> 40) == 0xFFFFFEULL)	/* a macOS-linked kernel (VMAPPLE) */
+		KERNEL_VIRT_BASE = (vm_lo - KERNEL_LINK_OFFSET) & ~(BASE_ALIGN - 1);
 	if (vm_lo < KERNEL_VIRT_BASE + KERNEL_LINK_OFFSET || !entry_va)
 		die("unexpected kernel layout (not a HakiOS kernel?)");
 
@@ -875,7 +881,7 @@ void avfboot_main(uint64_t fdt_pa)
 	/* io_base: non-zero (XNU takes 0 for "no SoC") and below crosvm's UART at 0x3f8 */
 	uint64_t io_base = 0x100, io_size = 0x40000000 - io_base;
 	uint64_t ranges[3] = { 0, io_base, io_size };
-	uint8_t seed[64];
+	uint8_t seed[256];	/* xnu-12377 asks for 256 bytes (prng_random.c), xnu-8796 for fewer */
 	for (unsigned i = 0; i < sizeof(seed); i++)
 		seed[i] = (uint8_t)(rsr("cntvct_el0") >> (i & 7)) ^ (uint8_t)(i * 37);
 
@@ -956,6 +962,8 @@ void avfboot_main(uint64_t fdt_pa)
 
 	dt_begin(&w, "defaults");
 	dt_prop_u32(&w, "kern.vm_compressor", 2);
+	if (m.uart_pa)	/* xnu-12377's pe_serial.c finds its console through this phandle */
+		dt_prop_u32(&w, "serial-device", UART0_PHANDLE);
 	dt_end(&w);
 
 	dt_begin(&w, "product");
@@ -1028,6 +1036,7 @@ void avfboot_main(uint64_t fdt_pa)
 		dt_prop_str(&w, "compatible", m.uart_kind == UART_8250 ? "ns16550a" : "arm,pl011");
 		dt_prop(&w, "reg", reg2, sizeof(reg2));
 		dt_prop_u32(&w, "boot-console", 1);
+		dt_prop_u32(&w, "AAPL,phandle", UART0_PHANDLE);
 		dt_end(&w);
 	}
 	if (sccam.ok) {
