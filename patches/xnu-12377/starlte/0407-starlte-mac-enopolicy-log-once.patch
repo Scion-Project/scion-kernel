@@ -1,0 +1,39 @@
+From 7160f5a56fc6ab09f0ea713bf810a523eb544291 Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:33:20 +0000
+Subject: [PATCH] starlte: log each ENOPOLICY __mac_syscall once per policy
+ name and call (first 40)
+
+A new user space asks for MAC policies this kernel does not have; the first-40 limit used to be spent on one repeated request.
+---
+ security/mac_base.c | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/security/mac_base.c b/security/mac_base.c
+index ce1b571f1..36bd8951b 100644
+--- a/security/mac_base.c
++++ b/security/mac_base.c
+@@ -1616,10 +1616,19 @@ __mac_syscall(proc_t p, struct __mac_syscall_args *uap, int *retv __unused)
+ done:
+ #if defined(ARM64_BOARD_CONFIG_STARLTE)
+ 	if (error == ENOPOLICY) {
+-		/* which MAC policy a new userland asks for that is not here (first 40) */
+-		static int left = 40;
+-		if (left > 0) {
+-			left--;
++		/* which MAC policy a new userland asks for that is not here (first of each name/op, 40 max) */
++		static struct { char n[16]; int c; } seen[40];
++		static int nseen;
++		int k;
++		for (k = 0; k < nseen; k++) {
++			if (seen[k].c == uap->call && strncmp(seen[k].n, target, sizeof(seen[k].n) - 1) == 0) {
++				break;
++			}
++		}
++		if (k == nseen && nseen < 40) {
++			strlcpy(seen[nseen].n, target, sizeof(seen[nseen].n));
++			seen[nseen].c = uap->call;
++			nseen++;
+ 			printf("STARBITE MAC: %s[%d] __mac_syscall(\"%s\", %d): no such policy\n", p->p_comm,
+ 			    proc_getpid(p), target, uap->call);
+ 		}
