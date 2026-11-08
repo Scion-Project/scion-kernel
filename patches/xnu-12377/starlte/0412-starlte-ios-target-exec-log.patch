@@ -1,0 +1,24 @@
+From 7e9c1e6595189b8a83fac95ad2e97631d25c6b28 Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 21:03:22 +0000
+Subject: [PATCH] kern_exec: keep the per-exec console line on the iOS-target
+ Starbite build
+
+---
+ bsd/kern/kern_exec.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+index af59e19e1..3329f91c9 100644
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -8798,6 +8798,9 @@ process_signature(proc_t p, struct image_params *imgp)
+ 			    p->p_name);
+ 		}
+ 	}
++#elif defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++	/* keep the per-exec console line the macOS-target build printed above */
++	printf("exec %s\n", p->p_name);
+ #endif /* XNU_TARGET_OS_OSX */
+ 
+ 	/* If the code signature came through the image activation path, we skip the
