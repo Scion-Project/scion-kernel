@@ -3,6 +3,7 @@
 # is named here.
 /*
 !/hakios-metal/
+*.ipsw
 !/.gitignore
 !/.gitattributes
 !/VERSION
@@ -18,6 +19,8 @@
 !/Makefile
 !/LICENSE
 !/LICENSE.APSL
+!/LICENSES.md
+!/LICENSES/
 !/NOTICE
 !/LEGAL.md
 !/COMMUNITY.md
@@ -56,6 +59,7 @@ __pycache__/
 !/xnuloader/chooser.h
 !/xnuloader/scion_splash_logo.h
 !/xnuloader/platforms/
+!/xnuloader/sboot/
 !/xnuloader/mkidentity.py
 !/xnuloader/mkpayload.py
 
