@@ -1673,8 +1673,12 @@ IOMobileFramebuffer::beamWait(const struct RowJob * job, int32_t lastRow)
 void
 IOMobileFramebuffer::beamShareDone(const struct RowJob * job, unsigned share, int32_t firstRow, int32_t lastRow, uint64_t began)
 {
-	uint64_t now = mach_absolute_time();
+	uint64_t now;
 
+	if (fBeamIntf == 0) {
+		return;                         /* (no beam, as on the Galaxy S9: nothing is counted) */
+	}
+	now = mach_absolute_time();
 	__atomic_fetch_add(&fStatShareTime[share], now - began, __ATOMIC_RELAXED);
 	__atomic_fetch_add(&fStatShares[share], 1, __ATOMIC_RELAXED);
 	if (job->scan != 0) {
@@ -3086,12 +3090,18 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		absolutetime_to_nanoseconds(fStatDrawing, &drawing);
 		absolutetime_to_nanoseconds(fStatWaiting, &waiting);
 		absolutetime_to_nanoseconds(fStatBeatWait, &beat);
+		char late[48] = "";
+
+		/* (the line as it was on the Galaxy S9, with no beam: what reads these logs does not change) */
+		if (fBeamIntf != 0) {
+			snprintf(late, sizeof(late), "; %u of %u too late for the next scan", fStatScansMissed, fStatScans);
+		}
 		IOLog("MiniIOMobileFramebuffer: %u frames in %llu ms (%llu a second), %llu us each in the driver, after %llu us "
 		    "waiting for the GPU and, %u of them, %llu us for the next refresh; %u swaps waited for the frame before, "
-		    "%u gave up; %u swaps came a refresh late themselves; %u frames drawn again filtered; %u of %u too late for the next scan\n", fStatFrames, nanos / NSEC_PER_MSEC,
+		    "%u gave up; %u swaps came a refresh late themselves; %u frames drawn again filtered%s\n", fStatFrames, nanos / NSEC_PER_MSEC,
 		    fStatFrames * NSEC_PER_SEC / nanos, drawing / fStatFrames / NSEC_PER_USEC,
 		    waiting / fStatFrames / NSEC_PER_USEC, fStatOnBeat, fStatOnBeat ? beat / fStatOnBeat / NSEC_PER_USEC : 0,
-		    fStatHeld, fStatLost, fStatSwapsLate, fStatSettled, fStatScansMissed, fStatScans);
+		    fStatHeld, fStatLost, fStatSwapsLate, fStatSettled, late);
 		fStatScans = fStatScansMissed = 0;
 		if (fBeamIntf != 0) {
 			char shares[8 * 24] = "";
