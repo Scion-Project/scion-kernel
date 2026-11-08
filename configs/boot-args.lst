@@ -300,6 +300,7 @@ max77705_haptic	k
 max77705_ipclk	k
 max77705_steps	k
 max77705_usbsw	k
+max77705_wdt	k
 max98512	k
 max98512_gain	k
 mc_ce	k

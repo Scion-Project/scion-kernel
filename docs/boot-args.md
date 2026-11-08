@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **607 arguments**: 519 read by the kernel, 22 by the loader, 82 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **608 arguments**: 520 read by the kernel, 22 by the loader, 82 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -243,7 +243,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `soc_pas_mpss` | K | `hakios.mpss.c` | `CONFIG_SOC_PAS_MPSS` |  |
 | `soc_smem` | K | `hakios.mpss.c`, `hakios.socinfo.c` | `CONFIG_SOC_SMEM` |  |
 
-## Audio and battery (64)
+## Audio and battery (65)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -291,6 +291,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `max77705_ipclk` | K | `hakios.max77705.c` | `CONFIG_MAX77705_IPCLK` |  |
 | `max77705_steps` | K | `hakios.max77705.c` | `CONFIG_MAX77705_STEPS` |  |
 | `max77705_usbsw` | K | `hakios.max77705.c` | `CONFIG_MAX77705_USBSW` |  |
+| `max77705_wdt` | K | `hakios.max77705.c` | `CONFIG_MAX77705_WDT` |  |
 | `max98512` | K | `hakios.max98512.c` | `CONFIG_MAX98512` |  |
 | `max98512_gain` | K | `hakios.max98512.c` | `CONFIG_MAX98512_GAIN` |  |
 | `mic` | K | `hakios.mic.c` | `CONFIG_MIC` |  |

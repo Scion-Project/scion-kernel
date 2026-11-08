@@ -286,6 +286,7 @@ MAX77705_HAPTIC	arg	max77705_haptic	Audio and battery	k	hakios.max77705.c
 MAX77705_IPCLK	arg	max77705_ipclk	Audio and battery	k	hakios.max77705.c	
 MAX77705_STEPS	arg	max77705_steps	Audio and battery	k	hakios.max77705.c	
 MAX77705_USBSW	arg	max77705_usbsw	Audio and battery	k	hakios.max77705.c	
+MAX77705_WDT	arg	max77705_wdt	Audio and battery	k	hakios.max77705.c	the charger's watchdog kicked, only while it is on (see the top of this file)
 MAX98512	arg	max98512	Audio and battery	k	hakios.max98512.c	a look: the bus brought up (its clocks, the USI, the pins), both chips' revisions and registers
 MAX98512_GAIN	arg	max98512_gain	Audio and battery	k	hakios.max98512.c	the bottom speaker's gain at start, 1 to 5 (+3 to +15 dB; 1); the top one's is always 1
 MC_CE	arg	mc_ce	User space	k	mc_ce.c	

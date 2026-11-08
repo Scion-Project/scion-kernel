@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 664 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 665 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -846,7 +846,7 @@ CONFIG_GPU=y
 # CONFIG_VBLUR is not set
 
 #
-# Audio and battery (63)
+# Audio and battery (64)
 #
 
 # the audio DSP; the battery level in the UI and charging state come through it [needs fw-audio/ from the phone]
@@ -983,6 +983,9 @@ CONFIG_SOUND=4
 
 # read by hakios.max77705.c (kernel)
 # CONFIG_MAX77705_USBSW is not set
+
+# the charger's watchdog kicked, only while it is on (see the top of this file)
+# CONFIG_MAX77705_WDT is not set
 
 # a look: the bus brought up (its clocks, the USI, the pins), both chips' revisions and registers
 # CONFIG_MAX98512 is not set
