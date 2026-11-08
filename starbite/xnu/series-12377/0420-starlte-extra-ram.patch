@@ -1,0 +1,559 @@
+From f5e1e43577ed65096488cb4d8dc37c5abe779ad1 Mon Sep 17 00:00:00 2001
+From: Claudius <claudiusthebot@gmail.com>
+Date: Sun, 8 Nov 2026 20:57:03 +0000
+Subject: [PATCH] parity: extra RAM (Scion 1512 port) + touch priority/period
+ boot-args
+
+---
+ bsd/dev/starlte_touch.c        |  30 ++++++-
+ osfmk/arm/caches.c             |  20 +++++
+ osfmk/arm/pmap/pmap.c          |  13 ++-
+ osfmk/arm/pmap/pmap.h          |  18 ++++
+ osfmk/arm/pmap/pmap_data.c     |  11 +--
+ osfmk/arm/pmap/pmap_data.h     |  35 +++++++-
+ osfmk/arm64/arm_vm_init.c      | 153 +++++++++++++++++++++++++++++++--
+ osfmk/arm64/machine_routines.c |  26 ++++++
+ 8 files changed, 287 insertions(+), 19 deletions(-)
+
+diff --git a/bsd/dev/starlte_touch.c b/bsd/dev/starlte_touch.c
+index 9eb69ffde..5552ac0a9 100644
+--- a/bsd/dev/starlte_touch.c
++++ b/bsd/dev/starlte_touch.c
+@@ -33,6 +33,17 @@
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern void sweet_hid_touch(int finger, int down, int x, int y);
+ void starlte_touch_probe(void);
++extern kern_return_t kernel_thread_start_priority(thread_continue_t continuation, void *parameter, integer_t priority,
++    thread_t *new_thread);
++
++/*
++ * Scion's touch findings (HakiOS hakios.s6sy761.c, xnu-8796), behind boot-args here (default: as before):
++ *   startouch=N      (N > 1) the polling thread's priority (startouch=0: no touch, 1: as before). Scion runs it at 92 (BASEPRI_PREEMPT, as its display presenter):
++ *                    at the kernel's default it lost the processors to the window server under load and a finger's
++ *                    moves came in bursts (scrolling sticky, long presses by mistake; seen on the S9, 1 November).
++ *   startouch_ms=N   the polling period, 2..20 ms (Scion: 4; here 5 by default).
++ */
++static unsigned st_poll_ms = 5;
+ 
+ #define ST_CMU_PERIC0_PA        0x10400000u     /* gates +0x2018/0x206c/0x20dc/0x20e0, QCH +0x3038 */
+ #define ST_SYSREG_PERIC0_PA     0x10411000u     /* +0x1c USI03 mode: 4 = I2C */
+@@ -694,7 +705,7 @@ st_thread(__unused void *arg, __unused wait_result_t wr)
+ 	bool sense = st_cmd(S6_SENSE_ON);
+ 	st_msleep(20);
+ 	bool clear = st_cmd(S6_CLEAR_EVENT_STACK);
+-	printf("STARLTE TOUCH: sense on %d, clear %d; polling every 5 ms\n", sense, clear);
++	printf("STARLTE TOUCH: sense on %d, clear %d; polling every %u ms\n", sense, clear, st_poll_ms);
+ 
+ 	unsigned stuck = 0;
+ 	for (unsigned tick = 0;; tick++) {
+@@ -713,10 +724,10 @@ st_thread(__unused void *arg, __unused wait_result_t wr)
+ 		} else {
+ 			stuck = 0;
+ 		}
+-		if (tick % 6000 == 5999) {
++		if (tick % (30000 / st_poll_ms) == (30000 / st_poll_ms) - 1) {
+ 			printf("STARLTE TOUCH: %u events, %u retries, %u lost\n", st_events, st_retries, st_lost);
+ 		}
+-		st_msleep(5);
++		st_msleep(st_poll_ms);
+ 	}
+ }
+ 
+@@ -876,7 +887,18 @@ starlte_touch_probe(void)
+ 	}
+ 	st_alive = ml_io_map(ST_ALIVE_PA, 0x1000);
+ 	printf("STARLTE TOUCH: INT pin %s at probe\n", st_int_low() ? "low" : "high");
+-	if (kernel_thread_start(st_thread, NULL, &thread) == KERN_SUCCESS) {
++	uint32_t pri = on, ms = 0;      /* startouch=N, N > 1: the thread's priority (short: the command line is full) */
++	if (PE_parse_boot_argn("startouch_ms", &ms, sizeof(ms)) && ms >= 2 && ms <= 20) {
++		st_poll_ms = ms;
++	}
++	kern_return_t kr;
++	if (pri >= 2 && pri <= 95) {
++		kr = kernel_thread_start_priority((thread_continue_t)st_thread, NULL, (integer_t)pri, &thread);
++		printf("STARLTE TOUCH: thread at priority %u, every %u ms\n", pri, st_poll_ms);
++	} else {
++		kr = kernel_thread_start(st_thread, NULL, &thread);
++	}
++	if (kr == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
+ }
+diff --git a/osfmk/arm/caches.c b/osfmk/arm/caches.c
+index b5b3ba935..fd335b6e4 100644
+--- a/osfmk/arm/caches.c
++++ b/osfmk/arm/caches.c
+@@ -47,6 +47,26 @@
+ 
+ #include <arm/misc_protos.h>
+ 
++/*
++ * HakiOS (patch 1512): the boot loader's extra RAM beside the window (arm/pmap/pmap.h) is in the physical aperture too,
++ * and is RAM: not a page to map through a copy window, nor (cache_sync_page) a reason to clean the whole data cache.
++ */
++static inline bool
++hakios_isphysmem(pmap_paddr_t pa)
++{
++	if (((vm_address_t)pa - gPhysBase) < gPhysSize) {
++		return true;
++	}
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		if ((pa >= hakios_extra_ram[i].pa) && (pa < hakios_extra_ram[i].end)) {
++			return true;
++		}
++	}
++	return false;
++}
++#undef isphysmem
++#define isphysmem(a) hakios_isphysmem((pmap_paddr_t)(a))
++
+ /*
+  * dcache_incoherent_io_flush64() dcache_incoherent_io_store64() result info
+  */
+diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
+index 87b389874..7073034dd 100644
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -1545,7 +1545,7 @@ pmap_set_xprr_perm(
+ {
+ 	pvh_assert_locked(pai);
+ 
+-	const vm_offset_t kva = phystokv(vm_first_phys + (pmap_paddr_t)ptoa(pai));
++	const vm_offset_t kva = phystokv(pai_to_pa(pai));   /* (HakiOS, patch 1512) */
+ 	pt_entry_t * const ptep = pmap_pte(kernel_pmap, kva);
+ 
+ 	pmap_set_pte_xprr_perm(ptep, expected_perm, new_perm);
+@@ -2833,7 +2833,8 @@ pmap_init(
+ 	 *	structures for pages we allocate to be page tables in
+ 	 *	pmap_expand().
+ 	 */
+-	_vm_object_allocate(mem_size, pmap_object, VM_MAP_SERIAL_SPECIAL);
++	/* (HakiOS, patch 1512: page-table pages are kept at ptoa(pa_index(pa)), the extra RAM's after the window's) */
++	_vm_object_allocate(mem_size + ptoa((vm_object_size_t)hakios_extra_ram_pages), pmap_object, VM_MAP_SERIAL_SPECIAL);
+ 	pmap_object->copy_strategy = MEMORY_OBJECT_COPY_NONE;
+ 
+ 	/*
+@@ -4134,7 +4135,7 @@ pmap_set_ptov_ap(unsigned int pai __unused, unsigned int ap __unused, boolean_t
+ {
+ #if __ARM_PTE_PHYSMAP__
+ 	pvh_assert_locked(pai);
+-	vm_offset_t kva = phystokv(vm_first_phys + (pmap_paddr_t)ptoa(pai));
++	vm_offset_t kva = phystokv(pai_to_pa(pai));   /* (HakiOS, patch 1512) */
+ 	pt_entry_t *pte_p = pmap_pte(kernel_pmap, kva);
+ 
+ 	pt_entry_t tmplate = *pte_p;
+@@ -7833,6 +7834,12 @@ pmap_disconnect(
+ boolean_t
+ pmap_has_managed_page(ppnum_t first, ppnum_t last)
+ {
++	/* HakiOS (patch 1512): the boot loader's extra RAM, below or above the window, is managed too */
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		if ((ptoa(first) < hakios_extra_ram[i].end) && (ptoa(last) >= hakios_extra_ram[i].pa)) {
++			return TRUE;
++		}
++	}
+ 	if (ptoa(first) >= vm_last_phys) {
+ 		return FALSE;
+ 	}
+diff --git a/osfmk/arm/pmap/pmap.h b/osfmk/arm/pmap/pmap.h
+index f9e841f85..78765bfe5 100644
+--- a/osfmk/arm/pmap/pmap.h
++++ b/osfmk/arm/pmap/pmap.h
+@@ -547,6 +547,24 @@ extern pmap_paddr_t kvtophys_nofail(vm_offset_t va);
+ extern vm_map_address_t phystokv(pmap_paddr_t pa);
+ extern vm_map_address_t phystokv_range(pmap_paddr_t pa, vm_size_t *max_len);
+ 
++/*
++ * HakiOS/Scion (patch 1512, ported to xnu-12377): RAM the boot loader gives the kernel beside its window
++ * [gPhysBase, gPhysBase + memSize), in the device tree's /chosen "hakios-extra-ram" (pairs of 64-bit base and size),
++ * taken only with boot-arg extra_ram=1. The Galaxy S9's RAM is in two banks (2 GB from 0x80000000 with the firmware's
++ * ranges in it, 2 GB from 0x880000000); the window is in the second, the free pieces of the first come here.
++ * arm_vm_init() reads them, maps them in the physical aperture and gives each page an index after the window's in the
++ * pmap's tables (pa_index); arm_vm_prot_finalize() gives the pages to the VM, as ml_static_mfree() does its own.
++ */
++#define HAKIOS_EXTRA_RAM_MAX 12
++typedef struct {
++	pmap_paddr_t pa;        /* the first byte, PAGE_SIZE aligned */
++	pmap_paddr_t end;       /* past the last byte, PAGE_SIZE aligned */
++	unsigned int pai;       /* the pmap's index (pa_index) of its first page */
++} hakios_extra_ram_t;
++extern hakios_extra_ram_t hakios_extra_ram[HAKIOS_EXTRA_RAM_MAX];
++extern unsigned int hakios_extra_ram_count;     /* ranges in use */
++extern unsigned int hakios_extra_ram_pages;     /* PAGE_SIZE pages in them all */
++
+ extern vm_map_address_t pmap_map(vm_map_address_t va, vm_offset_t sa, vm_offset_t ea, vm_prot_t prot, unsigned int flags);
+ extern vm_map_address_t pmap_map_high_window_bd( vm_offset_t pa, vm_size_t len, vm_prot_t prot);
+ extern kern_return_t pmap_map_block(pmap_t pmap, addr64_t va, ppnum_t pa, uint32_t size, vm_prot_t prot, int attr, unsigned int flags);
+diff --git a/osfmk/arm/pmap/pmap_data.c b/osfmk/arm/pmap/pmap_data.c
+index 9c758b0e6..6c3659ad1 100644
+--- a/osfmk/arm/pmap/pmap_data.c
++++ b/osfmk/arm/pmap/pmap_data.c
+@@ -620,7 +620,7 @@ pmap_data_bootstrap(void)
+ 	 * needed to cover all of kernel-managed physical memory.
+ 	 */
+ 	const uint32_t num_leaf_page_tables =
+-	    (uint32_t)(mem_size / ((PAGE_SIZE / sizeof(pt_entry_t)) * ARM_PGBYTES));
++	    (uint32_t)((mem_size + ptoa(hakios_extra_ram_pages)) / ((PAGE_SIZE / sizeof(pt_entry_t)) * ARM_PGBYTES));
+ 
+ 	/**
+ 	 * There should be one PTD per page table (times 2 since we want twice the
+@@ -635,7 +635,7 @@ pmap_data_bootstrap(void)
+ 	vm_size_t ptd_root_table_size = num_ptd_pages * PAGE_SIZE;
+ 
+ 	/* Number of VM pages that span all of kernel-managed memory. */
+-	unsigned int npages = (unsigned int)atop(mem_size);
++	unsigned int npages = (unsigned int)atop(mem_size) + hakios_extra_ram_pages;   /* (HakiOS, patch 1512: and the extra RAM's) */
+ 
+ 	/* The pv_head_table and pp_attr_table both have one entry per VM page. */
+ 	const vm_size_t pp_attr_table_size = npages * sizeof(pp_attr_t);
+@@ -1234,8 +1234,9 @@ pmap_enqueue_pages(vm_page_t list)
+ 	vm_object_lock(pmap_object);
+ 
+ 	_vm_page_list_foreach_consume(mem, &list) {
++		/* (HakiOS, patch 1512: pa - gPhysBase, and for the extra RAM beside the window an offset after it) */
+ 		const vm_object_offset_t offset =
+-		    (vm_object_offset_t) ((ptoa(VM_PAGE_GET_PHYS_PAGE(mem))) - gPhysBase);
++		    (vm_object_offset_t) ptoa(pa_index(ptoa(VM_PAGE_GET_PHYS_PAGE(mem))));
+ 
+ 		vm_page_insert_internal(mem, pmap_object, offset,
+ 		    VM_KERN_MEMORY_PTE, VMPI_NONE, &delayed_acct);
+@@ -1553,7 +1554,7 @@ pmap_pages_free(pmap_paddr_t pa, __assert_only unsigned size)
+ 		 * Remove the page from the pmap's VM object and return it back to the
+ 		 * VM's global free list of pages.
+ 		 */
+-		mem = vm_page_lookup(pmap_object, (pa - gPhysBase));
++		mem = vm_page_lookup(pmap_object, ptoa(pa_index(pa)));   /* (HakiOS, patch 1512) */
+ 		assert(mem != VM_PAGE_NULL);
+ 		assert(VM_PAGE_WIRED(mem));
+ 		vm_page_lock_queues();
+@@ -2626,7 +2627,7 @@ pmap_remove_pv(
+ 	}
+ #endif /* PVH_FLAG_EXEC */
+ 	if (__improbable((pvh_flags & PVH_FLAG_FLUSH_NEEDED) && pvh_test_type(pvh, PVH_TYPE_NULL))) {
+-		pmap_flush_noncoherent_page((pmap_paddr_t)ptoa(pai) + vm_first_phys);
++		pmap_flush_noncoherent_page(pai_to_pa(pai));   /* (HakiOS, patch 1512) */
+ 	}
+ 
+ 	*is_internal_p = is_internal;
+diff --git a/osfmk/arm/pmap/pmap_data.h b/osfmk/arm/pmap/pmap_data.h
+index f66dfba3b..df1e92d26 100644
+--- a/osfmk/arm/pmap/pmap_data.h
++++ b/osfmk/arm/pmap/pmap_data.h
+@@ -74,7 +74,16 @@ extern pmap_paddr_t vm_first_phys, vm_last_phys;
+ static inline bool
+ pa_valid(pmap_paddr_t pa)
+ {
+-	return (pa >= vm_first_phys) && (pa < vm_last_phys);
++	if (__probable((pa >= vm_first_phys) && (pa < vm_last_phys))) {
++		return true;
++	}
++	/* HakiOS (patch 1512): the boot loader's extra RAM beside the window (arm/pmap/pmap.h) is kernel-managed too */
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		if ((pa >= hakios_extra_ram[i].pa) && (pa < hakios_extra_ram[i].end)) {
++			return true;
++		}
++	}
++	return false;
+ }
+ 
+ /**
+@@ -98,9 +107,33 @@ pa_valid(pmap_paddr_t pa)
+ static inline unsigned int
+ pa_index(pmap_paddr_t pa)
+ {
++	if (__probable((pa >= vm_first_phys) && (pa < vm_last_phys))) {
++		return (unsigned int)atop(pa - vm_first_phys);
++	}
++	/* HakiOS (patch 1512): an extra range's pages come after the window's, in the order of the ranges */
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		if ((pa >= hakios_extra_ram[i].pa) && (pa < hakios_extra_ram[i].end)) {
++			return hakios_extra_ram[i].pai + (unsigned int)atop(pa - hakios_extra_ram[i].pa);
++		}
++	}
+ 	return (unsigned int)atop(pa - vm_first_phys);
+ }
+ 
++/**
++ * The physical address of a physical address index (the reverse of pa_index()). HakiOS (patch 1512).
++ */
++static inline pmap_paddr_t
++pai_to_pa(unsigned int pai)
++{
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		if ((pai >= hakios_extra_ram[i].pai) &&
++		    (pai - hakios_extra_ram[i].pai < atop(hakios_extra_ram[i].end - hakios_extra_ram[i].pa))) {
++			return hakios_extra_ram[i].pa + ptoa((pmap_paddr_t)(pai - hakios_extra_ram[i].pai));
++		}
++	}
++	return vm_first_phys + ptoa((pmap_paddr_t)pai);
++}
++
+ /* See the definition of pv_head_table for more information. */
+ extern pv_entry_t **pv_head_table;
+ 
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index 3cf71a827..90d8f0a03 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -367,15 +367,111 @@ typedef struct {
+ 	vm_size_t len;
+ } ptov_table_entry;
+ 
++/* (HakiOS, patch 1512: and one for each range of the boot loader's extra RAM) */
+ #if HAS_MTE
+-#define PTOV_TABLE_SIZE 9
++#define PTOV_TABLE_SIZE (9 + HAKIOS_EXTRA_RAM_MAX)
+ #else /* HAS_MTE */
+-#define PTOV_TABLE_SIZE 8
++#define PTOV_TABLE_SIZE (8 + HAKIOS_EXTRA_RAM_MAX)
+ #endif /* HAS_MTE */
+ 
+ SECURITY_READ_ONLY_LATE(static ptov_table_entry)        ptov_table[PTOV_TABLE_SIZE];
+ SECURITY_READ_ONLY_LATE(static boolean_t)               kva_active = FALSE;
+ 
++/*
++ * HakiOS (patch 1512, ported to xnu-12377): the boot loader's extra RAM beside the window (arm/pmap/pmap.h). Read once
++ * from the device tree in arm_vm_init(), before anything is sized from the memory there is. Only with boot-arg
++ * extra_ram=1 (off by default on this tree until a phone run proves it); extra_ram=N with N > 1: at most N MB in all (the
++ * last range taken is cut); extra_ram_mask=BITS takes only the ranges whose bit is set (bit 0: the property's first).
++ * Ranges must lie below the window: 12377's VM finds the pages of RAM outside its vm_pages array in a radix tree that
++ * starts at pmap_first_pnum, which is lowered to the lowest extra page (vm_page_find_canonical()).
++ */
++SECURITY_READ_ONLY_LATE(hakios_extra_ram_t) hakios_extra_ram[HAKIOS_EXTRA_RAM_MAX];
++SECURITY_READ_ONLY_LATE(unsigned int) hakios_extra_ram_count = 0;
++SECURITY_READ_ONLY_LATE(unsigned int) hakios_extra_ram_pages = 0;
++SECURITY_READ_ONLY_LATE(static unsigned int) hakios_extra_ram_refused = 0;
++SECURITY_READ_ONLY_LATE(static unsigned int) hakios_extra_ram_offered = 0;
++
++static void
++hakios_extra_ram_init(void)
++{
++	DTEntry chosen;
++	const uint64_t *ranges;
++	unsigned int size = 0, first_pai = (unsigned int)atop(mem_size);
++	uint32_t on = 0, mask = 0xffffffffu, cap_mb = 0;
++
++	if (!PE_parse_boot_argn("extra_ram", &on, sizeof(on)) || on == 0) {
++		return;
++	}
++	(void)PE_parse_boot_argn("extra_ram_mask", &mask, sizeof(mask));
++	cap_mb = on > 1 ? on : 0;
++	if (SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
++	    SecureDTGetProperty(chosen, "hakios-extra-ram", (void const **)&ranges, &size) != kSuccess) {
++		return;
++	}
++	uint64_t cap = cap_mb ? ((uint64_t)cap_mb << 20) : UINT64_MAX, taken = 0;
++	for (unsigned int i = 0; i + 1 < size / sizeof(uint64_t) && hakios_extra_ram_count < HAKIOS_EXTRA_RAM_MAX; i += 2) {
++		hakios_extra_ram_offered++;
++		if (!(mask & (1u << ((i / 2) & 31)))) {
++			continue;
++		}
++		pmap_paddr_t pa = round_page(ranges[i]), end = trunc_page(ranges[i] + ranges[i + 1]);
++		bool ok = end > pa && ranges[i] + ranges[i + 1] > ranges[i];
++
++		/* below the window only (vm_page_find_canonical), never the window, nor another range */
++		if (ok && end > gPhysBase) {
++			ok = false;
++		}
++		for (unsigned int j = 0; ok && j < hakios_extra_ram_count; j++) {
++			ok = !(pa < hakios_extra_ram[j].end && end > hakios_extra_ram[j].pa);
++		}
++		if (ok && taken >= cap) {
++			continue;
++		}
++		if (ok && end - pa > cap - taken) {
++			end = pa + trunc_page(cap - taken);
++			ok = end > pa;
++		}
++		if (!ok) {
++			hakios_extra_ram_refused++;     /* (said in arm_vm_prot_finalize(): too early for printf here) */
++			continue;
++		}
++		hakios_extra_ram[hakios_extra_ram_count].pa = pa;
++		hakios_extra_ram[hakios_extra_ram_count].end = end;
++		hakios_extra_ram[hakios_extra_ram_count].pai = first_pai + hakios_extra_ram_pages;
++		hakios_extra_ram_pages += (unsigned int)atop(end - pa);
++		hakios_extra_ram_count++;
++		taken += end - pa;
++		/* 12377: the radix tree of canonical pages outside vm_pages starts here (vm_resident.c) */
++		if ((ppnum_t)atop(pa) < pmap_first_pnum) {
++			pmap_first_pnum = (ppnum_t)atop(pa);
++		}
++	}
++}
++
++/* [pa, pa + len) is all in one of the extra ranges */
++static bool
++hakios_extra_ram_covers(pmap_paddr_t pa, pmap_paddr_t len)
++{
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		if (pa >= hakios_extra_ram[i].pa && pa + len <= hakios_extra_ram[i].end) {
++			return true;
++		}
++	}
++	return false;
++}
++
++/* [pa, pa + len) meets one of the extra ranges */
++static bool
++hakios_extra_ram_meets(pmap_paddr_t pa, pmap_paddr_t len)
++{
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		if (pa < hakios_extra_ram[i].end && pa + len > hakios_extra_ram[i].pa) {
++			return true;
++		}
++	}
++	return false;
++}
++
+ #define ARM64_PAGE_UNGUARDED (0)
+ #define ARM64_PAGE_GUARDED   (1)
+ 
+@@ -1011,7 +1107,9 @@ arm_vm_page_granular_helper(vm_offset_t start, vm_offset_t _end, vm_offset_t va,
+ 		va &= ~ARM_TT_L2_OFFMASK;
+ 		pa = va - gVirtBase + gPhysBase - pa_offset;
+ 
+-		if (pa >= real_avail_end) {
++		/* (HakiOS, patch 1512: an extra range may be anywhere, below the window too) */
++		bool extra = hakios_extra_ram_meets(pa, ARM_TT_L2_SIZE);
++		if (pa >= real_avail_end && !extra) {
+ 			return;
+ 		}
+ 
+@@ -1038,10 +1136,10 @@ arm_vm_page_granular_helper(vm_offset_t start, vm_offset_t _end, vm_offset_t va,
+ 		}
+ 
+ 		vm_offset_t len = _end - va;
+-		if ((pa + len) > real_avail_end) {
++		if (!extra && (pa + len) > real_avail_end) {
+ 			_end -= (pa + len - real_avail_end);
+ 		}
+-		assert((start - gVirtBase + gPhysBase - pa_offset) >= gPhysBase);
++		assert(extra || (start - gVirtBase + gPhysBase - pa_offset) >= gPhysBase);
+ 
+ 		/* Round up to the nearest PAGE_SIZE boundary when creating mappings:
+ 		 * PAGE_SIZE may be a multiple of ARM_PGBYTES, and we don't want to leave
+@@ -1141,7 +1239,7 @@ arm_vm_page_granular_prot(vm_offset_t start, unsigned long size, pmap_paddr_t pa
+ 
+ 			tte2 = arm_kva_to_tte(align_start);
+ 
+-			if ((pa >= gPhysBase) && (pa < real_avail_end)) {
++			if (((pa >= gPhysBase) && (pa < real_avail_end)) || hakios_extra_ram_covers(pa, ARM_TT_L2_SIZE)) {
+ 				tmplate = (pa & ARM_TTE_BLOCK_L2_MASK) | ARM_TTE_TYPE_BLOCK
+ 				    | ARM_TTE_VALID | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_NX
+ 				    | ARM_TTE_BLOCK_AP(pte_prot_APX) | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY)
+@@ -1640,6 +1738,16 @@ arm_vm_physmap_init(boot_args *args)
+ 	arm_vm_physmap_slide(temp_ptov_table, (args->topOfKernelData - gPhysBase + gVirtBase),
+ 	    real_avail_end - args->topOfKernelData, AP_RWNA, ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT); // rest of physmem
+ 
++	/*
++	 * HakiOS (patch 1512): the boot loader's extra RAM, each range after the last in the aperture. Its "va" for
++	 * arm_vm_physmap_slide() is where the static formula (pa - gPhysBase + gVirtBase) would put it, which for a range
++	 * below the window is no address at all: it is only ever turned back into the physical address.
++	 */
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		arm_vm_physmap_slide(temp_ptov_table, hakios_extra_ram[i].pa - gPhysBase + gVirtBase,
++		    hakios_extra_ram[i].end - hakios_extra_ram[i].pa, AP_RWNA, ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT);
++	}
++
+ 	assert((temp_ptov_table[ptov_index - 1].va + temp_ptov_table[ptov_index - 1].len) <= physmap_end);
+ 
+ 	// Sort in descending order of segment length.  LUT traversal is linear, so largest (most likely used)
+@@ -1689,6 +1797,29 @@ arm_vm_prot_finalize(boot_args * args __unused)
+ 	arm64_replace_bootstack(&BootCpuData);
+ 	ml_static_mfree(phystokv(segBOOTDATAB - gVirtBase + gPhysBase), segSizeBOOTDATA);
+ 
++	/*
++	 * HakiOS (patch 1512): the boot loader's extra RAM to the VM (machine_routines.c), queued with ml_static_mfree()'s
++	 * pages and released with them once the aperture is final (machine_lockdown()), before bsd_init() and vm_pageout(),
++	 * so that jetsam's and the pageout daemon's levels count it.
++	 */
++	for (unsigned int i = 0; i < hakios_extra_ram_count; i++) {
++		extern void hakios_extra_ram_give(ppnum_t first, ppnum_t end);
++		hakios_extra_ram_give((ppnum_t)atop(hakios_extra_ram[i].pa), (ppnum_t)atop(hakios_extra_ram[i].end));
++		printf("hakios: extra RAM 0x%llx..0x%llx (%llu MB) given to the VM\n", (unsigned long long)hakios_extra_ram[i].pa,
++		    (unsigned long long)hakios_extra_ram[i].end - 1,
++		    (unsigned long long)(hakios_extra_ram[i].end - hakios_extra_ram[i].pa) >> 20);
++	}
++	if (hakios_extra_ram_refused != 0) {
++		printf("hakios: extra RAM: %u of the boot loader's ranges refused (above or in the window, or overlapping)\n",
++		    hakios_extra_ram_refused);
++	}
++	if (hakios_extra_ram_count != 0 || hakios_extra_ram_offered != 0) {
++		printf("hakios: extra RAM: %u pages (%llu MB) in %u of %u ranges beside the window 0x%llx + 0x%llx; max_mem 0x%llx, "
++		    "pmap_first_pnum 0x%x\n", hakios_extra_ram_pages, (unsigned long long)ptoa((uint64_t)hakios_extra_ram_pages) >> 20,
++		    hakios_extra_ram_count, hakios_extra_ram_offered, (unsigned long long)gPhysBase, (unsigned long long)mem_size,
++		    (unsigned long long)max_mem, pmap_first_pnum);
++	}
++
+ #if __ARM_KERNEL_PROTECT__
+ 	arm_vm_populate_kernel_el0_mappings();
+ #endif /* __ARM_KERNEL_PROTECT__ */
+@@ -1887,6 +2018,10 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 		max_mem_actual = memory_size;
+ 	} else {
+ 		max_mem_actual = mem_actual;
++		/* HakiOS (patch 1512): the boot loader's extra RAM beside the window (none with maxmem=) */
++		hakios_extra_ram_init();
++		mem_actual += ptoa((uint64_t)hakios_extra_ram_pages);
++		max_mem_actual += ptoa((uint64_t)hakios_extra_ram_pages);
+ 	}
+ #if !defined(ARM_LARGE_MEMORY)
+ 	if (mem_size >= ((VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / 2)) {
+@@ -1929,6 +2064,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ #else
+ 	static_memory_end = physmap_base + mem_size + ARM64_PHYSMAP_ALIGNMENT_PADDING; // worst possible case for block alignment
+ 	physmap_end = physmap_base + real_phys_size + ARM64_PHYSMAP_ALIGNMENT_PADDING;
++	/* (HakiOS, patch 1512: the extra RAM is in the aperture too) */
++	static_memory_end += ptoa((vm_map_address_t)hakios_extra_ram_pages);
++	physmap_end += ptoa((vm_map_address_t)hakios_extra_ram_pages);
+ #endif // ARM_LARGE_MEMORY
+ #endif
+ 
+@@ -2293,6 +2431,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 
+ 	sane_size = mem_size - (avail_start - gPhysBase);
+ 	max_mem = mem_size;
++	/* (HakiOS, patch 1512: the extra RAM counts as the VM's: it is given to it in arm_vm_prot_finalize()) */
++	sane_size += ptoa((uint64_t)hakios_extra_ram_pages);
++	max_mem += ptoa((uint64_t)hakios_extra_ram_pages);
+ 	vm_kernel_slid_base = segLOWESTTEXT;
+ 	// vm_kernel_slide is set by arm_init()->arm_slide_rebase_and_sign_image()
+ 	vm_kernel_stext = segTEXTB;
+diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
+index 1604738a8..ba0204ed7 100644
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -2180,6 +2180,32 @@ ml_release_deferred_pages(void)
+ 	ml_static_mfree_queue_up = false;
+ }
+ 
++/*
++ * HakiOS (patch 1512, xnu-12377): the boot loader's extra RAM [first, end) to the VM, each page made as ml_static_mfree()
++ * makes its own (canonical: found by vm_page_find_canonical() through the radix tree below vm_pages_first_pnum), queued
++ * with them until the physical aperture is final, then released by ml_release_deferred_pages(). vm_page_bootstrap()
++ * counted every page of max_mem not free then as wired, these with them: they are taken off again, as ml_static_mfree()
++ * does for its pages.
++ */
++void hakios_extra_ram_give(ppnum_t first, ppnum_t end);
++void
++hakios_extra_ram_give(ppnum_t first, ppnum_t end)
++{
++	for (ppnum_t ppn = first; ppn < end; ppn++) {
++		if (__probable(!ml_static_mfree_queue_up)) {
++			vm_page_create_canonical(ppn);
++		} else {
++			vm_page_t m = vm_page_create(ppn, true, Z_WAITOK);
++
++			vm_page_list_push(&ml_static_mfree_pre_slide_list, m);
++		}
++	}
++	vm_page_lockspin_queues();
++	vm_page_wire_count -= (unsigned int)(end - first);
++	vm_page_wire_count_initial -= (unsigned int)(end - first);
++	vm_page_unlock_queues();
++}
++
+ /*
+  *	Routine:        ml_static_mfree
+  *	Function:
