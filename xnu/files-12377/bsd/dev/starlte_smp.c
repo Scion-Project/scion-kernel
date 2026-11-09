@@ -267,7 +267,7 @@ st_top_a64e(uint64_t window_ns)
 	printf("%s\n", line);
 
 	/* of which LSE/LRCPC on the Mongoose M3s, and threads pinned to an A55 for another instruction */
-	extern uint64_t sweet_lse_counts[4], sweet_m3_pins;
+	extern uint64_t sweet_lse_counts[4], sweet_m3_pins, sweet_m3_unpins;
 	static uint64_t lse_last[4], pins_last;
 	uint64_t ld[4];
 	for (unsigned i = 0; i < 4; i++) {
@@ -275,8 +275,8 @@ st_top_a64e(uint64_t window_ns)
 		lse_last[i] = sweet_lse_counts[i];
 	}
 	if (ld[0] + ld[1] + ld[2] + ld[3] + (sweet_m3_pins - pins_last) != 0) {
-		printf("STARLTE LSE (M3): cas %llu casp %llu ldop %llu ldapr %llu in %llu ms; %llu threads pinned to A55 (%llu all)\n",
-		    ld[0], ld[1], ld[2], ld[3], window_ns / NSEC_PER_MSEC, sweet_m3_pins - pins_last, sweet_m3_pins);
+		printf("STARLTE LSE (M3): cas %llu casp %llu ldop %llu ldapr %llu in %llu ms; %llu threads pinned to A55 (%llu all, %llu released)\n",
+		    ld[0], ld[1], ld[2], ld[3], window_ns / NSEC_PER_MSEC, sweet_m3_pins - pins_last, sweet_m3_pins, sweet_m3_unpins);
 	}
 	pins_last = sweet_m3_pins;
 

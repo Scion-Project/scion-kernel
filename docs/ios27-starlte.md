@@ -28,8 +28,9 @@ builder's own, from their own IPSW; nothing of Apple's is in this repository.
 | `xnu/apply-series.sh` | makes the tree; learned `files DIR`, `copy SOURCE TARGET`, `.sh` lines and `# drivers: series`, `# imports: none`, all inert for the ios-26 series |
 | `xnuloader/sboot/` | the loader S-Boot starts (boot menu, OS store, recovery menu, USB console and fastboot subset); Scion's own path boots through Mu-Silicium's UEFI and `xnuloader/`, which this leaves alone |
 | `tools/ios27/` | build, packing and test tools (`build-xnu-12377.sh`, `-ios.sh`, `mkpayload-ios26.sh`, `make-xnu-boot.sh`, the ADT makers, `a64e/`, `gpu/`, `mesa-ios/`, `ca-gpu/`) and wardevsa's `herolte/` packing tools |
+| `tools/ios27/lse/` | the shared cache's LSE atomics rewritten into LL/SC thunks for the M3s (`lse-rewrite.py`, the root scripts, the differential test); `docs/ios27/EIGHT-CORES.md` |
 | `userland/src/sbca.c` | CoreAnimation's renderer through OpenGL ES on the Mali-G72 (Mesa Panfrost behind HakiOS's EAGL bridge), with iOS 27.0.1's addresses; the bridge's iOS 27 table is `tools/ios27/ca-gpu/hakios/` |
-| `docs/ios27/` | `IOS27-TARGET.md` (the iPhoneOS-target build and what it changes), `PARITY.md` (against Scion's 16.5 kernel), and the author's pages on the loader's USB console and fastboot, the microSD root and the recovery menu |
+| `docs/ios27/` | `IOS27-TARGET.md` (the iPhoneOS-target build and what it changes), `PARITY.md` (against Scion's 16.5 kernel), `EIGHT-CORES.md` (the eight cores: the LSE rewrite, the soft pins), and the author's pages on the loader's USB console and fastboot, the microSD root and the recovery menu |
 
 **Layers, and whose they are** (`LICENSES.md` has the licences): ios-sweet (dipa-studio, MIT) `0003`-`0081`; ios-a5xelte (orhunnx and A5XELTE
 contributors, MIT) `0082`-`0128`; the Galaxy S7 layer of ios-a5xelte (wardevsa) `0200`-`0238`, used and published with the author's
@@ -48,7 +49,7 @@ the LSE and LDAPR instructions they lack for EL0, and pin a thread that uses ano
 console: `/dev/cu.usbmodem*`), `rd=ufsroot0 ufsroot=USERDATA ufsrw=1 rootrw=1`, `sweetacl=1`, `sweetfb_native=1 sweetfb_scale=1`,
 `sweetfb_gpu=1`, `sweetinject=/usr/lib/sbca.dylib,backboardd,Preferences`, `vm_compression_limit=196608`, `wdt=-1 -wdt_no_pmu`, and this kernel's
 own code-signing policy for the builder's own root (`cs_enforcement_disable=1 cs_integrity_skip=1 launchd_unsecure_cache=1`: its AMFI is a stand-in,
-`starlte/0025`, `0035`, `0036`, `0322`). `startop=1` adds trap statistics. The set is `tools/ios27/cmdline/starlte-8core.txt` (pass it to `tools/ios27/mkpayload-ios26.sh NAME FILE`; the payload
+`starlte/0025`, `0035`, `0036`, `0322`). `startop=1` adds trap statistics; `sweetm3unpin=N` (default off) lets a thread pinned to an A55 go back to the M3s after N ms (`docs/ios27/EIGHT-CORES.md`). The set is `tools/ios27/cmdline/starlte-8core.txt` (pass it to `tools/ios27/mkpayload-ios26.sh NAME FILE`; the payload
 holds 607 bytes of it); the set that booted on the phone at 4 cores is that with `cpus=4`. `docs/boot-args.md` lists what the 16.5 kernel and
 user space read; the S9's own are in the sources under `xnu/files-12377/`.
 

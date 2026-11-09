@@ -35,6 +35,9 @@
 #include <kern/misc_protos.h>
 #include <libkern/OSAtomic.h>
 #include <arm/thread.h>
+#include <pexpert/pexpert.h>
+#include <kern/clock.h>
+#include <os/atomic_private.h>
 
 bool sweet_a64e_emulate(arm_saved_state_t *state, uint32_t instr);
 /* sweet_a64e_fp.s: one FP add/sub of `size` (1 = H, 2 = S, 3 = D) under fpcr. */
@@ -460,6 +463,90 @@ extern int copyin_atomic64(const user_addr_t user_addr, uint64_t *kernel_addr);
 
 uint64_t sweet_lse_counts[4];   /* CAS, CASP, LD<op>/SWP, LDAPR */
 uint64_t sweet_m3_pins;          /* threads pinned to an A55 (sleh.c) */
+uint64_t sweet_m3_unpins;        /* soft pins released (sweetm3unpin) */
+
+/*
+ * Soft M3 pins (boot-arg sweetm3unpin=N, milliseconds; default 0 = off = pins are permanent):
+ * sleh.c binds a thread that ran an instruction the M3 lacks (FP16, DotProd, RDM) to an A55 and
+ * notes it here; at the thread's first synchronous exception from EL0 (syscall, fault, trap) at
+ * least N ms later the binding is dropped, so it can run on the big cores again (and is pinned
+ * again, one trap later, if it meets such an instruction on an M3 once more). Pins that do not fit
+ * the table stay permanent, as before. Entries carry the thread id, so a recycled thread_t that
+ * matches the pointer but not the id is never unbound.
+ */
+#define SWEET_PIN_SLOTS 256
+static struct { thread_t th; uint64_t tid; uint64_t until; } sweet_pin_slots[SWEET_PIN_SLOTS];
+static uint64_t sweet_unpin_abs;
+static int sweet_unpin_state;            /* 0 = boot-arg not read yet, 1 = off, 2 = on */
+
+static bool
+sweet_unpin_enabled(void)
+{
+	if (sweet_unpin_state == 0) {
+		uint32_t ms = 0;
+		PE_parse_boot_argn("sweetm3unpin", &ms, sizeof(ms));
+		if (ms != 0) {
+			nanoseconds_to_absolutetime((uint64_t)ms * NSEC_PER_MSEC, &sweet_unpin_abs);
+		}
+		sweet_unpin_state = ms != 0 ? 2 : 1;
+	}
+	return sweet_unpin_state == 2;
+}
+
+static unsigned
+sweet_pin_hash(thread_t th)
+{
+	return (unsigned)((((uintptr_t)th) >> 4) * 0x9E3779B1u) % SWEET_PIN_SLOTS;
+}
+
+void sweet_m3_pin_note(thread_t th);
+void sweet_m3_unpin_check(thread_t th);
+
+void
+sweet_m3_pin_note(thread_t th)
+{
+	if (!sweet_unpin_enabled()) {
+		return;
+	}
+	unsigned h = sweet_pin_hash(th);
+	uint64_t tid = thread_tid(th);
+	for (unsigned i = 0; i < 16; i++) {
+		unsigned k = (h + i) % SWEET_PIN_SLOTS;
+		thread_t cur = os_atomic_load(&sweet_pin_slots[k].th, acquire);
+		if (cur == th || (cur == THREAD_NULL &&
+		    os_atomic_cmpxchg(&sweet_pin_slots[k].th, THREAD_NULL, th, acq_rel))) {
+			sweet_pin_slots[k].tid = tid;
+			sweet_pin_slots[k].until = mach_absolute_time() + sweet_unpin_abs;
+			return;
+		}
+	}
+}
+
+void
+sweet_m3_unpin_check(thread_t th)
+{
+	if (sweet_unpin_state != 2) {
+		return;
+	}
+	unsigned h = sweet_pin_hash(th);
+	for (unsigned i = 0; i < 16; i++) {
+		unsigned k = (h + i) % SWEET_PIN_SLOTS;
+		if (os_atomic_load(&sweet_pin_slots[k].th, acquire) != th) {
+			continue;
+		}
+		if (sweet_pin_slots[k].tid != thread_tid(th)) {
+			/* a recycled thread_t: the old thread's slot is stale; free it, leave the binding */
+			os_atomic_store(&sweet_pin_slots[k].th, THREAD_NULL, release);
+			return;
+		}
+		if (mach_absolute_time() >= sweet_pin_slots[k].until) {
+			os_atomic_store(&sweet_pin_slots[k].th, THREAD_NULL, release);
+			thread_bind(PROCESSOR_NULL);
+			sweet_m3_unpins++;
+		}
+		return;
+	}
+}
 
 /* Where the traps come from: an open table of user PCs (racy counts are fine), read and reset by the
  * STARLTE TOP report (bsd/dev/starlte_smp.c). Shared-cache PCs are the same in every process. */

@@ -201,3 +201,5 @@ starlte/0421-starlte-cpu-governor.patch
 starlte/0422-starlte-wifi-pcie-stage1.patch
 starlte/0423-starlte-tmu.patch
 starlte/0424-starlte-dpu-scanout.patch
+# 8-core mode: soft A55 pins (boot-arg sweetm3unpin=N ms, default off; the bookkeeping is in xnu/files-12377/osfmk/arm64/sweet_a64e.c)
+starlte/0425-starlte-m3-soft-unpin.patch
