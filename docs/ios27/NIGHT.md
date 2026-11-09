@@ -8,14 +8,14 @@ caches, roots or logs is here.
 
 **What is verified, and how.** The numbers below were taken on a phone with kernels that had these changes behind a different boot-argument (`sbx`, one
 bit each, the command line being at its 607-byte limit) and a root edited as described. This repository carries the changes as
-`patches/xnu-12377/starlte/0427` (the hooks in Apple's and the port's files) and `0428` (Scion's S6E3HA8 panel driver, `drivers/display/panel`, taken to this
+`commit 0427 of scion/xnu-12377-starlte` (the hooks in Apple's and the port's files) and `0428` (Scion's S6E3HA8 panel driver, `drivers/display/panel`, taken to this
 tree), with the bits renumbered into `sweetspeed`. The applied tree was compared with the tree that ran, file by file: they differ only by the boot-argument
 switches, comment wording, and the panel driver, which is Scion's current one (the phone ran an older copy of it; the new functions are the same). **The gated
 kernel was built (the iOS-target STARLTE kernel, as for #255 and #260) and not booted.** What the phone showed is the measured part; "should" below is a guess.
 
 ## The bits
 
-`xnu/files-12377/osfmk/arm64/sweet_a64e.c` has the table; 1 to 16 are in `SPEED.md`.
+`scion/xnu-12377-starlte:osfmk/arm64/sweet_a64e.c` has the table; 1 to 16 are in `SPEED.md`.
 
 | Bit | Change | Where |
 |---|---|---|

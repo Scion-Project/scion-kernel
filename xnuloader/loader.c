@@ -16,7 +16,7 @@
 #include "efi.h"
 #include "identity.h"         /* who Darwin shall think we are: from the iPhone's own device tree (mkidentity.py) */
 #include "scion_splash_logo.h"   /* Scion's boot screen (splash=1): the sprout, and the drawing the kernel shares (docs/boot-screen.md) */
-#include "../xnu/files/osfmk/console/scion_splash.h"
+#include "scion_splash.h"          /* the kernel's (osfmk/console of the fork, scion/xnu-8796): build.sh puts its directory on -I */
 
 /* ------------------------------------------------------------------------ */
 /* Fixed conventions shared with the boot shim, the packer and the kernel   */

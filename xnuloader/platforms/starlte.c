@@ -2,7 +2,7 @@
  * The Exynos 9810 phones' low bank (0x80000000-0xFFFFFFFF), where the window is not (it is the bank from 0x880000000):
  * where its free RAM may be XNU's as well (extra_ram_claim). Every range the device tree reserves there, every range the
  * kernel's drivers take for themselves, and the platform's keep-outs are outside these (devices/starlte/README.md,
- * Memory layout; xnu/files/bsd/sys/hakios.exynos9810_mem.h):
+ * Memory layout; scion/xnu-8796:bsd/sys/hakios.exynos9810_mem.h):
  *   0x80000000 + 2 MB          sec_debug_magic (4 KB) and a margin
  *   0x8F000000 - 0x97FFFFFF    the UEFI image, its stack, the DXE heap, and 80 MB more left to UEFI's allocator, which
  *                              stays alive beside the kernel (zswap_debug, 0x91300000, is in it)

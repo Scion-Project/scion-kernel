@@ -1,4 +1,0 @@
-# Files xnu-12377.121.6 includes but does not ship, from another open-source release of XNU (xnu/apply-series.sh):
-# <tag> <commit> <path>. Apple's own, under the terms of that release; fetched, not kept in this repository.
-# The TrustCache library's headers: xnu-8796.101.5 is the last release that has them (bsd/kern/kern_trustcache.c).
-xnu-8796.101.5 aca3beaa3dfbd42498b42c5e5ce20a938e6554e5 EXTERNAL_HEADERS/TrustCache

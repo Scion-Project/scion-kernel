@@ -2,11 +2,11 @@
 # of Apple's repository, where Scion's changes are ordinary commits on Apple's tags (docs/xnu-fork.md): the profile names the
 # fork, its branch and the commit a build takes (profiles/*.conf: xnu_fork, fork_branch, fork_commit). What may not be in git
 # (the Kernel Debug Kit's headers) is staged at build time by the profile's fork_stage scripts.
-#   SCION_XNU_FROM_PATCHES=1   make the tree the old way instead: Apple's tag and the patch series in this repository
 #   XNU_FORK_URL               where to fetch the fork from (default the profile's xnu_fork; a clone that has the commit will do)
+# A profile that names no fork_commit does not build.
 _scion_profile_get() { OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get "$1" 2>/dev/null; }
 FORK_COMMIT=$(_scion_profile_get fork_commit || true)
-use_fork() { [ -n "$FORK_COMMIT" ] && [ -z "${SCION_XNU_FROM_PATCHES:-}" ]; }
+[ -n "$FORK_COMMIT" ] || { echo "fork: the profile $(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" name) names no fork_commit: the kernel tree is a commit of Scion-Project/xnu (docs/xnu-fork.md)" >&2; exit 1; }
 # fork_checkout DIR: DIR is the fork at the profile's commit, on the branch "hakios", and the current directory
 fork_checkout() {
 	local url=${XNU_FORK_URL:-$(_scion_profile_get xnu_fork)} branch=$(_scion_profile_get fork_branch || true) s

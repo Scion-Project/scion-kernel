@@ -9,8 +9,8 @@ cache's symbols is here.
 
 **What is verified, and how.** The numbers come from a phone with kernels that had these changes behind `sbx` bits (one bit each: the command line is at its
 607-byte limit) and roots edited as described; the table of boots is the work's own log, not a repeat. This repository carries the kernel part as
-`xnu/files-12377/osfmk/arm64/sweet_prof.c` (new), edits to `sweet_a64e.c`, `starlte_smp.c`, `hakios.exynos_cpufreq.c` and patch
-`patches/xnu-12377/starlte/0429` (the hooks in Apple's `sleh.c`, `processor.c`, `sched_prim.c`, `timer_call.h`, `files.arm64`, and the port's extra-RAM,
+`scion/xnu-12377-starlte:osfmk/arm64/sweet_prof.c` (new), edits to `sweet_a64e.c`, `starlte_smp.c`, `hakios.exynos_cpufreq.c` and patch
+`commit 0429 of scion/xnu-12377-starlte` (the hooks in Apple's `sleh.c`, `processor.c`, `sched_prim.c`, `timer_call.h`, `files.arm64`, and the port's extra-RAM,
 `IOKitBSDInit.cpp` and `SweetFramebuffer.cpp` code), with the bits renumbered into `sweetspeed`. The applied tree was compared with the tree that ran: they differ by
 the switches, comment wording, and two additions made while porting (the profiler's emulator timing and the framebuffer's gap counters only run with the profiler's
 bit on; the retry of a late-MIDR trap stops after four tries at one pc). **The gated kernel was built (the iOS-target STARLTE kernel, as for #255, #260 and #261) and
@@ -20,7 +20,7 @@ below is a guess.
 
 ## The bits
 
-`xnu/files-12377/osfmk/arm64/sweet_a64e.c` has the table; 1 to 16 are in `SPEED.md`, 32 to 8192 in `NIGHT.md`.
+`scion/xnu-12377-starlte:osfmk/arm64/sweet_a64e.c` has the table; 1 to 16 are in `SPEED.md`, 32 to 8192 in `NIGHT.md`.
 
 | Bit | On the phone it was | Change | Where |
 |---|---|---|---|

@@ -7,7 +7,8 @@ Rules (each one is a way the layout went wrong while it was being made):
   - no file is listed twice, and no two files share a name (they would sit in one directory under it);
   - every listed file exists as drivers/<subsystem>/<name>;
   - every file under drivers/<subsystem>/ is listed (README.md excepted): an unlisted file would not reach the kernel;
-  - xnu/files/ holds no driver any more (a copy there would be applied over the one in drivers/ or the other way round);
+  - the fork of XNU holds no driver of the map (a copy there would be put over by the one in drivers/ at build time, or the other
+    way round): read from the ios-16.5 profile's fork by tools/xnu-tree.py, so with the network the first time;
   - drivers/<subsystem>/conf (what the kernel is built with: docs/drivers-config.md) reads, names only files of its own
     subsystem, and every .c and .cpp of drivers/map is built by exactly one `standard` line or `driver` of it: a file in
     none would be in the tree and never compiled.
@@ -69,10 +70,14 @@ def check(root):
         for name in sorted(names):
             if name not in ("README.md", "conf") and os.path.join(shown, name) not in listed:
                 problems.append("%s/%s is not in drivers/map, so it would never reach the kernel" % (shown, name))
-    for tree in seen_tree:
-        stale = os.path.join(root, "xnu", "files", tree)
-        if os.path.exists(stale):
-            problems.append("xnu/files/%s: a driver must not also be kept here" % tree)
+    if os.path.realpath(root) == os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))):
+        spec = importlib.util.spec_from_file_location("xnu_tree", os.path.join(os.path.dirname(os.path.abspath(__file__)), "xnu-tree.py"))
+        xnu_tree = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(xnu_tree)
+        in_fork = set(xnu_tree.changed("ios-16.5"))
+        for tree in sorted(seen_tree):
+            if tree in in_fork:
+                problems.append("%s: a driver must not also be kept in the fork" % tree)
     problems += check_conf(root, entries)
     return entries, problems
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copy the drivers that were edited in drivers/ into the kernel tree, so that `make kernel` builds what is in
 # the repository. A driver is copied only when the file in drivers/ is NEWER than the one in the tree: a driver
-# that was edited in the tree (and not yet exported with xnu/export.sh) is never overwritten by an old copy.
+# that was edited in the tree (and not yet moved back into drivers/) is never overwritten by an old copy.
 # usage: xnu/sync-drivers.sh [KERNEL-TREE]       (default: $XNU_SRC, else the OS profile's tree)
 # prints one line per file it copied, and "drivers: in step" when there was nothing to do.
 set -e

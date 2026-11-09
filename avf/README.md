@@ -34,7 +34,7 @@ same Apple device tree and `boot_args` as the loader: iPhone X identity, `/chose
 (`ns16550a` or `arm,pl011`), `/pci0` for the virtio-pci host driver, `/pram`. There is no
 return-to-loader path (the kernel's return slot stays 0).
 
-Kernel side (`xnu/patches/`):
+Kernel side (the fork's numbered commits 1000 to 1300, `scion/xnu-8796`):
 
 - **1000** drives the 8250 UART (crosvm accepts only byte-wide accesses to it).
 - **1001** ends the VM when the kernel is done: with no loader to return to, a reboot becomes PSCI

@@ -28,7 +28,7 @@ Each report ends with a "Fix status" section: what was fixed and where, and what
 
 These are in the reports; they are listed here because a fix is a choice, not a repair.
 
-1. **Persona entitlement removed from `posix_spawn`** (policy-glue P1, in `xnu/hakios.patch`). Any process can spawn
+1. **Persona entitlement removed from `posix_spawn`** (policy-glue P1, in the fork's changes to Apple's files, `scion/xnu-8796`). Any process can spawn
    a root child. The reason in the patch comment (nobody carries the entitlement) is out of date, because the
    code-signing stand-in now reads entitlements from signatures. Restore the check, or document the whole system as
    single-user.

@@ -2526,7 +2526,7 @@ mac80211 из Linux стоит наша станция (`wifi/lx/src/lx_80211.c`
 образов (см. «Только APFS, как на iPhone»). Пишется он снизу вверх, и каждый слой сначала проверяется на
 компьютере — в ядро идёт только то, что уже сошлось с настоящим образом.
 
-Описание формата — `bsd/miscfs/apfs/apfs_format.h` ядра (в репозитории — `xnu/files/bsd/miscfs/apfs/apfs_format.h`),
+Описание формата — `bsd/miscfs/apfs/apfs_format.h` ядра (в репозитории — `scion/xnu-8796:bsd/miscfs/apfs/apfs_format.h`),
 написано по «Apple File System Reference» Apple. Копия одна: по этому же заголовку проверяются и инструменты на
 компьютере, и будущий драйвер. Имена структур с приставкой `apfs_`, чтобы ничего не задеть внутри ядра.
 
@@ -3245,11 +3245,11 @@ Darwin, которого она ждёт, — это уже другое: соз
 - Файлов Darwin в репозитории нет: IPSW вы берёте сами, `sysimage/unpack.sh` распаковывает его на вашей машине; ничего не скачивается.
 - `xnu/` — производная работа от XNU, распространяется на условиях APSL 2.0, как и сам XNU; `prebuilt/mach.*` —
   ядро, собранное из этих исходников.
-- `xnu/files/bsd/miscfs/apfs/libzbitmap/` — декодер LZBITMAP libzbitmap (Corellium LLC, GPL-2.0+ OR MIT; здесь —
+- `scion/xnu-8796:bsd/miscfs/apfs/libzbitmap/` — декодер LZBITMAP libzbitmap (Corellium LLC, GPL-2.0+ OR MIT; здесь —
   на условиях MIT), которым сжаты файлы криптексов Apple;
 - apfsprogs (Ernesto A. Fernández и др., GPL-2.0) в репозитории нет: `tools/apfs/check-image.sh` берёт его с GitHub
   (linux-apfs/apfsprogs, закреплённая версия) и собирает только `apfsck` для проверки образов на компьютере;
-- `xnu/files/bsd/miscfs/apfs/libdeflate/` — распаковывающая половина libdeflate 1.24 (Eric Biggers, Google LLC;
+- `scion/xnu-8796:bsd/miscfs/apfs/libdeflate/` — распаковывающая половина libdeflate 1.24 (Eric Biggers, Google LLC;
   лицензия MIT, `COPYING` там же), взята `tools/mk-libdeflate.sh` из выпуска без изменений;
 - Mesa (лицензия MIT) в репозитории нет: `tools/mk-mesa.sh` берёт выпуск 25.0.7 с archive.mesa3d.org,
   `tools/mesa/*.patch` — наши правки к нему;

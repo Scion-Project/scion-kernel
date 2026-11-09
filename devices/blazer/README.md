@@ -2,8 +2,8 @@
 
 The second XNU base of this tree, xnu-12377.121.6 for iOS 26 (arm64e), starts here. `docs/two-bases.md` is the design.
 
-**State: nothing here has run.** `make blazer_defconfig && make kernel` fetches Apple's pristine xnu-12377.121.6 and applies
-`patches/xnu-12377/series`; how far the build gets on the build host is in `docs/two-bases.md`. No Scion image boots this phone.
+**State: nothing here has run.** `make blazer_defconfig && make kernel` takes the fork of XNU, Apple's xnu-12377.121.6 with Scion's
+changes (`scion/xnu-12377`, docs/xnu-fork.md); how far the build gets on the build host is in `docs/two-bases.md`. No Scion image boots this phone.
 
 ## Where it comes from
 

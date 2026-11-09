@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the STARLTE kernel on xnu-12377.121.6 (iOS 26 / macOS 26.5; the base of iOS 27 here) as a macOS-target XNU, from the
-# tree xnu/apply-series.sh makes for the `ios-27` profile (patches/xnu-12377/series.ios27): blacktop/darwin-xnu-build at a
+# tree xnu/apply-series.sh makes for the `ios-27` profile (the fork's scion/xnu-12377-starlte, docs/xnu-fork.md): blacktop/darwin-xnu-build at a
 # pinned commit does the build around it (libdispatch, bootstrap_cmds, mig, the firehose library), with the Kernel Debug Kit
 # 26.5 (25F71) that you bring: Apple's, not in this repository.
 #   DEVELOPER_DIR=<Xcode 16.4 or 26> KDKROOT=<unpacked KDK> tools/ios27/build-xnu-12377.sh   -> out/kernel.development.starlte-12377
@@ -22,8 +22,9 @@ for tool in jq gum xcodes cmake ninja; do
     command -v "$tool" >/dev/null || { echo "missing $tool"; exit 1; }
 done
 
-series_id=$(cat patches/xnu-12377/series.ios27 patches/xnu-12377/starlte/*.patch patches/xnu-12377/starlte/*.sh \
-    patches/xnu-12377/0120-darwin27-syscalls.patch | shasum -a 256 | cut -c1-16)
+# what the tree is made of: the fork's commit the ios-27 profile pins, and what is staged or copied in from this repository
+series_id=$( { OS_PROFILE=ios-27 OS_PROFILE_QUIET=1 python3 tools/os-profile.py get fork_commit; cat xnu/stage/*.sh profiles/ios-27.copy; } \
+    | shasum -a 256 | cut -c1-16)
 if [ ! -d "$DXB" ] || [ -n "${FRESH:-}" ]; then
     rm -rf "$DXB"
     git init -q "$DXB"
@@ -42,13 +43,13 @@ assert text.count(old) == 1, 'darwin-xnu-build firehose line changed'
 text = text.replace(old, new).replace('make install -j8', 'make install -j4')
 path.write_text(text)
 PY
-    # The tree: Apple's tag plus the profile's series (the stage scripts fetch Apple's HFS and libpthread and BearSSL by commit)
+    # The tree: the profile's commit of the fork, and the files its fork_copy and fork_stage add
     OS_PROFILE=ios-27 "$ROOT/xnu/apply-series.sh" "$DXB/xnu"
     echo "$series_id" > "$DXB/.series-12377"
 else
-    # The series is applied once, when the source tree is made. make is incremental afterwards; a changed series needs a fresh tree.
+    # The tree is made once. make is incremental afterwards; a changed fork commit (or staged file) needs a fresh tree.
     [ "$(cat "$DXB/.series-12377" 2>/dev/null)" = "$series_id" ] || {
-        echo "the ios-27 series changed since $DXB was set up: run with FRESH=1"; exit 1; }
+        echo "the ios-27 tree (the profile's fork commit) changed since $DXB was set up: run with FRESH=1"; exit 1; }
 fi
 export SKIP_PATCHES=1
 grep -q 'SKIP_PATCHES' "$DXB/build.sh" ||

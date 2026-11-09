@@ -4,7 +4,7 @@
 Everything happens in a copy made for the test (the tools, configs/, the drivers' conf files, the SoC and device repositories):
   - a device repository's defconfig is found as if it were in configs/; the same name in two repositories is refused
   - its driver (devices/<name>/drivers/<sub>/conf) is a CONFIG_HAKIOS_ symbol like the common ones, goes into the kernel tree's
-    conf/files `optional`, and is listed by external-files for apply.sh, sync-drivers.sh and export.sh
+    conf/files `optional`, and is listed by external-files for apply.sh and sync-drivers.sh
   - a device repository cannot declare `standard` files; a driver naming a file that is not there is a problem of `check`
   - `new` makes a device that `check` passes, with the phone drivers left out but the SoC's
   - the real tree's devices and SoCs hold together

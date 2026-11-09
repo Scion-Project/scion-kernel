@@ -9,7 +9,7 @@ OBJCOPY=${OBJCOPY:-$(command -v llvm-objcopy || echo /opt/homebrew/opt/llvm/bin/
 READELF=${READELF:-$(command -v llvm-readelf || echo /opt/homebrew/opt/llvm/bin/llvm-readelf)}
 CFLAGS="--target=aarch64-none-elf -O2 -ffreestanding -fno-builtin -nostdlib -fPIE -fvisibility=hidden
 	-mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -Werror
-	-I../../../xnu/files/bsd"
+	-I$(python3 ../../../tools/xnu-tree.py added)/bsd"
 mkdir -p out
 SH=../../shim
 SRCS="$SH/start.S main.c bench.c $SH/fdtx.c $SH/uart.c ../../../drivers/gpu/vgpu/hakios.vgpu3d.c"

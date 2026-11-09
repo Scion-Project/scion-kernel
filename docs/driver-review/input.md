@@ -4,7 +4,7 @@
 
 Read-only audit; this is the only file written.
 
-| File (under xnu/files/bsd/) | Lines | Read |
+| File (under scion/xnu-8796:bsd/) | Lines | Read |
 |---|---|---|
 | dev/hakios.input.c | 228 | all |
 | dev/hakios.goodix.c | 1515 | all, except the array in hakios.focaltech_fw.h (only its header: `FOCALTECH_FW_LENGTH 116448`, declared as `focaltech_fw[FOCALTECH_FW_LENGTH]`) |

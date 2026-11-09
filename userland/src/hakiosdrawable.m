@@ -75,7 +75,7 @@
 
 /*
  * The two requests this file needs, by the numbers the kernel answers them on
- * (xnu/files/iokit/Kernel/hakios.gpu.cpp:78-95): kHakiosSurface is this port's own and
+ * (scion/xnu-8796:iokit/Kernel/hakios.gpu.cpp:78-95): kHakiosSurface is this port's own and
  * kDrmGemClose is Linux's. Repeated here rather than shared for the reason the structs are
  * repeated, and it is two lines.
  */

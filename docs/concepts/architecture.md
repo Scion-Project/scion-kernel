@@ -18,7 +18,7 @@ yours (the user space you lay out).
 | 1. into RAM | Android's fastboot receives a boot image and runs it; nothing is flashed | `./xl enter` |
 | 2. UEFI | HakiOS's UEFI (Mu-Silicium with HakiOS's changes and banner, and the phone's platform) starts on the SoC, shows the HakiOS logo, offers the framebuffer and storage, and starts the loader from the image | `uefi/`, `devices/<name>/uefi/` |
 | 3. the loader | `xnuloader` reads the payload (the kernel, the command line, `kernel.ver`), lays out memory and the device tree the kernel expects, keeps a service for the storage, starts the kernel; at the end of a run it takes control back | `xnuloader/` |
-| 4. the kernel | XNU with this port: Apple's patched files (`xnu/hakios.patch`), new ones (`xnu/files/`), the drivers (`drivers/`) | [Building](../getting-started/building.md) |
+| 4. the kernel | XNU with this port: the fork `Scion-Project/xnu` (Apple's files changed, new ones, [docs/xnu-fork.md](../xnu-fork.md)) and the drivers (`drivers/`) | [Building](../getting-started/building.md) |
 | 5. the drivers | each one does nothing until its boot-argument asks; those the configuration left out are not in the kernel at all | [Drivers in the configuration](../drivers-config.md) |
 | 6. user space | launchd starts what the system image holds: Darwin 16.5's (layer 2, yours), or `userland/hello` for the open kernel | `userland/` |
 
@@ -64,7 +64,7 @@ device's. A device's defconfig is three lines: the common kernel, its SoC's frag
 
 | Directory | What |
 |---|---|
-| `xnu/` | the kernel: `hakios.patch` (Apple's files, changed), `files/` (new files), `apply.sh`, `export.sh` |
+| `xnu/` | the kernel tree: `apply.sh` takes the fork at the profile's commit and adds the drivers |
 | `drivers/<subsystem>/` | the drivers, by subsystem, each with its `conf` ([reference](../reference/drivers.md)) |
 | `xnuloader/` | the boot loader (a UEFI application, no EDK2) |
 | `userland/` | programs and libraries of our own (`src/`), the Metal plug-in, the image build, launchd jobs |

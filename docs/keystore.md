@@ -74,7 +74,7 @@ The attempt is counted and written before the key derivation runs, so cutting th
 
 **The primitives are not written here.** The kernel has no corecrypto AES: Apple's kext is closed,
 and `osfmk/minicrypto/mc_aes.c` is a byte-table AES that is not constant-time. So: BearSSL's constant-time `aes_ct64` (AES) and Monocypher 4.0.2
-(Argon2id) are vendored unchanged in `xnu/files/osfmk/minicrypto/third_party/`, and `mc_keywrap.c` is the glue. FIPS 197, RFC 3394 and RFC 9106 known
+(Argon2id) are vendored unchanged in `scion/xnu-8796:osfmk/minicrypto/third_party/`, and `mc_keywrap.c` is the glue. FIPS 197, RFC 3394 and RFC 9106 known
 answers run before any bag is used; failing them is treated as damage. `tools/keybag-offline.py` checks the result from outside the kernel with
 the reference Argon2 and OpenSSL.
 
@@ -122,7 +122,7 @@ From 16.5's binaries (securityd, keybagd, coreauthd, SharedUtils, MobileKeyBag, 
 | AppleCredentialManager: contexts, credentials, policies, environment variables (`ACMContextCreate` 0x24 or 1, ...), via user client selector 0 | coreauthd, securityd, keybagd (`com.apple.private.applecredentialmanager.allow`) | not done, stage 3. The commands are exported by name from `SharedUtils`; the map is below |
 | `LAContext`, passcode as a credential, biometric policies | Settings, apps, Face ID enrolment | needs stage 3 |
 | Biometric unlock only after a first unlock, passcode again after 48 hours, a reboot or 5 failed matches | iOS's rule | not done, stage 3. Without a Secure Enclave, holding class A's key for a biometric unlock means **keeping it in kernel memory while locked**, weaker than iOS; the owner's call |
-| File classes A, B, C, D on `/private/var` (HFS+ `cprotect`) | every app and daemon's files | **off today**: `xnu/hfs/hfs.patch` sets `CONFIG_PROTECT 0`. Stage 4 |
+| File classes A, B, C, D on `/private/var` (HFS+ `cprotect`) | every app and daemon's files | **off today**: the port's HFS Plus changes (the fork's `scion/xnu-8796`) set `CONFIG_PROTECT 0`. Stage 4 |
 | Escrow bags (`com.apple.keystore.escrow.create`, `aks_create_bag` 0x02, `aks_load_bag` 0x06, backup bags) | lockdownd pairing, MDM, backups | not done; those selectors answer unsupported and `aks_unlock_bag` 0x0c is refused, so nothing is unlocked by a bag |
 | Effaceable storage, `obliterate-d-key` | `mobile_obliterator`, "Erase Data" | not done. **Do not turn on "Erase Data"**: untested here |
 | Secure Enclave keys, attestation (`sik`) | CryptoTokenKit, 65 programs hold the entitlement | not done and no plan: no Secure Enclave |

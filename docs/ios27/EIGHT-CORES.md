@@ -63,7 +63,7 @@ rewrite from a wrong M3.
 A thread that runs FP16, DotProd or RDM on an M3 is bound to an A55 for the rest of its life. With `sweetm3unpin=N` (milliseconds, default 0 =
 off = permanent pins, as before) the binding is dropped at the thread's first synchronous exception from EL0 (a system call, a fault, a trap) at
 least N ms later, so it can use the big cores again; if it meets such an instruction on an M3 once more it is pinned again, one trap later. The
-bookkeeping is a 256-slot table in `xnu/files-12377/osfmk/arm64/sweet_a64e.c` (entries carry the thread id, so a recycled `thread_t` is never unbound; pins
+bookkeeping is a 256-slot table in `scion/xnu-12377-starlte:osfmk/arm64/sweet_a64e.c` (entries carry the thread id, so a recycled `thread_t` is never unbound; pins
 that do not fit stay permanent); `0425` is the two hooks in Apple's `sleh.c`; the `STARLTE LSE` line ends `(M all, R released)`. Built and not
 booted. Use it only if the line shows pins piling up (`N threads pinned to A55`): 100 is the value it was prepared with.
 

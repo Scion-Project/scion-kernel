@@ -4,15 +4,15 @@
 
 (This review came before HakiosGPU's request `0x7d`, the client's own pages as a buffer, added 3 November: [Metal on the Adreno](../reference/metal.md#hakiosgpu-driversgpuhakiosgpucpp). That request has not been reviewed, and it adds to G6's wired memory without a cap of its own.)
 
-Read-only review of the user-reachable surface of the GPU and display code. Nothing was built or run; the XNU source tree itself is not in this repository (only `xnu/files` overlays), so XNU API behaviour is not verified here.
+Read-only review of the user-reachable surface of the GPU and display code. Nothing was built or run; the XNU source tree itself is not in this repository (only the fork's new files, `scion/xnu-8796`), so XNU API behaviour is not verified here.
 
 | File | Lines |
 |---|---|
 | `drivers/gpu/adreno/hakios.adreno.c` | 3843 |
 | `drivers/gpu/hakios.gpu.cpp` | 1192 |
-| `xnu/files/iokit/Kernel/MiniIOMobileFramebuffer.cpp` | 1531 |
-| `xnu/files/iokit/Kernel/MiniIOSurface.cpp` | 1814 |
-| `xnu/files/iokit/Kernel/MiniIOSurface.h` | 174 |
+| `scion/xnu-8796:iokit/Kernel/MiniIOMobileFramebuffer.cpp` | 1531 |
+| `scion/xnu-8796:iokit/Kernel/MiniIOSurface.cpp` | 1814 |
+| `scion/xnu-8796:iokit/Kernel/MiniIOSurface.h` | 174 |
 
 Method: read all of `hakios.gpu.cpp`, `MiniIOSurface.cpp/.h` and `MiniIOMobileFramebuffer.cpp` end to end; in `hakios.adreno.c` read the register helpers, SMMU/page-table code, ring and submit code, the "GPU kept on" API (lines 3157-3520), firmware parsing, boot-arg parsing and the init path. The bring-up steps (clocks, RPMh, TrustZone) were skimmed only. Each finding below was traced from an entry point (IOKit external method) to the faulty line. Hardware effects are labelled NEEDS-HARDWARE.
 
@@ -201,7 +201,7 @@ Before each submission buffers are cleaned and invalidated (`dc civac`, adreno.c
 
 ## Fix status
 
-Edited: drivers/gpu/hakios.gpu.cpp, drivers/gpu/adreno/hakios.adreno.c, xnu/files/iokit/Kernel/MiniIOSurface.cpp, MiniIOMobileFramebuffer.cpp (MiniIOSurface.h unchanged). Nothing was compiled or run; every edit was re-read for syntax and types.
+Edited: drivers/gpu/hakios.gpu.cpp, drivers/gpu/adreno/hakios.adreno.c, scion/xnu-8796:iokit/Kernel/MiniIOSurface.cpp, MiniIOMobileFramebuffer.cpp (MiniIOSurface.h unchanged). Nothing was compiled or run; every edit was re-read for syntax and types.
 
 - G1 SKIPPED. Command-stream validation, CP_PROTECT and kernel-only mappings are a design and hardware matter (register semantics, privilege bit meaning); not invented here.
 - G2 FIXED. MiniIOMobileFramebuffer.cpp: new `surfaceHolds()` (64-bit arithmetic) is checked in `drawLayer()` for the rows and columns it reads (offset + (rows-1)*stride + columns*4 must be within allocSize) and in `record()` for the whole display; a surface that does not hold them is not read. This covers a small stride, element height above 1 and a wrapped client size, whatever they were created with. MiniIOSurface.cpp `surfaceCreate()`: wrapped surfaces' owner-given IOSurfaceAllocSize must be non-zero and at most 512 MB (same limit as other surfaces); plane width/height are capped at 16384 and a computed plane size is done in 64 bits and refused above 512 MB. NOT changed: creation still accepts a stride below width*bytes-per-element and the element-height row count, because a client with an unusual element definition would be refused; the read-side check makes both memory-safe.

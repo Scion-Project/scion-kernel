@@ -4,7 +4,7 @@
  * Follows the DWC3 programming model as Linux drivers/usb/dwc3 uses it (core.c dwc3_core_init,
  * gadget.c dwc3_gadget_start / reset / conndone, ep0.c), cross-checked against the woa UEFI's
  * polling driver (build/woa/fw/.../UsbDebugHid.c, BSD-2-Clause-Patent) and our XNU ep0 patch
- * (patches/xnu-12377/starlte/0073): where they differ, the Linux order wins because it is the one that
+ * (commit 0073 of the fork's scion/xnu-12377-starlte): where they differ, the Linux order wins because it is the one that
  * enumerates on this phone (the ECM + ACM gadget). The DT quirks of our Linux port apply
  * (exynos9810-star2lte.dts usb@10c00000): dis_u2_susphy, dis_u3_susphy, dis-u2-freeclk-exists,
  * frame-length-adjustment 0x20, maximum-speed high-speed.

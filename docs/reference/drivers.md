@@ -12,7 +12,7 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 | `hakios.audio.c` | /dev/hakios-audio, the sound Darwin plays, to whatever plays it; and where the camera, flashlight, motor and speaker drivers are started from |
 | `hakios.scsnd.c` | SCSND: what iOS plays, to the Scion app's audio ring in the shared framebuffer (patch 1401) |
 | `hakios.sccam_torch.c` | the phone's flashlight under AVF, through the Scion app's camera block (patch 1402) |
-| `hakios.version.c` | kern.hakios.version, and the version in the boot log (xnu-12377: patches/xnu-12377/0110) |
+| `hakios.version.c` | kern.hakios.version, and the version in the boot log (xnu-12377: the fork's commit 0110-hakios-core) |
 | `hakios.platform.c` | what the drivers share (the locks of the PMIC arbiter, the always-on processor, RPMh and the SMMU), and kern.hakios.drivers, the list of the drivers built in |
 | `hakios.cryptobench.c` | kern.hakios.crypto_bench: the kernel's SHA and AES with the ARMv8 instructions and in C, measured when read |
 | `hakios.systrace.c` | boot-arg systrace=1|2 (systrace_name=): the BSD system calls that fail, or all of them, in the kernel log. unix_syscall() makes one test per call (bsd/dev/arm/systemcalls.c) |

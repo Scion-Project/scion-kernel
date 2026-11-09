@@ -1,6 +1,6 @@
 /*
  * fp16t.c: FCCMP H under ten conditions and FABS/FNEG .4H/.8H, run natively on the phone and checked against C copies of the
- * emulator's fp16_cond_holds() and fp16_compare_nzcv() (xnu/files-12377/osfmk/arm64/sweet_a64e.c, which emulates them on a
+ * emulator's fp16_cond_holds() and fp16_compare_nzcv() (osfmk/arm64/sweet_a64e.c on the fork's scion/xnu-12377-starlte, which emulates them on a
  * Mongoose M3 under sweetspeed&2). On an A55 it tests the copies against the hardware; on an M3 with sweetspeed&2 the kernel's
  * emulation is what answers, so it tests that. A mismatch prints. Build for the phone and run it there:
  *   xcrun --sdk iphoneos clang -arch arm64 -O1 -o fp16t tools/ios27/perf/test/fp16t.c && codesign -f -s - fp16t

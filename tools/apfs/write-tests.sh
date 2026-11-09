@@ -33,7 +33,7 @@ stale=""
 [ -x "$TOOL" ] || stale=1
 for f in "$HERE/apfs-tool.c" "$HERE/build-tool.sh" \
 	"$ROOT"/xnu-src/xnu-8796.121.2/bsd/miscfs/apfs/*.[ch] \
-	"$ROOT"/xnu/files/bsd/miscfs/apfs/*.[ch]; do
+	"$(python3 "$ROOT/tools/xnu-tree.py" path ios-16.5)"/bsd/miscfs/apfs/*.[ch]; do
 	[ -n "$stale" ] && break
 	[ -e "$f" ] && [ "$f" -nt "$TOOL" ] && stale=1
 done

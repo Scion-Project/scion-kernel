@@ -1,6 +1,6 @@
 # The files of this repository that the ios-27 kernel tree takes at build time (xnu/fork.sh, the profile's fork_copy):
 # "SOURCE TARGET", SOURCE from the repository root, TARGET in the tree. They are Scion's shared drivers and SoC headers, which
-# live here, not in the fork, as the drivers of the other profiles do (drivers/map): the ones series.ios27's copy lines named,
+# live here, not in the fork, as the drivers of the other profiles do (drivers/map): the ones the old series' `copy` lines named,
 # and the ones the series carried copies of (hakios.dwc3.c, hakios.exynos_tmu.h, hakios.scion_gov.c; docs/xnu-fork.md).
 # hakios.s6e3ha8.c is not here: the fork's branch changes it for this tree (patch 0428), so the branch keeps its copy.
 drivers/soc/exynos/hakios.exynos_hsi2c.c bsd/dev/hakios.exynos_hsi2c.c

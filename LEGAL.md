@@ -40,8 +40,8 @@ program that can write to flash, and CI fails if one appears that is not listed.
 
 ## What this repository contains
 
-- **The kernel changes**: a patch to Apple's open-source XNU (`xnu/hakios.patch`) and added
-  source files (`xnu/files/`, `drivers/`). These are a derivative work of XNU and are licensed under the
+- **The kernel changes**: changes to Apple's open-source XNU (commits of the fork `Scion-Project/xnu`) and added
+  source files (the fork's, and `drivers/`). These are a derivative work of XNU and are licensed under the
   Apple Public Source License 2.0 (`LICENSE.APSL`). See `COMPLIANCE.md` for how the APSL terms
   are met.
 - **Our own original code**: the boot loader (`xnuloader/`), user-space programs

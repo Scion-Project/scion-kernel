@@ -22,7 +22,7 @@
 #include <stdbool.h>
 #include "../../shim/fdtx.h"
 #include "../../shim/uart.h"
-#include "../../../xnu/files/bsd/sys/hakios.vgpu3d.h"
+#include <sys/hakios.vgpu3d.h>      /* the fork of XNU's: build.sh puts its bsd/ on -I */
 
 #define PSCI_SYSTEM_OFF 0x84000008u
 

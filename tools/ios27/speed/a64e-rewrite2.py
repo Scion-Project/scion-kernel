@@ -15,7 +15,7 @@ Left for the kernel (sweet_a64e.c) to emulate on trap: FJCVTZS, FCADD, PACGA wit
 writeback and a register that is its own base or an offset out of range.
 
 The PACGA rewrite and the kernel must agree: the kernel's trapped PACGA has to give Xn & 0xffffffff00000000 too, which it does with
-boot-arg sweetspeed&4 (xnu/files-12377/osfmk/arm64/sweet_a64e.c). Rewrite a root this way only for a kernel that is booted with that bit,
+boot-arg sweetspeed&4 (osfmk/arm64/sweet_a64e.c on the fork's scion/xnu-12377-starlte). Rewrite a root this way only for a kernel that is booted with that bit,
 and put the original files back (keep a copy of each subcache first) before booting one that is not.
 
 libcorecrypto is not rewritten unless --skip is given an empty list: its FIPS self-test checks a MAC of its own code, so

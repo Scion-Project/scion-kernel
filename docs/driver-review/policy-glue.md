@@ -8,16 +8,16 @@ Files read in full (line counts):
 
 | File | Lines |
 |---|---|
-| xnu/files/bsd/kern/kern_minimac.c | 369 |
-| xnu/files/libkern/amfi/miniamfi.c | 264 |
-| xnu/files/libkern/amfi/miniamfi_entitlements.cpp | 123 |
-| xnu/files/iokit/Kernel/MiniAppleKeyStore.cpp | 335 |
-| xnu/files/iokit/Kernel/GenericARMPE.cpp | 407 |
-| xnu/files/iokit/Kernel/MiniIONetworkStack.cpp | 114 |
-| xnu/files/iokit/Kernel/MiniDrivers.h | 21 |
-| xnu/files/osfmk/arm64/loader_return.c (the loader-return code) | 597 |
-| xnu/files/osfmk/arm64/user_exception_trace.c | 440 |
-| xnu/hakios.patch (all 73 hunks' files, every hunk read) | 3242 |
+| scion/xnu-8796:bsd/kern/kern_minimac.c | 369 |
+| scion/xnu-8796:libkern/amfi/miniamfi.c | 264 |
+| scion/xnu-8796:libkern/amfi/miniamfi_entitlements.cpp | 123 |
+| scion/xnu-8796:iokit/Kernel/MiniAppleKeyStore.cpp | 335 |
+| scion/xnu-8796:iokit/Kernel/GenericARMPE.cpp | 407 |
+| scion/xnu-8796:iokit/Kernel/MiniIONetworkStack.cpp | 114 |
+| scion/xnu-8796:iokit/Kernel/MiniDrivers.h | 21 |
+| scion/xnu-8796:osfmk/arm64/loader_return.c (the loader-return code) | 597 |
+| scion/xnu-8796:osfmk/arm64/user_exception_trace.c | 440 |
+| the fork's changes to Apple's files (`scion/xnu-8796`; the 73 hunks of the review's `hakios.patch`, every hunk read) | 3242 |
 
 Also read, for the surface questions: the devfs/sysctl registration and the user-facing handlers in
 bsd/dev/hakios.{input,audio,mic,camera,haptic,torch,sparse,virtio_blk,ufs,apfs_check,sound,speaker,guard}.c and
@@ -28,7 +28,7 @@ Method. For each stub I traced who calls it and what the caller does with the an
 unchanged Apple function around it. Apple's original code was read with `git show c54f35ca...:<path>` (read-only) from
 the XNU checkout that lives in WSL (`~/hakios/xnu-src/xnu-8796.121.2`), because this Windows tree has no
 `xnu-src`. Line numbers of the form "Apple file:N" are in that original file; "patch:N" are lines of
-xnu/hakios.patch; everything else is a line of the file named.
+the review's `hakios.patch` (the fork's changes to Apple's files, as one patch); everything else is a line of the file named.
 
 Overlap: the sound/input/camera reviewers (docs/driver-review/sound.md, input.md, camera-haptic-torch.md) found P2 and
 P3's touch/audio/mic parts independently; I re-derived them because the question asked for every device node, and I
@@ -307,7 +307,7 @@ Policy stand-ins
 
 Surface
 
-- Every sysctl the port adds (grep over xnu/files; the modem files were not read):
+- Every sysctl the port adds (grep over the fork's new files; the modem files were not read):
   - writable: `kern.exec_inject` (root; see below), `kern.hakios_switch_root` (pid 1 and root, once, input
     `< 512` bytes, hakios.apfs_check.c:1753-1766), `kern.apfs_synthetic` (explicit `suser`, `newlen < MAXPATHLEN`,
     NUL-terminated, apfs_vfsops.c:660-671), `kern.apfs_stats` (write zeroes the counters, root through the sysctl

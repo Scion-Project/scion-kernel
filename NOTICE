@@ -16,17 +16,17 @@ In the repository:
   author's own, MIT by their headers ("Copyright (c) 2026 hackios contributors" as the source states it), used in Scion with
   the author's permission and his credit kept. Its third-party parts (ios-tegu-derived code, which has no licence; GPL-2.0-only
   UFS link code; GPL-derived panel tables) are not in this repository: docs/two-bases.md.
-- libdeflate (Eric Biggers), xnu/files/bsd/miscfs/apfs/libdeflate/: MIT, see its COPYING.
-- Monocypher 4.0.2 (Loup Vaillant and others), xnu/files/osfmk/minicrypto/third_party/monocypher.*: CC0-1.0 or BSD-2-Clause.
-- BearSSL (Thomas Pornin), xnu/files/osfmk/minicrypto/third_party/bearssl_*: MIT.
+- libdeflate (Eric Biggers), scion/xnu-8796:bsd/miscfs/apfs/libdeflate/: MIT, see its COPYING.
+- Monocypher 4.0.2 (Loup Vaillant and others), scion/xnu-8796:osfmk/minicrypto/third_party/monocypher.*: CC0-1.0 or BSD-2-Clause.
+- BearSSL (Thomas Pornin), scion/xnu-8796:osfmk/minicrypto/third_party/bearssl_*: MIT.
 - SoftwareAES (UniXNU, ArmVirtPlatform contributors), github.com/UniXNU/SoftwareAES at 4a45326da5c2:
-  xnu/files/iokit/Kernel/MiniIOAESAccelerator.cpp is a port of it, under BSD-2-Clause-Patent (notice in the file).
-- UniXNU (github.com/UniXNU/UniXNU, BSD-2-Clause-Patent): patches/xnu-12377/0090, the PAC keys in the architectural
+  scion/xnu-8796:iokit/Kernel/MiniIOAESAccelerator.cpp is a port of it, under BSD-2-Clause-Patent (notice in the file).
+- UniXNU (github.com/UniXNU/UniXNU, BSD-2-Clause-Patent): commit 0090 of scion/xnu-12377, the PAC keys in the architectural
   registers on a non-Apple CPU, follows the design of its native-pac-keys.patch; no UniXNU code is copied there. Patches
   0096 (PAR_EL1 ISB), 0097 (64-bit physical address in the pmap's page-data sync) and 0098 (arm64 processes with the PAC keys
   off, behind SCION_NATIVE_PAC) are UniXNU's own small patches (native-at-par-sync, zzx-pmap-sync-64bit-pa,
   native-pac-arm64-user-jop and a hunk of native-pac-keys, at a9ec98c and f65660d/a11553a, by their contributors), taken with
-  their notice, patches/xnu-12377/LICENSE.UniXNU, under BSD-2-Clause-Patent; 0098's macro name is ours.
+  their notice, LICENSES/BSD-2-Clause-Patent-UniXNU.txt, under BSD-2-Clause-Patent; 0098's macro name is ours.
 - mkbootimg.py (Android Open Source Project), devices/redwood/prebuilt/mkbootimg.py: Apache License 2.0.
 - Mu-Silicium / Project Mu (Project Silicium, Microsoft and contributors): devices/redwood/uefi/ holds a
   patch and files against it; their license applies to the derived parts (BSD-2-Clause-Patent).
@@ -54,7 +54,7 @@ In the repository:
   layer (wifi/lx/brcmfmac, MIT); only the layer and the patch are here.
 
 - the community Galaxy S9+ port (danstronics/ios-s9plus-exynos, a Scion-based port; its LICENSE: MIT for its own layer, "the HakiOS
-  authors"): xnu/files/bsd/sys/hakios.touch_queue.h and tools/touch-queue-test.c are from its core/drivers/input, and the
+  authors"): scion/xnu-8796:bsd/sys/hakios.touch_queue.h and tools/touch-queue-test.c are from its core/drivers/input, and the
   touch_coalesce argument in drivers/input/hakios.input.c is that behaviour; tools/mesa/panfrost-mapping-cache.patch is its
   baseline-support/panfrost-cache-mapping.patch (a patch to Mesa 25.0.7: Mesa's licence applies to the lines it adds). Each file's
   header names the source. docs/star2lte-absorb.md says what else of it was read and left. Nothing Apple's or the vendor's.
@@ -105,7 +105,7 @@ Fetched at build time, never committed:
   patch files in tools/metal/m2v/, which are under its licence and say so in their headers.
 
 - Project Starbite (its author, credited as "Starbite author" until he names the account he wants), the iOS 27 port to the Galaxy S9
-  (patches/xnu-12377/starlte/, xnu/files-12377/, xnuloader/sboot/, tools/ios27/, userland/src/sbca.c), published with his agreement: his own
+  (the fork's scion/xnu-12377-starlte branch with its commits and files, xnuloader/sboot/, tools/ios27/, userland/src/sbca.c), published with his agreement: his own
   files under MIT (LICENSES/MIT-Starbite.txt), the patches that modify Apple's XNU under APSL 2.0, the loader GPL-2.0-only as its files say.
   Per path: LICENSES.md.
 - wardevsa, the herolte (Galaxy S7) XNU layer of ios-a5xelte (github.com/wardevsa/ios-a5xelte, branch herolte), patches 0200-0238 of that series
@@ -113,4 +113,4 @@ Fetched at build time, never committed:
   8 November 2026); patches to Apple XNU files remain APSL-2.0.
 - ios-sweet (dipa-studio, MIT, Copyright (c) 2026 dipa-studio) and ios-a5xelte (orhunnx and A5XELTE contributors, MIT, Copyright (c) 2026
   orhunnx and A5XELTE contributors): the layers under it, patches 0003-0128; their notices are LICENSES/MIT-ios-sweet.txt and MIT-ios-a5xelte.txt.
-- blacktop/darwin-xnu-build (MIT, Copyright (c) 2023-2025 blacktop): patches/xnu-12377/starlte/blacktop/ and tools/ios27/dxb-ios.patch.
+- blacktop/darwin-xnu-build (MIT, Copyright (c) 2023-2025 blacktop): xnu/stage/00_setup_coreentitlements.sh (LICENSES/MIT-blacktop.txt), the edits among the commits of the fork's scion/xnu-12377-starlte, and tools/ios27/dxb-ios.patch.

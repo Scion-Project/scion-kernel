@@ -6,7 +6,7 @@ run on your own root image; nothing of the builder's images, caches or logs is h
 
 **What is verified, and how.** The numbers below were taken on a phone with a kernel (`kernel-speed3`) that had the changes on unconditionally, and a root
 edited as described. That kernel was Starbite's merged kernel from `main` after #255 plus a 14 KB diff. This repository carries the same diff in two parts,
-`xnu/files-12377/osfmk/arm64/sweet_a64e.c` and `bsd/dev/starlte_smp.c` (new files of the port) and `patches/xnu-12377/starlte/0426`, with one change: each
+`scion/xnu-12377-starlte:osfmk/arm64/sweet_a64e.c` and `bsd/dev/starlte_smp.c` (new files of the port) and `commit 0426 of scion/xnu-12377-starlte`, with one change: each
 behaviour is behind a bit of the boot-argument `sweetspeed=<mask>` (default 0, nothing changes), as this repository ships behaviour changes. The applied tree
 was compared with the speed3 sources file by file: they differ only by those switches. With `sweetspeed=31` the code is the code that ran. **The gated
 kernel itself was built (the iOS-target STARLTE kernel, as for #255) and not booted**; `tools/ios27/cmdline/starlte-fast.txt` is the command line of the best
@@ -29,7 +29,7 @@ One change set each, one root each. "Display" is the time from the reboot comman
 
 ## What each change does
 
-All of the kernel's are in `sweetspeed=<mask>`; `xnu/files-12377/osfmk/arm64/sweet_a64e.c` has the table.
+All of the kernel's are in `sweetspeed=<mask>`; `scion/xnu-12377-starlte:osfmk/arm64/sweet_a64e.c` has the table.
 
 | Bit | Change | What it bought |
 |---|---|---|

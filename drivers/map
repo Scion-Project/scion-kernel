@@ -2,9 +2,9 @@
 #
 #   <subsystem>  <path in the XNU tree>
 #
-# The repository file is drivers/<subsystem>/<file name>. xnu/apply.sh copies each of them to its path in the tree,
-# xnu/export.sh copies them back, tools/drivers-check.py (and CI) checks that this list and the directories agree.
-# A new hakios.* file in bsd/dev/ or iokit/Kernel/ has to be listed here: export.sh refuses to guess.
+# The repository file is drivers/<subsystem>/<file name>. xnu/apply.sh copies each of them to its path in the tree
+# (they are not in the fork), tools/drivers-check.py (and CI) checks that this list and the directories agree.
+# A new hakios.* driver of bsd/dev/ or iokit/Kernel/ has to be listed here, or it would never reach the kernel.
 #
 # Subsystems: input storage gpu camera haptic audio power wifi bluetooth modem net core
 

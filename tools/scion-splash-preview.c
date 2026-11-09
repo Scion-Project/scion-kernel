@@ -2,7 +2,7 @@
  * scion-splash-preview: draws the boot screen the way the loader does, on the host, into a PPM, to look at it
  * (no phone, no QEMU): the same scion_splash.h and scion_splash_logo.h as the loader's, the same unpacking and scaling.
  *
- *   cc -O2 -o scion-splash-preview tools/scion-splash-preview.c && ./scion-splash-preview [-w 1440] [-h 2960] [-p 400] > shot.ppm
+ *   cc -O2 -I "$(tools/xnu-tree.py added)/osfmk/console" -o scion-splash-preview tools/scion-splash-preview.c && ./scion-splash-preview [-w 1440] [-h 2960] [-p 400] > shot.ppm
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include "../xnuloader/scion_splash_logo.h"
-#include "../xnu/files/osfmk/console/scion_splash.h"
+#include "scion_splash.h"                  /* the fork of XNU's osfmk/console/scion_splash.h: -I the directory (tools/xnu-tree.py added) */
 
 int
 main(int argc, char **argv)

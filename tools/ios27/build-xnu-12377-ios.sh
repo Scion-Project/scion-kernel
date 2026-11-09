@@ -19,7 +19,7 @@ export DEVELOPER_DIR=${DEVELOPER_DIR:?set DEVELOPER_DIR to an Xcode (16.4 builds
 export MACOS_VERSION=26.5 KERNEL_CONFIG=${KERNEL_CONFIG:-DEVELOPMENT} MACHINE_CONFIG=${MACHINE_CONFIG:-STARLTE}
 export KDKROOT=${KDKROOT:?set KDKROOT to your unpacked Kernel Debug Kit 26.5 (25F71); Apple, not in this repository}
 export SKIP_PATCHES=1
-[ -d "$DXB/xnu" ] || { echo "run tools/ios27/build-xnu-12377.sh once first: it sets up $DXB with the series applied"; exit 1; }
+[ -d "$DXB/xnu" ] || { echo "run tools/ios27/build-xnu-12377.sh once first: it sets up $DXB with the fork's tree"; exit 1; }
 [ -f "$DXB/build/firehose-ios/libfirehose_kernel.a" ] || { echo "missing $DXB/build/firehose-ios/libfirehose_kernel.a (see this script's head)"; exit 1; }
 cd "$DXB"
 cp build.sh build-ios.sh

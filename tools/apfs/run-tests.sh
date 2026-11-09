@@ -26,13 +26,13 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-# the header lives in the kernel tree; xnu/files/ has the exported copy
+# the header lives in the kernel tree; the fork of XNU (tools/xnu-tree.py) has it too
 HDR_DIR=""
-for d in "$ROOT/xnu-src/xnu-8796.121.2/bsd/miscfs/apfs" "$ROOT/xnu/files/bsd/miscfs/apfs"; do
+for d in "$ROOT/xnu-src/xnu-8796.121.2/bsd/miscfs/apfs" "$(python3 "$ROOT/tools/xnu-tree.py" path ios-16.5)/bsd/miscfs/apfs"; do
 	[ -f "$d/apfs_format.h" ] && { HDR_DIR=$d; break; }
 done
 if [ -z "$HDR_DIR" ]; then
-	echo "run-tests.sh: apfs_format.h is in neither the kernel tree nor xnu/files" >&2
+	echo "run-tests.sh: apfs_format.h is in neither the kernel tree nor the fork of XNU" >&2
 	exit 1
 fi
 

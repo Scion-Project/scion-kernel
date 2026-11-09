@@ -2,7 +2,7 @@
 
 ## Scope and method
 
-Files read in full (paths under `xnu/files/`):
+Files read in full (paths in the fork's `scion/xnu-8796`):
 
 | File | Lines |
 |---|---|

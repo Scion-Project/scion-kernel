@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-side checks of the kernel's read-only ext4 reader (xnu/files/bsd/sys/hakios.ext4.h), without the phone.
+"""Host-side checks of the kernel's read-only ext4 reader (bsd/sys/hakios.ext4.h in the fork of XNU, scion/xnu-8796), without the phone.
 
 usage: tools/ext4-test.py
 
@@ -26,6 +26,11 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def fork_added():
+    """The files the ios-16.5 fork adds to Apple's XNU, at their paths in the tree (tools/xnu-tree.py added): Scion's own headers."""
+    return subprocess.run([sys.executable, os.path.join(ROOT, "tools", "xnu-tree.py"), "added", "ios-16.5"], check=True, capture_output=True,
+                          text=True).stdout.strip()
 failed = []
 
 
@@ -130,7 +135,7 @@ def main():
         src = os.path.join(tmp, "ext4cat.c")
         with open(src, "w") as f:
             f.write(HARNESS)
-        cc = subprocess.run(["cc", "-std=gnu11", "-Wall", "-Werror", "-I", os.path.join(ROOT, "xnu/files/bsd/sys"), src, "-o", exe],
+        cc = subprocess.run(["cc", "-std=gnu11", "-Wall", "-Werror", "-I", os.path.join(fork_added(), "bsd/sys"), src, "-o", exe],
                             capture_output=True, text=True)
         check("hakios.ext4.h compiles on the host" + (": " + cc.stderr.strip() if cc.returncode else ""), cc.returncode == 0)
         if cc.returncode:

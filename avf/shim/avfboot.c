@@ -733,7 +733,7 @@ void avfboot_main(uint64_t fdt_pa)
 		uart_putc('\n');
 	}
 	/*
-	 * Scion's GPU (SCGPU, xnu/files/bsd/sys/hakios.scgpu.h): a third slice the app maps, a mailbox and a
+	 * Scion's GPU (SCGPU, scion/xnu-8796:bsd/sys/hakios.scgpu.h): a third slice the app maps, a mailbox and a
 	 * pool, below the others; the kernel finds it by scgpu.addr= itself, here it only stays out of the
 	 * kernel's memory.
 	 */
@@ -747,7 +747,7 @@ void avfboot_main(uint64_t fdt_pa)
 		uart_kv("+", scgpu_size);
 		uart_putc('\n');
 	}
-	/* Scion's speaker (SCSND, xnu/files/bsd/sys/hakios.scsnd.h): a ring of samples, likewise */
+	/* Scion's speaker (SCSND, scion/xnu-8796:bsd/sys/hakios.scsnd.h): a ring of samples, likewise */
 	uint64_t scsnd_pa = arg_num(m.bootargs, "scsnd.addr="), scsnd_size = arg_num(m.bootargs, "scsnd.size=");
 	if (scsnd_pa || scsnd_size) {
 		if (scsnd_pa < m.ram_lo || scsnd_pa + scsnd_size > m.ram_hi || (scsnd_pa & 0xfff) || scsnd_size < 0x10000)

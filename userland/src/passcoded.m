@@ -4,7 +4,7 @@
  *
  * Apple's keybagd keeps the system keybag (/private/var/keybags/systembag.kb) and changes its secret in
  * the Secure Enclave. Neither exists here (userland/mkjobs.py keeps keybagd out), and the kernel's
- * key store stand-in (xnu/files/iokit/Kernel/MiniAppleKeyStore.cpp) holds the passcode's verifier
+ * key store stand-in (scion/xnu-8796:iokit/Kernel/MiniAppleKeyStore.cpp) holds the passcode's verifier
  * itself. What reaches keybagd from the rest of the system goes through MobileKeyBag.framework's
  * MKBKeyStoreDevice, an NSXPCConnection to com.apple.mobile.keybagd.xpc with the protocol
  * KBXPCProtocol. This program serves that protocol; the methods that matter for a passcode are passed

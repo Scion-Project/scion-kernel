@@ -25,11 +25,13 @@ takes the copy named `hakios-kernel`, and `prebuilt/hakios-kernel` when there is
 
 ### Changing the kernel
 
-The kernel's changes live in this repository in two forms: `xnu/hakios.patch` (Apple's files, changed) and `xnu/files/` (new
-files), with the drivers by subsystem in `drivers/`. Work in the tree (`xnu-src/xnu-8796.121.2`), then save it:
+The kernel's changes live in the fork [Scion-Project/xnu](https://github.com/Scion-Project/xnu) as commits on Apple's tag
+([docs/xnu-fork.md](../xnu-fork.md)); the drivers by subsystem are in `drivers/`. The tree `xnu/apply.sh` makes
+(`xnu-src/xnu-8796.121.2`) is a clone of the fork at the profile's commit: commit and push the kernel's changes from it to the fork,
+and set `fork_commit` in `profiles/ios-16.5.conf` to the new commit in a pull request here. A driver you edited in the tree goes
+back into `drivers/`, then:
 
 ```sh
-xnu/export.sh                       # the tree -> xnu/hakios.patch, xnu/files/, drivers/
 python3 tools/drivers-check.py      # drivers/map and drivers/*/conf agree
 ```
 

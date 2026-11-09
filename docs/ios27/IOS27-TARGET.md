@@ -55,7 +55,7 @@ Kept: medium sizing (`xsmall` caps tasks at 512 and threads at 1536 below 3 GiB 
   Foundation then `rmdir`s or `removefile`s).
 
 Still needed whatever the target: the 8 GiB shared region (`0403`), `security.mac.lockdown_mode_state_public` and the AMFI
-stand-in sysctls and operations (`0402`), PRIV_DARKBOOT, Darwin 27's system calls (`patches/xnu-12377/0120`), the USB console and
+stand-in sysctls and operations (`0402`), PRIV_DARKBOOT, Darwin 27's system calls (`commit 0120 of scion/xnu-12377`), the USB console and
 the MUIC switch (`0400`).
 
 ## What was run

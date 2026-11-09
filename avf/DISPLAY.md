@@ -29,7 +29,7 @@ frame.
     `flags = READY|POLL`;
   * points `boot_args.video` at the buffer. From there XNU's text console and
     MiniIOMobileFramebuffer find it the usual way (`PE_state.video` → `vinfo`).
-* **Patch 1200** (`xnu/patches/1200-avf-scfb-display.patch`,
+* **Patch 1200** (the fork's commit `1200-avf-scfb-display`,
   MiniIOMobileFramebuffer):
   * at `start()`, maps the header page (`scfb.addr`) and checks the magic;
   * after each `show()` has copied a frame into the panel's memory, it runs a

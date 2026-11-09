@@ -5,7 +5,7 @@ A boot log carries stacks from two printers, and they do not agree on what an
 address is:
 
   * `userabort: NAME[pid] aborts, shared cache slide 0xS; called from: A B C ...`
-    -- the kernel (`xnu/files/osfmk/arm64/user_exception_trace.c`).  It walks the
+    -- the kernel (`osfmk/arm64/user_exception_trace.c` of the fork of XNU).  It walks the
     frame pointer chain and prints each saved LR **raw**, that is at its runtime
     address, and prints the slide separately in the same line.  So every frame
     needs 0xS subtracted, and 0xS must be read from that line: it is a different

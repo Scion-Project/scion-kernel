@@ -4,7 +4,7 @@ Read-only audit, no source file changed, nothing built. Evidence is file:line in
 
 ## Scope
 
-Kernel, `xnu/files/bsd/dev/`:
+Kernel, `scion/xnu-8796:bsd/dev/`:
 
 | file | lines |
 |---|---|
@@ -17,11 +17,11 @@ Kernel, `xnu/files/bsd/dev/`:
 | hakios.image.c | 187 |
 | hakios.guard.c | 315 (this is the speaker limiter, not a write guard) |
 
-Headers read: `xnu/files/bsd/sys/hakios.virtio_blk.h`, `hakios.sparse.h`, `hakios.apfs_check.h`, `hakios.audio.h` (two defines).
+Headers read: `scion/xnu-8796:bsd/sys/hakios.virtio_blk.h`, `hakios.sparse.h`, `hakios.apfs_check.h`, `hakios.audio.h` (two defines).
 
 Loader: `xnuloader/loader.c`, the block service (lines 1440-2160: `BLOCK_*`, `block_is_darwin`, `block_start`, `block_poll`, hc_take_back), the boot-arg parse (2840-2873), `write_logs` and `find_log_partition` (240-380), and the watch loop that calls them (2236-2365). The only two `write_blocks` call sites in the loader are 361 (logdump) and 2123 (darwin).
 
-APFS read path, because `hakios.image.c` and `hakios.apfs_check.c` sit on it: `xnu/files/bsd/miscfs/apfs/apfs_lib.c` lines 100-1700 (blocks, node_parse/node_entry, omap, nx_open, vol_open, seek/cursor, xfields, inode, readdir) and 2020-4062 (xattr, extents, stream_plan/fetch, decmpfs header and tables, read_cfile_attr/rsrc, read_plain). Also all of `apfs_write.c`, `apfs_store.c`, and the mount/write-relevant lines of `apfs_vfsops.c` and `apfs_vnops.c` (grep for FWRITE, MNT_RDONLY, dev.write).
+APFS read path, because `hakios.image.c` and `hakios.apfs_check.c` sit on it: `scion/xnu-8796:bsd/miscfs/apfs/apfs_lib.c` lines 100-1700 (blocks, node_parse/node_entry, omap, nx_open, vol_open, seek/cursor, xfields, inode, readdir) and 2020-4062 (xattr, extents, stream_plan/fetch, decmpfs header and tables, read_cfile_attr/rsrc, read_plain). Also all of `apfs_write.c`, `apfs_store.c`, and the mount/write-relevant lines of `apfs_vfsops.c` and `apfs_vnops.c` (grep for FWRITE, MNT_RDONLY, dev.write).
 
 Method: read every function end to end on the write path (cwrite -> ufs_write -> ufs_request -> mailbox -> block_poll -> UEFI BlockIo) and on the strategy/completion path of the UFS host controller, then the other places that could reach storage (grep for `write_blocks`, `0x1d84000`, `UTRLDBR`, `VNOP_STRATEGY`, `B_WRITE`, `FWRITE`, `dev.write`). Arithmetic was checked by hand for wrap on every length and offset. The XNU source tree (`xnu-src/`) is not present on this machine, so anything that depends on XNU behaviour (spec_open, spec_strategy, PE_parse_boot_argn) is stated as an assumption.
 

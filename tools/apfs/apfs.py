@@ -3,8 +3,8 @@
 # files -- including the ones stored compressed.  Read only, and it never writes to the
 # image.
 #
-# The on-disk structures are described in bsd/miscfs/apfs/apfs_format.h (exported to
-# xnu/files/); the layout this file assumes is checked against that header by
+# The on-disk structures are described in bsd/miscfs/apfs/apfs_format.h (in the
+# fork of XNU, scion/xnu-8796); the layout this file assumes is checked against that header by
 # tools/apfs/run-tests.sh, so the two cannot drift apart silently.
 #
 # usage: apfs.py info   IMAGE

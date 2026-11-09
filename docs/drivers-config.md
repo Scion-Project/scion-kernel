@@ -107,10 +107,10 @@ on when it has been made to work there. A phone with another touch controller ad
 `tools/hakios-config.py kernel` (run by `make kernel` through `tools/make-kernel.sh`, and by `xnu/apply.sh`) writes, into the
 kernel tree, only what has changed:
 
-| File in the tree | What | In `xnu/hakios.patch`? |
+| File in the tree | What | In the fork? |
 |---|---|---|
 | `bsd/conf/files`, `iokit/conf/files` | one block between `# HakiOS drivers: ...` and `# end of the HakiOS drivers`: each file `standard` or `optional hakios_<name>` | yes: it does not depend on the configuration |
-| `config/MASTER.hakios` | `#  HAKIOS_DRIVERS = [ hakios_goodix ... ]` (the attributes that are on) and an `options HAKIOS_<NAME> # <hakios_<name>>` line for every driver | no: made for each build, kept out by `xnu/export.sh` |
+| `config/MASTER.hakios` | `#  HAKIOS_DRIVERS = [ hakios_goodix ... ]` (the attributes that are on) and an `options HAKIOS_<NAME> # <hakios_<name>>` line for every driver | no: made for each build, kept out of `git status` by `xnu/apply.sh` |
 | `bsd/dev/hakios.drivers.h` | the list, for `sysctl kern.hakios.drivers` and the boot log line `hakios-kernel: N drivers built in` | no |
 
 and what the patch carries once: `SETUP/config/doconf` reads `MASTER.hakios` after `MASTER` and `MASTER.arm64.bcm2837`; the

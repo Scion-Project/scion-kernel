@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Make the kernel's table of every SoC from socs/*/include/, for a kernel that picks its SoC at boot.
 
-  tools/soc-runtime.py            write xnu/files/bsd/sys/hakios.soc_runtime.h and bsd/dev/hakios.soc_runtime.c's table
-  tools/soc-runtime.py --check    exit 1 if they are not what the tables make
+  tools/soc-runtime.py            write drivers/soc/exynos/hakios.soc_runtime.c's table, and with --fork DIR the header
+                                  bsd/sys/hakios.soc_runtime.h into DIR (a checkout of the fork of XNU, docs/xnu-fork.md: commit it there)
+  tools/soc-runtime.py --check    exit 1 if they are not what the tables make: the table here, the header in the fork's ios-16.5 commit
+                                  (tools/xnu-tree.py)
 
 Each EXYNOS_* an object-like number in a table becomes a field. A number no table of that SoC has is 0: its block is absent, and
 a driver sees that before it maps anything (HAKIOS_SOC_HAS). The 9810's function-like macros and brace lists stay what they are:
@@ -18,7 +20,7 @@ NUM = re.compile(r"^#define\s+EXYNOS_([A-Z0-9_]+)\s+([^/\n]+?)\s*(?:/\*.*)?$", r
 FN = re.compile(r"^#define\s+EXYNOS_[A-Z0-9_]+\([^)]*\).*$", re.M)
 # a brace list over several lines: a number only the 9810's driver takes, compile time on every SoC
 BLOCK = re.compile(r"^#define\s+EXYNOS_[A-Z0-9_]+\s+\{\s*\\\n(?:.*\\\n)*.*$", re.M)
-HDR = os.path.join(ROOT, "xnu", "files", "bsd", "sys", "hakios.soc_runtime.h")
+HDR = os.path.join("bsd", "sys", "hakios.soc_runtime.h")     # in the fork of XNU, not in this repository
 SRC = os.path.join(ROOT, "drivers", "soc", "exynos", "hakios.soc_runtime.c")
 GENERATED = "/* Made by tools/soc-runtime.py from the tables in socs/. Do not edit. */\n"
 
@@ -102,16 +104,26 @@ def make():
     return "\n".join(h), "\n".join(c), known, sorted(set(tabs) - set(known)), len(fields)
 
 
+def fork_tree():
+    spec = importlib.util.spec_from_file_location("xnu_tree", os.path.join(ROOT, "tools", "xnu-tree.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.tree("ios-16.5")
+
+
 def main():
     h, c, known, unknown, n = make()
     if "--check" in sys.argv:
-        bad = [p for p, t in ((HDR, h), (SRC, c)) if not os.path.isfile(p) or open(p, encoding="utf-8").read() != t]
+        bad = [p for p, t in ((os.path.join(fork_tree(), HDR), h), (SRC, c)) if not os.path.isfile(p) or open(p, encoding="utf-8").read() != t]
         if bad:
-            print("soc-runtime: not what the tables make: %s" % ", ".join(os.path.relpath(p, ROOT) for p in bad))
+            print("soc-runtime: not what the tables make: %s" % ", ".join(os.path.relpath(p, ROOT) if p.startswith(ROOT) else p for p in bad))
             return 1
     else:
-        open(HDR, "w", encoding="utf-8", newline="\n").write(h)
         open(SRC, "w", encoding="utf-8", newline="\n").write(c)
+        if "--fork" in sys.argv:
+            open(os.path.join(sys.argv[sys.argv.index("--fork") + 1], HDR), "w", encoding="utf-8", newline="\n").write(h)
+        else:
+            print("soc-runtime: the header %s belongs to the fork of XNU: give --fork DIR to write it" % HDR)
     print("soc-runtime: %d numbers; selectable: %s; no chip id known: %s" % (n, " ".join(known), " ".join(unknown)))
     return 0
 
