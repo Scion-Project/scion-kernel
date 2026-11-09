@@ -67,3 +67,10 @@ of the FP16 bodies in a hot loop, the 816 + 550 words without a body.
 The root's 284 executables (74 k sites: CommCenter, libglInterpose, locationd, ...) need a segment appended to each file and a re-signature;
 those sites still trap into the kernel's emulation. The generators and the checker are not published yet (they carry census data of Apple
 binaries); the method above is all there is to reproduce.
+
+## Two things the boot taught that are not about the rewrite
+
+- The kernel command line is cut at 608 bytes. Appending `a5fb_noconsole=1` to a 594-byte line made 611 and the argument was lost; the
+  kernel console then drew over the UI. The STARLTE framebuffer reads `a5fb_noconsole` (not `sweetfb_noconsole`), so use that one.
+- `sweet_console_muted` was checked only in `_cnputs`; kprintf falls back to `console_write_unbuffered` and the message-buffer replay calls
+  `vcputc`, both of which drew. The check now sits in `vcputc_options` (the fork's `bb6a6a4`); panics still draw.
