@@ -1,0 +1,100 @@
+# iOS 27 on the Galaxy S9: Liquid Glass on CoreAnimation's Metal renderer, and the frame cadence (9 November 2026)
+
+iOS 27 draws its glass materials with CoreAnimation's Metal renderer. On the S9 the default compositor is the OpenGL ES one ([GPU-PATH.md](GPU-PATH.md)),
+which has no shader for several of them; the Metal one works ([METAL.md](METAL.md): `sbgl=0`, backboardd in `mtl2-clients`) but was much slower. This page
+is where the time went, what was changed, and what each change measured on a phone. Everything new is off by default.
+
+All numbers are from one Galaxy S9 (the second test phone, `cpus=8`, the AOT-rewritten root of [AOT-REWRITE.md](AOT-REWRITE.md)), the scripted input of
+`sweetspeed&4096` (sixteen home-screen swipes, then sixteen vertical drags), and the framebuffer's present-gap histogram (`sweetspeed&16384`,
+`tools/ios27/perf/gaps.py`): **on time** is the share of frames shown one refresh after the frame before, **motion fps** is 60 x frames / refreshes over the
+frames that came within three refreshes of the one before. One run each; none of it is a benchmark.
+
+## Where the Metal path lost its time
+
+1. **Every GPU job was synchronous.** PanVK reaches the kernel's StarbiteMali through `tools/ios27/mesa-ios/starbite-drm`. The copy the Metal bundle of 8
+   November was built with predates that shim's asynchronous submits (the OpenGL stack has had them since the night run), so each `SUBMIT` ran its chain to
+   the end inside the call: 5,814 submits in ten seconds of swiping, 463 us each, 27 % of the render thread's wall time, on top of its own CPU time. Rebuilt
+   with the repository's shim (and a line on the console, `SBDRM[pid name]: async submits on`), PanVK asks for them.
+2. **The kernel's "asynchronous" submit was only that for one chain.** It returned at once while the GPU was free; the next submit, and every wait, spun in
+   `delay()` under the GPU lock until the chain before was done (`STARLTE GPU ASYNC: ... next submit waited 4202 x avg 347 us` of 4,387 chains). A frame is a
+   dozen chains or more (a render pass is a vertex/tiler chain and a fragment chain, a blur is many passes), so the render thread still sat out nearly all of
+   the GPU's time on a core, and this frame's GPU work never overlapped the next frame's CPU work. A fence wait also held the client's lock, so a completion
+   thread blocked the render thread's next submit. **The fix is a queue** (the fork's `bsd/dev/starlte_gpu.c`, boot-arg `sweetspeed&262144`, as Scion's
+   iOS 16.5 Mali driver has it): a submit appends and returns, one kernel thread starts each chain in order and naps until it is done (50 us naps, boot-arg
+   `sgu_nap_us`), waiters sleep until their chain's number is done, and the waits no longer hold the client's lock.
+3. **Whole-surface cache maintenance, twice a frame.** The Mali is not IO-coherent. The Metal frontend cleaned and invalidated (`DC CIVAC`) every IOSurface a
+   command buffer named at commit, and every written one again at completion: 25 GB in 183 s of that run, 1.3 ms a frame for the framebuffer alone, on the
+   render and completion threads. `tools/ios27/metal/patches/frontend-flush.diff` adds `SWEET_MTL2_FLUSH` (in `mtl2-env`; 0, the default, is as before):
+   `1` cleans a surface at commit only when it is new to the process or its IOSurface seed moved since the last clean (every CPU writer unlocks with a seed
+   bump); `2` also skips the invalidate after completion for a surface the GPU has written four times in a row with no seed change (the swap chain,
+   CoreAnimation's render targets: nothing reads them on the CPU), except every 64th time. The state lives on the IOSurface object, so a recycled surface
+   ID never inherits it. The kernel's GPU present did the same clean (6 MiB of `DC CVAC` a frame on the vsync thread); `sweetspeed&524288` does it only for a
+   surface that is new or whose seed moved.
+4. **Start-up.** The first frame came 26 to 28 s after the kernel's first line, against 16 s with OpenGL ES: 5 to 6 s to create the device, and 8.3 s in 98
+   pipeline creations (85 ms each) with the shader cache reporting 0 hits, 200 misses. Not fixed here (below).
+
+## The frame cadence
+
+With the queue, the framebuffer no longer shows "whatever the GPU has finished": a swap records the number of the last chain queued when it came, and the
+vsync thread sleeps until that chain is done before it draws the frame to the panel (its own frame's chains, not the next frame's, which may already be
+queued). A swap also waits for the chains of the swap before it, so **at most two frames are in flight**: the window server builds frame N+1 while the GPU
+draws frame N, and cannot run further ahead (without that, a scene the GPU needs more than a refresh for would fill the queue's 256 chains and every touch
+would be answered a dozen frames late).
+
+What a frame still pays after the queue: the present itself is a GPU job (the frame scaled from 828 x 1792 to the panel's 1440 x 2960, 2.3 to 2.4 ms, in
+turn with the app's chains) drawn into the buffer the display controller is reading, so it can tear. **Next step (designed, not built):** the scan-out
+service the 16.5 kernel uses (`drivers/display/dpu/hakios.exynos_dpu.c`, already built into the iOS 27 kernel, `dpu_probe=1` reads it): the window server's
+display surfaces made of the DPU's pool (`hakios_scanout_carve`), VGF0 scanning out the very surface CoreAnimation drew (`hakios_scanout_show`, flipped at
+the panel's TE, scaled by the DPP), nothing copied. The steps: (1) `SweetSurface.cpp` allocates backboardd's display-sized BGRA surfaces from the pool
+(physically contiguous, below 4 GB, outside XNU's RAM, mapped write-combined; the Mali's page tables take them as they take any page); (2)
+`SweetFramebuffer.cpp` attaches mode 2 (828 x 1792 at 3,328 bytes a row scaled to the panel) and, per swap, waits for the swap's chains and for the flip
+before to be latched, then calls `hakios_scanout_show`; a surface is not drawn into again until the flip away from it is latched (two in the pool for
+CoreAnimation, as on 16.5); (3) the 60 Hz timer follows the DECON's refresh count instead of free-running. Two things stand in the way on iOS 27 as booted
+today: the extra-RAM ranges give `0xD0000000`-`0xD7FFFFFF` to the VM (`extra_ram_mask=127`), which holds the pool's first slot and the scan-out buffers, so
+either that range is dropped (`extra_ram_mask=95`, 128 MB less) or the pool keeps to its three slots above `0xD8000000`; and every failure must fall back
+to the present of today (the service already goes back to the boot loader's channel on a configuration error).
+
+## Measured
+
+| Boot | What | Swipes: on time, motion fps | Drags: on time, motion fps | First frame | Notes |
+|---|---|---|---|---|---|
+| g0 | OpenGL ES compositor, kernel as before | 69 %, 45.7 | 66 %, 42.1 | +15.8 s | the default; GPU 37 % busy while swiping |
+| m1 | Metal compositor as it was (`sbgl=0`, bundle of 8 November) | 29 %, 33.9 | 28 %, 30.8 | +28.0 s | 5,814 synchronous submits / 10 s at 463 us |
+| m2 | m1 + this bundle (PanVK asks for async submits, `SWEET_MTL2_FLUSH=2`), same kernel | 42 %, 36.6 | 34 %, 32.8 | +25.7 s | 96 % of submits still wait for the chain before |
+| m3 | m2 + the kernel's chain queue, the present's clean on a seed change, two frames in flight (`sweetspeed&262144`, `&524288`) | 67 %, 44.5 | 64 %, 41.1 | +18.1 s | a submit costs 1 us; one GPU fault and reset (below) |
+| m4 | m3 + the shim's timeline query waits for the queue, and a buffer is closed only after every queued chain | 66 %, 44.3 and 67 %, 44.6 | 64 %, 40.5 and 66 %, 41.7 | +21.9 s | two passes of the script, no GPU fault; a buffer close may now block (up to 90 ms seen) |
+
+So the Metal compositor, which draws the glass, is where the OpenGL ES one is (within two or three points of frames on time), from less than half of
+it. What the two draw is not the same picture: at the same moment of the script the OpenGL ES compositor shows no dock platter, no folder glass, no search
+pill and no panel behind the keyboard; the Metal one draws them all.
+
+**The fault of m3, and why the queue found it.** One chain of the run faulted in the GPU's MMU at address 0 and the kernel reset the GPU (nothing died).
+PanVK's shim has no real sync objects: every fence is "signalled", every timeline "reached". That was true while a submit ran its chain to the end, and
+nearly true with one chain in flight. With chains really queued, a thread that asked a queue's timeline for its value right after another thread's submit
+was told "all reached", took chains that had not run yet for finished, and reused their memory under the GPU. The shim's timeline query now waits for the
+chains queued so far before it answers (as its fence wait does), and the kernel closes a buffer only once every chain queued by then is done (a chain
+reaches buffers its submit does not list). Honest sync objects (a chain number per fence and timeline point, so that a wait is for that chain and not for
+the queue to drain, and a close can be deferred instead of waited for) are the next step.
+
+**The shader cache does work.** The 0 hits of m1 were a first boot of a new configuration (the cache's names include the device's profile; the extra-RAM
+change since the bundle's last runs changed it). The boots after it: 121 hits and 32 misses, then 100 hits and no miss; pipeline creation fell from 8.3 s
+to 1.5 s, the first frame from +28 s to about +20 s. What is left of the start is the device itself (5 to 6 s before the first GPU call).
+
+## Not done
+
+- **Honest sync objects in the shim** (above): today a wait is for the whole queue, and a buffer close waits too.
+- **A cap on the GPU's wired memory.** Every PanVK device wires 57 MiB when it is made (a 32 MiB tiler heap, 17 MiB of varyings, 8 MiB of TLS) and every
+  GPU buffer is wired kernel memory: backboardd alone holds 285 MiB while swiping, and nothing bounds the sum over processes.
+- **The device's start** (5 to 6 s), and the twelve no-copy buffers PanVK refuses (`HostMemory: NotRepresentable`; CoreAnimation copies instead): five a
+  boot here.
+- The zero-copy scan-out above.
+- The CPU side: backboardd uses 0.19 to 0.25 of a core while swiping on Metal against 0.13 on OpenGL ES (metal2vulkan's and PanVK's per-draw work).
+- `chronod` aborts once at start in every Metal run (it did not in the OpenGL ES run); not looked at.
+
+## How to turn it on
+
+Kernel: the fork's `wip/ios27-gpu-queue` (four commits on `bb6a6a4`; draft pull request 6 of Scion-Project/xnu). Command line: `sbgl=0` (with `sbmtl=1`)
+and `sweetspeed` with 262144 and 524288 added. Root: this bundle (`tools/ios27/metal/mk-bundle27.sh` applies `frontend-flush.diff`; PanVK built with the
+repository's `starbite-drm`), `SWEET_MTL2_DEXR=1`, `SWEET_MTL2_FLUSH=2` and `STARBITE_DRM_LEAKS=0` in `/private/var/local/mtl2-env`, backboardd in
+`/private/var/local/mtl2-clients`, and `/private/var/local/m2v-cache` (mode 0777) for the pipeline cache. Back to OpenGL ES: backboardd out of
+`mtl2-clients` and no `sbgl=0`.
