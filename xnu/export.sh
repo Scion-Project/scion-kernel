@@ -9,6 +9,8 @@ set -e
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 [ "$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get base)" = xnu-8796 ] || {
 	echo "export.sh: hakios.patch and files/ are xnu-8796's; another base keeps its work as patches/<base>/ (docs/two-bases.md)" >&2; exit 1; }
+[ -n "${SCION_XNU_FROM_PATCHES:-}" ] || ! OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get fork_commit > /dev/null || {
+	echo "export.sh: this profile's tree is a clone of Scion-Project/xnu: commit your change there and push it, then set fork_commit (docs/xnu-fork.md)" >&2; exit 1; }
 SRC=${1:-${XNU_SRC:-$HERE/../$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get src)}}
 BASE=c54f35ca767986246321eb901baf8f5ff7923f6a           # tag xnu-8796.121.2
 # never part of the work: build output and what editors, patch and python leave behind

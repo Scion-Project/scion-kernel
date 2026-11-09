@@ -15,6 +15,7 @@ URL=${XNU_URL:-https://github.com/apple-oss-distributions/xnu.git}
 TAG=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_tag)
 BASE=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_commit)
 
+. "$HERE/fork.sh"
 [ -e "$DIR" ] && { echo "apply.sh: $DIR already exists; not touching it" >&2; exit 1; }
 BASEID=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get base)
 HFS=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get hfs)
@@ -23,12 +24,16 @@ SERIES=$HERE/../patches/$BASEID
 PATCHES=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get patches)
 case "$PATCHES" in patches/$BASEID/series*) SERIESFILE=$HERE/../$PATCHES ;; *) SERIESFILE=$SERIES/series ;; esac
 MACHINE=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get machine)
-[ -s "$SERIESFILE" ] || { echo "apply-series.sh: no $SERIESFILE" >&2; exit 1; }
+use_fork || [ -s "$SERIESFILE" ] || { echo "apply-series.sh: no $SERIESFILE" >&2; exit 1; }
 [ -f "$HERE/../drivers/map" ] || { echo "apply.sh: no drivers/map next to xnu/ (the drivers are in drivers/)" >&2; exit 1; }
 mkdir -p "$(dirname "$DIR")"
 DIR=$(cd "$(dirname "$DIR")" && pwd)/$(basename "$DIR")
-git init -q "$DIR"
 trap 'echo "apply-series.sh: failed; removing the incomplete $DIR" >&2; rm -rf "$DIR"' ERR
+if use_fork; then
+# Scion-Project/xnu at the profile's commit: Apple's tag with the imports, the series and what its scripts stage, as commits
+fork_checkout "$DIR"
+else
+git init -q "$DIR"
 cd "$DIR"
 git remote add origin "$URL"
 git fetch -q --depth 1 origin "refs/tags/$TAG:refs/tags/$TAG"      # that one release, without the history
@@ -59,8 +64,9 @@ grep -v '^#' "$SERIESFILE" | while read -r p; do
 done
 # HFS Plus (the data volume): Apple's release, fetched like XNU, and this port's changes over it
 if [ "$HFS" = yes ]; then "$HERE/hfs/hfs.sh" put "$DIR"; fi
+fi
 NDRIVERS=0
-if grep -q '^# drivers: series' "$SERIESFILE"; then
+if grep -qs '^# drivers: series' "$SERIESFILE"; then
 echo "apply-series.sh: this series carries its own drivers (# drivers: series), none is taken from drivers/"
 else
 # the drivers are kept by subsystem (drivers/<subsystem>/), not at their place in Apple's tree: drivers/map says where
@@ -79,7 +85,7 @@ python3 "$HERE/../tools/hakios-config.py" external-files | while IFS="$(printf '
 	cp -p "$src" "$tree"
 done
 # what the numbered patches change in the drivers today, until it is folded into them
-if [ -s "$SERIES/9000-driver-fixups.patch" ]; then git apply --whitespace=nowarn "$SERIES/9000-driver-fixups.patch"; fi
+if ! use_fork && [ -s "$SERIES/9000-driver-fixups.patch" ]; then git apply --whitespace=nowarn "$SERIES/9000-driver-fixups.patch"; fi
 # which of them are built is the configuration's (drivers/*/conf, CONFIG_HAKIOS_*): put into the tree as XNU reads it.
 # What that writes is made again for every build, so it is kept out of the work that xnu/export.sh saves.
 printf '%s\n' config/MASTER.hakios bsd/dev/hakios.drivers.h >> .git/info/exclude
@@ -91,4 +97,5 @@ else
 	echo "apply-series.sh: $BASEID: the drivers are in the tree but not in its configuration (docs/two-bases.md)"
 fi
 fi
-echo "apply-series.sh: $DIR: $TAG + the series + $NDRIVERS drivers"
+if use_fork; then echo "apply-series.sh: $DIR: Scion-Project/xnu ${FORK_COMMIT:0:12} + $NDRIVERS drivers"; else
+echo "apply-series.sh: $DIR: $TAG + the series + $NDRIVERS drivers"; fi
