@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""install-metal27.py ROOT [--clients "mtl27test PosterBoard ..."] [--oslog "PosterBoard ..."] [--wallpaper|--no-wallpaper] [--no-job] [--uninstall]
+"""install-metal27.py ROOT [--clients "mtl27test PosterBoard ..."] [--oslog "PosterBoard ..."] [--wallpaper FILE|--no-wallpaper] [--no-job] [--uninstall]
 Copies the staged iOS 27 Metal stack (stage/) into a MOUNTED iOS 27 root
 (hdiutil attach -owners on, run with sudo), and adds the one-shot launchd job com.starbite.mtl27test.
   ROOT/System/Library/Extensions/StarbiteMetal.bundle   (frontend + metal2vulkan bridge + PanVK, arm64)
@@ -10,7 +10,7 @@ Copies the staged iOS 27 Metal stack (stage/) into a MOUNTED iOS 27 root
 Every file it replaces is kept once as NAME.before-metal27."""
 import os, plistlib, shutil, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-# mk-bundle27.sh's output, plus sbmtlc.dylib and mtl27test (and sbwallpaper.png for --wallpaper)
+# mk-bundle27.sh's output, plus sbmtlc.dylib and mtl27test
 STAGE = os.environ.get('STAGE') or os.path.join(os.getcwd(), 'build/metal27/stage')
 JOBKEY = '/System/Library/LaunchDaemons/com.starbite.mtl27test.plist'
 JOBKEY2 = '/System/Library/LaunchDaemons/com.starbite.m2vtest.plist'
@@ -75,10 +75,17 @@ lines = [l for l in (open(env).read().splitlines() if os.path.exists(env) else [
 open(env, 'w').write('\n'.join(lines + ['HOT_MTL2_CONSOLE=1', 'SWEET_M2V_MESSAGES=/private/var/local/m2v-messages.log']) + '\n'); os.chmod(env, 0o644)
 mm = os.path.join(local, 'm2v-messages.log'); open(mm, 'a').close(); os.chmod(mm, 0o666)
 # stop-gap static wallpaper drawn by sbmtlc inside SpringBoard (needs SpringBoard in sbmtlc's sweetinject group)
+# The image is the builder's own: a file in the root being installed into (path relative to ROOT, e.g. one of the root's wallpaper
+# assets) or any file on this Mac, converted to PNG with sips. Nothing is staged or shipped with these tools.
 if '--wallpaper' in args:
-    shutil.copy2(os.path.join(STAGE, 'sbwallpaper.png'), os.path.join(local, 'sbwallpaper.png'))
-    os.chmod(os.path.join(local, 'sbwallpaper.png'), 0o644)
-    print('static wallpaper: /private/var/local/sbwallpaper.png (SpringBoard draws it while sbmtlc is injected into it)')
+    import subprocess
+    src = args[args.index('--wallpaper') + 1]
+    inroot = os.path.join(root, src.lstrip('/'))
+    src = inroot if os.path.exists(inroot) else src
+    dst = os.path.join(local, 'sbwallpaper.png')
+    subprocess.run(['sips', '-s', 'format', 'png', src, '--out', dst], check=True, stdout=subprocess.DEVNULL)
+    os.chmod(dst, 0o644)
+    print('static wallpaper: /private/var/local/sbwallpaper.png from', src, '(SpringBoard draws it while sbmtlc is injected into it)')
 if '--no-wallpaper' in args and os.path.exists(os.path.join(local, 'sbwallpaper.png')):
     os.remove(os.path.join(local, 'sbwallpaper.png'))
 oc = os.path.join(local, 'oslog-clients')
