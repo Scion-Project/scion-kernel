@@ -24,7 +24,7 @@ DEFAULT = "ios-16.5"
 KEYS = {"status", "arch", "darwin", "xnu_tag", "xnu_commit", "base", "machine", "sdk", "hfs", "patches", "adt", "userland"}
 # where the kernel tree comes from (docs/xnu-fork.md): Scion-Project/xnu, a fork of Apple's repository, at one commit of one branch,
 # and what is still staged at build time on top of it (inputs that may not be in git: the Kernel Debug Kit's headers)
-OPTIONAL = {"xnu_fork", "fork_branch", "fork_commit", "fork_stage"}
+OPTIONAL = {"xnu_fork", "fork_branch", "fork_commit", "fork_stage", "fork_copy"}
 STATUSES = ("real", "experimental", "not-implemented")
 
 

@@ -22,5 +22,14 @@ fork_checkout() {
 			{ echo "fork: $s failed" >&2; return 1; }
 		git ls-files --others --exclude-standard | sed 's|^|/|' >> .git/info/exclude   # staged, not the fork's: kept out of git status
 	done
+	# this repository's files the tree takes (fork_copy: "SOURCE TARGET" lines): shared drivers that live here, not in the fork
+	s=$(_scion_profile_get fork_copy || true)
+	if [ -n "$s" ]; then
+		grep -v '^#' "$HERE/../$s" | while read -r src dst; do
+			[ -n "$src" ] || continue
+			mkdir -p "$(dirname "$dst")" && cp -p "$HERE/../$src" "$dst" || { echo "fork: copy $src $dst failed" >&2; exit 1; }
+			echo "/$dst" >> .git/info/exclude
+		done || return 1
+	fi
 	echo "fork: $1: $url ${branch:-?} at ${FORK_COMMIT:0:12}"
 }

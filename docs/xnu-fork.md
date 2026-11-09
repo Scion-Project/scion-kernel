@@ -31,6 +31,11 @@ CoreEntitlements' V2 headers, which come from the Kernel Debug Kit you bring (`p
 `KDKROOT`). The libpthread and HFS staging copies the SDK's `TargetConditionals.h` (Apple's, APSL-2.0 by its header) into the
 tree; on the branch it is the copy from Xcode 27.2's macOS SDK, the one the iOS 27 kernel was built with.
 
+Scion's shared drivers stay in this repository, as for the other profiles (`drivers/map`): for ios-27 the files that
+`series.ios27`'s `copy` lines named are copied into the tree at build time from `drivers/` and `socs/` (`profiles/ios-27.copy`, the
+profile's `fork_copy`), and the branch does not keep a second copy; `hakios.s6e3ha8.c` is the exception until its ios-27 change
+(patch 0428) is folded into `drivers/display/panel`.
+
 `SCION_XNU_FROM_PATCHES=1` makes the tree the old way (Apple's tag and this repository's patches), and `XNU_FORK_URL` fetches
 the fork from elsewhere (a local clone that has the commit).
 
