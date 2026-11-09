@@ -88,7 +88,9 @@
  */
 #include <kern/clock.h>
 #include <kern/locks.h>
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: STARTUP macro */
 #include <kern/startup.h>
+#endif
 #include <kern/thread.h>
 #include <libkern/libkern.h>
 #include <libkern/OSAtomic.h>
@@ -297,10 +299,12 @@ step_look(void)
 	}
 	say("cs47l93: the reset pin gpg1-0: CON %08x DAT %08x PUD %08x (CON [3:0] 1 output, DAT bit 0 low: in reset)\n",
 	    gpio_rd(GPG1), gpio_rd(GPG1 + 4), gpio_rd(GPG1 + 8));
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: hakios_acpm_init() is real; 12377 has it as a stub */
 	if (!hakios_acpm_init(say)) {
 		say("cs47l93: no ACPM: the codec's supplies cannot be read\n");
 		return false;
 	}
+#endif
 	if (!ldo_read(L33CTRL, &l33) || !ldo_read(L34CTRL, &l34)) {
 		return false;
 	}
@@ -1021,9 +1025,14 @@ hakios_cs47l93_console(const char *arg)
 	}
 }
 
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: called from IOKitBSDInit.cpp */
+void
+hakios_cs47l93_init(void)
+#else   /* xnu-8796: STARTUP */
 __startup_func
 static void
 cs47l93_init(void)
+#endif
 {
 	thread_t thread;
 	uint32_t div;
@@ -1056,4 +1065,6 @@ cs47l93_init(void)
 		busy = 0;
 	}
 }
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796 only */
 STARTUP(EARLY_BOOT, STARTUP_RANK_LAST, cs47l93_init);
+#endif

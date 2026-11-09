@@ -163,6 +163,9 @@
 #include <sys/hakios.exynos_acpm.h>
 #include <sys/systm.h>
 #include <vm/vm_kern.h>
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377 (ios-27): IOKit DMA allocator, below-4-GB check */
+#include <sys/hakios.exynos9810_mem.h>
+#endif
 #include <sys/hakios.exynos_soc.h>
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
@@ -426,6 +429,11 @@ step_look(void)
 	on_at_boot = (status & 0xF) == 0xF;
 	say("abox: 1: the AUD domain is %s\n", on_at_boot ? "ON already (the boot left it so)" : (status & 0xF) == 0 ? "off" :
 	    "neither on nor off");
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: hakios_acpm_init() is a stub returning false */
+	error = hakios_acpm_dvfs_get(ACPM_DVFS_AUD, &khz);
+	say("abox: 1: ACPM's AUD DVFS domain (%u): %s %u kHz\n", ACPM_DVFS_AUD, error == 0 ? "at" : "not read, error",
+	    error == 0 ? khz : (uint32_t)error);
+#else
 	if (hakios_acpm_init(say)) {
 		error = hakios_acpm_dvfs_get(ACPM_DVFS_AUD, &khz);
 		say("abox: 1: ACPM's AUD DVFS domain (%u): %s %u kHz\n", ACPM_DVFS_AUD, error == 0 ? "at" : "not read, error", error == 0 ?
@@ -433,6 +441,7 @@ step_look(void)
 	} else {
 		say("abox: 1: no ACPM: the AUD DVFS domain's rate is not known\n");
 	}
+#endif
 	return true;
 }
 
@@ -910,6 +919,89 @@ sysmmu_passes(void)
 	return true;
 }
 
+
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377 */
+/* a contiguous buffer below 4 GB from IOKit, kept for good: iokit/bsddev/IOKitBSDInit.cpp */
+extern vm_offset_t hakios_dma32_alloc(vm_size_t size, uint64_t *pa);
+static uint32_t use_rmem;               /* abox_rmem=1: abox_rmem when IOKit has nothing below 4 GB (Scion's choice) */
+static bool area_failed_said;
+
+/* the ring and its zeroes, had once (at the driver's start, or at the first stream) and never given back */
+static bool
+area_get(void)
+{
+	uint64_t pa = 0;
+	vm_offset_t va;
+
+	if (area != 0) {
+		return true;
+	}
+	if (ring_pa == 0) {
+		va = hakios_dma32_alloc(AREA_BYTES, &pa);
+		if (va != 0 && pa != 0 && pa + AREA_BYTES <= 0x100000000ull && (pa & PAGE_MASK) == 0 &&
+		    (pa + AREA_BYTES <= EXYNOS9810_MEM_DISPLAY_PA || pa >= EXYNOS9810_MEM_DISPLAY_END) &&
+		    pa + AREA_BYTES <= 0xF0000000ull) {
+			area = va;
+			area_pa = pa;
+			area_rmem = false;
+			bzero((void *)area, AREA_BYTES);
+			FlushPoC_DcacheRegion(area, AREA_BYTES);
+			say("abox: the ring's memory: %u KB, physically contiguous, from IOKit at %#llx (below 4 GB, kernel %#lx)\n",
+			    AREA_BYTES / 1024, area_pa, area);
+			return true;
+		}
+		if (va != 0) {
+			/* (kept: a descriptor of IOKit's, never released; not handed to the DMA) */
+			say("abox: IOKit's buffer below 4 GB is at %#llx, inside the display's carve-out or above 0xF0000000: NOT used\n",
+			    pa);
+		}
+		if (!use_rmem) {
+			if (!area_failed_said) {
+				say("abox: !!! NO %u KB of contiguous RAM below 4 GB from IOKit (physical mask 0xFFFFFFFF): ABOX's RDMA0 "
+				    "(32-bit addresses) cannot be given a ring, steps 7-8 will refuse. Boot with extra_ram=1 (kernel RAM "
+				    "below 4 GB), or abox_rmem=1 (ABOX's own reserved memory at %#x, Scion's choice) !!!\n",
+				    AREA_BYTES / 1024, ABOX_RMEM_PA);
+				area_failed_said = true;
+			}
+			return false;
+		}
+	}
+	pa = ring_pa != 0 ? ring_pa : ABOX_RMEM_PA;
+	if (pa < ABOX_RMEM_PA || pa + AREA_BYTES > ABOX_RMEM_PA + ABOX_RMEM_SIZE || (pa & PAGE_MASK) != 0) {
+		say("abox: %#llx is not a page of abox_rmem (%#x + %#x): no ring\n", pa, ABOX_RMEM_PA, ABOX_RMEM_SIZE);
+		return false;
+	}
+	/* abox_rmem: not XNU's RAM on this path; mapped write-combined (uncached), as Scion maps it */
+	area = ml_io_map_unmappable((vm_offset_t)pa, AREA_BYTES, VM_WIMG_WCOMB);
+	if (area == 0) {
+		say("abox: abox_rmem at %#llx could not be mapped\n", pa);
+		return false;
+	}
+	for (uint32_t i = 0; i < AREA_BYTES / 8; i++) {
+		((volatile uint64_t *)area)[i] = 0;
+	}
+	area_pa = pa;
+	area_rmem = true;
+	say("abox: the ring's memory: %u KB in abox_rmem at %#llx (kernel %#lx, uncached)%s\n", AREA_BYTES / 1024, area_pa, area,
+	    ring_pa != 0 ? " (abox_ring_pa)" : " (abox_rmem=1)");
+	return true;
+}
+
+/* before a stream: the ring had (once) and zeroed */
+static bool
+area_alloc(void)
+{
+	if (area == 0) {
+		return area_get();
+	}
+	if (area_rmem) {
+		for (uint32_t i = 0; i < AREA_BYTES / 8; i++) {
+			((volatile uint64_t *)area)[i] = 0;
+		}
+	}
+	return true;
+}
+#else   /* xnu-8796 */
 static bool
 area_alloc(void)
 {
@@ -964,11 +1056,15 @@ area_alloc(void)
 	return true;
 }
 
+#endif   /* __has_include(<vm/vm_kern_xnu.h>) / area_alloc */
+
 static void
 area_free(void)
 {
 	if (area != 0 && !rdma_on && !area_kept && !area_rmem) {
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796 only: IOKit memory (12377) is never freed */
 		kmem_free(kernel_map, area, AREA_BYTES);
+#endif
 		area = 0;
 	}
 }
@@ -2007,6 +2103,12 @@ hakios_exynos_abox_init(void)
 	PE_parse_boot_argn("abox_ring_pa", &ring_pa, sizeof(ring_pa));
 	PE_parse_boot_argn("abox_mic", &mic_for_ios, sizeof(mic_for_ios));
 	PE_parse_boot_argn("abox_tone", &boot_tone, sizeof(boot_tone));
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: abox_rmem boot-arg; early ring alloc (below-4-GB RAM is scarce) */
+	PE_parse_boot_argn("abox_rmem", &use_rmem, sizeof(use_rmem));
+	if (steps >= 7) {
+		(void)area_get();
+	}
+#endif
 	busy = 1;
 	if (kernel_thread_start(abox_thread, NULL, &thread) == KERN_SUCCESS) {
 		thread_deallocate(thread);

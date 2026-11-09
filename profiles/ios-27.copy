@@ -4,6 +4,7 @@
 # and the ones the series carried copies of (hakios.dwc3.c, hakios.exynos_tmu.h, hakios.scion_gov.c; docs/xnu-fork.md).
 # hakios.s6e3ha8.c is not here: the fork's branch changes it for this tree (patch 0428), so the branch keeps its copy.
 drivers/soc/exynos/hakios.exynos_hsi2c.c bsd/dev/hakios.exynos_hsi2c.c
+drivers/soc/exynos/hakios.exynos_spi.c bsd/dev/hakios.exynos_spi.c
 drivers/display/panel/hakios.s6e3ha8_gamma.h bsd/dev/hakios.s6e3ha8_gamma.h
 drivers/usb/hakios.exynos_usb.c bsd/dev/hakios.exynos_usb.c
 drivers/usb/hakios.usb_acm.h bsd/dev/hakios.usb_acm.h
@@ -12,3 +13,11 @@ socs/exynos9810/include/hakios.exynos9810_soc.h bsd/sys/hakios.exynos9810_soc.h
 drivers/usb/hakios.dwc3.c bsd/dev/hakios.dwc3.c
 drivers/power/exynos/hakios.exynos_tmu.h bsd/sys/hakios.exynos_tmu.h
 drivers/power/exynos/hakios.scion_gov.c bsd/dev/hakios.scion_gov.c
+drivers/audio/abox/hakios.exynos_abox.c bsd/dev/hakios.exynos_abox.c
+drivers/audio/codec/hakios.max98512.c bsd/dev/hakios.max98512.c
+drivers/audio/codec/hakios.cs47l93.c bsd/dev/hakios.cs47l93.c
+drivers/audio/hakios.audio.c bsd/dev/hakios.audio.c
+drivers/audio/hakios.guard.c bsd/dev/hakios.guard.c
+drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c bsd/dev/hakios.bcm4361_bt.c
+drivers/bluetooth/bcm4361/hakios.bcm_hci.h bsd/dev/hakios.bcm_hci.h
+drivers/bluetooth/bcm4361/hakios.bt_node.cpp iokit/Kernel/hakios.bt_node.cpp

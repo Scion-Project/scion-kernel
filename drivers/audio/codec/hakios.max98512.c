@@ -95,7 +95,9 @@
  */
 #include <kern/clock.h>
 #include <kern/locks.h>
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: STARTUP macro */
 #include <kern/startup.h>
+#endif
 #include <kern/thread.h>
 #include <libkern/libkern.h>
 #include <mach/mach_time.h>
@@ -103,11 +105,17 @@
 #include <pexpert/pexpert.h>
 #include <sys/errno.h>
 #include <sys/hakios.exynos_hsi2c.h>
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796 only */
 #include <sys/hakios.input.h>
+#endif
 #include <sys/hakios.max98512.h>
 #include <sys/systm.h>
 #include <sys/hakios.exynos_soc.h>
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: ABOX driver is in this kernel; no hakios.drivers.h */
+#define HAKIOS_EXYNOS_ABOX      1
+#else
 #include "hakios.drivers.h"      /* HAKIOS_EXYNOS_ABOX: ABOX's driver in this kernel */
+#endif
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
 
@@ -601,6 +609,9 @@ configure(uint32_t slot_bits, uint32_t channels)
 	       both_bits(PCM_CLK_SETUP, 0x0f, bclks);
 }
 
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: no fuel gauge; battery temperature not known */
+static int hakios_battery_temperature(void) { return -273; }
+#endif
 /* steps 4-6 of start(): the speaker path on, the level, the global enable (__max98512_spk_enable, the stereo mode) */
 static bool
 unmute(void)
@@ -830,9 +841,14 @@ out:
 	thread_terminate(current_thread());
 }
 
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: called from IOKitBSDInit.cpp */
+void
+hakios_max98512_init(void)
+#else   /* xnu-8796: STARTUP */
 __startup_func
 static void
 max98512_init(void)
+#endif
 {
 	uint32_t steps = 0, gain;
 	thread_t thread;
@@ -850,4 +866,6 @@ max98512_init(void)
 		thread_deallocate(thread);
 	}
 }
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796 only */
 STARTUP(EARLY_BOOT, STARTUP_RANK_LAST, max98512_init);
+#endif
