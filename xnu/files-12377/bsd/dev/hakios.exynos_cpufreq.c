@@ -1231,6 +1231,13 @@ hakios_exynos_cpufreq_gov_start(void)
 	}
 	(void)PE_parse_boot_argn("cpufreq_gov_lit_max", &lit_max, sizeof(lit_max));
 	(void)PE_parse_boot_argn("cpufreq_gov_lit_min", &lit_min, sizeof(lit_min));
+	{
+		/* sweetspeed&131072: the A55s no slower than 1456 MHz (the symmetric scheduler puts UI work there) */
+		extern uint32_t sweet_speed_flags(void);
+		if ((sweet_speed_flags() & 131072) != 0 && lit_min < 1456000) {
+			lit_min = 1456000;
+		}
+	}
 	(void)PE_parse_boot_argn("cpufreq_gov_big_max", &big_max, sizeof(big_max));
 	(void)PE_parse_boot_argn("cpufreq_gov_big_min", &big_min, sizeof(big_min));
 	(void)PE_parse_boot_argn("gov_boost_big", &touch_big, sizeof(touch_big));

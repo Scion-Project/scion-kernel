@@ -211,3 +211,5 @@ starlte/0426-starlte-speed-hooks.patch
 starlte/0427-starlte-night-hooks.patch
 # Scion's S6E3HA8 panel driver (copied above, byte for byte) taken to this tree: levels and nits for the framebuffer, no backlight service
 starlte/0428-starlte-panel-driver.patch
+# the optimisation run: SWEET PROF (sweetspeed&16384), extra RAM canary bit, recommended cores, A55 floor, the late-MIDR retry (docs/ios27/OPTIMISE.md)
+starlte/0429-starlte-opt-hooks.patch

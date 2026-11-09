@@ -75,6 +75,16 @@ extern int proc_selfpid(void);
  * 2048  CoreAnimation pacing aids (as sweetfb_cav=1: IOMFBDisplayRefresh, "SWEET FB CAV" lines)
  * 4096  scripted input for a repeatable frame-rate run (starlte_touch.c script 5)
  * 8192  scripted input that drags the brightness slider (script 6)
+ * The optimisation run (patch 0429, docs/ios27/OPTIMISE.md):
+ * 16384  SWEET PROF: a 1 ms per-CPU sampling profiler (osfmk/arm64/sweet_prof.c, report every 10 s with the STARLTE TOP report),
+ *        the time inside the emulator, and the framebuffer's "A5XELTE FB gaps" histogram of vsync ticks between presented frames
+ * 32768  the extra RAM canary pages (as extra_ram_canary=1; a bit for a command line that is full)
+ * 65536  recommended cores 0xf1 (cpu0 + the four M3s) once the machine is up: the scheduler here is symmetric, so UI work else lands on
+ *        the A55s; threads bound to an A55 (FP16 pins) still run there
+ *131072  the A55s' governor floor 1456 MHz (measured: no change, kept for the record)
+ * The FP16 forms emulated under bit 2 now include FCCMP/FCCMPE/FCSEL H, FMOV/FABS/FNEG H and FABS/FNEG .4H/.8H (tools/ios27/perf/test/fp16t.c
+ * checks them bit for bit); and, always on, a trap that was taken on an M3 but is handled after the thread migrated to an A55 is
+ * retried (the A55 runs it) instead of ending in SIGILL.
  */
 #define SWEET_SPEED_IORTC   1
 #define SWEET_SPEED_FP16    2
@@ -536,6 +546,80 @@ extern int sweet_copy_cas128(user_addr_t user_addr, const uint64_t expected[2], 
 extern int copyin_atomic64(const user_addr_t user_addr, uint64_t *kernel_addr);
 
 uint64_t sweet_lse_counts[4];   /* CAS, CASP, LD<op>/SWP, LDAPR */
+
+/*
+ * ios27-opt: instructions the A55 implements (ARMv8.2 FP16, DotProd, RDM) and the Mongoose M3 lacks. If one traps on an
+ * M3 and the handler finds itself on an A55 (sleh_synchronous enables interrupts, so the thread can be preempted and
+ * migrated before the MIDR checks), retrying it is right: the A55 runs it. Without this the late MIDR check says "not
+ * an M3" and the process gets a SIGILL (iconservicesagent, CoreGraphics RGBAf16_mark_inner FCMP H).
+ */
+uint64_t sweet_a55_retries;
+bool sweet_a55_native_m3_lacks(uint32_t w);
+bool sweet_a55_retry_ok(uint32_t w, thread_t th, uint64_t pc);
+bool
+sweet_a55_native_m3_lacks(uint32_t w)
+{
+	unsigned ftype = (w >> 22) & 3;
+	if ((w & 0x5F200000) == 0x1E200000 && ftype == 3) {     /* scalar FP data-processing, half */
+		return true;
+	}
+	if ((w & 0x5F000000) == 0x1F000000 && ftype == 3) {     /* FP 3-source, half */
+		return true;
+	}
+	if ((w & 0x9F60C400) == 0x0E400400 || (w & 0xDF60C400) == 0x5E400400) {        /* (scalar) three same FP16 */
+		return true;
+	}
+	if ((w & 0x9F7E0C00) == 0x0E780800 || (w & 0xDF7E0C00) == 0x5E780800) {        /* (scalar) two-reg misc FP16 */
+		return true;
+	}
+	if ((w & 0x9FC00400) == 0x0F000000 || (w & 0xDFC00400) == 0x5F000000) {        /* by element, size 00 = half */
+		unsigned op = (w >> 12) & 0xF;
+		if (op == 1 || op == 5 || op == 9) {
+			return true;
+		}
+	}
+	if ((w & 0x9FBFFC00) == 0x0E30C800 || (w & 0x9FBFFC00) == 0x0E30F800 ||       /* FMAXNMV/FMINNMV/FMAXV/FMINV .H */
+	    (w & 0xFFBE0C00) == 0x5E300800 ||                                            /* scalar pairwise .H */
+	    (w & 0x9FF8FC00) == 0x0F00FC00) {                                            /* FMOV Vd.nH, #imm */
+		return true;
+	}
+	if ((w & 0xBF20FC00) == 0x0E009400 || (w & 0xBF00F400) == 0x0F00E000) {        /* SDOT/UDOT */
+		return true;
+	}
+	if ((w & 0xBF20F400) == 0x2E008400 || (w & 0xFF20F400) == 0x7E008400 ||       /* SQRDMLAH/SQRDMLSH */
+	    (w & 0xBF00D400) == 0x2F00D000 || (w & 0xFF00D400) == 0x7F00D000) {
+		return true;
+	}
+	return false;
+}
+
+/*
+ * The retry above is only right for an instruction the A55 really runs. The patterns are classes, and an unallocated encoding
+ * inside one would trap on the A55 too and be retried for ever: at most 4 retries in a row of the same pc of the same thread
+ * (a small direct-mapped table, racy on purpose: a lost entry only means one more try), then the SIGILL goes out as before.
+ */
+bool
+sweet_a55_retry_ok(uint32_t w, thread_t th, uint64_t pc)
+{
+	static struct { thread_t th; uint64_t pc; uint32_t n; } tab[64];
+	if (!sweet_a55_native_m3_lacks(w)) {
+		return false;
+	}
+	unsigned i = (unsigned)(((uintptr_t)th >> 6) ^ (pc >> 2)) % 64;
+	if (tab[i].th == th && tab[i].pc == pc) {
+		if (tab[i].n >= 4) {
+			return false;
+		}
+		tab[i].n++;
+	} else {
+		tab[i].th = th;
+		tab[i].pc = pc;
+		tab[i].n = 1;
+	}
+	sweet_a55_retries++;
+	return true;
+}
+
 uint64_t sweet_m3_pins;          /* threads pinned to an A55 (sleh.c) */
 uint64_t sweet_m3_unpins;        /* soft pins released (sweetm3unpin) */
 
@@ -781,6 +865,85 @@ sweet_lse_emulate(arm_saved_state_t *ss, uint32_t w)
 	return true;
 }
 
+/* ios27-opt: condition codes as the architecture's ConditionHolds() */
+static bool
+fp16_cond_holds(uint32_t cond, uint32_t cpsr)
+{
+	bool n = (cpsr >> 31) & 1, z = (cpsr >> 30) & 1, c = (cpsr >> 29) & 1, v = (cpsr >> 28) & 1, r;
+	switch (cond >> 1) {
+	case 0: r = z; break;
+	case 1: r = c; break;
+	case 2: r = n; break;
+	case 3: r = v; break;
+	case 4: r = c && !z; break;
+	case 5: r = n == v; break;
+	case 6: r = n == v && !z; break;
+	default: r = true; break;
+	}
+	return ((cond & 1) && cond != 15) ? !r : r;
+}
+
+static uint32_t
+fp16_compare_nzcv(uint16_t a, uint16_t b)
+{
+	bool an = (a & 0x7c00) == 0x7c00 && (a & 0x3ff), bn = (b & 0x7c00) == 0x7c00 && (b & 0x3ff);
+	if (an || bn) {
+		return 0x3;                                     /* unordered: C V */
+	}
+	int ka = (a & 0x8000) ? -(int)(a & 0x7fff) : (int)(a & 0x7fff);
+	int kb = (b & 0x8000) ? -(int)(b & 0x7fff) : (int)(b & 0x7fff);
+	return ka == kb ? 0x6 : ka < kb ? 0x8 : 0x2;
+}
+
+static bool
+emulate_fp16_m3_more(arm_saved_state_t *ss, arm_neon_saved_state64_t *ns, uint32_t w)
+{
+	unsigned rd = w & 31, rn = (w >> 5) & 31, rm = (w >> 16) & 31;
+	uint32_t cpsr = get_saved_state_cpsr(ss);
+	if ((w & 0xFFE00C00) == 0x1EE00400) {                   /* FCCMP/FCCMPE Hn, Hm, #nzcv, cond */
+		uint32_t nzcv = w & 0xf;
+		if (fp16_cond_holds((w >> 12) & 0xf, cpsr)) {
+			uint16_t a, b;
+			memcpy(&a, &ns->v.q[rn], 2);
+			memcpy(&b, &ns->v.q[rm], 2);
+			nzcv = fp16_compare_nzcv(a, b);
+		}
+		set_saved_state_cpsr(ss, (cpsr & ~PSR64_NZCV_MASK) | (nzcv << 28));
+		return true;
+	}
+	if ((w & 0xFFE00C00) == 0x1EE00C00) {                   /* FCSEL Hd, Hn, Hm, cond */
+		uint16_t h;
+		memcpy(&h, &ns->v.q[fp16_cond_holds((w >> 12) & 0xf, cpsr) ? rn : rm], 2);
+		uint8_t d[16];
+		memset(d, 0, 16);
+		memcpy(d, &h, 2);
+		memcpy(&ns->v.q[rd], d, 16);
+		return true;
+	}
+	if ((w & 0xFFFE7C00) == 0x1EE04000 && ((w >> 15) & 3) != 3) {  /* FMOV/FABS/FNEG Hd, Hn */
+		uint16_t h;
+		memcpy(&h, &ns->v.q[rn], 2);
+		unsigned op = (w >> 15) & 3;
+		h = op == 1 ? (uint16_t)(h & 0x7fff) : op == 2 ? (uint16_t)(h ^ 0x8000) : h;
+		uint8_t d[16];
+		memset(d, 0, 16);
+		memcpy(d, &h, 2);
+		memcpy(&ns->v.q[rd], d, 16);
+		return true;
+	}
+	if ((w & 0x9FFFFC00) == 0x0EF8F800) {                   /* FABS / FNEG Vd.4H|8H, Vn */
+		bool q = (w >> 30) & 1, neg = (w >> 29) & 1;
+		uint16_t lanes[8];
+		memcpy(lanes, &ns->v.q[rn], 16);
+		for (unsigned i = 0; i < 8; i++) {
+			lanes[i] = (i >= 4 && !q) ? 0 : neg ? (uint16_t)(lanes[i] ^ 0x8000) : (uint16_t)(lanes[i] & 0x7fff);
+		}
+		memcpy(&ns->v.q[rd], lanes, 16);
+		return true;
+	}
+	return false;
+}
+
 /*
  * The few scalar FP16 instructions iOS 27's UI code runs all the time (FMOV H #imm, FMOV between H and W/X,
  * FCMP/FCMPE H), emulated on the Mongoose M3 instead of pinning the thread to an A55 (sleh.c) (sweetspeed&2).
@@ -842,11 +1005,29 @@ emulate_fp16_m3(arm_saved_state_t *ss, uint32_t w)
 		set_saved_state_cpsr(ss, cpsr | (nzcv << 28));
 		return true;
 	}
-	return false;
+	return emulate_fp16_m3_more(ss, ns, w);
 }
 
+static bool sweet_a64e_emulate_inner(arm_saved_state_t *ss, uint32_t w);
+extern uint64_t sweet_emu_n[2], sweet_emu_abs[2];
 bool
 sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
+{
+	/* time spent emulating, LSE/LRCPC vs the rest (the SWEET PROF emu line): only while the profiler is on (sweetspeed&16384) */
+	extern uint32_t sweet_prof_on;
+	if (__probable(!os_atomic_load(&sweet_prof_on, relaxed))) {
+		return sweet_a64e_emulate_inner(ss, w);
+	}
+	uint64_t t0 = mach_absolute_time();
+	bool ok = sweet_a64e_emulate_inner(ss, w);
+	unsigned c = ((w & 0x3f200c00) == 0x38200000 || (w & 0x3fa07c00) == 0x08a07c00 || (w & 0xbfa07c00) == 0x08207c00) ? 0 : 1;
+	os_atomic_inc(&sweet_emu_n[c], relaxed);
+	os_atomic_add(&sweet_emu_abs[c], mach_absolute_time() - t0, relaxed);
+	return ok;
+}
+
+static bool
+sweet_a64e_emulate_inner(arm_saved_state_t *ss, uint32_t w)
 {
 	/* LSE/LRCPC (the M3s, millions a second) first: they are not arm64e and not counted per pid */
 	if (((w & 0x3f200c00) == 0x38200000 || (w & 0x3fa07c00) == 0x08a07c00 || (w & 0xbfa07c00) == 0x08207c00) &&

@@ -134,6 +134,48 @@ st_top_one(proc_t p, __unused void *arg)
 	return PROC_RETURNED;
 }
 
+/* SWEET PROF helper (sweetspeed&16384): name the file mapping a user pc outside the shared region (once per mapping) */
+#include <sys/bsdtask_info.h>
+#include <sys/vnode.h>
+extern int fill_procregioninfo(task_t, uint64_t, struct proc_regioninfo_internal *, uintptr_t *, uint32_t *);
+static struct { int pid; uint64_t start, end; } st_prof_maps[256];
+static unsigned st_prof_nmaps;
+static void
+st_prof_region(int pid, uint64_t pc)
+{
+	for (unsigned i = 0; i < st_prof_nmaps; i++) {
+		if (st_prof_maps[i].pid == pid && st_prof_maps[i].start <= pc && pc < st_prof_maps[i].end) {
+			return;
+		}
+	}
+	proc_t p = proc_find(pid);
+	if (p == PROC_NULL) {
+		return;
+	}
+	task_t task = proc_task(p);
+	struct proc_regioninfo_internal ri;
+	uintptr_t vp = 0;
+	uint32_t vid = 0;
+	bzero(&ri, sizeof(ri));
+	if (task != TASK_NULL && fill_procregioninfo(task, pc, &ri, &vp, &vid) && ri.pri_address <= pc) {
+		char path[160] = "-";
+		if (vp != 0 && vnode_getwithvid((vnode_t)vp, vid) == 0) {
+			int len = sizeof(path);
+			(void)vn_getpath((vnode_t)vp, path, &len);
+			vnode_put((vnode_t)vp);
+		}
+		printf("SWEET PROF map: %d %llx-%llx off %llx %s\n", pid, ri.pri_address, ri.pri_address + ri.pri_size,
+		    ri.pri_offset, path);
+		if (st_prof_nmaps < 256) {
+			st_prof_maps[st_prof_nmaps].pid = pid;
+			st_prof_maps[st_prof_nmaps].start = ri.pri_address;
+			st_prof_maps[st_prof_nmaps].end = ri.pri_address + ri.pri_size;
+			st_prof_nmaps++;
+		}
+	}
+	proc_rele(p);
+}
+
 static void
 st_top(void)
 {
@@ -143,6 +185,8 @@ st_top(void)
 		return;
 	}
 	uint64_t last_time = 0;
+	extern void sweet_prof_init(void);
+	sweet_prof_init();
 	for (;;) {
 		st_top_n = 0;
 		uint64_t now = mach_absolute_time();
@@ -180,6 +224,8 @@ st_top(void)
 			}
 			printf("%s\n", line);
 			st_top_a64e(window_ns);
+			extern void sweet_prof_report(uint64_t, void (*)(int, char *, int), void (*)(int, uint64_t));
+			sweet_prof_report(window_ns, proc_name, st_prof_region);
 			st_top_mem();
 		}
 		bcopy(st_top_now, st_top_last, sizeof(st_top_now[0]) * st_top_n);
@@ -364,6 +410,17 @@ st_cpu_survey(__unused void *arg, __unused wait_result_t wr)
 	}
 	thread_bind(PROCESSOR_NULL);
 	thread_block(THREAD_CONTINUE_NULL);
+	/*
+	 * sweetspeed&65536: the scheduler here is symmetric (no __AMP__), so half of the UI's work lands on
+	 * the A55s (half the M3's speed). Recommend only cpu0 (an A55, the boot CPU) and the four M3s: threads go to
+	 * the M3s; threads bound to an A55 (FP16 pins, sleh.c) still run there.
+	 */
+	extern uint32_t sweet_speed_flags(void);
+	if ((sweet_speed_flags() & 65536) != 0 && ml_get_max_cpu_number() >= 7) {
+		extern void sched_perfcontrol_update_recommended_cores(uint32_t recommended_cores);
+		sched_perfcontrol_update_recommended_cores(0xF1);
+		printf("STARLTE CPU: recommended cores 0xf1 (cpu0 + the M3s; sweetspeed&65536)\n");
+	}
 	st_top();
 }
 
