@@ -10,7 +10,7 @@ edited as described. That kernel was Starbite's merged kernel from `main` after 
 behaviour is behind a bit of the boot-argument `sweetspeed=<mask>` (default 0, nothing changes), as this repository ships behaviour changes. The applied tree
 was compared with the speed3 sources file by file: they differ only by those switches. With `sweetspeed=31` the code is the code that ran. **The gated
 kernel itself was built (the iOS-target STARLTE kernel, as for #255) and not booted**; `tools/ios27/cmdline/starlte-fast.txt` is the command line of the best
-boot below with `sweetspeed=31` added (and `a5fb_noconsole=1` taken out: the STARLTE framebuffer driver reads `sweetfb_noconsole` only, and the line is limited
+boot below with `sweetspeed=31` added (it now has `sweetspeed=2047`, with the night run's bits of `NIGHT.md`, and `sweettrace=0`, the default, is out for room) (and `a5fb_noconsole=1` taken out: the STARLTE framebuffer driver reads `sweetfb_noconsole` only, and the line is limited
 to 607 bytes).
 
 ## The boots
@@ -69,14 +69,14 @@ every cache file the tools change, the work's logs and the boot images are not h
 
 ## What was found and is not fixed
 
-- **A boot dance** (every boot but s1w): SpringBoard is relaunched every 5 s four times (`ThrottleInterval`), and `backboardd` is killed twice at about 10 s
+- **A boot dance** (every boot but s1w; found and fixed afterwards, `NIGHT.md`: launchd's kqworkloop limits killed the daemons, `sweetspeed&256`): SpringBoard is relaunched every 5 s four times (`ThrottleInterval`), and `backboardd` is killed twice at about 10 s
   while still in dyld (fixing up the non-cache dylibs `s.dylib`, `libsbgl`, `libOSMesa`, 16 MB, on a cold boot); the third `backboardd` reaches the display
   1.3 s after exec. It costs about 20 s. Who kills it is unknown (no crash, no launchd message). Ideas: warm those libraries into the page cache before
   `backboardd` starts; find the 10 s killer.
-- **GPU submits are synchronous**: StarbiteMali's `SBM_SUBMIT` runs the job chain to completion, polling; 2-3 thousand submits a second while
+- **GPU submits are synchronous** (`NIGHT.md` has asynchronous ones behind `sweetspeed&64`, submit 48 us against 165-192 us, frame rates unchanged): StarbiteMali's `SBM_SUBMIT` runs the job chain to completion, polling; 2-3 thousand submits a second while
   scrolling, 27-37 % of `backboardd`'s time. The present copy is 2.3-2.6 ms a frame (under 3 % at 10 fps) and is not the bottleneck; zero-copy scan-out
   to the DPU was not tried.
-- **Crash loops** left in the best boot: `MessagesBlastDoorService` every 10 s (imagent), `terminusd` at boot, and `kbd` on the first use of the keyboard
+- **Crash loops** left in the best boot (`NIGHT.md`: `imagent` and `terminusd` disabled, the `kbd` crash patched out of the cache): `MessagesBlastDoorService` every 10 s (imagent), `terminusd` at boot, and `kbd` on the first use of the keyboard
   (a null dereference in SafariCore's `WBSSetUpAccessToAppDataContainerWithIdentifier`, reached through the one-time-code autofill provider: Safari's app
   data container is missing).
 - `sweettrace=0` alone does not stop the pid 1 system call trace of this kernel; the command line keeps `sweettracename=none` too.
