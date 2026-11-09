@@ -22,6 +22,14 @@ What the step does:
 - `AUDIO_BT_LOG=1` (tests): each of the three jobs' stderr into `/private/var/local/oslog/<name>.err`, with
   `OS_ACTIVITY_DT_MODE=YES` so their os_log lines go there too (logd is off on this root).
 
-Status (9 November 2026): the kernel's speaker tone played on phone 1 (heard). This step has not run on a phone yet:
-whether iOS 27's audiomxd runs on this kernel (on iOS 26 it looped on a SIGTRAP in caulk), loads the plug-in and builds
-a speaker route from it under the N104 (iPhone 11) routing tables is the next test.
+Status (9 November 2026, phone 1, silent runs at night):
+- Kernel: `abox=7 max98512=3 abox_rmem=1` + console `abox tone 3` played through both speakers (heard by the owner).
+- With this step and `abox=8 bt=7 cs47l93=6 abox_mic=1`: iOS 27's `audiomxd` runs (no crash loop on this kernel) and
+  loads `HakiosAudio.driver`; VirtualAudio makes the Speaker (`pspk`), Hawking, Actuator and Codec ports from it and
+  activates routes on them. `hal_probe` (as the root's `/private/var/herolte/autorun`) loads the plug-in, sees its four
+  devices and runs 3 s of output and 3 s of microphone input through it. That run had no `/dev/hakios-audio` (a kernel
+  bug, fixed in scion-kernel `fork/ios27-audio-bt`) and no codec power (PMIC calls stubbed; fixed in the fork).
+- Bluetooth: kernel `bt=1..7` all pass on iOS 27 (the phone's own SEMCO patch from `/private/var/hakios/bt/`, 4 Mbaud);
+  BlueTool runs `N104AP.boot/init.script` (result 0); bluetoothd reaches STACK_READY, and Apple's BTAudioHALPlugin in
+  audiomxd connects to it; bluetoothd then restarts (reason 701) when the chip rejects one of Apple's LE-scan vendor
+  commands: kernel boot-arg `bt_vsc_ok=` (scion-kernel `fork/ios27-audio-bt`) answers those.
