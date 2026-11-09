@@ -1,0 +1,102 @@
+--- a/tools/metal2/NativeBridgeMetalFrontend.mm
++++ b/tools/metal2/NativeBridgeMetalFrontend.mm
+@@ -14,6 +14,7 @@
+ #include <atomic>
+ #include <initializer_list>
+ #include <mutex>
++#include <set>
+ #include <pthread.h>
+ #include <string>
+ #include <unordered_map>
+@@ -237,9 +238,31 @@
+  }
+  return buffer;
+ }
+-static bool textureDescriptor(MTLTextureDescriptor *d,NmbTextureDescriptor *out) {
++// iOS 27: SWEET_MTL2_DEXR=1 (mtl2-env) holds the extended-range formats (BGRA10_XR 552/553, BGR10_XR 554/555) of
++// textures that live in device memory only (not over an IOSurface or a buffer) as RGBA16Float, and render pipelines'
++// color attachments to match: metal2vulkan samples XR textures only through mip-less, single-filter samplers, and iOS 27
++// CoreAnimation's backdrop blur (variable_blur_clamp_downsample_frag_lph) samples one otherwise (boot C: every such
++// command buffer refused, NotImplemented(Format)). Off by default.
++static int gDexr=-1;
++static MTLPixelFormat dexr(MTLPixelFormat f) {
++ if(gDexr<0){const char *e=getenv("SWEET_MTL2_DEXR");gDexr=(e && !strcmp(e,"1"))?1:0;}
++ if(!gDexr)return f;
++ switch((unsigned long)f){case 552:case 553:case 554:case 555:return MTLPixelFormatRGBA16Float;default:return f;}
++}
++// iOS 27: the first 48 distinct (format, usage, storage) texture shapes a process makes, once each, for diagnosis.
++static void noteTextureShape(MTLTextureDescriptor *d,const char *how,MTLPixelFormat held) {
++ static std::mutex lock;static std::set<uint64_t> seen;
++ uint64_t key=((uint64_t)d.pixelFormat<<32)|((uint64_t)d.usage<<8)|((uint64_t)d.storageMode<<4)|(how[0]&15);
++ {std::lock_guard<std::mutex> g(lock);if(seen.size()>=48 || !seen.insert(key).second)return;}
++ char line[200];snprintf(line,sizeof line,"native-metal: texture %s fmt %lu%s usage %#lx storage %lu type %lu %lux%lu mips %lu",how,(unsigned long)d.pixelFormat,
++  held!=d.pixelFormat?" (held as RGBA16Float)":"",(unsigned long)d.usage,(unsigned long)d.storageMode,(unsigned long)d.textureType,(unsigned long)d.width,(unsigned long)d.height,(unsigned long)d.mipmapLevelCount);
++ sm2_logs(line);
++}
++static bool textureDescriptor(MTLTextureDescriptor *d,NmbTextureDescriptor *out,bool deviceMemory=false,const char *how="memory") {
+  if(!d)return false;
+- *out={(uint64_t)d.textureType,(uint64_t)d.pixelFormat,d.width,d.height,d.depth,d.mipmapLevelCount,d.sampleCount,d.arrayLength,(uint64_t)d.usage,(uint64_t)d.resourceOptions};
++ const MTLPixelFormat held=deviceMemory?dexr(d.pixelFormat):d.pixelFormat;
++ noteTextureShape(d,how,held);
++ *out={(uint64_t)d.textureType,(uint64_t)held,d.width,d.height,d.depth,d.mipmapLevelCount,d.sampleCount,d.arrayLength,(uint64_t)d.usage,(uint64_t)d.resourceOptions};
+  return true;
+ }
+ static uint64_t sweetTexelBytes(MTLPixelFormat f);
+@@ -398,10 +421,12 @@
+  return (id<MTLTexture>)view;
+ }
+ - (id<MTLTexture>)newTextureViewWithPixelFormat:(MTLPixelFormat)format {
++ if(self.pixelFormat==MTLPixelFormatRGBA16Float)format=dexr(format);
+  return [self view:nmb_texture_new_view(_handle,format,0,nullptr,nullptr,true)];
+ }
+ - (id<MTLTexture>)newTextureViewWithPixelFormat:(MTLPixelFormat)format textureType:(MTLTextureType)type levels:(NSRange)levels slices:(NSRange)slices {
+  const uint64_t l[2]={levels.location,levels.length},s[2]={slices.location,slices.length};
++ if(self.pixelFormat==MTLPixelFormatRGBA16Float)format=dexr(format);
+  id<MTLTexture> v=[self view:nmb_texture_new_view(_handle,format,type,l,s,false)];
+  if(v){((NBTexture *)v).parentRelativeLevel=levels.location;((NBTexture *)v).parentRelativeSlice=slices.location;}
+  return v;
+@@ -414,7 +439,7 @@
+  if(!d)return nil;
+  id<NBTextureViewDesc> desc=(id<NBTextureViewDesc>)d;
+  const MTLPixelFormat df=[desc pixelFormat];
+- const MTLPixelFormat format=(df!=MTLPixelFormatInvalid)?df:self.pixelFormat;
++ const MTLPixelFormat format=(df!=MTLPixelFormatInvalid)?(self.pixelFormat==MTLPixelFormatRGBA16Float?dexr(df):df):self.pixelFormat;
+  const MTLTextureType type=[desc textureType];
+  NSRange levels=[desc levelRange],slices=[desc sliceRange];
+  if(!levels.length)levels=NSMakeRange(0,MAX((NSUInteger)1,self.mipmapLevelCount));
+@@ -1735,7 +1760,7 @@
+  p->vertex=[(NBFunction *)d.vertexFunction handle];p->fragment=d.fragmentFunction?[(NBFunction *)d.fragmentFunction handle]:nullptr;
+  for(unsigned i=0;i<8;i++) {
+   MTLRenderPipelineColorAttachmentDescriptor *a=d.colorAttachments[i];
+-  p->colors[i]={(uint64_t)a.pixelFormat,(uint64_t)a.writeMask,(uint64_t)a.blendingEnabled,(uint64_t)a.sourceRGBBlendFactor,(uint64_t)a.destinationRGBBlendFactor,
++  p->colors[i]={(uint64_t)dexr(a.pixelFormat),(uint64_t)a.writeMask,(uint64_t)a.blendingEnabled,(uint64_t)a.sourceRGBBlendFactor,(uint64_t)a.destinationRGBBlendFactor,
+       (uint64_t)a.rgbBlendOperation,(uint64_t)a.sourceAlphaBlendFactor,(uint64_t)a.destinationAlphaBlendFactor,(uint64_t)a.alphaBlendOperation};
+  }
+  p->depth_format=d.depthAttachmentPixelFormat;p->stencil_format=d.stencilAttachmentPixelFormat;p->samples=d.rasterSampleCount;
+@@ -1803,7 +1828,7 @@
+  return [self bufferWithLength:len options:opts offset:offset];
+ }
+ - (id<MTLTexture>)textureWithDescriptor:(MTLTextureDescriptor *)d offset:(uint64_t)offset {
+- NmbTextureDescriptor descriptor;if(!textureDescriptor(d,&descriptor))return nil;
++ NmbTextureDescriptor descriptor;if(!textureDescriptor(d,&descriptor,true,"heap"))return nil;
+  NmbTexture *handle=nmb_heap_new_texture(_handle,&descriptor,offset);
+  if(!handle){if(!strstr(nmb_last_error(),"OutOfMemory(Heap)"))NBLOG(@"native-metal: heap texture refused: %@",lastError());return nil;}
+  NBTexture *texture=[NBTexture new];texture.handle=handle;nmb_texture_describe(handle,&descriptor);texture.descriptor=descriptor;
+@@ -2191,7 +2216,7 @@
+  return (id<MTLBuffer>)buffer;
+ }
+ - (id<MTLTexture>)newTextureWithDescriptor:(MTLTextureDescriptor *)d {
+- NmbTextureDescriptor req;if(!textureDescriptor(d,&req))return nil;
++ NmbTextureDescriptor req;if(!textureDescriptor(d,&req,true,"device"))return nil;
+  NmbTexture *handle=takePooledTexture(req);
+  if(!handle) {
+   handle=nmb_texture_new(gDevice,&req);
+@@ -2415,7 +2440,7 @@
+ }
+ - (MTLSizeAndAlign)heapTextureSizeAndAlignWithDescriptor:(MTLTextureDescriptor *)d {
+  NmbTextureDescriptor descriptor;uint64_t out[2]={0,4096};
+- if(gDevice && textureDescriptor(d,&descriptor) && nmb_device_heap_texture_size_and_align(gDevice,&descriptor,out))
++ if(gDevice && textureDescriptor(d,&descriptor,true,"heapsize") && nmb_device_heap_texture_size_and_align(gDevice,&descriptor,out))
+   return {(NSUInteger)out[0],(NSUInteger)out[1]};
+  NBLOG(@"native-metal: heapTextureSizeAndAlign refused: %@",lastError());
+  return {0,(NSUInteger)MAX((NSUInteger)4096,(NSUInteger)getpagesize())};

@@ -1,0 +1,38 @@
+--- a/tools/ios27/mesa-ios/starbite-drm/starbite_drm.c
++++ b/tools/ios27/mesa-ios/starbite-drm/starbite_drm.c
+@@ -29,6 +29,8 @@
+ #include <sys/ioccom.h>
+ #include <time.h>
+ #include <unistd.h>
++#include <fcntl.h>
++#include <stdio.h>
+ 
+ #include <IOKit/IOKitLib.h>
+ 
+@@ -54,11 +56,22 @@
+ 		return true;
+ 	}
+ 	io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching(SBM_SERVICE));
+-	if (service == IO_OBJECT_NULL) {
+-		return false;
++	kern_return_t kr = KERN_FAILURE;
++	if (service != IO_OBJECT_NULL) {
++		kr = IOServiceOpen(service, mach_task_self(), 0, &connection);
++		IOObjectRelease(service);
+ 	}
+-	kern_return_t kr = IOServiceOpen(service, mach_task_self(), 0, &connection);
+-	IOObjectRelease(service);
++	/* iOS 27 diag: say once per process how the connection went (backboardd never reached the GPU, boot C) */
++	static int said;
++	if (!said || kr != KERN_SUCCESS) {
++		said = 1;
++		int fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_NONBLOCK);
++		if (fd >= 0) {
++			dprintf(fd, "SBDRM[%d %s]: StarbiteMali %s, IOServiceOpen -> %#x\n", getpid(), getprogname(),
++			    service != IO_OBJECT_NULL ? "found" : "NOT FOUND", kr);
++			close(fd);
++		}
++	}
+ 	return kr == KERN_SUCCESS;
+ }
+ 
