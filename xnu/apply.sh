@@ -5,8 +5,10 @@
 # A profile on another XNU base than xnu-8796 has no hakios.patch: its tree is the base's series, by xnu/apply-series.sh.
 # env:   XNU_URL   where to fetch from (default: Apple's repository on GitHub; an existing clone
 #                  that has the tag will do: XNU_URL=file:///path/to/xnu)
-# The result is a git tree on the branch "hakios" with the work uncommitted, which is how
-# xnu/export.sh expects to find it. A directory that already exists is left alone.
+# When the profile names a commit of Scion-Project/xnu (fork_commit: docs/xnu-fork.md), the tree is that commit, on the branch
+# "hakios", and only the drivers and the configuration are added here; SCION_XNU_FROM_PATCHES=1 makes it the old way: a git tree
+# on the branch "hakios" with the work uncommitted, which is how xnu/export.sh expects to find it.
+# A directory that already exists is left alone.
 set -e
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 python3 "$HERE/../tools/os-profile.py" require || exit 1
@@ -16,13 +18,18 @@ URL=${XNU_URL:-https://github.com/apple-oss-distributions/xnu.git}
 TAG=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_tag)
 BASE=$(OS_PROFILE_QUIET=1 python3 "$HERE/../tools/os-profile.py" get xnu_commit)
 
+. "$HERE/fork.sh"
 [ -e "$DIR" ] && { echo "apply.sh: $DIR already exists; not touching it" >&2; exit 1; }
-[ -s "$HERE/hakios.patch" ] && [ -d "$HERE/files" ] || { echo "apply.sh: no hakios.patch and files/ in $HERE" >&2; exit 1; }
+use_fork || { [ -s "$HERE/hakios.patch" ] && [ -d "$HERE/files" ]; } || { echo "apply.sh: no hakios.patch and files/ in $HERE" >&2; exit 1; }
 [ -f "$HERE/../drivers/map" ] || { echo "apply.sh: no drivers/map next to xnu/ (the drivers are in drivers/)" >&2; exit 1; }
 mkdir -p "$(dirname "$DIR")"
 DIR=$(cd "$(dirname "$DIR")" && pwd)/$(basename "$DIR")
-git init -q "$DIR"
 trap 'echo "apply.sh: failed; removing the incomplete $DIR" >&2; rm -rf "$DIR"' ERR
+if use_fork; then
+# Scion-Project/xnu at the profile's commit: Apple's tag with hakios.patch, files/, HFS and the numbered patches as commits
+fork_checkout "$DIR"
+else
+git init -q "$DIR"
 cd "$DIR"
 git remote add origin "$URL"
 git fetch -q --depth 1 origin "refs/tags/$TAG:refs/tags/$TAG"      # that one release, without the history
@@ -33,6 +40,7 @@ git apply --whitespace=nowarn "$HERE/hakios.patch"
 cp -a "$HERE/files/." .
 # HFS Plus (the data volume): Apple's release, fetched like XNU, and this port's changes over it
 "$HERE/hfs/hfs.sh" put "$DIR"
+fi
 # the drivers are kept by subsystem (drivers/<subsystem>/), not at their place in Apple's tree: drivers/map says where
 # each one goes, one line per file: "<subsystem> <path in the tree>"
 NDRIVERS=0
@@ -53,6 +61,7 @@ done
 # 1100-1199 virtio-pci, 1200-1299 display and input, 1300-1399 GPU 3D.
 # They come after the drivers, some of which they change; they leave bsd/conf/files to the configuration below.
 NPATCHES=0
+use_fork ||
 for p in "$HERE"/patches/*.patch; do
 	[ -e "$p" ] || continue
 	git apply --whitespace=nowarn "$p" || { echo "apply.sh: $(basename "$p") does not apply" >&2; false; }
@@ -62,4 +71,5 @@ done
 # What that writes is made again for every build, so it is kept out of the work that xnu/export.sh saves.
 printf '%s\n' config/MASTER.hakios bsd/dev/hakios.drivers.h >> .git/info/exclude
 python3 "$HERE/../tools/hakios-config.py" kernel --tree "$DIR"
-echo "apply.sh: $DIR: $TAG + $(grep -c '^diff --git' "$HERE/hakios.patch") changed and $(find "$HERE/files" -type f | wc -l) new files + $NDRIVERS drivers, $NPATCHES numbered patches"
+if use_fork; then echo "apply.sh: $DIR: Scion-Project/xnu ${FORK_COMMIT:0:12} + $NDRIVERS drivers"; else
+echo "apply.sh: $DIR: $TAG + $(grep -c '^diff --git' "$HERE/hakios.patch") changed and $(find "$HERE/files" -type f | wc -l) new files + $NDRIVERS drivers, $NPATCHES numbered patches"; fi

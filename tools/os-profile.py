@@ -22,6 +22,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT = "ios-16.5"
 KEYS = {"status", "arch", "darwin", "xnu_tag", "xnu_commit", "base", "machine", "sdk", "hfs", "patches", "adt", "userland"}
+# where the kernel tree comes from (docs/xnu-fork.md): Scion-Project/xnu, a fork of Apple's repository, at one commit of one branch,
+# and what is still staged at build time on top of it (inputs that may not be in git: the Kernel Debug Kit's headers)
+OPTIONAL = {"xnu_fork", "fork_branch", "fork_commit", "fork_stage"}
 STATUSES = ("real", "experimental", "not-implemented")
 
 
@@ -33,7 +36,7 @@ def read(name):
     for line in open(path, encoding="utf-8"):
         if line.startswith("\t"):
             key, _, value = line.strip().partition(" ")
-            if key not in KEYS:
+            if key not in KEYS | OPTIONAL:
                 sys.exit("os-profile: %s: unknown key %s" % (path, key))
             fields[key] = value.strip()
     missing = KEYS - set(fields)
@@ -107,6 +110,8 @@ def main():
         fields = read(name)
         require(name, fields)
         if sys.argv[2] not in fields:
+            if sys.argv[2] in OPTIONAL:
+                sys.exit(1)
             sys.exit("os-profile: no key %s" % sys.argv[2])
         print(fields[sys.argv[2]])
     else:

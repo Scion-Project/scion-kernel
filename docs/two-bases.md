@@ -18,6 +18,10 @@ background (UniXNU's layers and how this tree maps onto them).
 | `socs/<soc>/` | a SoC's numbers and layer (`exynos9810`, `lga` for the Tensor G5, ...) | shared |
 | `devices/<name>/` | a phone: `device.conf` (now with `profile`), configs, image recipe | shared; the device names its profile |
 
+The kernel tree itself comes from Scion-Project/xnu, a fork of Apple's repository with Scion's changes as commits on Apple's
+tags, one branch per base (`docs/xnu-fork.md`); each profile names the commit a build takes. The series below are what those
+branches were made from, and remain until they are removed.
+
 `tools/os-profile.py` is the one place a path or tag per base comes from:
 
 ```
