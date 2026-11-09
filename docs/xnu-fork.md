@@ -58,8 +58,10 @@ from them are compared in the pull request that brought this page.
 1. Remove what the fork now holds from this repository: `patches/`, `xnu/hakios.patch`, `xnu/files/`, `xnu/files-12377/`,
    `xnu/patches/`, `xnu/hfs/hfs.patch` (the tools and checks that read them first).
 2. The drivers into the fork's tree, one source per hardware block with `bases` (`docs/two-bases.md`), deduplicated against the
-   copies the ios-27 branch carries (`hakios.dwc3.c`, `hakios.exynos_cpufreq.c`, `hakios.exynos_tmu.c`, `hakios.exynos_dpu.c`,
-   `hakios.exynos_pcie.c`, `hakios.scion_gov.c`, `hakios.exynos_acpm_dvfs.c` and the SoC headers; `docs/ios27-starlte.md`).
+   copies the ios-27 branch carries. `hakios.dwc3.c`, `hakios.exynos_tmu.h`, `hakios.scion_gov.c` and the files of the old `copy`
+   lines are one source already (`profiles/ios-27.copy`); left: `hakios.exynos_cpufreq.c`, `hakios.exynos_tmu.c`, `hakios.exynos_dpu.c`,
+   `hakios.exynos_pcie.c` (they differ in behaviour, so merging them changes one kernel or the other), `hakios.s6e3ha8.c` (patch 0428),
+   `hakios.exynos_acpm_dvfs.c` (the series' own) and the SoC headers `hakios.exynos_soc.h` and `hakios.exynos9810_mem.h`.
 3. One xnu-12377 branch: the stand-ins both machine layers make (SART, UAT, tunables, the read-only region, crypto, AMFI) merged,
    so that `scion/xnu-12377` builds VMAPPLE and STARLTE.
 4. The Starbite and wardevsa files renamed to Scion's conventions, and the boards STARLTE does not use (SWEET, A5XELTE, HEROLTE)

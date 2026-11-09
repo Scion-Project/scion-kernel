@@ -3,13 +3,11 @@
  * serial port (Linux /dev/ttyACM0, macOS /dev/cu.usbmodem*, Windows COMn), and a small line console back. For a run that
  * has no serial port and gave back only what fits in pstore (32 KB on the Galaxy S9, read in TWRP), this is the whole
  * log, as it is written, for as long as the run lasts, and the panic text at the end.
- *
  * Device-neutral: the DWC3 in device mode, its event buffer, endpoint 0 and the bulk endpoints are here; the CDC-ACM
  * descriptors and requests are plain C in hakios.usb_acm.h (checked on the build machine: tools/usb-acm-test.sh); what
  * the SoC has to do first (clocks, power, the PHY) is a glue's (hakios.usb_glue.h), today only the Exynos 9810's
  * (hakios.exynos_usb.c, the Galaxy S9). Polled from a thread call, no interrupt; one control transfer at a time, one
  * TRB per transfer (LST set), each in its own cache line of memory mapped uncached.
- *
  * Nothing else in the tree provides USB device mode. The POCO loader's fastboot uses Qualcomm's UEFI USB protocol
  * (xnuloader/loader.c, usb_start()); the S9's Silicium UEFI has no USB driver in its firmware volume, and nothing of
  * that survives the hand-over into the kernel. This code is not a port of it.
@@ -89,7 +87,6 @@
  *                     RETURN_FORCE_SECONDS (the save or a driver's stop waiting on something under load), the poll goes
  *                     back to the loader without them, as a panic does
  * Not a shell: user space is not reached from here.
- *
  * The cable. Nothing in the controller reports the cable going: the PHY's VBUS is forced valid (the VBUS pad is not
  * wired to it, dt is_not_vbus_pad: hakios.exynos_usb.c step i), so there is no disconnect event. On Android the MUIC
  * and charger interrupts make dwc3/otg.c stop the controller and bring it up again from dwc3_core_init on every attach.
@@ -144,6 +141,9 @@
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <vm/vm_kern.h>
+#if __has_include(<vm/vm_kern_xnu.h>)	/* xnu-12377 (ios-27): kmem_alloc and its flags are declared here */
+#include <vm/vm_kern_xnu.h>
+#endif
 #include <vm/memory_types.h>
 #include <console/video_console.h>
 #include <sys/hakios.input.h>
