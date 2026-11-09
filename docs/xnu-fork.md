@@ -64,5 +64,7 @@ from them are compared in the pull request that brought this page.
    `hakios.exynos_acpm_dvfs.c` (the series' own) and the SoC headers `hakios.exynos_soc.h` and `hakios.exynos9810_mem.h`.
 3. One xnu-12377 branch: the stand-ins both machine layers make (SART, UAT, tunables, the read-only region, crypto, AMFI) merged,
    so that `scion/xnu-12377` builds VMAPPLE and STARLTE.
-4. The Starbite and wardevsa files renamed to Scion's conventions, and the boards STARLTE does not use (SWEET, A5XELTE, HEROLTE)
-   dropped, as commits on the fork.
+4. The Starbite and wardevsa files renamed to Scion's conventions, and what STARLTE does not use dropped, as commits on the fork.
+   STARLTE is built on the A5XELTE and HEROLTE boards' code (`makedefs/MakeInc.def` defines all three for it), so only SWEET is
+   unused: its six drivers that compiled to empty objects are gone (`sweet_ufs.c`, `sweet_keys.c`, `sweet_touch.c`, `sweet_rpmh.c`,
+   `sweet_spmi.c`, `sweet_usb.c`); its blocks in Apple's files, `MASTER.arm64.sweet` and `SWEET.h` are left.
