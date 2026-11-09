@@ -10,7 +10,7 @@ background (UniXNU's layers and how this tree maps onto them).
 
 | Path | What it holds | Per base? |
 |---|---|---|
-| `profiles/<os>.conf` | the OS a build is for: XNU tag and commit, `base`, `machine`, `sdk`, `hfs`, `arch`, status | one per OS; several may share a base (ios-26 and ios-27 both name `xnu-12377`) |
+| `profiles/<os>.conf` | the OS a build is for: XNU tag and commit, `base`, `machine`, `sdk`, `hfs`, `arch`, status, and `builder` (only ios-27 has one: `dxb-ios`, darwin-xnu-build) | one per OS; several may share a base (ios-26 and ios-27 both name `xnu-12377`) |
 | `xnu-src/<xnu_tag>/` | the kernel tree being built: the profile's commit of Scion-Project/xnu (`docs/xnu-fork.md`), plus the drivers. Not in git | yes, one per tag, side by side |
 | the fork [Scion-Project/xnu](https://github.com/Scion-Project/xnu) | Scion's changes to Apple's files, as commits on Apple's tag, one branch per base (`scion/xnu-8796`, `scion/xnu-12377`, `scion/xnu-12377-starlte`); a profile pins a commit (`docs/xnu-fork.md`) | yes |
 | `drivers/<class>/` | the drivers, by subsystem, with `conf` and `map` | shared; a driver says which bases it is built on (below) |
@@ -78,6 +78,11 @@ Built on the Mac mini on 7 November 2026 (Xcode 27.2):
 - **ios-16.5, starlte:** built from this branch and from main with the same version suffix; every object compared (below).
 - **ios-26, VMAPPLE:** `OS_PROFILE=ios-26 make kernel` fetches the fork's `scion/xnu-12377`, and links an arm64e
   kernel for Apple's virtual machine (`VMAPPLE`, the profile's `machine`), with no device's drivers (below). Linked, not booted.
+- **ios-27, STARLTE:** `OS_PROFILE=ios-27 make kernel` on the Mac mini, 9 November 2026, from a fresh clone, `-j4`, with Xcode 16.4 and the
+  Kernel Debug Kit 26.5 (25F71): darwin-xnu-build's iOS-target XNU, in about seven minutes, as `hakios-kernel` (Mach-O arm64). Built
+  the way the profile's kernel was built before (by hand, in the same directory), it gives the same 1077 objects byte for byte, the same
+  92,690 symbol names, and a kernel that is the same in every segment but `__CTF` (the type data: the kernel's own `ctfmerge` makes a
+  different one each time, a relink of the same objects as well).
 
 ### The S9 stays the same
 
@@ -160,8 +165,10 @@ after this is the Tensor G5 platform, written fresh (gaps, below).
 the S9's layer (`scion/xnu-12377-starlte`, one ordered block of commits on Apple's tag) is merged (`docs/xnu-fork.md`, one xnu-12377 tree). The Exynos 9810 has
 no pointer authentication and no Apple SoC, so the machine layer is not `VMAPPLE`'s: it comes from Project Starbite and the layers under it, and
 `docs/ios27-starlte.md` says whose each is, what runs, and what the follow-up is (folding the drivers into `drivers/`, merging the stand-ins
-that both machine layers make with `0020`-`0100`, so that one layer serves both). `make kernel` does not build it yet;
-`tools/ios27/build-xnu-12377.sh` does.
+that both machine layers make with `0020`-`0100`, so that one layer serves both). `OS_PROFILE=ios-27 make kernel` builds it, as an
+iOS-target XNU, with blacktop's darwin-xnu-build (the profile's `builder dxb-ios`, `tools/ios27/build-xnu-ios.sh`, in `build/dxb-12377`
+rather than `xnu-src/`): it needs Xcode (`DEVELOPER_DIR`) and the Kernel Debug Kit 26.5 (`KDKROOT`), Apple's, which you bring, and
+`docs/ios27/IOS27-TARGET.md` says what it does. The profile's other build, `tools/ios27/build-xnu-12377.sh`, is the macOS-target one.
 
 ## ios-on-pixel-10: what Scion may take
 

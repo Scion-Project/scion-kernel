@@ -37,6 +37,12 @@ python3 tools/drivers-check.py      # drivers/map and drivers/*/conf agree
 
 A driver you edit in `drivers/` goes into the tree by itself on the next `make kernel`.
 
+### The iOS 27 kernel for the Galaxy S9
+
+`OS_PROFILE=ios-27 make kernel` builds the S9's iOS 27 kernel (an iOS-target XNU on xnu-12377) with blacktop's darwin-xnu-build, in
+`build/dxb-12377`, and leaves `hakios-kernel`. It needs a Mac with Xcode (`DEVELOPER_DIR`) and Apple's Kernel Debug Kit 26.5
+(`KDKROOT`), which you bring and which is not in this repository: `docs/ios27/IOS27-TARGET.md`.
+
 ## The loader
 
 ```sh

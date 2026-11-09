@@ -39,7 +39,9 @@ compiled into it (`__LINE__` of asserts and panics, as `mov wN, #line` immediate
 the branch `hakios`, and adds what it always added after the series: the drivers of
 `drivers/map` and of the SoC and device repositories checked out, and the drivers' configuration (`tools/hakios-config.py
 kernel`). `make kernel` is unchanged for the user: `make starlte_defconfig && make kernel` builds the S9's iOS 16.5 kernel,
-`OS_PROFILE=ios-26 make kernel` the VMAPPLE kernel, and `tools/ios27/build-xnu-12377.sh` the iOS 27 S9 kernel, each from the fork.
+`OS_PROFILE=ios-26 make kernel` the VMAPPLE kernel, and `OS_PROFILE=ios-27 make kernel` the iOS 27 S9 kernel (an iOS-target XNU, built by
+blacktop's darwin-xnu-build in `build/dxb-12377`, with the Xcode and the Kernel Debug Kit you bring: `DEVELOPER_DIR`, `KDKROOT`;
+`docs/ios27/IOS27-TARGET.md`), each from the fork.
 
 What may not be in git is still staged at build time, by the scripts the profile names in `fork_stage`: for ios-27 that is
 CoreEntitlements' V2 headers, which come from the Kernel Debug Kit you bring (`xnu/stage/00_setup_coreentitlements.sh`,
