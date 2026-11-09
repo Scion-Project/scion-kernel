@@ -68,6 +68,10 @@ In the repository:
 - AdrenoMetal (UniXNU, "NativeMetal contributors"), userland/src/metalvk/NativeBridgeMetalFrontend.* and
   tools/metal/bridge/NativeMetal*: MIT, see LICENSE.AdrenoMetal beside them; the Metal-on-Vulkan plug-in (METAL=vk).
 
+- Project Starbite's Metal 2 frontend and bridge, tools/ios27/metal2/ (HotMetal2.mm, NativeBridgeMetalFrontend.*, bridge/): MIT, the
+  Starbite author's, from IOS-26-Hot (dipa-studio, MIT, LICENSE.IOS-26-Hot and bridge/LICENSE beside them) and, before it, UniXNU's
+  AdrenoMetal (NativeMetal contributors, MIT). Its bridge/patches are patches to metal2vulkan, under metal2vulkan's licence.
+
 - patches to Mesa, tools/mesa/*.patch, and the libdrm stand-in tools/mesa/hakios-drm/: Mesa's and X.Org's MIT terms.
 - patches to UniXNU's AdrenoMetal, tools/m2v/adrenometal-ios16.patch: MIT, Copyright (c) 2026 NativeMetal contributors.
 - a patch to steelbrain's metal2vulkan, tools/m2v/metal2vulkan-hakios.patch: GPL-2.0-or-later OR LGPL-3.0-or-later, as the code it

@@ -3,10 +3,10 @@
 iOS 27 on the S9 renders with OpenGL ES through `sbca` ([GPU-PATH.md](GPU-PATH.md)). This page is about the other route: Apple's Metal
 framework on the Mali-G72, through a Metal plug-in that Starbite wrote for iOS 26 (a Metal 2 frontend, `HotMetal2.mm` and
 `NativeBridgeMetalFrontend.mm`; metal2vulkan's bridge; Mesa's PanVK over the kernel's StarbiteMali). The scripts and tools in
-`tools/ios27/metal/` rebuild that stack for iOS 27.0.1 and test it. **What they need that this repository does not carry:** Starbite's
-`tools/metal2` (the two frontend files, `build-m2v-bridge.sh`, the bridge patches 0001-0016 and 0100-0102, `Info.plist`, `m2vtest.c`) and its
-tree layout (`SB=`); the three patches in `tools/ios27/metal/patches/` are diffs against files of that tree, so they apply there (and one, to
-`starbite_drm.c`, applies here). No binary of any kind is in the repository.
+`tools/ios27/metal/` rebuild that stack for iOS 27.0.1 and test it. Starbite's own part of it is in `tools/ios27/metal2/` (the two frontend files,
+`HotMetal2.mm` and `NativeBridgeMetalFrontend.mm`, `build-m2v-bridge.sh`, the bridge's Rust sources and its patches 0001-0016 and 0100-0102,
+`Info.plist`, `m2vtest.c`; MIT, credited below), so the scripts and the three patches in `tools/ios27/metal/patches/` work from this repository
+as it is. No binary of any kind is in the repository.
 
 ## What is here (`tools/ios27/metal/`)
 
@@ -14,8 +14,8 @@ tree layout (`SB=`); the three patches in `tools/ios27/metal/patches/` are diffs
 |---|---|
 | `build-host.sh` | SPIRV-Headers, SPIRV-Tools (Vulkan SDK 1.4.363.0) and SPIRV-LLVM-Translator v23.1.3, against Homebrew's llvm 23: the host tools Mesa 26's `mesa_clc` needs |
 | `mk-panvk27.sh` | `tools/ios27/mesa-ios/mk-panvk26-ios.sh` with its paths from the environment: the host tools (`mesa_clc`, `vtn_bindgen2`, `panfrost_compile`), then PanVK of Mesa 26.2.6 for iOS arm64 (the patches are `tools/ios27/mesa-ios/mesa26-panvk-ios.patch`, `-shader-size-cap`, `-bifrost-ra-multispill`) |
-| `rust.sh`, `bridge.sh` | Rust 1.98.0 with the iOS target, then metal2vulkan's bridge (`libnative_metal_bridge.a`) through Starbite's `build-m2v-bridge.sh` |
-| `mk-bundle27.sh` | `StarbiteMetal.bundle` (frontend, bridge, PanVK; arm64, ad hoc signed) and `m2vtest` |
+| `rust.sh`, `bridge.sh` | Rust 1.98.0 with the iOS target, then metal2vulkan's bridge (`libnative_metal_bridge.a`) through `tools/ios27/metal2/build-m2v-bridge.sh` (it clones metal2vulkan at 720ef1ce and applies the bridge patches) |
+| `mk-bundle27.sh` | `StarbiteMetal.bundle` (frontend, bridge, PanVK; arm64, ad hoc signed) and `m2vtest`; the frontend and `HotMetal2.mm` are built from a copy with `frontend-dexr.diff` and `hotmetal2-diag.diff` applied (`NOPATCH=1`: as they are in `tools/ios27/metal2`) |
 | `mtl27test.m` | the smoke test, six steps: the kernel's services (StarbiteMali, `IOAcceleratorES`, `IOCoreSurfaceRoot`), IOSurface, `MTLCreateSystemDefaultDevice()` through Metal's own discovery (or `--direct`), a render-pass clear read back, a render pass into an IOSurface-backed texture (what CoreAnimation does), and QuartzCore's compute and render shaders into pipelines |
 | `sbmtlc.c`, `sbwall.m` | `sbmtlc.dylib`, a library for `sweetinject`: any inserted library makes the kernel start the program with `ptrauth_disabled=1` (xnu `0324`), which is what lets dyld take the arm64 plug-in into an arm64e process; it also captures `os_log` (logd is off on this root: an in-place hook of libsystem_trace's four `_os_log_*impl` entry points, opt-in by `/private/var/local/oslog-clients`) and `sbwall` draws a static wallpaper in SpringBoard from `/private/var/local/sbwallpaper.png` (opt-in: `install-metal27.py --wallpaper FILE` takes the image from the builder's own root, or any file on the Mac, at install time; no image is shipped here) |
 | `install-metal27.py` | puts the stack into an attached iOS 27 root (`STAGE=<dir> sudo python3 install-metal27.py /Volumes/ROOT [--clients "mtl27test PosterBoard CollectionsPoster"] [--oslog "PosterBoard"] [--wallpaper FILE] [--no-job] [--uninstall]`), keeps every file it replaces as `NAME.before-metal27`, adds two run-once launchd jobs (`com.starbite.m2vtest`, `com.starbite.mtl27test`) |
@@ -61,4 +61,4 @@ was written: that patch on a phone, and the frame rate of CoreAnimation on Metal
 
 - The wallpaper (above), and the 12 `NotRepresentable` no-copy buffers.
 - The decmpfs type 16 of nine SplashBoard `*.ktx` snapshots (the kernel registers type 1 only): unrelated to Metal.
-- Starbite's `tools/metal2` itself is not in this repository yet: the follow-up is to import it with its bridge patches, so that these scripts and patches stand on files that are here.
+- The scripts were run against Starbite's tree (`SB=`) before `tools/ios27/metal2/` was imported; the import changed their paths only (`tools/metal2` to `tools/ios27/metal2`, the repository as the tree). `bridge.sh` and `mk-bundle27.sh` were not re-run on a phone for it.
