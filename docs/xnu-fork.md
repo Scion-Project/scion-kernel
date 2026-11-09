@@ -9,13 +9,28 @@ build takes.
 | Profile | Branch | On Apple's tag | What the branch's commits are |
 |---|---|---|---|
 | `ios-16.5` | `scion/xnu-8796` | `xnu-8796.121.2` | Scion's changes to Apple's files (one commit), Scion's new files (one commit), HFS Plus (Apple's `hfs-627.100.6` files, then the port's changes to them), the numbered patches `1002` to `1517`: one commit each, in the order the build used to apply them |
-| `ios-26` | `scion/xnu-12377` | `xnu-12377.121.6` | the TrustCache headers of `xnu-8796.101.5`, then the patches `0010` to `0120`, one commit each |
-| `ios-27` | `scion/xnu-12377-starlte` | `xnu-12377.121.6` | one commit per step of the old series: what darwin-xnu-build's edits and the staging scripts make (Apple's libpthread and HFS and BearSSL, by commit), the files the series added, the `copy` lines' files, every patch |
+| `ios-26` and `ios-27` | `scion/xnu-12377` | `xnu-12377.121.6` | one tree for both machines (below): the TrustCache headers of `xnu-8796.101.5`, then the patches `0010` to `0120` (VMAPPLE's layer), one commit each; merged with `scion/xnu-12377-starlte` |
+| (history of ios-27) | `scion/xnu-12377-starlte` | `xnu-12377.121.6` | the S9's layer, frozen at `56c907c4d4c3` and merged into `scion/xnu-12377`: one commit per step of the old series (what darwin-xnu-build's edits and the staging scripts make: Apple's libpthread and HFS and BearSSL, by commit; the files the series added; the `copy` lines' files; every patch), then the commits that took the shared drivers out and dropped SWEET's empty drivers. Its commits are the ones the ios-27 docs name (`commit 0429 of scion/xnu-12377-starlte`) |
 
 Each commit's message carries the patch's own description, the file of this repository it came from (and the commit of this
 repository it was taken at), and for the ios-27 branch the layer it belongs to (ios-sweet, ios-a5xelte, wardevsa's Galaxy S7
 layer, the Starbite author's STARLTE port, Scion's), as `LICENSES.md` and `NOTICE` record them. The licences are the files' own:
 the fork is APSL-2.0 as Apple's XNU is; files of other authors keep theirs.
+
+### One xnu-12377 tree for VMAPPLE and STARLTE
+
+`scion/xnu-12377` at `296d251e68ea` is both machines' tree: the merge of the S9's layer into VMAPPLE's. Each board compiles
+exactly what it compiled on its own branch: in the 99 source files either side changed, the generic ARMv8 boards (those that
+define `ARM64_BOARD_CONFIG_A5XELTE` or `ARM64_BOARD_CONFIG_SWEET`: STARLTE and the boards it is built on) see the S9 layer's text
+and every other board VMAPPLE's, through `#if` pairs (identical changes, the Darwin 27 system calls of `0120`, are there once); the
+file lists name each side's files `optional scion_generic_arm64` or `optional scion_vmapple`, keywords of the machines' MASTER
+files. The stand-ins both layers made at the same path are one file now: `osfmk/arm64/ppl/sart.h`, `uat.h` and
+`osfmk/arm64/tunables/tunables.s`; the others (the read-only region `amcc_rorgn_*`, `ml_enable_monitor`, the crypto providers
+minicrypto and BearSSL, AMFI) differ in what they do and stay per board. VMAPPLE's TrustCache, CodeSignature and CoreEntitlements V2
+headers moved to `EXTERNAL_HEADERS/scion-vmapple/` (on the include path of the other boards only), so that STARLTE keeps the Kernel
+Debug Kit's. Both kernels were built before and after the merge, each at one path: the code is the same but for the line numbers
+compiled into it (`__LINE__` of asserts and panics, as `mov wN, #line` immediates, and the names of a few symbols the startup and
+`kalloc_type` macros make from them): 789 such instructions in VMAPPLE's, 646 in STARLTE's, every symbol at the same address.
 
 ## How a build takes it
 
