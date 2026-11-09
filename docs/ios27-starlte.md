@@ -21,7 +21,7 @@ builder's own, from their own IPSW; nothing of Apple's is in this repository.
 
 | Path | What |
 |---|---|
-| `profiles/ios-27.conf` | machine `STARLTE`, fork branch `scion/xnu-12377-starlte` (`fork_commit`, `fork_stage`, `fork_copy`), `drivers none`, status experimental |
+| `profiles/ios-27.conf` | machine `STARLTE`, fork branch `scion/xnu-12377`, the S9 layer merged from `scion/xnu-12377-starlte` (`fork_commit`, `fork_stage`, `fork_copy`), `drivers none`, status experimental |
 | the fork's `scion/xnu-12377-starlte`, first commits | the order: the edits darwin-xnu-build makes, what the staging scripts made (Apple's HFS and libpthread and BearSSL by commit), the files the old series added (platform code, the Starbite and wardevsa drivers, the IOHID event services, the crypto stand-ins, the Mali and display services), then the patches |
 | the fork's `scion/xnu-12377-starlte`, the commits after them | the patches: hunks on Apple's files only (and on the sources the scripts staged). [starlte-porting-notes.md](ios27/starlte-porting-notes.md) has the Starbite author's porting notes |
 | `xnu/stage/` | `00_setup_coreentitlements.sh`, the profile's `fork_stage`: CoreEntitlements' V2 headers from the Kernel Debug Kit you bring, which cannot be in git |

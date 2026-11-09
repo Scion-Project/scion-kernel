@@ -156,8 +156,8 @@ after this is the Tensor G5 platform, written fresh (gaps, below).
 
 ## The S9's machine layer on xnu-12377 (the ios-27 profile)
 
-`profiles/ios-27.conf` builds the Galaxy S9 (`STARLTE`) on this base: its tree is the fork's branch `scion/xnu-12377-starlte`: one ordered block of commits on Apple's tag, beside
-`scion/xnu-12377` (which the `ios-26` profile pins, unchanged), with the files it adds in the same commits. The Exynos 9810 has
+`profiles/ios-27.conf` builds the Galaxy S9 (`STARLTE`) on this base, from the same tree as `ios-26`: the fork's `scion/xnu-12377`, into which
+the S9's layer (`scion/xnu-12377-starlte`, one ordered block of commits on Apple's tag) is merged (`docs/xnu-fork.md`, one xnu-12377 tree). The Exynos 9810 has
 no pointer authentication and no Apple SoC, so the machine layer is not `VMAPPLE`'s: it comes from Project Starbite and the layers under it, and
 `docs/ios27-starlte.md` says whose each is, what runs, and what the follow-up is (folding the drivers into `drivers/`, merging the stand-ins
 that both machine layers make with `0020`-`0100`, so that one layer serves both). `make kernel` does not build it yet;
