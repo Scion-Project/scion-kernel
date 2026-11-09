@@ -45,5 +45,10 @@ reset into recovery. `kern.sweetwdog_test` provokes it without hanging anything 
 noting the time; from the USB console: `sysctl kern.sweetwdog_test=1`), and `kern.sweetwdog_kernel_age_ms` / `kern.sweetwdog_user_age_ms` read the ages
 as the last look saw them. A restart into the system instead of recovery, and the hardware timer, are not built.
 
-About 150 lines in `herolte_ufs.c`, six in `sleh.c`. The test: `sweetwd=60` idle for ten minutes with no reset; then a deliberate hang (a
+About 150 lines in `herolte_ufs.c`, six in `sleh.c`.
+
+The same sign of life serves the loader (`bce1bead`, boot-argument `scionup=1`, off by default): at the first system call two words of the loader's
+64-byte boot record at `0x91ffe000` are written (its sequence number copied, and "SNUP"), only when the record's magic is there, so the loader can
+tell a boot that reached user space from one that did not. The loader also reads the watchdog's line from the pmsg ring: its first bytes stay
+"STARBITE: HANG WATCHDOG (sweetwdog=". The test: `sweetwd=60` idle for ten minutes with no reset; then a deliberate hang (a
 kernel thread that takes the VM's page-queue lock and sleeps, from a console verb) must end in TWRP within 62 s with the watchdog's line in pstore.

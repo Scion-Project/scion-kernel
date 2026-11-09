@@ -106,12 +106,25 @@ unless a process needs one (SpringBoard's renderer service asserts without a dev
 backboardd took 4 to 6 s to make its Metal device, nearly all of it before PanVK's first call to the kernel: `dlopen()` of the plug-in and of PanVK
 (38 MB outside the shared cache) while every other daemon starts. chronod, started meanwhile, asks the render server for the displays, gives up and
 aborts once (QuartzCore's `query_displays`), and runs when it is started again. The kernel's prewarm thread (`sweetspeed&128`) read the GL stack into the
-page cache at mount; with `sbgl=0` on the command line it now reads the Metal plug-in and PanVK instead (`2db66861` of the fork's branch). **Not yet
-timed on a phone.**
+page cache at mount; with `sbgl=0` on the command line it now reads the Metal plug-in and PanVK instead (`2db66861` of the fork's branch). Timed
+since (below): no gain.
+
+## Later the same night: the close that waited, and frames that are on time but late
+
+- **A buffer close no longer waits.** The kernel's belt of m4 (a close waits for every chain queued by then) held the closing thread for as long as
+  the queue took to drain: up to 90 ms. The buffer is now only marked with the chain it has to outlive and is unmapped and freed at one of the client's
+  next calls (`af8ac0d0`). On the bench phone, with the full root of the release candidate: closes of 1 to 2 us, the longest 2.4 ms, no GPU fault, no
+  exit; 47 % of swipe frames on time on that fuller home screen (the first phone: 43 to 46 %), 95 % (56.8 fps) while a list scrolled in an app.
+- **On time is not the same as soon.** In that 95 % run the queue held 60 chains on average and up to 199: about three frames, 55 ms between a chain's
+  submit and its start. The frames came one refresh apart, each of them late. "Two frames in flight" at the swap does not bound it (the window server
+  commits more than it swaps). `sgu_depth=N` (`2abb4031`; default 256, the whole queue, as before) makes a submit sleep when N chains wait, until half
+  of them are done. **Not yet run**: 48 (a frame or two) is the first value to try, against the touch-to-picture delay, not against frames on time.
+- The prewarm of the Metal plug-in did not shorten the device's start (4.4 s again), and chronod's abort comes 4.6 s after the device exists, just
+  before the first frame: it waits for the render server's first display state, not for the device. Harmless (it is started again and runs).
 
 ## Not done
 
-- **Honest sync objects in the shim** (above): today a wait is for the whole queue, and a buffer close waits too.
+- **Honest sync objects in the shim** (above): today a wait is for the whole queue.
 - **The device's start** (5 to 6 s), and the twelve no-copy buffers PanVK refuses (`HostMemory: NotRepresentable`; CoreAnimation copies instead): five a
   boot here.
 - The zero-copy scan-out above.
