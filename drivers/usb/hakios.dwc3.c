@@ -3,13 +3,11 @@
  * serial port (Linux /dev/ttyACM0, macOS /dev/cu.usbmodem*, Windows COMn), and a small line console back. For a run that
  * has no serial port and gave back only what fits in pstore (32 KB on the Galaxy S9, read in TWRP), this is the whole
  * log, as it is written, for as long as the run lasts, and the panic text at the end.
- *
  * Device-neutral: the DWC3 in device mode, its event buffer, endpoint 0 and the bulk endpoints are here; the CDC-ACM
  * descriptors and requests are plain C in hakios.usb_acm.h (checked on the build machine: tools/usb-acm-test.sh); what
  * the SoC has to do first (clocks, power, the PHY) is a glue's (hakios.usb_glue.h), today only the Exynos 9810's
  * (hakios.exynos_usb.c, the Galaxy S9). Polled from a thread call, no interrupt; one control transfer at a time, one
  * TRB per transfer (LST set), each in its own cache line of memory mapped uncached.
- *
  * Nothing else in the tree provides USB device mode. The POCO loader's fastboot uses Qualcomm's UEFI USB protocol
  * (xnuloader/loader.c, usb_start()); the S9's Silicium UEFI has no USB driver in its firmware volume, and nothing of
  * that survives the hand-over into the kernel. This code is not a port of it.
@@ -106,6 +104,7 @@
  *     eight failures in some 10 s) and only sees a new pull-up. A wall charger has VBUS too and never talks, and a host
  *     that suspends the port stops its SOFs: both get those five and no more.
  * The restart never waits on VBUS alone: a reading that stops coming puts a stopped link back up after 3 s.
+ *
  * Boot-args:
  *   usb_gadget=<1-5>      the steps (0, or none: nothing)
  *   usb_gadget_soc=<name> the glue (exynos9810, the only one; the default)
@@ -116,6 +115,7 @@
  *   usb_gadget_poll=<ms>  the poll period while a host is attached (1-50; 2)
  *   usb_gadget_drain=<ms> on the way back to the loader, how long to keep sending the rest of the log (0-5000; 1000)
  *   usb_gadget_crlf=0     send the log's line ends as they are (LF) rather than CR LF
+ *
  * Registers and fields: Samsung's kernel fork for the Galaxy S9 (Scion-Project/android_kernel_samsung_exynos9810,
  * lineage-24.0, e5906667068e), drivers/usb/dwc3/core.h and gadget.h, at the lines given next to each below; the
  * sequences after core.c dwc3_core_init (795-1000), dwc3_soft_reset (350-375), dwc3_core_config (140-253), dwc3_phy_setup
