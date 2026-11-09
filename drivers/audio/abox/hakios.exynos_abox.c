@@ -2108,6 +2108,9 @@ hakios_exynos_abox_init(void)
 	if (steps >= 7) {
 		(void)area_get();
 	}
+	if (steps >= 8) {
+		hakios_audio_init();    /* xnu-12377: /dev/hakios-audio, made with abox=8 (the 8796 tree makes it at every boot) */
+	}
 #endif
 	busy = 1;
 	if (kernel_thread_start(abox_thread, NULL, &thread) == KERN_SUCCESS) {
