@@ -139,11 +139,18 @@
 #include <sys/sysctl.h>
 #include <sys/hakios.exynos_soc.h>
 #include "hakios.bcm_hci.h"
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377 (ios-27): vnode file reader */
+#include <sys/vnode.h>
+#include <sys/vnode_internal.h>
+#include <kern/kalloc.h>
+#endif
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
 
 extern void HakiosBTNodeStart(const uint8_t *hci_address, uint32_t speed);
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796 only: image/partition helpers */
 extern const uint8_t *hakios_image_file(const char *dir, const char *name, uint64_t *size, int *disk_out);
+#endif
 
 #define UART_PA                 EXYNOS_UART_BT_PA
 #define CMU_PERIC1_PA           EXYNOS_CMU_PERIC1_PA
@@ -671,6 +678,114 @@ identify(const char *when, struct hci_local_version *v)
 	return true;
 }
 
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377 (ios-27): read .hcd from iOS root filesystem */
+/*
+ * Starbite port: the patch from the iOS root filesystem (the header's note). A file of at most 1 MB, a regular one,
+ * read whole into memory and kept (bt=7 may patch the chip a second time). 0 or an errno.
+ */
+#define HCD_DIR                 "/private/var/hakios/bt/"
+#define HCD_MAX                 (1u << 20)
+
+static int
+root_file(const char *path, uint64_t max, uint8_t **data, uint64_t *size)
+{
+	vfs_context_t ctx = vfs_context_kernel();
+	vnode_t vp = NULLVP;
+	off_t len = 0;
+	int e, resid = 0;
+	uint8_t *buf;
+
+	if (rootvnode == NULLVP) {
+		return EAGAIN;
+	}
+	if ((e = vnode_open(path, FREAD, 0, 0, &vp, ctx)) != 0) {
+		return e;
+	}
+	if (vnode_vtype(vp) != VREG) {
+		e = EFTYPE;
+	} else if ((e = vnode_size(vp, &len, ctx)) == 0 && (len <= 0 || (uint64_t)len > max)) {
+		e = EFBIG;
+	}
+	if (e == 0) {
+		buf = kalloc_data((vm_size_t)len, Z_WAITOK | Z_ZERO);
+		if (buf == NULL) {
+			e = ENOMEM;
+		} else if ((e = vn_rdwr(UIO_READ, vp, (caddr_t)buf, (int)len, 0, UIO_SYSSPACE, 0, vfs_context_ucred(ctx),
+		    &resid, current_proc())) != 0 || resid != 0) {
+			kfree_data(buf, (vm_size_t)len);
+			e = e != 0 ? e : EIO;
+		} else {
+			*data = buf;
+			*size = (uint64_t)len;
+		}
+	}
+	(void)vnode_close(vp, FREAD, ctx);
+	return e;
+}
+
+static uint8_t *hcd_data;
+static uint64_t hcd_size;
+static char hcd_file[128];
+
+/* the candidates in turn, each second, until one is read or bt_hcd_wait seconds have gone */
+static const uint8_t *
+module_patch(char *file, size_t room, uint64_t *size)
+{
+	char arg[96] = "", module[16] = "", paths[2][128];
+	unsigned npaths = 0;
+	uint32_t wait_s = 180;
+	bool guessed = false;
+	int last[2] = { 0, 0 };
+
+	if (hcd_data != NULL) {
+		strlcpy(file, hcd_file, room);
+		*size = hcd_size;
+		return hcd_data;
+	}
+	PE_parse_boot_argn("bt_hcd_wait", &wait_s, sizeof(wait_s));
+	if (PE_parse_boot_arg_str("bt_hcd", arg, sizeof(arg)) && arg[0] != 0) {
+		snprintf(paths[npaths++], sizeof(paths[0]), "%s%s", arg[0] == '/' ? "" : HCD_DIR, arg);
+	} else if (PE_parse_boot_arg_str("bt_module", module, sizeof(module)) && module[0] != 0) {
+		snprintf(paths[npaths++], sizeof(paths[0]), HCD_DIR "bcm4361B2_%s.hcd", module);
+	} else {
+		guessed = true;
+		snprintf(paths[npaths++], sizeof(paths[0]), HCD_DIR "bcm4361B2_murata.hcd");
+		snprintf(paths[npaths++], sizeof(paths[0]), HCD_DIR "bcm4361B2_semco.hcd");
+	}
+	say("bt: 6: the patch from the root filesystem: %s%s%s (waiting up to %u s for it)\n", paths[0],
+	    npaths > 1 ? ", else " : "", npaths > 1 ? paths[1] : "", wait_s);
+	for (uint32_t waited = 0; ; waited++) {
+		for (unsigned k = 0; k < npaths; k++) {
+			uint8_t *d = NULL;
+			uint64_t s = 0;
+
+			last[k] = root_file(paths[k], HCD_MAX, &d, &s);
+			if (last[k] == 0) {
+				hcd_data = d;
+				hcd_size = s;
+				strlcpy(hcd_file, paths[k], sizeof(hcd_file));
+				strlcpy(file, paths[k], room);
+				*size = s;
+				say("bt: 6: the patch is %s%s\n", paths[k], guessed ? ": A GUESS of the module (bt_module=murata or "
+				    "semco says which)" : "");
+				return hcd_data;
+			}
+		}
+		if (waited >= wait_s) {
+			break;
+		}
+		if (waited % 30 == 0) {
+			say("bt: 6: %s (%s, errno %d)%s: waiting\n", paths[0], rootvnode == NULLVP ? "no root filesystem yet" :
+			    "not read", last[0], npaths > 1 ? " and the other" : "");
+		}
+		sleep_ms(1000);
+	}
+	snprintf(file, room, "%s", paths[0]);
+	say("bt: 6: %s not read (errno %d%s) after %u s\n", paths[0], last[0], rootvnode == NULLVP ? ", no root filesystem" :
+	    "", wait_s);
+	return NULL;
+}
+#else   /* xnu-8796: image file and VENDOR partition */
 /*
  * The patch from fw/ under its vendor name (devices/starlte/firmware/bt/, DEVICE=starlte), else from the phone's own
  * VENDOR partition, read at run time (drivers/storage/hakios.ext4.c, with ufs=2), so that
@@ -741,6 +856,7 @@ module_patch(char *file, size_t room, uint64_t *size)
 	}
 	return data;
 }
+#endif   /* __has_include(<vm/vm_kern_xnu.h>) / module_patch */
 
 static bool
 patch(void)
@@ -754,6 +870,13 @@ patch(void)
 	uint32_t sent = 0;
 	int r;
 
+	/* note: for xnu-8796 the file name default is "bcm4361B2.hcd" (see declaration above); for 12377 it is "" */
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: patch from iOS root filesystem */
+	data = module_patch(file, sizeof(file), &size);
+	if (data == NULL) {
+		say("bt: 6: SKIPPED: no patch (put the phone's own bcm4361B2_<module>.hcd, from its VENDOR partition, in "
+		    HCD_DIR ", or name one with bt_hcd=<path>)\n");
+#else   /* xnu-8796: image file first, then VENDOR */
 	PE_parse_boot_arg_str("bt_hcd", file, sizeof(file));
 	for (int tries = 0; tries < 10 && data == NULL; tries++) {
 		data = hakios_image_file("fw", file, &size, NULL);
@@ -772,6 +895,7 @@ patch(void)
 	if (data == NULL) {
 		say("bt: 6: no patch: neither fw/%s of the small image nor the phone's VENDOR (/firmware/bcm4361B2_<module>.hcd, "
 		    "with ufs=2; devices/starlte/BLUETOOTH.md)\n", file);
+#endif   /* __has_include(<vm/vm_kern_xnu.h>) / patch loading */
 		return false;
 	}
 	r = bcm_hcd_check(data, (size_t)size, &info);
@@ -1714,8 +1838,10 @@ static void
 set_own_address(void)
 {
 	char arg[24] = "", a[20];
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: EFS reader variables */
 	const uint8_t *data = NULL;
 	uint64_t size = 0;
+#endif
 	uint8_t want[6], ret[255], rl = 0;
 	const char *from;
 
@@ -1729,7 +1855,15 @@ set_own_address(void)
 			return;
 		}
 		from = "bt_addr=";
-	} else if (hakios_partition_file("EFS", "/efs", "/bluetooth/bt_addr", 64, &data, &size) == 0 && data != NULL &&
+	} else {
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: no EFS reader in this tree */
+		/* Starbite port: no EFS reader in this tree */
+		say("bt: 7: no bt_addr=<a> (the phone's EFS:/bluetooth/bt_addr is not read on this kernel): the chip keeps "
+		    "its default\n");
+		return;
+	}
+#else   /* xnu-8796: read address from EFS partition */
+	if (hakios_partition_file("EFS", "/efs", "/bluetooth/bt_addr", 64, &data, &size) == 0 && data != NULL &&
 	    addr_parse((const char *)data, (size_t)size, want)) {
 		from = "the phone's EFS:/bluetooth/bt_addr";
 	} else {
@@ -1737,6 +1871,7 @@ set_own_address(void)
 		    "its default\n");
 		return;
 	}
+#endif   /* __has_include(<vm/vm_kern_xnu.h>) / EFS reader */
 	addr_text(want, a, sizeof(a));
 	if (!hci(HCI_BCM_WRITE_BD_ADDR, want, 6, ret, &rl, CMD_TIMEOUT_MS, false)) {
 		say("bt: 7: Write_BD_ADDR (0xFC01) %s from %s: not taken; the chip keeps its default\n", a, from);

@@ -69,19 +69,23 @@ struct rec_block {
 	uint32_t reserved;
 };
 
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: recording (rec_sound=N) and loader handoff */
 /* { physical address, bytes, kernel address } of the recording, for the loader: osfmk/arm64/loader_return.c */
 extern uint64_t loader_sound[3];
+#endif
 
 static LCK_GRP_DECLARE(audio_lck_grp, "hakios-audio");
 static LCK_MTX_DECLARE(audio_lock, &audio_lck_grp);
 
 static hakios_audio_sink_t audio_sink;
 
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: rec_sound recording */
 static uint8_t *rec_base;
 static bool rec_fed;                    /* boot-arg rec_sound_fed=1: what the guard let through is recorded, not what was written */
 static bool rec_mic;                    /* boot-arg rec_sound_mic=1: what the microphone hears (hakios.mic.c) */
 static uint64_t rec_size, rec_used;
 static uint64_t rec_frames, rec_frames_max;
+#endif
 
 /* the stretch of writing in progress */
 static uint64_t stretch_first, stretch_last;    /* mach_absolute_time() of its first and its latest write */
@@ -131,6 +135,7 @@ audio_report(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
 	printf("\n");
 }
 
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: rec_sound recording storage */
 /* With audio_lock held. */
 static void
 audio_record(const int16_t *frames, uint32_t count)
@@ -155,7 +160,9 @@ audio_record(const int16_t *frames, uint32_t count)
 		printf("hakios-audio: recording finished: %llu s in %u writes\n", rec_frames / HAKIOS_AUDIO_RATE, header->blocks);
 	}
 }
+#endif   /* xnu-8796 audio_record */
 
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: rec_sound recording callbacks */
 bool
 hakios_audio_recording_fed(void)
 {
@@ -176,6 +183,13 @@ hakios_audio_record_fed(const int16_t *frames, uint32_t count)
 	audio_record(frames, count);
 	lck_mtx_unlock(&audio_lock);
 }
+#endif   /* xnu-8796 rec_sound */
+
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: stubs so callers compile */
+bool hakios_audio_recording_fed(void) { return false; }
+bool hakios_audio_recording_mic(void) { return false; }
+void hakios_audio_record_fed(__unused const int16_t *frames, __unused uint32_t count) {}
+#endif
 
 static void
 audio_play(const int16_t *frames, uint32_t count)
@@ -191,9 +205,11 @@ audio_play(const int16_t *frames, uint32_t count)
 		}
 	}
 	lck_mtx_lock(&audio_lock);
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: rec_sound recording */
 	if (!rec_fed && !rec_mic) {
 		audio_record(frames, count);
 	}
+#endif
 	if (audio_sink != NULL) {
 		taken = audio_sink(frames, count);
 		stretch_lost += count - taken;
@@ -482,6 +498,7 @@ hakios_audio_input_create(const char *source)
 	return true;
 }
 
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796: rec_sound=N recording into loader-visible memory */
 static void
 audio_recording_init(void)
 {
@@ -525,6 +542,7 @@ audio_recording_init(void)
 	    rec_fed ? " as the speakers' guard lets it through" : rec_mic ? " the microphone hears (in both channels)" : "", size >> 20,
 	    loader_sound[0]);
 }
+#endif   /* xnu-8796 audio_recording_init */
 
 void
 hakios_audio_init(void)
@@ -536,6 +554,7 @@ hakios_audio_init(void)
 		return;
 	}
 	report_call = thread_call_allocate(audio_report, NULL);
+#if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796 only: recording, virtio sound, speaker, haptic, torch, camera */
 	audio_recording_init();
 	hakios_virtio_sound_init();
 	{
@@ -550,4 +569,5 @@ hakios_audio_init(void)
 		hakios_sccam_torch_init();      /* sccam.addr=: the phone's torch, by the Scion app (bsd/dev/hakios.sccam_torch.c) */
 	}
 	hakios_camera_init();
+#endif
 }
