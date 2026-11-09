@@ -1,8 +1,8 @@
-# iOS 27 on the Galaxy S9: a watchdog for hard hangs (proposal, 9 November 2026; not built)
+# iOS 27 on the Galaxy S9: a watchdog for hard hangs (9 November 2026; built, not yet run on a phone)
 
 On 9 November a boot of the S9 stopped dead 66 seconds in: no panic, the USB console gone, nothing in pstore. With `wdt=-1` on the command line
 nothing ever brings such a phone back; it takes the key combination. This page says what the kernel has today and what a watchdog for that case
-should be. Nothing here is built.
+should be. It is built as described under "As built"; no phone has run it yet.
 
 ## What `wdt=` is, and is not
 
@@ -34,5 +34,16 @@ written for panics: it takes no lock, allocates nothing, and its two mappings ar
 - **Later, the hardware timer.** The same beat can pet `WDT_CLUSTER0` (a count-down register and a reset mask in the PMU). That covers the dead-core
   case too, but it is a register sequence nobody here has run on this phone; it is a second step, tried first on the bench phone with a long count.
 
-About 60 lines in `herolte_ufs.c` and a counter in `sleh.c`. The test: `sweetwd=60` idle for ten minutes with no reset; then a deliberate hang (a
+## As built
+
+`wip/ios27-hang-watchdog` of the fork (`3c4be6ee`, on `bb6a6a4`): boot-argument `sweetwdog=SECONDS` (absent or 0: off; less than 60 is 60). The timer
+call is armed from the watchdog's own thread and looks every 2 s. User space's sign of life is one variable (`sweet_wdog_mark`): the look sets it to 0,
+the next system call or Mach trap from EL0 sets it to 1 (`handle_svc`: one read per call, at most one write per look and CPU; with the watchdog off it
+is 1 for good and never written). The first system call arms the watchdog. On a miss the line "STARBITE: HANG WATCHDOG (sweetwdog=N): no sign of life
+from the kernel's thread | user space; kernel thread A ms ago, user space B ms ago, up U s" and the console's tail go to the pmsg ring, then the PMU
+reset into recovery. `kern.sweetwdog_test` provokes it without hanging anything (1: user space's signs are not counted, 2: the kernel thread stops
+noting the time; from the USB console: `sysctl kern.sweetwdog_test=1`), and `kern.sweetwdog_kernel_age_ms` / `kern.sweetwdog_user_age_ms` read the ages
+as the last look saw them. A restart into the system instead of recovery, and the hardware timer, are not built.
+
+About 150 lines in `herolte_ufs.c`, six in `sleh.c`. The test: `sweetwd=60` idle for ten minutes with no reset; then a deliberate hang (a
 kernel thread that takes the VM's page-queue lock and sleeps, from a console verb) must end in TWRP within 62 s with the watchdog's line in pstore.

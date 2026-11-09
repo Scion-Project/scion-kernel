@@ -80,21 +80,48 @@ the queue to drain, and a close can be deferred instead of waited for) are the n
 change since the bundle's last runs changed it). The boots after it: 121 hits and 32 misses, then 100 hits and no miss; pipeline creation fell from 8.3 s
 to 1.5 s, the first frame from +28 s to about +20 s. What is left of the start is the device itself (5 to 6 s before the first GPU call).
 
+## On the first phone, and what a fuller home screen costs
+
+The owner's phone (a root with more on its home screen: widgets, a weather widget's renderer, a wallpaper poster) ran the same script on the kernel
+that merges this line with the data-protection work (`rc1/ios27-gpu-keystore` `414af8e2`, tag `ios27-s9-rc1-20261109`), with the Metal compositor and
+the cap below: 43 % of swipe frames on time (motion 37.4 fps) and 63 % of the drags, no GPU fault, no exit of backboardd or SpringBoard in 7.5 minutes,
+and it is what that phone was left on. The bench phone's 66 % and this 43 % are the same code. The difference is in the frames: 35 chains a frame
+there against 25 on the bench phone, at 0.42 to 0.48 ms a chain, so 14.7 ms of GPU time a frame against 12.2, before the 2.4 ms of the present. At
+60 Hz that does not fit; the GPU, not the CPU, is what a heavy glass frame waits for now. A chain's 0.4 ms is mostly not drawing: every chain is started,
+polled for (10 us looks, then 50 us naps; `sgu_spin_us` sets how long it looks) and flushed on its own, and a pass is two of them. What would shorten it,
+none of it built: the fragment chain of one pass and the vertex/tiler chain of the next on the two job slots at once; the job interrupt instead of the
+poll; fewer passes from CoreAnimation for the same picture.
+
+## A cap on the GPU's wired memory
+
+Every buffer StarbiteMali makes is wired kernel memory that nothing can page out, and a PanVK device wires 57 MiB when it is made (a 32 MiB tiler heap,
+17 MiB of varyings, 8 MiB of TLS). `sweetspeed&134217728` (or `sbm_cap_mb=`, `sbm_client_cap_mb=`) bounds the sum: all clients together 35 % of the
+memory, one client half of that (1029 and 514 MiB on a phone with 2940 MiB). A buffer beyond it is refused (the client sees an allocation failure) with
+a line on the console. backboardd peaked at 182 MiB in the runs above, so the cap never fired; it is there for the day several Metal clients start at once.
+Which processes get a Metal device at all is the list in `/private/var/local/mtl2-clients`; for the compositor it should hold backboardd and nothing else
+unless a process needs one (SpringBoard's renderer service asserts without a device once posters are in use).
+
+## The start
+
+backboardd took 4 to 6 s to make its Metal device, nearly all of it before PanVK's first call to the kernel: `dlopen()` of the plug-in and of PanVK
+(38 MB outside the shared cache) while every other daemon starts. chronod, started meanwhile, asks the render server for the displays, gives up and
+aborts once (QuartzCore's `query_displays`), and runs when it is started again. The kernel's prewarm thread (`sweetspeed&128`) read the GL stack into the
+page cache at mount; with `sbgl=0` on the command line it now reads the Metal plug-in and PanVK instead (`2db66861` of the fork's branch). **Not yet
+timed on a phone.**
+
 ## Not done
 
 - **Honest sync objects in the shim** (above): today a wait is for the whole queue, and a buffer close waits too.
-- **A cap on the GPU's wired memory.** Every PanVK device wires 57 MiB when it is made (a 32 MiB tiler heap, 17 MiB of varyings, 8 MiB of TLS) and every
-  GPU buffer is wired kernel memory: backboardd alone holds 285 MiB while swiping, and nothing bounds the sum over processes.
 - **The device's start** (5 to 6 s), and the twelve no-copy buffers PanVK refuses (`HostMemory: NotRepresentable`; CoreAnimation copies instead): five a
   boot here.
 - The zero-copy scan-out above.
 - The CPU side: backboardd uses 0.19 to 0.25 of a core while swiping on Metal against 0.13 on OpenGL ES (metal2vulkan's and PanVK's per-draw work).
-- `chronod` aborts once at start in every Metal run (it did not in the OpenGL ES run); not looked at.
+- A chain's fixed cost (above), which is what a fuller home screen now waits for.
 
 ## How to turn it on
 
-Kernel: the fork's `wip/ios27-gpu-queue` (four commits on `bb6a6a4`; draft pull request 6 of Scion-Project/xnu). Command line: `sbgl=0` (with `sbmtl=1`)
-and `sweetspeed` with 262144 and 524288 added. Root: this bundle (`tools/ios27/metal/mk-bundle27.sh` applies `frontend-flush.diff`; PanVK built with the
+Kernel: the fork's `wip/ios27-gpu-queue` (on `bb6a6a4`; draft pull request 6 of Scion-Project/xnu). Command line: `sbgl=0` (with `sbmtl=1`)
+and `sweetspeed` with 262144, 524288 and 134217728 added. Root: this bundle (`tools/ios27/metal/mk-bundle27.sh` applies `frontend-flush.diff`; PanVK built with the
 repository's `starbite-drm`), `SWEET_MTL2_DEXR=1`, `SWEET_MTL2_FLUSH=2` and `STARBITE_DRM_LEAKS=0` in `/private/var/local/mtl2-env`, backboardd in
 `/private/var/local/mtl2-clients`, and `/private/var/local/m2v-cache` (mode 0777) for the pipeline cache. Back to OpenGL ES: backboardd out of
 `mtl2-clients` and no `sbgl=0`.
