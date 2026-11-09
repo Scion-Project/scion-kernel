@@ -1,0 +1,149 @@
+From: Claudius <claudiusthebot@gmail.com>
+Date: Mon, 9 Nov 2026 02:30:00 +0000
+Subject: [PATCH] S9 speed: the hooks for boot-arg sweetspeed (IORTC wait, SBBOOT stage lines, pin log)
+
+The changes of the ios27-speed work (docs/ios27/SPEED.md) that sit in Apple's files, each behind a bit of the boot-arg
+sweetspeed=<mask> (default 0: nothing changes). The flags and the emulations they switch are in
+xnu/files-12377/osfmk/arm64/sweet_a64e.c (sweet_speed_flags()):
+  1  iokit/Kernel/IOStartIOKit.cpp: IOKitInitializeTime does not wait 30 s for IORTC, which nothing here publishes
+  8  osfmk/kern/startup.c, bsd/kern/bsd_init.c: "SBBOOT <ms> ms: <stage>" on the console at each boot stage
+ 16  osfmk/arm64/sleh.c: "STARLTE PIN: ..." for the first 64 thread pins to an A55, then one every 10 s at most
+(2 = FP16 FMOV/FCMP emulation on the M3s and 4 = PACGA as AND are in sweet_a64e.c.)
+---
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 3187791..4150446 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -101,6 +101,9 @@
+ #include <sys/codesign.h>
+ 
+ #include <kern/startup.h>
++#if defined(__arm64__)
++#include <pexpert/arm64/board_config.h>
++#endif
+ #include <kern/thread.h>
+ #include <kern/task.h>
+ #include <kern/ast.h>
+@@ -502,6 +505,11 @@ bsd_init(void)
+ 
+ #if DEBUG_BSDINIT
+ #define bsd_init_kprintf(x, ...) kprintf("bsd_init: " x, ## __VA_ARGS__)
++#elif defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++/* sweet: boot timing on the console (boot-arg sweetspeed&8, osfmk/arm64/sweet_a64e.c) */
++#define bsd_init_kprintf(x, ...) do { extern uint32_t sweet_speed_flags(void); if (sweet_speed_flags() & 8) { uint64_t ns_ = 0; \
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns_); \
++	printf("SBBOOT %llu ms: bsd_init: " x, ns_ / 1000000, ## __VA_ARGS__); } } while (0)
+ #else
+ #define bsd_init_kprintf(x, ...)
+ #endif
+diff --git a/iokit/Kernel/IOStartIOKit.cpp b/iokit/Kernel/IOStartIOKit.cpp
+index 95553a0..eb322b7 100644
+--- a/iokit/Kernel/IOStartIOKit.cpp
++++ b/iokit/Kernel/IOStartIOKit.cpp
+@@ -68,6 +68,10 @@ SECURITY_READ_ONLY_LATE(static IOPlatformExpertDevice*) gRootNub;
+ 
+ #include <kern/clock.h>
+ #include <sys/time.h>
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_A5XELTE) || defined(ARM64_BOARD_CONFIG_SWEET)
++extern "C" uint32_t sweet_speed_flags(void);
++#endif
+ 
+ void
+ IOKitInitializeTime( void )
+@@ -76,6 +80,12 @@ IOKitInitializeTime( void )
+ 
+ 	t.tv_sec = 30;
+ 	t.tv_nsec = 0;
++#if defined(ARM64_BOARD_CONFIG_A5XELTE) || defined(ARM64_BOARD_CONFIG_SWEET)
++	/* sweet: no driver here publishes IORTC, so this waited the whole 30 s of every boot (boot-arg sweetspeed&1) */
++	if (sweet_speed_flags() & 1) {
++		t.tv_sec = 0;
++	}
++#endif
+ 
+ 	IOService::waitForService(
+ 		IOService::resourceMatching("IORTC"), &t );
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index b679c80..b378328 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1342,6 +1342,30 @@ handle_uncategorized(arm_saved_state_t *state)
+ 				thread_bind(little);
+ 				extern void sweet_m3_pin_note(thread_t);
+ 				sweet_m3_pin_note(current_thread());
++				/*
++				 * Pin diagnostics (boot-arg sweetspeed&16): one line per pin for the first 64, then at most one per
++				 * 10 s (racy on purpose: an extra line now and then is harmless). Preemptible user trap context,
++				 * about to thread_block: printf is fine, nothing is allocated.
++				 */
++				extern uint32_t sweet_speed_flags(void);
++				if (sweet_speed_flags() & 16) {
++					static uint32_t pin_lines;
++					static uint64_t pin_line_last;
++					uint64_t now = mach_absolute_time(), gap;
++					nanoseconds_to_absolutetime(10ULL * NSEC_PER_SEC, &gap);
++					if (pin_lines < 64 || now - pin_line_last >= gap) {
++						extern void proc_selfname(char *, int);
++						extern int proc_selfpid(void);
++						char comm[17];
++						thread_t pth = current_thread();
++						pin_lines++;
++						pin_line_last = now;
++						proc_selfname(comm, sizeof(comm));
++						printf("STARLTE PIN: %s[%d] tid %llu pri %d pc 0x%llx insn %08x\n", comm,
++						    proc_selfpid(), thread_tid(pth), (int)pth->sched_pri,
++						    (uint64_t)get_saved_state_pc(state), instr);
++					}
++				}
+ 				thread_block(THREAD_CONTINUE_NULL);
+ 				return;
+ 			}
+diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
+index c977c98..140f260 100644
+--- a/osfmk/kern/startup.c
++++ b/osfmk/kern/startup.c
+@@ -92,6 +92,9 @@
+ #endif
+ #include <kern/smr.h>
+ #include <kern/startup.h>
++#if defined(__arm64__)
++#include <pexpert/arm64/board_config.h>
++#endif
+ #include <kern/task.h>
+ #include <kern/thread.h>
+ #include <kern/timer.h>
+@@ -226,6 +229,16 @@ kernel_bootstrap_log(const char *message)
+ 	    startup_phase >= STARTUP_SUB_KPRINTF) {
+ 		kprintf("kernel_bootstrap: %s\n", message);
+ 	}
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++	if (startup_phase >= STARTUP_SUB_KPRINTF) {
++		extern uint32_t sweet_speed_flags(void);
++		if (sweet_speed_flags() & 8) {
++			uint64_t ns_ = 0;
++			absolutetime_to_nanoseconds(mach_absolute_time(), &ns_);
++			printf("SBBOOT %llu ms: %s\n", ns_ / 1000000, message);
++		}
++	}
++#endif
+ 	kernel_debug_string_early(message);
+ }
+ 
+@@ -236,6 +249,16 @@ kernel_bootstrap_thread_log(const char *message)
+ 	    startup_phase >= STARTUP_SUB_KPRINTF) {
+ 		kprintf("kernel_bootstrap_thread: %s\n", message);
+ 	}
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_A5XELTE)
++	if (startup_phase >= STARTUP_SUB_KPRINTF) {
++		extern uint32_t sweet_speed_flags(void);
++		if (sweet_speed_flags() & 8) {
++			uint64_t ns_ = 0;
++			absolutetime_to_nanoseconds(mach_absolute_time(), &ns_);
++			printf("SBBOOT %llu ms: thread %s\n", ns_ / 1000000, message);
++		}
++	}
++#endif
+ 	kernel_debug_string_early(message);
+ }
+ 
