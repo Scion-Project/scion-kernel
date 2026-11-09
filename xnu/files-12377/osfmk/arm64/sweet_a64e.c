@@ -9,7 +9,8 @@
  *   PAC*, AUT*, XPAC* (register forms)    -> no change to the register
  *   RETAA/RETAB, BRA*, BLRA*              -> RET / BR / BLR
  *   LDRAA/LDRAB                           -> LDR (offset and pre-index forms)
- *   PACGA                                 -> deterministic 32-bit hash << 32
+ *   PACGA                                 -> deterministic 32-bit hash << 32 (sweetspeed&4: Xn & 0xffffffff00000000,
+ *                                            what the cache rewrite of tools/ios27/speed leaves behind)
  *   FJCVTZS                               -> JavaScript ToInt32, Z = exact
  *   FCADD (vector, H/S/D)                 -> lane-wise FADD/FSUB, user FPCR
  *
@@ -24,6 +25,7 @@
  *                                            around the target (sweet_copy_cas64/128, copyio.c),
  *                                            full barriers (stronger than any A/L form)
  *   LDAPR{B,H,,}                          -> load + DMB ISH
+ *   FMOV H, FCMP H (sweetspeed&2)         -> moves and compares in the thread's own state, instead of pinning it to an A55
  */
 #include <pexpert/arm64/board_config.h>
 
@@ -51,6 +53,60 @@ uint64_t sweet_a64e_counts[8];
 struct sweet_a64e_pid { int pid; uint64_t count; };
 struct sweet_a64e_pid sweet_a64e_pids[SWEET_A64E_PIDS];
 extern int proc_selfpid(void);
+
+/*
+ * Boot-arg sweetspeed=<mask> (default 0: none of it): the changes of the boot-time and trap-cost work of tools/ios27/speed
+ * (docs/ios27/SPEED.md). Read once, when first asked, so the arguments are there.
+ *    1  IOKitInitializeTime does not wait 30 s for the IORTC resource (iokit/Kernel/IOStartIOKit.cpp: nothing here publishes it)
+ *    2  on a Mongoose M3, FMOV Hd,#imm / FMOV H<->W,X / FCMP,FCMPE H are emulated here instead of pinning the thread to an A55
+ *    4  PACGA gives Xn & 0xffffffff00000000, as the cache's PACGA sites were rewritten ahead of time to AND Xd, Xn, #mask
+ *       (tools/ios27/speed/a64e-rewrite2.py); a trapped one must agree with them, so set it only on a root rewritten that way
+ *    8  "SBBOOT <ms> ms: <stage>" lines on the console from kernel_bootstrap, kernel_bootstrap_thread and bsd_init
+ *   16  "STARLTE PIN: <program>[pid] ..." for each of the first 64 pins of a thread to an A55, then one every 10 s at most
+ */
+#define SWEET_SPEED_IORTC   1
+#define SWEET_SPEED_FP16    2
+#define SWEET_SPEED_PACGA   4
+#define SWEET_SPEED_BOOTLOG 8
+#define SWEET_SPEED_PINLOG  16
+
+uint32_t sweet_speed_flags(void);
+static uint32_t sweet_speed_value;
+static int sweet_speed_state;               /* 0 = boot-arg not read yet */
+
+uint32_t
+sweet_speed_flags(void)
+{
+	if (os_atomic_load(&sweet_speed_state, acquire) == 0) {
+		uint32_t v = 0;
+		PE_parse_boot_argn("sweetspeed", &v, sizeof(v));
+		sweet_speed_value = v;
+		os_atomic_store(&sweet_speed_state, 1, release);
+	}
+	return sweet_speed_value;
+}
+
+/* Where the non-LSE emulations come from (PAC*, PACGA, FJCVTZS, FCADD, DOT, DIT, LRCPC2, LDRA ...): an
+ * open table of user PCs with the instruction word, racy counts like the LSE sites below, read and reset
+ * by the STARLTE A64E hot report (bsd/dev/starlte_smp.c). */
+#define SWEET_A64E_SITES 512
+struct sweet_a64e_site { uint64_t pc, count; uint32_t insn; };
+struct sweet_a64e_site sweet_a64e_sites[SWEET_A64E_SITES];
+
+static void
+a64e_site(uint64_t pc, uint32_t w)
+{
+	unsigned h = (unsigned)((pc >> 2) * 0x9E3779B1u) % SWEET_A64E_SITES;
+	for (unsigned i = 0; i < 8; i++) {
+		struct sweet_a64e_site *e = &sweet_a64e_sites[(h + i) % SWEET_A64E_SITES];
+		if (e->pc == pc || e->pc == 0) {
+			e->pc = pc;
+			e->insn = w;
+			e->count++;
+			return;
+		}
+	}
+}
 
 static void
 sweet_a64e_count_pid(void)
@@ -100,6 +156,12 @@ reg_set(arm_saved_state_t *ss, unsigned r, bool sp31, uint64_t v)
 static uint64_t
 pacga_hash(uint64_t a, uint64_t b)
 {
+	if (sweet_speed_flags() & SWEET_SPEED_PACGA) {
+		/* the cache's PACGA sites are rewritten ahead of time to AND Xd, Xn, #0xffffffff00000000;
+		 * trapped ones must give the same value */
+		(void)b;
+		return a & 0xffffffff00000000ULL;
+	}
 	uint64_t h = a * 0x9e3779b97f4a7c15ULL ^ (b + 0x632be59bd9b4e019ULL);
 	h ^= h >> 31;
 	h *= 0xbf58476d1ce4e5b9ULL;
@@ -707,6 +769,70 @@ sweet_lse_emulate(arm_saved_state_t *ss, uint32_t w)
 	return true;
 }
 
+/*
+ * The few scalar FP16 instructions iOS 27's UI code runs all the time (FMOV H #imm, FMOV between H and W/X,
+ * FCMP/FCMPE H), emulated on the Mongoose M3 instead of pinning the thread to an A55 (sleh.c) (sweetspeed&2).
+ * Exact: no arithmetic, only moves and compares. Anything else still pins.
+ */
+static bool
+emulate_fp16_m3(arm_saved_state_t *ss, uint32_t w)
+{
+	thread_t th = current_thread();
+	if (th->machine.uNeon == NULL) {
+		return false;
+	}
+	arm_neon_saved_state64_t *ns = &th->machine.uNeon->ns_64;
+	unsigned rd = w & 31, rn = (w >> 5) & 31, rm = (w >> 16) & 31;
+	if ((w & 0xFFE01FE0) == 0x1EE01000) {                   /* FMOV Hd, #imm */
+		unsigned imm8 = (w >> 13) & 0xff, b6 = (imm8 >> 6) & 1;
+		uint16_t h = (uint16_t)(((imm8 >> 7) << 15) |
+		    ((((b6 ^ 1) << 4) | (b6 ? 0xc : 0) | ((imm8 >> 4) & 3)) << 10) | ((imm8 & 0xf) << 6));
+		uint8_t d[16];
+		memset(d, 0, 16);
+		memcpy(d, &h, 2);
+		memcpy(&ns->v.q[rd], d, 16);
+		return true;
+	}
+	if ((w & 0x7FFFFC00) == 0x1EE60000) {                   /* FMOV Wd|Xd, Hn */
+		uint16_t h;
+		memcpy(&h, &ns->v.q[rn], 2);
+		reg_set(ss, rd, false, h);
+		return true;
+	}
+	if ((w & 0x7FFFFC00) == 0x1EE70000) {                   /* FMOV Hd, Wn|Xn */
+		uint16_t h = (uint16_t)reg_get(ss, rn, false);
+		uint8_t d[16];
+		memset(d, 0, 16);
+		memcpy(d, &h, 2);
+		memcpy(&ns->v.q[rd], d, 16);
+		return true;
+	}
+	if ((w & 0xFFE0FC07) == 0x1EE02000) {                   /* FCMP/FCMPE Hn, Hm|#0.0 */
+		uint16_t a, b = 0;
+		memcpy(&a, &ns->v.q[rn], 2);
+		if (w & 0x08) {
+			if (rm != 0) {
+				return false;
+			}
+		} else {
+			memcpy(&b, &ns->v.q[rm], 2);
+		}
+		uint32_t nzcv;
+		bool an = (a & 0x7c00) == 0x7c00 && (a & 0x3ff), bn = (b & 0x7c00) == 0x7c00 && (b & 0x3ff);
+		if (an || bn) {
+			nzcv = 0x3;                             /* unordered: C V */
+		} else {
+			int ka = (a & 0x8000) ? -(int)(a & 0x7fff) : (int)(a & 0x7fff);
+			int kb = (b & 0x8000) ? -(int)(b & 0x7fff) : (int)(b & 0x7fff);
+			nzcv = ka == kb ? 0x6 : ka < kb ? 0x8 : 0x2;
+		}
+		uint32_t cpsr = get_saved_state_cpsr(ss) & ~PSR64_NZCV_MASK;
+		set_saved_state_cpsr(ss, cpsr | (nzcv << 28));
+		return true;
+	}
+	return false;
+}
+
 bool
 sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
 {
@@ -717,6 +843,7 @@ sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
 	}
 	sweet_a64e_count_pid();
 	uint64_t pc = get_saved_state_pc(ss);
+	a64e_site(pc, w);
 
 	if ((w & 0xFFFFFBFF) == 0xD65F0BFF) {                   /* RETAA, RETAB */
 		set_saved_state_pc(ss, reg_get(ss, 30, false));
@@ -784,6 +911,12 @@ sweet_a64e_emulate(arm_saved_state_t *ss, uint32_t w)
 		return true;
 	}
 	if (emulate_dot(w)) {                                   /* SDOT / UDOT */
+		set_saved_state_pc(ss, pc + 4);
+		sweet_a64e_counts[7]++;
+		return true;
+	}
+	if ((sweet_speed_flags() & SWEET_SPEED_FP16) && (__builtin_arm_rsr64("MIDR_EL1") >> 24) == 0x53 &&
+	    emulate_fp16_m3(ss, w)) {
 		set_saved_state_pc(ss, pc + 4);
 		sweet_a64e_counts[7]++;
 		return true;

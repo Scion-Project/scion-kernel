@@ -266,6 +266,31 @@ st_top_a64e(uint64_t window_ns)
 	}
 	printf("%s\n", line);
 
+	/* the hottest non-LSE emulated PCs of the window, with their instruction words */
+	struct sweet_a64e_site { uint64_t pc, count; uint32_t insn; };
+	extern struct sweet_a64e_site sweet_a64e_sites[512];
+	char ahot[400];
+	int an = snprintf(ahot, sizeof(ahot), "STARLTE A64E hot:");
+	for (unsigned k = 0; k < 10; k++) {
+		unsigned best = 512;
+		for (unsigned i = 0; i < 512; i++) {
+			if (sweet_a64e_sites[i].count != 0 &&
+			    (best == 512 || sweet_a64e_sites[i].count > sweet_a64e_sites[best].count)) {
+				best = i;
+			}
+		}
+		if (best == 512 || an >= (int)sizeof(ahot) - 40) {
+			break;
+		}
+		an += snprintf(ahot + an, sizeof(ahot) - (size_t)an, " %llx:%llu/%08x", sweet_a64e_sites[best].pc,
+		    sweet_a64e_sites[best].count, sweet_a64e_sites[best].insn);
+		sweet_a64e_sites[best].count = 0;
+	}
+	if (an > 18) {
+		printf("%s\n", ahot);
+	}
+	bzero(sweet_a64e_sites, sizeof(sweet_a64e_sites));
+
 	/* of which LSE/LRCPC on the Mongoose M3s, and threads pinned to an A55 for another instruction */
 	extern uint64_t sweet_lse_counts[4], sweet_m3_pins, sweet_m3_unpins;
 	static uint64_t lse_last[4], pins_last;
