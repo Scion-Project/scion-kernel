@@ -59,8 +59,9 @@ user space read; the S9's own are in the sources under `xnu/files-12377/`.
 to take none from `drivers/`. What is left to fold into this repository's modular layout, each step with the applied tree checked file for
 file as the last two were (`xnu/files-12377` and the `copy` lines):
 
-1. The adapted Scion drivers that `xnu/files-12377` still holds: `hakios.dwc3.c` (one include more on xnu-12377: `vm/vm_kern_xnu.h`),
-   `hakios.exynos_cpufreq.c`, `hakios.scion_gov.c`, `hakios.exynos_tmu.c`/`.h`, `hakios.exynos_pcie.c`, `hakios.exynos_dpu.c`,
+1. The adapted Scion drivers that `xnu/files-12377` still holds. Done (9 November 2026, `docs/xnu-fork.md`): `hakios.dwc3.c` (its
+   xnu-12377 include is behind `__has_include` in `drivers/usb`), `hakios.exynos_tmu.h` and `hakios.scion_gov.c` come from `drivers/` at
+   build time (`profiles/ios-27.copy`) and the fork keeps no copy. Left: `hakios.exynos_cpufreq.c`, `hakios.exynos_tmu.c`, `hakios.exynos_pcie.c`, `hakios.exynos_dpu.c`,
    `hakios.exynos_acpm_dvfs.c`, `hakios.exynos9810_mem.h`, `hakios.exynos_soc.h` become `drivers/` files with `bases xnu-8796 xnu-12377` in their `conf`
    (the differences go into `drivers/core/xnu-12377/` shims or the drivers themselves).
 2. The Starbite and wardevsa platform and device code (`sweet_*.c`, `a5xelte_*.c`, `herolte_*.c`, `starlte_*.c`, the Mali user client, the framebuffer and

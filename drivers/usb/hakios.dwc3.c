@@ -89,7 +89,6 @@
  *                     RETURN_FORCE_SECONDS (the save or a driver's stop waiting on something under load), the poll goes
  *                     back to the loader without them, as a panic does
  * Not a shell: user space is not reached from here.
- *
  * The cable. Nothing in the controller reports the cable going: the PHY's VBUS is forced valid (the VBUS pad is not
  * wired to it, dt is_not_vbus_pad: hakios.exynos_usb.c step i), so there is no disconnect event. On Android the MUIC
  * and charger interrupts make dwc3/otg.c stop the controller and bring it up again from dwc3_core_init on every attach.
@@ -107,7 +106,6 @@
  *     eight failures in some 10 s) and only sees a new pull-up. A wall charger has VBUS too and never talks, and a host
  *     that suspends the port stops its SOFs: both get those five and no more.
  * The restart never waits on VBUS alone: a reading that stops coming puts a stopped link back up after 3 s.
- *
  * Boot-args:
  *   usb_gadget=<1-5>      the steps (0, or none: nothing)
  *   usb_gadget_soc=<name> the glue (exynos9810, the only one; the default)
@@ -118,7 +116,6 @@
  *   usb_gadget_poll=<ms>  the poll period while a host is attached (1-50; 2)
  *   usb_gadget_drain=<ms> on the way back to the loader, how long to keep sending the rest of the log (0-5000; 1000)
  *   usb_gadget_crlf=0     send the log's line ends as they are (LF) rather than CR LF
- *
  * Registers and fields: Samsung's kernel fork for the Galaxy S9 (Scion-Project/android_kernel_samsung_exynos9810,
  * lineage-24.0, e5906667068e), drivers/usb/dwc3/core.h and gadget.h, at the lines given next to each below; the
  * sequences after core.c dwc3_core_init (795-1000), dwc3_soft_reset (350-375), dwc3_core_config (140-253), dwc3_phy_setup
@@ -144,6 +141,9 @@
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <vm/vm_kern.h>
+#if __has_include(<vm/vm_kern_xnu.h>)	/* xnu-12377 (ios-27): kmem_alloc and its flags are declared here */
+#include <vm/vm_kern_xnu.h>
+#endif
 #include <vm/memory_types.h>
 #include <console/video_console.h>
 #include <sys/hakios.input.h>
