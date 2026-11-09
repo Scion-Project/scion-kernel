@@ -38,10 +38,19 @@
 #define SBM_GEM_CLOSE   0x100
 #define SBM_SURFACE     0x103
 #define SBM_IMPORT_HOST 0x104
+#define SBM_ASYNC       0x105
+#define SBM_WAIT_IDLE   0x106
 
 static io_connect_t connection;
 static int connection_fd = -1;
 static uint32_t next_syncobj;
+/*
+ * Asynchronous submits. The kernel (boot-arg sweetspeed&64) starts a chain and returns; a
+ * fence (syncobj) wait is then a wait for the GPU to be done with everything submitted so far (the
+ * kernel runs chains one at a time, in order), WAIT_BO waits for the chains that named the buffer.
+ * STARBITE_DRM_SYNC=1: synchronous submits as before.
+ */
+static bool async_on;
 
 /*
  * The connection to StarbiteMali, opened at the first request whoever makes it: Panfrost GL comes
@@ -59,7 +68,18 @@ starbite_connect(void)
 	}
 	kern_return_t kr = IOServiceOpen(service, mach_task_self(), 0, &connection);
 	IOObjectRelease(service);
-	return kr == KERN_SUCCESS;
+	if (kr != KERN_SUCCESS) {
+		return false;
+	}
+	if (getenv("STARBITE_DRM_SYNC") == NULL) {
+		uint32_t flag = 1;
+		size_t returned = sizeof(flag);
+		if (IOConnectCallStructMethod(connection, SBM_ASYNC, &flag, sizeof(flag), &flag, &returned) == KERN_SUCCESS &&
+		    flag != 0) {
+			async_on = true;
+		}
+	}
+	return true;
 }
 
 int
@@ -445,10 +465,21 @@ drmSyncobjWait(int fd, uint32_t *handles, unsigned num_handles, int64_t timeout_
 	(void)fd;
 	(void)handles;
 	(void)num_handles;
-	(void)timeout_nsec;
 	(void)flags;
 	if (first_signaled != NULL) {
 		*first_signaled = 0;
+	}
+	if (async_on) {
+		/* timeout_nsec is an absolute CLOCK_MONOTONIC time: 0 (or past) = just look */
+		struct timespec ts;
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		int64_t now = (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
+		int64_t rel = timeout_nsec < 0 ? INT64_MAX : timeout_nsec > now ? timeout_nsec - now : 0;
+		int error = call(SBM_WAIT_IDLE, &rel, sizeof(rel));
+		if (error == ETIMEDOUT) {
+			errno = ETIME;
+			return -ETIME;
+		}
 	}
 	return 0;
 }
