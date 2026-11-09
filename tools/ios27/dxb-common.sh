@@ -66,7 +66,7 @@ text = text.replace(old, new).replace('make install -j8', 'make install -j4')
 path.write_text(text)
 PY
 	[ $? -eq 0 ] || return 1
-	# The tree: the profile's (the fork's commit; Apple's tag plus the series with SCION_XNU_FROM_PATCHES=1). Its stage scripts fetch
+	# The tree: the profile's (the fork's commit). Its stage scripts fetch
 	# Apple's HFS and libpthread and BearSSL by commit and take CoreEntitlements' headers from the Kernel Debug Kit.
 	OS_PROFILE=$OS_PROFILE "$ROOT/xnu/apply-series.sh" "$DXB/xnu" || return 1
 	grep -q 'SKIP_PATCHES' "$DXB/build.sh" ||
@@ -80,7 +80,7 @@ PY
 dxb_copies() {
 	local list src dst
 	list=$(OS_PROFILE_QUIET=1 python3 "$ROOT/tools/os-profile.py" get fork_copy 2>/dev/null || true)
-	{ [ -n "$list" ] && [ -z "${SCION_XNU_FROM_PATCHES:-}" ]; } || return 0
+	[ -n "$list" ] || return 0
 	grep -v '^#' "$ROOT/$list" | while read -r src dst; do
 		[ -n "$src" ] || continue
 		cmp -s "$ROOT/$src" "$DXB/xnu/$dst" || { cp "$ROOT/$src" "$DXB/xnu/$dst" && echo "$DXB_WHO: $dst is $src again"; }
