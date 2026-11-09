@@ -15,6 +15,14 @@
 cd "$(dirname "$0")/.." || exit 1
 # the kernel tree and machine configuration are the OS profile's (profiles/*.conf, docs/two-bases.md)
 SRC=$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get src 2>/dev/null || echo xnu-src/xnu-8796.121.2)
+# A profile with `builder dxb-ios` (ios-27: the Galaxy S9 on xnu-12377, an iOS-target XNU) is not built by xnu-build.sh but by
+# darwin-xnu-build, in build/dxb-12377, with the Kernel Debug Kit and Xcode you bring: tools/ios27/build-xnu-ios.sh. Everything below
+# that is the same for it: the log is judged the same way and the kernel ends up as ./hakios-kernel.
+BUILDER=$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get builder 2>/dev/null || true)
+if [ "$BUILDER" = dxb-ios ]; then
+	SRC=build/dxb-12377/xnu
+	KERNEL=${KERNEL:-$(tools/ios27/build-xnu-ios.sh --kernel-path)}
+fi
 MACHINE=${MACHINE:-$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get machine 2>/dev/null || echo BCM2837)}
 export MACHINE
 KERNEL=${KERNEL:-$SRC/BUILD/obj/DEVELOPMENT_ARM64_$MACHINE/mach.development.$(echo "$MACHINE" | tr '[:upper:]' '[:lower:]')}
@@ -47,15 +55,27 @@ fi
 # what was edited in drivers/ goes into the kernel tree first (only what is newer than the tree's copy), and then the
 # drivers the .config builds (CONFIG_HAKIOS_*; every driver when there is no .config): docs/drivers-config.md
 python3 tools/os-profile.py require || exit 1
-# (on a base whose series has the place for them: xnu/apply-series.sh)
-if [ -d "$SRC" ] && grep -qF "# HakiOS drivers: made by tools/hakios-config.py kernel" "$SRC/bsd/conf/files"; then
+# (on a base whose series has the place for them: xnu/apply-series.sh; not in darwin-xnu-build's tree, which the fork and its
+# fork_copy lines make whole)
+if [ "$BUILDER" != dxb-ios ] && [ -d "$SRC" ] && grep -qF "# HakiOS drivers: made by tools/hakios-config.py kernel" "$SRC/bsd/conf/files"; then
 	xnu/sync-drivers.sh "$SRC" || exit 1
 	python3 tools/hakios-config.py kernel --tree "$SRC" || exit 1
 fi
 export XNU_SRC=${XNU_SRC:-$PWD/$SRC}
 log=${KERNEL_LOG:-xnu-build.log}
-./xnu-build.sh -k "$@" 2>&1 | tee "$log"
-status=${PIPESTATUS[0]}
+if [ "$BUILDER" = dxb-ios ]; then
+	# darwin-xnu-build's make is verbose (some 40,000 lines): all of it is in the log, and the terminal gets its steps, its
+	# errors and a sign of life
+	# (no kernel of an earlier run stands in for this one if the builder fails before it gets to link: a missing Xcode, say)
+	rm -f "$KERNEL"
+	tools/ios27/build-xnu-ios.sh "$@" 2>&1 | tee "$log" | awk -v logfile="$log" '
+		/⇒|\[info\]|\[error\]| error:|\*\*\* |^build-xnu-ios|^firehose-ios|^fork:|^apply-series|Build Done/ { print; fflush() }
+		NR % 4000 == 0 { printf "make-kernel: %d lines of %s\n", NR, logfile; fflush() }'
+	status=${PIPESTATUS[0]}
+else
+	./xnu-build.sh -k "$@" 2>&1 | tee "$log"
+	status=${PIPESTATUS[0]}
+fi
 # The kernel's name is HakiOS's: XNU's build calls its output mach.<config>.<machine>, and the copy every tool takes
 # (xl, make phone, make qemu-open, tools/update-prebuilt.sh) is ./hakios-kernel
 named() { cp -p "$KERNEL" hakios-kernel && echo "make-kernel: built: hakios-kernel ($KERNEL)"; }

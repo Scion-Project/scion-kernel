@@ -1,0 +1,7 @@
+# The one commit of blacktop's darwin-xnu-build ("dxb", MIT, Copyright (c) 2023-2025 blacktop) the ios-27 profile's `builder dxb-ios`
+# builds with: fetched by commit, never a moving branch. Read (sourced) by tools/ios27/dxb-common.sh, which both
+# tools/ios27/build-xnu-ios.sh (what `OS_PROFILE=ios-27 make kernel` runs) and tools/ios27/build-xnu-12377.sh use.
+# Moving the pin: change DXB_SHA here, then `FRESH=1 OS_PROFILE=ios-27 make kernel`; tools/ios27/dxb-ios.patch is made against it
+# (dxb's build.sh as dxb-common.sh edits it) and has to apply to the new one.
+DXB_REPO=https://github.com/blacktop/darwin-xnu-build
+DXB_SHA=663906528d1cd5ea8fde7de6f16de73db9511549

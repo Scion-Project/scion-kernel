@@ -4,7 +4,9 @@
 #   make                 help
 #   make unpack IPSW=F   the OS files out of your own Darwin userland 16.5 IPSW into sysimage/ (sysimage/unpack.sh)
 #   make images          userland/root.apfs and userland/system.apfs (userland/build.sh)
-#   make kernel          the kernel from source (xnu/apply.sh, xnu-deps/setup.sh, xnu-build.sh)
+#   make kernel          the kernel from source (xnu/apply.sh, xnu-deps/setup.sh, xnu-build.sh); OS_PROFILE=ios-27 make kernel: the
+#                        iOS 27 Galaxy S9 kernel, by darwin-xnu-build (tools/ios27/build-xnu-ios.sh; needs Xcode and the Kernel
+#                        Debug Kit: DEVELOPER_DIR, KDKROOT; docs/ios27/IOS27-TARGET.md)
 #   make loader          the boot loader, with identity.h made from your IPSW (xnuloader/build.sh)
 #   make firmware        the phone's firmware off the phone over adb (devices/$(DEVICE)/pull-firmware.sh)
 #   make qemu            a 20-minute session in QEMU (needs the Darwin images)
@@ -75,9 +77,13 @@ images:
 soc-status:
 	python3 tools/soc-check.py --status
 
+# a profile with `builder dxb-ios` (ios-27) is built by darwin-xnu-build, in build/dxb-12377 (tools/ios27/build-xnu-ios.sh, run by
+# tools/make-kernel.sh), not in xnu-src/ with xnu-deps/: the two steps before it are for the other profiles
+DXB_BUILDER = [ "$$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get builder 2>/dev/null)" = dxb-ios ]
+
 kernel:
-	[ -d "$$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get src)" ] || xnu/apply.sh
-	[ -e xnu-deps/host/bin/ld64 ] && [ -f xnu-deps/sdk/iPhoneOS$$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get sdk).xnu.sdk/usr/local/lib/kernel/libfirehose_kernel.a ] || \
+	$(DXB_BUILDER) || [ -d "$$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get src)" ] || xnu/apply.sh
+	$(DXB_BUILDER) || { [ -e xnu-deps/host/bin/ld64 ] && [ -f xnu-deps/sdk/iPhoneOS$$(OS_PROFILE_QUIET=1 python3 tools/os-profile.py get sdk).xnu.sdk/usr/local/lib/kernel/libfirehose_kernel.a; } || \
 		xnu-deps/setup.sh
 	tools/make-kernel.sh -j$(JOBS)
 
