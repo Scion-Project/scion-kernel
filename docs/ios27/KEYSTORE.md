@@ -10,6 +10,7 @@ of the boot-argument `sweetspeed=<mask>` and are **off by default**:
 | `0x100000` (1048576) | the built-in HFS Plus keeps, reports and inherits data-protection classes, as labels; what has no class reads back as D | `bsd/sweet_hfs/sweet_hfs_pclass.c`, hooks in `core/hfs_vnops.c`, `hfs_attrlist.c`, `hfs_readwrite.c` |
 | `0x200000` (2097152) | with the bit above: the mount says `MNT_CPROTECT` (what `MKBDeviceFormattedForContentProtection()` and SQLite read), and an update mount keeps it | `core/hfs_vfsutils.c`, `bsd/vfs/vfs_syscalls.c` |
 | `0x400000` (4194304) | the key store answers as a device with **no passcode** does, in full (below) | `iokit/Kernel/arm/SweetKeyStore.cpp` |
+| `0x1000000` (16777216) | APFS's purgeable-file and directory-statistics `fsctl()`s are accepted (and forgotten) by the built-in HFS Plus | `core/hfs_readwrite.c` |
 
 **In short: nothing here encrypts anything.** There is no Secure Enclave, no passcode, no key that lives outside the kernel. A protection
 class is a label that programs can set and read back; a file marked A is as readable from the flash, and while the screen is locked, as one
@@ -38,7 +39,7 @@ Found on a Galaxy S9 running 24A446 (the kernel's own log of key store calls, an
 The selector numbers were not the problem: every `aks_*` function of 24A446 still calls the number it called on iOS 16 (table below); iOS 27
 only adds to the list.
 
-**What is verified, and how.** The kernel with these changes was built (the iOS-target STARLTE kernel) and **has not been booted yet**; the test below has not run. "What was wrong" is from a phone's logs and from the binaries; what the bits change is, until a phone run, what the code says.
+**What is verified, and how.** One Galaxy S9, the fork's commit 2adf535 (iOS-target STARLTE kernel), `sweetspeed` bits `0x100000` and `0x400000`, and the test of the last section (`dptest`, as root and as `mobile`), one boot: classes set by `fcntl`, `setattrlist`, `open_dprotected_np` and `NSFileManager` read back by `fcntl`, `getattrlist` and `NSURL`, also after reopening; a file made in a directory of class C came out C; what had no class read D. `MKBGetDeviceLockState` 3, `MKBDeviceUnlockedSinceBoot` 1, `MKBGetDeviceConfigurations` a dictionary (grace period 0, 10 attempts); selectors 7, 14, 17, 23, 31, 35, 40, 103, 107 as the table below says. A keychain item added, read back and deleted for each of "after first unlock", "when unlocked" and "always, this device only". `installcoordinationd` logged "Created .../InstallCoordination" and ".../Removability" and stayed up (it ended in `os_crash` before). The boot before that one found a panic: the configuration is asked for with a 32 KB buffer, which arrives as a memory descriptor, and the stand-in wrote to it unprepared ("IOGMD: not wired"); fixed in 2adf535. **Not run on a phone yet:** `0x200000` (`MNT_CPROTECT`) and `0x1000000` (the purgeable calls). A day of use with the bits on has not happened either.
 
 ## What the key store answers
 
@@ -90,6 +91,12 @@ without that (`CONFIG_PROTECT` off in `bsd/sweet_hfs/sweet_hfs_compat.h`): no ke
   the kernel answers: `MKBDeviceFormattedForContentProtection()` is that flag on `/var`, and SQLite strips its file-protection open flags
   without it ("volume does not support data protection").
 
+**Purgeable files (`sweetspeed&0x1000000`).** PosterFoundation marks every directory of the wallpaper store purgeable
+(`-[NSURL pf_setPurgable:afterDate:error:]`) with APFS's `fsctl()`s, whatever the volume is: group `'J'`, 3 (is this directory counted, 24
+bytes out), 113 (count it, 272 bytes), 111 (mark purgeable, 48 bytes), and 109 to ask (48 bytes out). On HFS they were `ENOTTY`: "Error
+marking ... as purgable" 115 times a boot, and no poster store. This volume keeps no such accounting and nothing here purges files, so with
+the bit the calls succeed and are forgotten; the questions answer zeroes ("not counted", "not purgeable").
+
 An image of the volume attached on a Mac shows nothing of this (the attribute is hidden there too); a kernel without the bit ignores the
 attributes and answers as before.
 
@@ -109,11 +116,11 @@ one `IOConnectCallMethod` with a constant selector. The numbers below are the on
 | 6 | `aks_load_bag` | the bag in, as a structure; handle out |
 | 7 | `aks_get_lock_state` | handle in; flags out |
 | 8, 32 | `aks_lock_device` (32: now) | handle |
-| 9 | `aks_unlock_device` | 4 scalars in: handle, the passcode's address, its length, an ACM handle |
+| 9 | `aks_unlock_device` | 4 scalars in: handle, the passcode's address, its length, 0 |
 | 10, 11 | `aks_wrap_key`, `aks_unwrap_key` | handle, class; key in; key out (10 also returns the class) |
 | 12, 13 | `aks_unlock_bag`, `aks_lock_bag` | 5 scalars; handle |
 | 14 | `aks_get_system` | handle out |
-| 15 | `aks_change_secret` (`_opts`, `_with_kek`) | 12 scalars in: handle, two options, the old passcode's address and length, the new one's, an ACM blob's address and length, a parameter, the generation option, flags; 1 scalar out: the handle of the bag that now holds the new secret |
+| 15 | `aks_change_secret` (`_opts`, `_with_kek`) | 12 scalars in: [0] handle, [1] the generation option (keybagd: 4 "make a new bag", 0 for a bag kept in xART), [3] and [4] the old passcode's address and length, [5] and [6] the new one's, [7] to [9] an ACM blob and a parameter, [11] flags; 1 scalar out: the handle of the bag that holds the new secret |
 | 17, 35 | `aks_get_device_state`, `aks_get_extended_device_state` | handle in; DER out |
 | 23 | `aks_get_bag_uuid` | 16 bytes out |
 | 26, 27, 100, 101 | `aks_assert_hold`, `_drop`, `_promote`, `_consume` | 3, 2, 2, 1 scalars |
