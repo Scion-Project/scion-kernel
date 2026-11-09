@@ -11,9 +11,9 @@ background (UniXNU's layers and how this tree maps onto them).
 | Path | What it holds | Per base? |
 |---|---|---|
 | `profiles/<os>.conf` | the OS a build is for: XNU tag and commit, `base`, `machine`, `sdk`, `hfs`, `arch`, status | one per OS; several may share a base (ios-26 and ios-27 both name `xnu-12377`) |
-| `xnu-src/<xnu_tag>/` | the kernel tree being built: Apple's tag, fetched pristine, plus the base's series. Not in git | yes, one per tag, side by side |
-| `patches/<base>/series` | Scion's changes to Apple's files, in order (`patches/xnu-8796/`, `patches/xnu-12377/`) | yes |
-| `xnu/hakios.patch`, `xnu/files/`, `xnu/patches/` | xnu-8796's work in its older form: `xnu/apply.sh` applies it, and gives the same tree as `patches/xnu-8796/series` | xnu-8796 only |
+| `xnu-src/<xnu_tag>/` | the kernel tree being built: the profile's commit of Scion-Project/xnu (`docs/xnu-fork.md`), plus the drivers. Not in git | yes, one per tag, side by side |
+| `patches/<base>/series` | Scion's changes to Apple's files, in order (`patches/xnu-12377/`): what the fork's xnu-12377 branches were made from | yes |
+| `xnu/hakios.patch`, `xnu/files/`, `xnu/patches/` | xnu-8796's work as patches: what the fork's `scion/xnu-8796` was made from (`SCION_XNU_FROM_PATCHES=1` applies them). The generated `patches/xnu-8796/series` is gone: it had fallen behind them | xnu-8796 only |
 | `drivers/<class>/` | the drivers, by subsystem, with `conf` and `map` | shared; a driver says which bases it is built on (below) |
 | `socs/<soc>/` | a SoC's numbers and layer (`exynos9810`, `lga` for the Tensor G5, ...) | shared |
 | `devices/<name>/` | a phone: `device.conf` (now with `profile`), configs, image recipe | shared; the device names its profile |
@@ -56,7 +56,7 @@ Tools that only make sense on xnu-8796 (`tools/kernel-delta.sh`, `tools/guard-te
 
 A driver is source in `drivers/`, copied into the tree by `drivers/map`, and built when `config/MASTER.hakios` and the
 HakiOS block of `bsd/conf/files` say so (`tools/hakios-config.py kernel`). Both series now carry the place for them
-(`patches/xnu-8796/0030-bsd-conf.patch` and `0130-config.patch` on 8796, `patches/xnu-12377/0080-hakios-drivers.patch` on 12377),
+(`xnu/hakios.patch`'s `bsd/conf/files` and `config/` hunks on 8796, `patches/xnu-12377/0080-hakios-drivers.patch` on 12377),
 and a driver says which bases it is built on with a `bases` line in its `drivers/<class>/conf` (`xnu-8796` when it says none;
 a `standard` file takes it too). `tools/hakios-config.py kernel` puts into a tree only the drivers of that tree's base, and says
 which it left out; the drivers table (`docs/reference/drivers.md`) marks a driver built for a device only on the base of the

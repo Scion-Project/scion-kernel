@@ -2,7 +2,8 @@
 # Get Apple's XNU sources (the release that Darwin userland 16.5 was built from) and put the HakiOS
 # work on top of them: hakios.patch changes Apple's files, files/ holds the new ones.
 # usage: xnu/apply-series.sh [DIR]              (default: $XNU_SRC, else the OS profile's tree: xnu-src/<xnu_tag> next to this directory)
-# The series is the profile's base's: patches/<base>/series (patches/xnu-8796 for ios-16.5, patches/xnu-12377 for ios-26).
+# The series is the profile's: patches/xnu-12377/series (ios-26) or series.ios27 (ios-27). A profile that names a commit of the fork
+# (docs/xnu-fork.md) takes that instead.
 # env:   XNU_URL   where to fetch from (default: Apple's repository on GitHub; an existing clone
 #                  that has the tag will do: XNU_URL=file:///path/to/xnu)
 # The result is a git tree on the branch "hakios" with the work uncommitted, which is how

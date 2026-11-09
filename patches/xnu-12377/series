@@ -21,7 +21,7 @@
 0097-pmap-sync-64bit-pa.patch
 0098-native-pac-user-jop.patch
 # minicrypto, the xnu-8796 series' crypto provider, the same files; built here, registered only with SCION_NATIVE_PAC=1
-../xnu-8796/0280-osfmk-minicrypto.patch
+0280-osfmk-minicrypto.patch
 0100-minicrypto.patch
 0110-hakios-core.patch
 # Darwin 27 (iOS 27) system calls on this base (docs/ios27-starlte.md)
