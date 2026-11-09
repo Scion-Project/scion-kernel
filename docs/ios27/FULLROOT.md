@@ -32,9 +32,12 @@ some Settings rows lack icons.
    `10 macho-a64e` (PAC rewrite of every arm64e Mach-O outside the caches) | `20 launchd` (hardware + crash-loop daemons only,
    `_PanicOnCrash` dropped; `lists/`; `DISABLE_HOGS=1` adds the opt-in CPU-hog list) | `30 overlay` (builder's userland shims,
    manifest-checked) | `40 prefs` (Reduce Motion / Reduce Transparency OFF, CA compression off, watchdogs off) |
-   `50 xpc-disable` (MessagesBlastDoorService) | `60 wifi-firmware` (inert data, only read with the Wi-Fi boot-args).
+   `50 xpc-disable` (MessagesBlastDoorService) | `60 wifi-firmware` (inert data, only read with the Wi-Fi boot-args) |
+   `70 lsd-extkit` (ExtensionKit FeatureFlag off + LaunchServices store rebuild: the kernel has no AMFI trust cache, so the signed
+   extension-point cache was rejected and no framework-declared extension point registered; `ENABLE_LSD_EXTKIT=0` turns it off).
 4. `check-root.sh`: required files, cache hard links, patched words, launchd plist sanity, prefs, Mach-O rewrite complete.
 
 ## Daemon policy
-The real iOS 27 runs: only jobs for hardware the port has no driver for (`lists/daemons-hw.list`) and measured crash loops
+`DAEMON_SET=bp` (default) removes exactly the job set of the owner build so the first full-root boot is comparable with it;
+`DAEMON_SET=min` is the real iOS 27: only jobs for hardware the port has no driver for (`lists/daemons-hw.list`) and measured crash loops
 (`lists/daemons-crashloop.list`) are moved to `launchd-disabled.plist`. The CPU-hog list is opt-in and off.

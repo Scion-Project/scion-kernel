@@ -6,3 +6,4 @@ com.apple.dhcp6d true
 com.apple.magicswitchd.companion true
 com.apple.security.otpaird true
 com.apple.ftp-proxy-embedded false
+com.apple.rapportd true

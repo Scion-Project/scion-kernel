@@ -1,7 +1,9 @@
 #!/bin/bash
 # verify-boot.sh SERIAL BOOT_IMG LABEL [WAIT_MIN=12] : ONE verification boot of the phone SERIAL (in TWRP, lock held by the caller).
 # Flashes BOOT (serial-pinned, read-back verified), reboots, captures the USB console with epoch timestamps into work/boot-LABEL.log,
-# ends the run with 'return' (-> TWRP) after WAIT_MIN minutes and prints tools/boot-metrics.py. Does NOT touch USERDATA.
+# after WAIT_MIN minutes prints tools/boot-metrics.py and ends the run with 'return' (-> TWRP), unless KEEP=1: then the capture is stopped,
+# the console device is left to the caller (usb-shot.py / "touch X Y" / "button home" / "return") and its name is written to work/boot-LABEL.dev.
+# Does NOT touch USERDATA.
 set -uo pipefail
 SERIAL=${1:?SERIAL}; BOOT=${2:?BOOT_IMG}; LABEL=${3:?LABEL}; WAIT=${4:-12}
 H=$(cd "$(dirname "$0")" && pwd); ADB=${ADB:-adb}; A="$ADB -s $SERIAL"
@@ -23,6 +25,7 @@ done
 echo "console $DEV (phone $SERIAL)"; : > "$LOG"
 cat "$DEV" | perl -MTime::HiRes=time -ne 'BEGIN{$|=1} print sprintf("%.3f ", time), $_' >> "$LOG" &
 CAT=$!
+echo "$DEV" > "$H/work/boot-$LABEL.dev"
 sleep $((WAIT*60))
-printf 'return\n' > "$DEV"; sleep 8; kill $CAT 2>/dev/null
+if [[ ${KEEP:-0} == 1 ]]; then kill $CAT 2>/dev/null; else printf 'return\n' > "$DEV"; sleep 8; kill $CAT 2>/dev/null; fi
 echo "run ended $(date -u +%T), boot started at epoch $T0"; python3 -I "$H/boot-metrics.py" "$LOG"
