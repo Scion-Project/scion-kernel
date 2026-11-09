@@ -15,7 +15,7 @@
  * ("invalid PMK"), 9 a timeout, 2 anything else.
  */
 #ifdef HAKIOS_APPLE80211_27     /* iOS 27 (24A446; the ios-27 tree defines it): requests, events and the ioctl path as in 16.5, */
-#define A80211_SCAN_LEN_BAD(n, ours)    n < ours                /* but SCAN_REQ is 5528 bytes, the first 5456 these; */
+#define A80211_SCAN_LEN_BAD             <                       /* but SCAN_REQ is 5528 bytes, the first 5456 these; */
 #define A80211_RESULT_ELEMENTS          0x8e8 - 0x8c            /* SCAN_RESULT / CURRENT_NETWORK 2280: 2048 of elements, 92 more; */
 #define A80211_RESULT_SIZE              2280
 #define A80211_ASSOC_AUTH               uint16_t mode, unused_0; uint32_t auth_lower, auth_upper       /* ASSOCIATE 656, its */
@@ -23,7 +23,7 @@
 #define A80211_ASSOC_SIZE               656
 #define A80211_ASSOC_KEY                0x4c
 #else                           /* Darwin userland 16.5 */
-#define A80211_SCAN_LEN_BAD(n, ours)    n != ours
+#define A80211_SCAN_LEN_BAD             !=                      /* (an operator: the line's columns stay 16.5's) */
 #define A80211_RESULT_ELEMENTS          1024
 #define A80211_RESULT_SIZE              1164
 #define A80211_ASSOC_AUTH               uint16_t mode, auth_lower, auth_upper, unused_0
@@ -495,7 +495,7 @@ set_scan(const struct apple80211req *request, char *said, size_t said_size)
 	unsigned unknown = 0;
 	int error;
 
-	if (A80211_SCAN_LEN_BAD(request->req_len, sizeof(*asked))) {
+	if (request->req_len A80211_SCAN_LEN_BAD sizeof(*asked)) {
 		return EINVAL;
 	}
 	if (!hakios_sta_present()) {
