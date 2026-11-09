@@ -171,3 +171,5 @@ To go back, run `cachepatch.py CACHEDIR ADDRESS NEW OLD`, or put the saved subca
 
 Way back: kernel only, `sweetspeed=31` (`SPEED.md`'s best boot, on this root too) or without 64 for synchronous GPU submits; root, the cache patches by
 `cachepatch.py` with the words swapped or the saved subcaches, `launchd.plist` and `launchd-disabled.plist` from `ORIG`, the saved `libOSMesa.8.dylib`.
+
+The next run, with a profiler and the changes made against its cost table, is in `OPTIMISE.md`.
