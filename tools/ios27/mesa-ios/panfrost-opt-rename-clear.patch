@@ -1,0 +1,103 @@
+Panfrost: give a render target a fresh BO on a full clear instead of flushing the batches that still use it
+
+A full clear that starts a new batch on a render target which other pending batches still use (CoreAnimation's offscreen
+textures, reused many times a frame) used to submit those batches early, each split storing and loading the main
+framebuffer again. The target gets a new BO (as transfer_map does for a discarding write); the pending batches keep their
+reference to the old one. Not for shared/imported or scanout BOs, mipmapped/array/3D/multisampled resources, separate
+stencil, or a resource a pending batch writes. SBGL_NORENAME=1 in the environment turns it off. Counted in
+sbdrm_flush_reason[8] (tools/ios27/mesa-ios/starbite-drm/starbite_drm.c; STARBITE_DRM_STATS=1 prints it).
+Mesa 25.0.7, MIT like Mesa.
+
+--- a/src/gallium/drivers/panfrost/pan_resource.c
++++ b/src/gallium/drivers/panfrost/pan_resource.c
+@@ -611,6 +611,46 @@
+       }
+    }
+    return 0;
++}
++
++/*
++ * A full clear that starts a new batch on a render target which other pending batches still use: give the
++ * target a fresh BO (as transfer_map does for a discarding write) instead of submitting those batches early.
++ * CoreAnimation reuses its offscreen textures many times a frame; every such reuse used to split the passes that
++ * sampled it (each split = the main framebuffer stored and loaded again). The pending batches hold references to the
++ * old BO; their descriptors already point at it. Not for shared/imported or scanout BOs, mipmapped/array/3D
++ * resources, separate stencil, or when a pending batch writes the resource. Counted in sbdrm_flush_reason[8].
++ */
++extern uint64_t sbdrm_flush_reason[10];
++bool
++panfrost_resource_rename_for_clear(struct panfrost_context *ctx, struct panfrost_resource *rsrc)
++{
++   struct panfrost_bo *bo = rsrc->bo;
++
++   if (!bo || (bo->flags & PAN_BO_SHARED) || rsrc->separate_stencil || rsrc->shadow_image || rsrc->scanout ||
++       (rsrc->base.bind & PAN_BIND_SHARED_MASK) || rsrc->base.last_level != 0 || rsrc->base.array_size != 1 ||
++       rsrc->base.depth0 != 1 || rsrc->base.nr_samples > 1 ||
++       (rsrc->base.target != PIPE_TEXTURE_2D && rsrc->base.target != PIPE_TEXTURE_RECT))
++      return false;
++   if (_mesa_hash_table_search(ctx->writers, rsrc))
++      return false;
++   if (!panfrost_any_batch_reads_rsrc(ctx, rsrc))
++      return false;
++
++   struct panfrost_bo *newbo =
++      panfrost_bo_create(pan_device(ctx->base.screen), panfrost_bo_size(bo), bo->flags, bo->label);
++   if (!newbo)
++      return false;
++
++   panfrost_bo_unreference(rsrc->bo);
++   rsrc->bo = newbo;
++   rsrc->image.data.base = newbo->ptr.gpu;
++   rsrc->valid.crc = false;
++   if (drm_is_afbc(rsrc->image.layout.modifier))
++      (void)panfrost_resource_init_afbc_headers(rsrc);
++   panfrost_dirty_state_all(ctx);
++   __atomic_fetch_add(&sbdrm_flush_reason[8], 1, __ATOMIC_RELAXED);
++   return true;
+ }
+ 
+ void
+--- a/src/gallium/drivers/panfrost/pan_resource.h
++++ b/src/gallium/drivers/panfrost/pan_resource.h
+@@ -116,6 +116,9 @@
+ 
+ void panfrost_resource_context_init(struct pipe_context *pctx);
+ 
++struct panfrost_context;
++bool panfrost_resource_rename_for_clear(struct panfrost_context *ctx, struct panfrost_resource *rsrc);
++
+ /* Blitting */
+ 
+ enum panfrost_blitter_op /* bitmask */
+--- a/src/gallium/drivers/panfrost/pan_context.c
++++ b/src/gallium/drivers/panfrost/pan_context.c
+@@ -55,6 +55,8 @@
+ #include "pan_screen.h"
+ #include "pan_util.h"
+ 
++static int sbgl_norename = -1;
++
+ static void
+ panfrost_clear(struct pipe_context *pipe, unsigned buffers,
+                const struct pipe_scissor_state *scissor_state,
+@@ -68,6 +70,20 @@
+     * cause the batch to be flushed.
+     */
+    struct panfrost_context *ctx = pan_context(pipe);
++
++   /* see panfrost_resource_rename_for_clear(); SBGL_NORENAME=1 in the environment: off */
++   if (sbgl_norename < 0)
++      sbgl_norename = getenv("SBGL_NORENAME") != NULL;
++   struct pipe_framebuffer_state *fb = &ctx->pipe_framebuffer;
++   if (!ctx->batch && (buffers & PIPE_CLEAR_COLOR0) && fb->nr_cbufs == 1 && fb->cbufs[0] && !fb->zsbuf &&
++       !sbgl_norename) {
++      struct pipe_surface *surf = fb->cbufs[0];
++      struct panfrost_resource *rsrc = pan_resource(surf->texture);
++      if (surf->u.tex.level == 0 && surf->u.tex.first_layer == 0 && surf->u.tex.last_layer == 0 &&
++          fb->width == rsrc->base.width0 && fb->height == rsrc->base.height0)
++         panfrost_resource_rename_for_clear(ctx, rsrc);
++   }
++
+    struct panfrost_batch *batch = panfrost_get_batch_for_fbo(ctx);
+    if (!batch)
+       return;

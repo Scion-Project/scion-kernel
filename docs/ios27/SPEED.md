@@ -90,3 +90,5 @@ every cache file the tools change, the work's logs and the boot images are not h
 The command line is `starlte-8core.txt`'s neighbour: the eight-core set with `cpufreq_gov=1 cpufreq_gov_big_min=1794000` (the governor of `starlte/0421`),
 `sweetm3unpin=100` (the soft pins, `0425`), `sweettrace=0 sweettracename=none`, the Metal client list of `docs/ios27/METAL.md` and `sweetspeed=31`.
 The unpin and the governor were on in the later boots above; their effect alone was not separated from the rest.
+
+The next run, with a profiler, is in `OPTIMISE.md`.

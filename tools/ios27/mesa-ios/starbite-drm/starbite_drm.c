@@ -288,6 +288,65 @@ call(uint32_t selector, void *data, size_t size)
 	}
 }
 
+/*
+ * Requests counted by selector (0-15; 16 = GEM_CLOSE, 17 = others), and every 10 s one line on the kernel's console through
+ * StarbiteMali's LOG selector: "STARLTE GPU APP: drm[pid] 10 s: submit N wait N madvise N(local) ...". Only with
+ * STARBITE_DRM_STATS=1 in the environment (a clock read and two atomics a request otherwise saved).
+ * MADVISE is answered here: StarbiteMali never purges a buffer (its MADVISE only checks the handle and says
+ * "retained"), and Panfrost's BO cache asks twice per cached buffer reuse. STARBITE_DRM_KMADVISE=1 asks the kernel again.
+ */
+static uint64_t sel_count[18], sel_last_ns, mmap_local;
+uint64_t sbdrm_flush_reason[10];                         /* pan_job.c: batches submitted, by why */
+#define MMAP_CACHE 8193u                                /* StarbiteMali's handles are 1..8192 */
+static uint64_t mmap_cache[MMAP_CACHE];
+static void
+count_and_report(uint32_t selector)
+{
+	static int stats = -1;
+	if (stats < 0) {
+		stats = getenv("STARBITE_DRM_STATS") != NULL;
+	}
+	if (!stats) {
+		return;
+	}
+	__atomic_fetch_add(&sel_count[selector < 16 ? selector : selector == SBM_GEM_CLOSE ? 16 : 17], 1, __ATOMIC_RELAXED);
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	uint64_t now = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+	uint64_t last = __atomic_load_n(&sel_last_ns, __ATOMIC_RELAXED);
+	if (last == 0) {
+		__atomic_store_n(&sel_last_ns, now, __ATOMIC_RELAXED);
+		return;
+	}
+	if (now - last < 10000000000ull || !__atomic_compare_exchange_n(&sel_last_ns, &last, now, false, __ATOMIC_RELAXED,
+	    __ATOMIC_RELAXED)) {
+		return;
+	}
+	uint64_t c[18];
+	for (int i = 0; i < 18; i++) {
+		c[i] = __atomic_exchange_n(&sel_count[i], 0, __ATOMIC_RELAXED);
+	}
+	char text[200];
+	int n = snprintf(text, sizeof(text), "drm[%d] %llu s: submit %llu wait %llu create %llu mmap %llu param %llu "
+	    "offset %llu madvise %llu(local) close %llu other %llu; mmap local %llu", getpid(), (unsigned long long)((now - last) / 1000000000ull),
+	    c[0], c[1], c[2], c[3], c[4], c[5], c[8], c[16], c[6] + c[7] + c[9] + c[10] + c[11] + c[12] + c[13] + c[14] + c[15] + c[17],
+	    (unsigned long long)__atomic_exchange_n(&mmap_local, 0, __ATOMIC_RELAXED));
+	if (n > 0 && n < (int)sizeof(text)) {
+		size_t returned = 0;
+		(void)IOConnectCallStructMethod(connection, 0x102, text, (size_t)n + 1, NULL, &returned);
+	}
+	uint64_t f[10];
+	for (int i = 0; i < 10; i++) {
+		f[i] = __atomic_exchange_n(&sbdrm_flush_reason[i], 0, __ATOMIC_RELAXED);
+	}
+	n = snprintf(text, sizeof(text), "drm[%d] batches by why: lru %llu fresh %llu dep-writer %llu dep-readers %llu "
+	    "flush-all %llu flush-writer %llu flush-users %llu; non-empty %llu; renamed %llu", getpid(), f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
+	if (n > 0 && n < (int)sizeof(text)) {
+		size_t returned = 0;
+		(void)IOConnectCallStructMethod(connection, 0x102, text, (size_t)n + 1, NULL, &returned);
+	}
+}
+
 int
 drmIoctl(int fd, unsigned long request, void *arg)
 {
@@ -295,6 +354,35 @@ drmIoctl(int fd, unsigned long request, void *arg)
 	uint32_t selector;
 
 	(void)fd;
+	static int kmadvise = -1;
+	if (kmadvise < 0) {
+		kmadvise = getenv("STARBITE_DRM_KMADVISE") != NULL;
+	}
+	if (nr >= DRM_COMMAND_BASE && nr - DRM_COMMAND_BASE == 8 && IOCPARM_LEN(request) >= 12 && !kmadvise) {
+		((uint32_t *)arg)[2] = 1;                       /* MADVISE: retained */
+		count_and_report(8);
+		return 0;
+	}
+	/*
+	 * MMAP_BO's answer is the kernel's mapping of the buffer, made once and kept until GEM_CLOSE
+	 * (StarbiteMali mmapBO); Panfrost asks again every time it takes a buffer out of its cache. Remember it per handle.
+	 */
+	if (nr >= DRM_COMMAND_BASE && nr - DRM_COMMAND_BASE == 3 && IOCPARM_LEN(request) >= 16) {
+		uint32_t h = ((uint32_t *)arg)[0];
+		uint64_t at = h < MMAP_CACHE ? __atomic_load_n(&mmap_cache[h], __ATOMIC_RELAXED) : 0;
+		if (at != 0) {
+			((uint64_t *)arg)[1] = at;
+			__atomic_fetch_add(&mmap_local, 1, __ATOMIC_RELAXED);
+			count_and_report(3);
+			return 0;
+		}
+	}
+	if (request == DRM_IOCTL_GEM_CLOSE) {
+		uint32_t h = ((uint32_t *)arg)[0];
+		if (h < MMAP_CACHE) {
+			__atomic_store_n(&mmap_cache[h], 0, __ATOMIC_RELAXED);
+		}
+	}
 	if (nr >= DRM_COMMAND_BASE) {
 		selector = nr - DRM_COMMAND_BASE;
 	} else if (request == DRM_IOCTL_GEM_CLOSE) {
@@ -306,10 +394,14 @@ drmIoctl(int fd, unsigned long request, void *arg)
 		errno = ENOSYS;
 		return -1;
 	}
+	count_and_report(selector);
 	int error = call(selector, arg, IOCPARM_LEN(request));
 	if (error != 0) {
 		errno = error;
 		return -1;
+	}
+	if (selector == 3 && IOCPARM_LEN(request) >= 16 && ((uint32_t *)arg)[0] < MMAP_CACHE) {
+		__atomic_store_n(&mmap_cache[((uint32_t *)arg)[0]], ((uint64_t *)arg)[1], __ATOMIC_RELAXED);
 	}
 	return 0;
 }

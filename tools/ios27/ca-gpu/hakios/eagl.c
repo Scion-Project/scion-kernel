@@ -234,6 +234,7 @@ struct image {
 	bool painted;                   /* something has been drawn into it (it is a target in fact, not only in name) */
 	unsigned looked;                /* ... the frame in which that memory was last looked at, */
 	uint64_t sum;                   /* ... and what it added up to */
+	uint64_t sum_sparse;            /* every 32nd word of it, for the frames in between */
 	GLenum to, internal, format, type;
 	uint32_t plane, seed;
 	GLsizei width, height;
@@ -659,11 +660,40 @@ surface_changed(struct eagl *e, struct image *image)
 		return false;
 	}
 	image->looked = e->frames + 1;
+	/*
+	 * Reading a whole surface each frame was ~7% of backboardd's time (the surfaces are
+	 * uncached memory). Above 64 KB: in full every 32nd frame, else every 32nd word (and the last
+	 * one); a change only the full sum sees shows at most 31 frames late. SBGL_FULLHASH=1 in the
+	 * environment: in full every frame, as before.
+	 */
+	static int fullhash = -1;
+	if (fullhash < 0) {
+		fullhash = getenv("SBGL_FULLHASH") != NULL;
+	}
+	uint64_t sparse = size;
+	for (size_t at = 0; at + 8 <= size; at += 256) {
+		memcpy(&word, base + at, 8);
+		sparse = (sparse ^ word) * 0x9e3779b97f4a7c15ull;
+		sparse ^= sparse >> 29;
+	}
+	if (size >= 8) {
+		memcpy(&word, base + size - 8, 8);
+		sparse = (sparse ^ word) * 0x9e3779b97f4a7c15ull;
+	}
+	if (size > 65536 && (e->frames % 32) != 0 && !fullhash) {
+		if (sparse == image->sum_sparse) {
+			return false;
+		}
+		image->sum_sparse = sparse;
+		image->sum = 0;                 /* the next full look takes it as changed: one more copy at most */
+		return true;
+	}
 	for (size_t at = 0; at + 8 <= size; at += 8) {
 		memcpy(&word, base + at, 8);
 		sum = (sum ^ word) * 0x9e3779b97f4a7c15ull;
 		sum ^= sum >> 29;
 	}
+	image->sum_sparse = sparse;
 	if (sum == image->sum) {
 		return false;
 	}

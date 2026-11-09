@@ -1,0 +1,99 @@
+Panfrost: count why batches are submitted (pan_job.c), for starbite_drm.c's STARBITE_DRM_STATS=1 report
+
+lru, fresh, dep-writer, dep-readers, flush-all, flush-writer, flush-users, non-empty, renamed. One relaxed atomic add per
+submit. The counters live in tools/ios27/mesa-ios/starbite-drm/starbite_drm.c (the patch set's Panfrost needs it anyway,
+panfrost-ios.patch). Mesa 25.0.7, MIT like Mesa.
+
+--- a/src/gallium/drivers/panfrost/pan_job.c
++++ b/src/gallium/drivers/panfrost/pan_job.c
+@@ -155,6 +155,10 @@
+    BITSET_CLEAR(ctx->batches.active, batch_idx);
+ }
+ 
++/* why batches get submitted (starbite_drm.c reports them on the console every 10 s) */
++extern uint64_t sbdrm_flush_reason[10];
++#define SB_FLUSH(i) __atomic_fetch_add(&sbdrm_flush_reason[i], 1, __ATOMIC_RELAXED)
++
+ static void panfrost_batch_submit(struct panfrost_context *ctx,
+                                   struct panfrost_batch *batch);
+ 
+@@ -183,6 +187,7 @@
+    /* The selected slot is used, we need to flush the batch */
+    if (batch->seqnum) {
+       perf_debug(ctx, "Flushing batch due to seqnum overflow");
++      SB_FLUSH(0);
+       panfrost_batch_submit(ctx, batch);
+    }
+ 
+@@ -241,6 +246,7 @@
+ 
+    if (batch->draw_count + batch->compute_count > 0) {
+       perf_debug(ctx, "Flushing the current FBO due to: %s", reason);
++      SB_FLUSH(1);
+       panfrost_batch_submit(ctx, batch);
+       batch = panfrost_get_batch(ctx, &ctx->pipe_framebuffer);
+    }
+@@ -273,8 +279,10 @@
+    struct panfrost_batch *writer = entry ? entry->data : NULL;
+ 
+    /* Both reads and writes flush the existing writer */
+-   if (writer != NULL && writer != batch)
++   if (writer != NULL && writer != batch) {
++      SB_FLUSH(2);
+       panfrost_batch_submit(ctx, writer);
++   }
+ 
+    /* Writes (only) flush readers too */
+    if (writes) {
+@@ -287,8 +295,10 @@
+             continue;
+ 
+          /* Submit if it's a user */
+-         if (panfrost_batch_uses_resource(batch, rsrc))
++         if (panfrost_batch_uses_resource(batch, rsrc)) {
++            SB_FLUSH(3);
+             panfrost_batch_submit(ctx, batch);
++         }
+       }
+    }
+ }
+@@ -656,6 +666,7 @@
+    /* Nothing to do! */
+    if (!has_frag && batch->compute_count == 0 && !batch->has_time_query)
+       goto out;
++   SB_FLUSH(7);                 /* batches that do go to the GPU */
+ 
+    if (batch->key.zsbuf && has_frag) {
+       struct pipe_surface *surf = batch->key.zsbuf;
+@@ -723,11 +734,14 @@
+    if (!batch)
+       return;
+ 
++   SB_FLUSH(4);
+    panfrost_batch_submit(ctx, batch);
+ 
+    for (unsigned i = 0; i < PAN_MAX_BATCHES; i++) {
+-      if (ctx->batches.slots[i].seqnum)
++      if (ctx->batches.slots[i].seqnum) {
++         SB_FLUSH(4);
+          panfrost_batch_submit(ctx, &ctx->batches.slots[i]);
++      }
+    }
+ }
+ 
+@@ -739,6 +753,7 @@
+ 
+    if (entry) {
+       perf_debug(ctx, "Flushing writer due to: %s", reason);
++      SB_FLUSH(5);
+       panfrost_batch_submit(ctx, entry->data);
+    }
+ }
+@@ -756,6 +771,7 @@
+          continue;
+ 
+       perf_debug(ctx, "Flushing user due to: %s", reason);
++      SB_FLUSH(6);
+       panfrost_batch_submit(ctx, batch);
+    }
+ }

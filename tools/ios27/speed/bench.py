@@ -58,5 +58,5 @@ for t, l in L:
         sk[m.group(1)] = sk.get(m.group(1), 0) + 1
 print('self-SIGKILL', sum(sk.values()), dict(sorted(sk.items(), key=lambda x: -x[1])[:15]))
 for t, l in L:
-    if re.search(r'PREWARM|scripted input done|GPU ASYNC|FAILED|GPU reset|panic', l):
+    if re.search(r'PREWARM|scripted input done|GPU ASYNC|FAILED|GPU reset|panic|recommended cores|canary|SWEET PROF: on', l):
         print('%.1f %s' % (t - (T0 or S), l[:200]))

@@ -9,20 +9,22 @@
 # Homebrew bison (macOS's 2.3 is too old), flex.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
-HERE=$ROOT/tools/mesa-ios
+HERE=$ROOT/tools/ios27/mesa-ios
 B=$ROOT/build/mesa-ios
 VERSION=25.0.7
 SHA256=592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode_16.4.app/Contents/Developer}
 mkdir -p "$B"
 cd "$B"
-stamp=$(cat "$HERE"/*.patch | shasum -a 256 | cut -c1-16)
+# the Mesa 25.0.7 patches (mesa26-*.patch are for mk-panvk26-ios.sh); panfrost-opt-*: the optimisation run (docs/ios27/OPTIMISE.md)
+PATCHES=("$HERE"/panfrost-*.patch "$HERE"/panvk-*.patch)
+stamp=$(cat "${PATCHES[@]}" "$HERE"/starbite-drm/* | shasum -a 256 | cut -c1-16)
 if [ ! -d mesa-$VERSION ] || [ "$(cat mesa-$VERSION/.starbite-patches 2>/dev/null)" != "$stamp" ]; then
 	[ -f mesa-$VERSION.tar.xz ] || curl -sL --fail -o mesa-$VERSION.tar.xz https://archive.mesa3d.org/mesa-$VERSION.tar.xz
 	echo "$SHA256  mesa-$VERSION.tar.xz" | shasum -a 256 -c --quiet
 	rm -rf mesa-$VERSION build-pan
 	tar xJf mesa-$VERSION.tar.xz
-	for p in "$HERE"/*.patch; do patch -s -p1 -d mesa-$VERSION < "$p"; done
+	for p in "${PATCHES[@]}"; do patch -s -p1 -d mesa-$VERSION < "$p"; done
 	echo "$stamp" > mesa-$VERSION/.starbite-patches
 fi
 rm -rf mesa-$VERSION/src/starbite-drm
