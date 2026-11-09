@@ -17,8 +17,10 @@ starlte/0026-stage-hfs.sh
 starlte/blacktop/00_setup_coreentitlements.sh
 # what the series adds as files (xnu/files-12377/, the tree's own layout): after the staging above, before the patches that hook them in
 files xnu/files-12377
-# Scion's own driver files, from where they live in this repository (drivers/, socs/, xnu/files/), byte for byte as the series booted with them
+# Scion's own driver files, from where they live in this repository (drivers/, socs/, xnu/files/), byte for byte as the series booted with them (the panel driver is then taken to this tree by 0428)
 copy drivers/soc/exynos/hakios.exynos_hsi2c.c bsd/dev/hakios.exynos_hsi2c.c
+copy drivers/display/panel/hakios.s6e3ha8.c bsd/dev/hakios.s6e3ha8.c
+copy drivers/display/panel/hakios.s6e3ha8_gamma.h bsd/dev/hakios.s6e3ha8_gamma.h
 copy drivers/usb/hakios.exynos_usb.c bsd/dev/hakios.exynos_usb.c
 copy drivers/usb/hakios.usb_acm.h bsd/dev/hakios.usb_acm.h
 copy drivers/usb/hakios.usb_glue.h bsd/dev/hakios.usb_glue.h
@@ -205,3 +207,7 @@ starlte/0424-starlte-dpu-scanout.patch
 starlte/0425-starlte-m3-soft-unpin.patch
 # speed: boot-time and trap-cost changes, behind boot-arg sweetspeed=<mask> (default 0; docs/ios27/SPEED.md); the emulations are in xnu/files-12377/osfmk/arm64/sweet_a64e.c
 starlte/0426-starlte-speed-hooks.patch
+# the night run: exit and kill log, async GPU submits, prewarm, kqworkloop limits, panel brightness, 60 Hz timer; behind boot-arg sweetspeed bits 32 and up (docs/ios27/NIGHT.md)
+starlte/0427-starlte-night-hooks.patch
+# Scion's S6E3HA8 panel driver (copied above, byte for byte) taken to this tree: levels and nits for the framebuffer, no backlight service
+starlte/0428-starlte-panel-driver.patch
