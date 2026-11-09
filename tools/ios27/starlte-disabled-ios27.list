@@ -1,0 +1,9 @@
+# iOS 27.0.1 (iPhone 11 root) on the S9, on top of tools/ios27/starlte-disabled.list:
+# the busiest daemons of the first boot with the GPU path (STARLTE TOP, four A55 at about 370 %), and what the next boots showed.
+# tools/ios27/starlte-disable-jobs.py ROOT tools/ios27/starlte-disabled.list, then this file; the removed jobs stay in launchd-disabled.plist.
+com.apple.accessibility.axassetsd   # 135-160 % with no network
+com.apple.logd                      # 45-79 %
+com.apple.sharingd                  # 47-58 %
+com.apple.fileindexerd              # SIGTRAP crash loop
+com.apple.modelcatalogd             # 4-41 %
+com.apple.modelmanagerd             # 13-20 %

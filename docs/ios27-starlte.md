@@ -29,7 +29,7 @@ builder's own, from their own IPSW; nothing of Apple's is in this repository.
 | `xnuloader/sboot/` | the loader S-Boot starts (boot menu, OS store, recovery menu, USB console and fastboot subset); Scion's own path boots through Mu-Silicium's UEFI and `xnuloader/`, which this leaves alone |
 | `tools/ios27/` | build, packing and test tools (`build-xnu-12377.sh`, `-ios.sh`, `mkpayload-ios26.sh`, `make-xnu-boot.sh`, the ADT makers, `a64e/`, `gpu/`, `mesa-ios/`, `ca-gpu/`) and wardevsa's `herolte/` packing tools |
 | `userland/src/sbca.c` | CoreAnimation's renderer through OpenGL ES on the Mali-G72 (Mesa Panfrost behind HakiOS's EAGL bridge), with iOS 27.0.1's addresses; the bridge's iOS 27 table is `tools/ios27/ca-gpu/hakios/` |
-| `docs/ios27/` | `IOS27-TARGET.md` (the iPhoneOS-target build and what it changes), `PARITY.md` (against Scion's 16.5 kernel), and the author's pages on the loader's USB console and fastboot, the microSD root and the recovery menu |
+| `docs/ios27/` | `IOS27-TARGET.md` (the iPhoneOS-target build and what it changes), `PARITY.md` (against Scion's 16.5 kernel), `GPU-PATH.md` (what the GPU track found), and the author's pages on the loader's USB console and fastboot, the microSD root and the recovery menu |
 
 **Layers, and whose they are** (`LICENSES.md` has the licences): ios-sweet (dipa-studio, MIT) `0003`-`0081`; ios-a5xelte (orhunnx and A5XELTE
 contributors, MIT) `0082`-`0128`; the Galaxy S7 layer of ios-a5xelte (wardevsa) `0200`-`0238`, used and published with the author's
