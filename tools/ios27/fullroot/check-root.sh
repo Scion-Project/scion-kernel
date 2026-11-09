@@ -44,9 +44,10 @@ print('info  jobs whose executable is not on the root: %d %s' % (len(miss), [m[0
 both = [dis[k].get('Label') for k in dis if k in jobs]; print('ok    disabled jobs not in launchd.plist' if not both else 'FAIL  in both: %s' % both); bad |= bool(both)
 for need in ('com.apple.backboardd', 'com.apple.SpringBoard', 'com.apple.configd', 'com.apple.lsd', 'com.apple.runningboardd', 'com.herolte.autorun'):
     has = any(j.get('Label') == need for j in jobs.values()); print(('ok    ' if has else 'FAIL  ') + 'job ' + need); bad |= (not has)
+ov = plistlib.load(open(r + '/private/var/db/com.apple.xpc.launchd/disabled.plist', 'rb'))
 for gone in ('com.apple.CommCenter', 'com.apple.bluetoothd', 'com.apple.imagent', 'com.apple.rapportd', 'com.apple.terminusd'):
-    has = any(j.get('Label') == gone for j in jobs.values()); print(('FAIL  still enabled: ' if has else 'ok    off: ') + gone); bad |= has
-ov = plistlib.load(open(r + '/private/var/db/com.apple.xpc.launchd/disabled.plist', 'rb')); print('info  launchctl overrides:', len(ov))
+    has = any(j.get('Label') == gone for j in jobs.values()) and ov.get(gone) is not True; print(('FAIL  still enabled: ' if has else 'ok    off: ') + gone); bad |= has
+print('info  launchctl overrides:', len(ov))
 sys.exit(1 if bad else 0)
 PY
 # prefs

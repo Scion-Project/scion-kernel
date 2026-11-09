@@ -21,5 +21,6 @@ setkeys('.GlobalPreferences.plist', {'CAEnableFramebufferCompression': False, 'C
 setkeys('com.apple.PosterBoard.plist', {'CAEnableDeepFramebuffer': False, 'CAEnableFramebufferCompression': False,
         'CAEnableIOSurfaceCompression': False})
 setkeys('com.apple.springboard.plist', {'BKNoWatchdogs': True, 'disableWatchdog': True, 'FBDisableWatchdog': True, 'SBDisableWatchdog': True})
+setkeys('com.apple.frontboard.plist', {'FBDisableWatchdog': True})
 setkeys('com.apple.BacklightServices.plist', {'backlightWatchdogsDisabled': True, 'BacklightWatchdogsDisabled': True,
         'ignoreWatchdogPanicRequests': True})

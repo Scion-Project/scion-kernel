@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""edit-launchd.py ROOT LISTS_DIR [--hogs] : launchd job edits of the full root (idempotent).
+"""edit-launchd.py ROOT LISTS_DIR [--set bp|min] [--hogs] : launchd job edits of the full root (declarative + idempotent: everything
+previously moved to launchd-disabled.plist is put back first, then the chosen set is moved out again).
   1. hardware list (daemons-hw.list): jobs removed from launchd.plist, kept in launchd-disabled.plist (restorable)
-  2. crash-loop list (daemons-crashloop.list) [+ daemons-hogs.list with --hogs]: same, by exact Label
+  2. --set min : crash-loop list (daemons-crashloop.list) [+ daemons-hogs.list with --hogs], by exact Label
+     --set bp  : exactly the job set of the owner build "bp" (daemons-bp.keys: hardware + crash loops + the 86 speed trims + CPU hogs)
   3. _PanicOnCrash dropped from every job (a crash loop must never panic the kernel on this port)
   4. launchd-override list -> /private/var/db/com.apple.xpc.launchd/disabled.plist
 """
 import os, plistlib, sys
 root, lists = sys.argv[1], sys.argv[2]
 hogs = '--hogs' in sys.argv
+DSET = sys.argv[sys.argv.index('--set') + 1] if '--set' in sys.argv else 'min'
+assert DSET in ('bp', 'min'), DSET
 def rd(p):
     return [l.split('#')[0].strip() for l in open(p) if l.split('#')[0].strip()]
 lp = root + '/System/Library/xpc/launchd.plist'; dp = root + '/System/Library/xpc/launchd-disabled.plist'
@@ -15,12 +19,15 @@ raw = open(lp, 'rb').read(); d = plistlib.loads(raw)
 try: dis = plistlib.load(open(dp, 'rb'))
 except FileNotFoundError: dis = {}
 jobs = d['LaunchDaemons']
+for k, v in dis.items(): jobs.setdefault(k, v)      # declarative: start from every job the image has
+dis = {}
 hw = rd(lists + '/daemons-hw.list')
-exact = set(rd(lists + '/daemons-crashloop.list')) | (set(rd(lists + '/daemons-hogs.list')) if hogs else set())
+exact = set(rd(lists + '/daemons-crashloop.list')) | (set(rd(lists + '/daemons-hogs.list')) if hogs else set()) if DSET == 'min' else set()
+keys = set(rd(lists + '/daemons-bp.keys')) if DSET == 'bp' else set()
 moved = []
 for k in list(jobs):
     lab = jobs[k].get('Label', '') if isinstance(jobs[k], dict) else ''
-    if any(h in k or h in lab for h in hw) or lab in exact:
+    if any(h in k or h in lab for h in hw) or lab in exact or k in keys:
         dis[k] = jobs.pop(k); moved.append(lab or k)
 pc = 0
 for k, j in jobs.items():

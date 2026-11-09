@@ -39,5 +39,12 @@ for t, l in rows:
 if tops:
     vals = [v for _, v, _ in tops]; print(f'STARLTE TOP samples {len(tops)}: first {vals[:3]} median {statistics.median(vals):.0f} last10 median {statistics.median(vals[-10:]):.0f}')
     for t, v, s in tops[-3:]: print('  ', rel(t), v, s)
+if tops and tf:
+    for a, b in ((120, 180), (180, 300), (300, 600)):
+        w = [v for t, v, _ in tops if t and a <= t - tf < b]
+        if w: print(f'CPU (STARLTE TOP all cores, 100% = one core) {a}-{b} s after first frame: mean {sum(w)/len(w):.0f}%, n={len(w)}  (= {sum(w)/len(w)/8:.1f}% of 8 cores)')
+mems = [(t, l) for t, l in rows if 'STARLTE MEM:' in l]
+if mems:
+    for lab, (t, l) in (('first', mems[0]), ('mid', mems[len(mems)//2]), ('last', mems[-1])): print(f'MEM {lab} ({rel(t)}):', l[l.find('free'):][:160])
 mem = [l for t, l in rows if 'cpufreq_gov:' in l and ' s: lit' in l]
 print('last cpufreq_gov:', (mem[-1][:200] if mem else None))
