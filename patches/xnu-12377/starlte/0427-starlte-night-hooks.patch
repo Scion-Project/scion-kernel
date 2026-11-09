@@ -1,0 +1,1129 @@
+From: Claudius <claudiusthebot@gmail.com>
+Date: Mon, 9 Nov 2026 06:00:00 +0000
+Subject: [PATCH] S9: the night run changes (exit and kill log, async GPU submits, prewarm, kqworkloop limits, panel brightness, 60 Hz timer)
+
+The kernel changes of the perf2 and night runs (docs/ios27/NIGHT.md), every one behind a bit of the boot-arg
+sweetspeed=<mask> (default 0: nothing changes; the bits are listed in xnu/files-12377/osfmk/arm64/sweet_a64e.c):
+  32    exit and kill log, SIGKILL backtrace, spawn limits log   (kern_exit.c, kern_sig.c, kern_exec.c, task.c)
+  64    asynchronous GPU submits (StarbiteMali 0x105/0x106, starlte_gpu.c) and HakiosWaitsForGPU
+  128   page-cache prewarm of the GL stack and the UI daemons    (bsd_init.c)
+  256   ignore launchd's kqworkloop limits at spawn              (kern_exec.c)
+  512   the S6E3HA8 panel (bsd/dev/hakios.s6e3ha8.c, patch 0428), iOS 27 swap brightness, brightness setProperties
+  1024  an absolute 60 Hz deadline for the framebuffer timer      (SweetFramebuffer.cpp)
+  2048  CoreAnimation pacing aids (sweetfb_cav)                   (SweetFramebuffer.cpp)
+  4096  scripted frame-rate input, 8192 scripted brightness-slider input   (starlte_touch.c)
+---
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 0648c55..b4b12a4 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -123,6 +123,7 @@ bsd/dev/hakios.exynos_tmu.c		standard
+ bsd/dev/hakios.scion_gov.c		standard
+ bsd/dev/hakios.exynos_pcie.c		standard
+ bsd/dev/hakios.exynos_dpu.c		standard
++bsd/dev/hakios.s6e3ha8.c		standard
+ bsd/dev/herolte_battery.c		standard
+ bsd/dev/herolte_gpu.c			standard
+ bsd/dev/a5xelte_keys.c			standard
+diff --git a/bsd/dev/starlte_gpu.c b/bsd/dev/starlte_gpu.c
+index 92ae0d4..2ea7e66 100644
+--- a/bsd/dev/starlte_gpu.c
++++ b/bsd/dev/starlte_gpu.c
+@@ -323,10 +323,17 @@ static bool sg_run_quiet;
+ static unsigned sg_run_as;
+ static unsigned sg_run_polls = 20000;
+ 
++/* an app chain may still be on the GPU (async submits, stage 6): finish it first. */
++static bool sgu_busy;
++static int sgu_retire_locked(bool block);
++
+ /* Start the chain at GPU VA job_va on slot js, wait (bounded), log. */
+ static bool
+ sg_run(unsigned js, uint64_t job_va, uint32_t affinity, const char *what)
+ {
++	if (sgu_busy) {
++		(void)sgu_retire_locked(true);
++	}
+ 	uint32_t slot = JS_BASE(js);
+ 	sg_wr(sg_gpu, MMU_IRQ_CLEAR, 0xffffffffu);
+ 	sg_wr(sg_gpu, JOB_IRQ_CLEAR, 0xffffffffu);
+@@ -1072,6 +1079,143 @@ starlte_gpu_user_submit(uint64_t jc, uint32_t requirements)
+ 	return ok ? 0 : (ns >= 1900ull * NSEC_PER_MSEC ? ETIMEDOUT : EIO);
+ }
+ 
++/*
++ * Asynchronous submits. A client that asks for it (StarbiteMali SBM_ASYNC, boot-arg
++ * sbmasync=1) gets its chain started and the call back at once; the chain is finished ("retired")
++ * by whoever comes next: the next submit (one chain on the GPU at a time, in order), a wait (WAIT_BO,
++ * a fence, GEM_CLOSE) or the kernel's own jobs (sg_run, the present). Polled, as before: no IRQ.
++ */
++static unsigned sgu_busy_js;
++static uint64_t sgu_busy_t0, sgu_busy_jc;
++static uint32_t sgu_busy_req;
++static uint64_t sgu_seq_sub, sgu_seq_done;
++static uint64_t sgu_as_n, sgu_as_prev_waits, sgu_as_prev_ns, sgu_as_gpu_ns, sgu_as_gpu_max, sgu_as_t0;
++
++/* sg_lock held. 0: nothing on the GPU any more; EBUSY: still running (block false); EIO: failed. */
++static int
++sgu_retire_locked(bool block)
++{
++	if (!sgu_busy) {
++		return 0;
++	}
++	unsigned js = sgu_busy_js;
++	uint64_t deadline = 0;
++	nanoseconds_to_absolutetime(2000ull * NSEC_PER_MSEC, &deadline);
++	deadline += sgu_busy_t0;
++	uint32_t jirq = 0, mirq = 0, girq = 0;
++	for (unsigned spins = 0;; spins++) {
++		jirq = sg_rd(sg_gpu, JOB_IRQ_RAWSTAT);
++		mirq = sg_rd(sg_gpu, MMU_IRQ_RAWSTAT);
++		girq = sg_rd(sg_gpu, GPU_IRQ_RAWSTAT);
++		if ((jirq & ((1u << js) | (1u << (js + 16)))) || mirq || (girq & 0x81)) {
++			break;
++		}
++		if (!block) {
++			return EBUSY;
++		}
++		if (mach_absolute_time() >= deadline) {
++			break;
++		}
++		delay(spins < 1500 ? 1 : 20);
++	}
++	uint64_t ns = 0;
++	absolutetime_to_nanoseconds(mach_absolute_time() - sgu_busy_t0, &ns);
++	bool ok = (jirq & (1u << js)) && !(jirq & (1u << (js + 16))) && !mirq && !(girq & 0x81);
++	if (!ok) {
++		printf("STARLTE GPU USER: async chain %#llx req %#x FAILED after %llu us: irq=%#x mmu=%#x gpu=%#x "
++		    "js_status=%#x as_fault=%#x@%#x\n", sgu_busy_jc, sgu_busy_req, ns / 1000, jirq, mirq, girq,
++		    sg_rd(sg_gpu, JS_BASE(js) + 0x24), sg_rd(sg_gpu, ASN(1) + 0x1c), sg_rd(sg_gpu, ASN(1) + 0x20));
++	}
++	sg_wr(sg_gpu, JOB_IRQ_CLEAR, 0xffffffffu);
++	sg_wr(sg_gpu, MMU_IRQ_CLEAR, 0xffffffffu);
++	sgu_busy = false;
++	sgu_seq_done = sgu_seq_sub;
++	sgu_jobs++;
++	sgu_as_gpu_ns += ns;
++	if (ns > sgu_as_gpu_max) {
++		sgu_as_gpu_max = ns;
++	}
++	if (!ok) {
++		sgu_faults++;
++		sgu_recover();
++	}
++	return ok ? 0 : EIO;
++}
++
++int starlte_gpu_user_submit2(uint64_t jc, uint32_t requirements, bool async, uint64_t *seq);
++int starlte_gpu_user_wait_seq(uint64_t seq, bool block);
++
++/* Start the chain (after the one before it); async false: and wait for it, as starlte_gpu_user_submit. */
++int
++starlte_gpu_user_submit2(uint64_t jc, uint32_t requirements, bool async, uint64_t *seq)
++{
++	if (!sgu_ready) {
++		return ENODEV;
++	}
++	lck_mtx_lock(&sg_lock);
++	uint64_t t0 = mach_absolute_time(), ns = 0;
++	if (sgu_busy) {
++		(void)sgu_retire_locked(true);
++		absolutetime_to_nanoseconds(mach_absolute_time() - t0, &ns);
++		sgu_as_prev_waits++;
++		sgu_as_prev_ns += ns;
++	}
++	unsigned js = (requirements & 1) ? 0 : 1;
++	uint32_t slot = JS_BASE(js);
++	sg_wr(sg_gpu, MMU_IRQ_CLEAR, 0xffffffffu);
++	sg_wr(sg_gpu, JOB_IRQ_CLEAR, 0xffffffffu);
++	sg_wr(sg_gpu, slot + 0x40, (uint32_t)jc);                       /* HEAD_NEXT */
++	sg_wr(sg_gpu, slot + 0x44, (uint32_t)(jc >> 32));
++	sg_wr(sg_gpu, slot + 0x50, sgp_shaders);                        /* AFFINITY_NEXT */
++	sg_wr(sg_gpu, slot + 0x54, 0);
++	sg_wr(sg_gpu, slot + 0x58, (8u << 16) | (3u << 8) | (3u << 12) | 1u);   /* AS1, flushes, priority 8 */
++	sgu_busy_js = js;
++	sgu_busy_jc = jc;
++	sgu_busy_req = requirements;
++	sgu_busy_t0 = mach_absolute_time();
++	sg_wr(sg_gpu, slot + 0x60, 1);                                  /* COMMAND_NEXT START */
++	sgu_busy = true;
++	*seq = ++sgu_seq_sub;
++	int ret = 0;
++	if (!async) {
++		ret = sgu_retire_locked(true);
++	}
++	sgu_as_n++;
++	if (sgu_as_t0 == 0) {
++		sgu_as_t0 = t0;
++	}
++	uint64_t window = 0;
++	absolutetime_to_nanoseconds(t0 - sgu_as_t0, &window);
++	if (window >= 10ull * NSEC_PER_SEC && sgu_as_n >= 50) {
++		printf("STARLTE GPU ASYNC (%llu s): %llu chains, gpu avg %llu us (max %llu), next submit waited %llu x avg %llu us\n",
++		    window / NSEC_PER_SEC, sgu_as_n, sgu_as_gpu_ns / sgu_as_n / 1000, sgu_as_gpu_max / 1000, sgu_as_prev_waits,
++		    sgu_as_prev_waits ? sgu_as_prev_ns / sgu_as_prev_waits / 1000 : 0);
++		sgu_as_n = sgu_as_prev_waits = sgu_as_prev_ns = sgu_as_gpu_ns = sgu_as_gpu_max = 0;
++		sgu_as_t0 = t0;
++	}
++	lck_mtx_unlock(&sg_lock);
++	return ret;
++}
++
++/* Wait until chain `seq` (0: every chain submitted so far) is done. 0, or ETIMEDOUT (block false and still running). */
++int
++starlte_gpu_user_wait_seq(uint64_t seq, bool block)
++{
++	if (!sgu_ready) {
++		return 0;
++	}
++	lck_mtx_lock(&sg_lock);
++	if (seq == 0) {
++		seq = sgu_seq_sub;
++	}
++	if (seq > sgu_seq_done) {
++		(void)sgu_retire_locked(block);
++	}
++	int ret = seq <= sgu_seq_done ? 0 : ETIMEDOUT;
++	lck_mtx_unlock(&sg_lock);
++	return ret;
++}
++
+ static void
+ sg_jobs(vm_offset_t pmu)
+ {
+diff --git a/bsd/dev/starlte_touch.c b/bsd/dev/starlte_touch.c
+index f54fb49..9d50712 100644
+--- a/bsd/dev/starlte_touch.c
++++ b/bsd/dev/starlte_touch.c
+@@ -879,6 +879,50 @@ static const struct st_step st_script_tour[] = {
+ 	{ 335, 1, 0, 0, 0, 0 },                 /* home (shot 360) */
+ };
+ 
++/*
++ * boot-arg sweetspeed&4096: the same input every boot, to compare frame rates: unlock,
++ * 20 home screen page swipes (60-90 s), Settings scrolled up and down (100-130 s), Home.
++ */
++static const struct st_step st_script_bench[] = {
++	{ 45, 1, 0, 0, 0, 0 },                  /* Home: unlock */
++	{ 55, 1, 0, 0, 0, 0 },                  /* Home again: first page of the home screen */
++	{ 60, 0, 1300, 1500, 150, 1500 }, { 62, 0, 150, 1500, 1300, 1500 },
++	{ 64, 0, 1300, 1500, 150, 1500 }, { 66, 0, 150, 1500, 1300, 1500 },
++	{ 68, 0, 1300, 1500, 150, 1500 }, { 70, 0, 150, 1500, 1300, 1500 },
++	{ 72, 0, 1300, 1500, 150, 1500 }, { 74, 0, 150, 1500, 1300, 1500 },
++	{ 76, 0, 1300, 1500, 150, 1500 }, { 78, 0, 150, 1500, 1300, 1500 },
++	{ 80, 0, 1300, 1500, 150, 1500 }, { 82, 0, 150, 1500, 1300, 1500 },
++	{ 84, 0, 1300, 1500, 150, 1500 }, { 86, 0, 150, 1500, 1300, 1500 },
++	{ 88, 0, 1300, 1500, 150, 1500 }, { 90, 0, 150, 1500, 1300, 1500 },
++	{ 95, 0, 556, 1406, 556, 1406 },        /* tap Settings */
++	{ 100, 0, 720, 2300, 720, 900 }, { 102, 0, 720, 900, 720, 2300 },
++	{ 104, 0, 720, 2300, 720, 900 }, { 106, 0, 720, 900, 720, 2300 },
++	{ 108, 0, 720, 2300, 720, 900 }, { 110, 0, 720, 900, 720, 2300 },
++	{ 112, 0, 720, 2300, 720, 900 }, { 114, 0, 720, 900, 720, 2300 },
++	{ 116, 0, 720, 2300, 720, 900 }, { 118, 0, 720, 900, 720, 2300 },
++	{ 120, 0, 720, 2300, 720, 900 }, { 122, 0, 720, 900, 720, 2300 },
++	{ 124, 0, 720, 2300, 720, 900 }, { 126, 0, 720, 900, 720, 2300 },
++	{ 128, 0, 720, 2300, 720, 900 }, { 130, 0, 720, 900, 720, 2300 },
++	{ 135, 1, 0, 0, 0, 0 },                 /* home screen */
++};
++
++/*
++ * boot-arg sweetspeed&8192: the brightness slider, blind. Unlock, Control Center (swipe down from the top right),
++ * vertical drags down then up at four columns of the middle band (one of them should be the brightness slider),
++ * ending bright; Home closes it. Canvas (x, y) -> panel (36 + 1.652 x, 1.652 y). Look for "SWEET FB: swap brightness".
++ */
++static const struct st_step st_script_bright[] = {
++	{ 45, 1, 0, 0, 0, 0 },                  /* Home: unlock */
++	{ 55, 1, 0, 0, 0, 0 },                  /* Home: first page */
++	{ 60, 0, 1380, 6, 1380, 1500 },         /* Control Center */
++	{ 66, 0, 812, 1156, 812, 1817 }, { 69, 0, 812, 1817, 812, 1156 },
++	{ 72, 0, 961, 1156, 961, 1817 }, { 75, 0, 961, 1817, 961, 1156 },
++	{ 78, 0, 1110, 1156, 1110, 1817 }, { 81, 0, 1110, 1817, 1110, 1156 },
++	{ 84, 0, 1258, 1156, 1258, 1817 }, { 87, 0, 1258, 1817, 1258, 1156 },
++	{ 90, 0, 664, 1156, 664, 1817 }, { 93, 0, 664, 1817, 664, 1156 },
++	{ 98, 1, 0, 0, 0, 0 },                  /* Home: closes it */
++};
++
+ static void
+ st_script_thread(void *arg, __unused wait_result_t wr)
+ {
+@@ -898,6 +942,8 @@ st_script_thread(void *arg, __unused wait_result_t wr)
+ 	case 2: script = (const struct st_step *)st_script_phone; count = sizeof(st_script_phone) / sizeof(st_script_phone[0]); break;
+ 	case 3: script = st_script_home; count = sizeof(st_script_home) / sizeof(st_script_home[0]); break;
+ 	case 4: script = st_script_tour; count = sizeof(st_script_tour) / sizeof(st_script_tour[0]); break;
++	case 5: script = st_script_bench; count = sizeof(st_script_bench) / sizeof(st_script_bench[0]); break;
++	case 6: script = st_script_bright; count = sizeof(st_script_bright) / sizeof(st_script_bright[0]); break;
+ 	default: script = (const struct st_step *)st_script; count = sizeof(st_script) / sizeof(st_script[0]); break;
+ 	}
+ 	for (unsigned i = 0; i < count; i++) {
+@@ -929,6 +975,7 @@ st_script_thread(void *arg, __unused wait_result_t wr)
+ 		}
+ 		sweet_hid_touch(f, 0, x1, y1);
+ 	}
++	printf("STARLTE TOUCH: scripted input done\n");
+ }
+ 
+ void
+@@ -937,8 +984,15 @@ starlte_touch_probe(void)
+ 	uint32_t on = 1;
+ 	thread_t thread;
+ 
+-	uint32_t script = 0;
+-	if (PE_parse_boot_argn("sweetswipe", &script, sizeof(script)) && script &&
++	extern uint32_t sweet_speed_flags(void);
++	uint32_t script = 0, sbx = sweet_speed_flags();
++	if ((sbx & 4096) != 0) {
++		script = 5;                     /* the bench input */
++	}
++	if ((sbx & 8192) != 0) {
++		script = 6;                     /* the brightness slider test */
++	}
++	if ((script != 0 || PE_parse_boot_argn("sweetswipe", &script, sizeof(script))) && script &&
+ 	    kernel_thread_start(st_script_thread, (void *)(uintptr_t)script, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
+diff --git a/bsd/dev/starlte_usbcon.c b/bsd/dev/starlte_usbcon.c
+index c0197c9..92ac7bb 100644
+--- a/bsd/dev/starlte_usbcon.c
++++ b/bsd/dev/starlte_usbcon.c
+@@ -123,7 +123,7 @@ void hakios_adsp_stop(void) {}
+ void hakios_max77705_usb_close(void);
+ void hakios_max77705_usb_close(void) {}
+ int hakios_panel_brightness(int level);
+-int hakios_panel_brightness(__unused int level) { return ENODEV; }
++/* the real one is bsd/dev/hakios.s6e3ha8.c now */
+ /* hakios_exynos_cpufreq_touch(): the CPU governor's, bsd/dev/hakios.exynos_cpufreq.c (a no-op without cpufreq_gov=1) */
+ int hakios_fb_scanned(uintptr_t *base, uint32_t *width, uint32_t *height, uint32_t *rowbytes, unsigned *index);
+ int hakios_fb_scanned(__unused uintptr_t *base, __unused uint32_t *width, __unused uint32_t *height,
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 4150446..6a86b09 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -484,6 +484,66 @@ bsd_rooted_ramdisk(void)
+  * of the tro_ucred field so that the uthread structure can be
+  * used like any other.
+  */
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++/*
++ * Boot-arg sweetspeed&128: read the big dylibs outside the shared cache that backboardd and SpringBoard load (the GL
++ * stack: libOSMesa is 16 MB) into the page cache as soon as the root is mounted. On a cold boot backboardd spent more
++ * than 10 s in dyld fix-ups of them (docs/ios27/NIGHT.md).
++ */
++static void
++sweet_prewarm_thread(__unused void *arg, __unused wait_result_t wr)
++{
++	static const char *const files[] = {
++		"/usr/local/starbite/lib/libOSMesa.8.dylib", "/usr/local/starbite/lib/libsbgl.dylib",
++		"/usr/lib/s.dylib", "/usr/lib/m.dylib", "/usr/libexec/backboardd",
++		"/System/Library/CoreServices/SpringBoard.app/SpringBoard",
++	};
++	const int chunk = 1024 * 1024;
++	char *buf = kalloc_data(chunk, Z_WAITOK);
++	if (buf == NULL) {
++		return;
++	}
++	uint64_t t0 = mach_absolute_time(), total = 0, ns = 0;
++	unsigned found = 0;
++	for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
++		vnode_t vp = NULLVP;
++		if (vnode_lookup(files[i], 0, &vp, vfs_context_kernel()) != 0) {
++			continue;
++		}
++		found++;
++		for (off_t off = 0;; off += chunk) {
++			int resid = 0;
++			if (vn_rdwr(UIO_READ, vp, buf, chunk, off, UIO_SYSSPACE, IO_NOAUTH,
++			    vfs_context_ucred(vfs_context_kernel()), &resid, kernproc) != 0) {
++				break;
++			}
++			total += (uint64_t)(chunk - resid);
++			if (resid != 0) {
++				break;
++			}
++		}
++		vnode_put(vp);
++	}
++	kfree_data(buf, chunk);
++	absolutetime_to_nanoseconds(mach_absolute_time() - t0, &ns);
++	printf("SWEET PREWARM: %u files, %llu KiB read into the page cache in %llu ms\n", found, total >> 10,
++	    ns / 1000000);
++}
++
++static void
++sweet_prewarm_start(void)
++{
++	extern uint32_t sweet_speed_flags(void);
++	thread_t th;
++	if ((sweet_speed_flags() & 128) == 0) {
++		return;
++	}
++	if (kernel_thread_start(sweet_prewarm_thread, NULL, &th) == KERN_SUCCESS) {
++		thread_deallocate(th);
++	}
++}
++#endif
++
+ void
+ bsd_init(void)
+ {
+@@ -1109,6 +1169,9 @@ bsd_init(void)
+ 		mountroot_post_hook();
+ 	}
+ #endif
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	sweet_prewarm_start();
++#endif
+ 
+ #if 0 /* not yet */
+ 	consider_zone_gc(FALSE);
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+index d4be575..0243af1 100644
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -5362,6 +5362,29 @@ bad:
+ 		}
+ 
+ #if CONFIG_PROC_RESOURCE_LIMITS
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++		/*
++		 * boot-arg sweetspeed&32 logs launchd's spawn resource limits; sweetspeed&256 drops the kqworkloop limits (their
++		 * hard-limit notification has no receiver here, so the "fatal port" kills the daemon at once from its own
++		 * context: runningboardd, lsd, SpringBoard restarts at boot; docs/ios27/NIGHT.md).
++		 */
++		extern uint32_t sweet_speed_flags(void);
++		static int sweet_lim_left = 150;
++		uint32_t sweet_sbx = sweet_speed_flags();
++		if (imgp->ip_px_sa != NULL && sweet_lim_left > 0 && (sweet_sbx & 32) != 0 &&
++		    (px_sa.psa_port_soft_limit | px_sa.psa_port_hard_limit | px_sa.psa_filedesc_soft_limit |
++		    px_sa.psa_filedesc_hard_limit | px_sa.psa_kqworkloop_soft_limit | px_sa.psa_kqworkloop_hard_limit) != 0) {
++			sweet_lim_left--;
++			printf("SWEET LIMITS: %s[%d] port %u/%u fd %u/%u kqwl %u/%u thr %u%s\n", p->p_comm, proc_getpid(p),
++			    px_sa.psa_port_soft_limit, px_sa.psa_port_hard_limit, px_sa.psa_filedesc_soft_limit,
++			    px_sa.psa_filedesc_hard_limit, px_sa.psa_kqworkloop_soft_limit, px_sa.psa_kqworkloop_hard_limit,
++			    (unsigned)px_sa.psa_thread_limit, (sweet_sbx & 256) ? " (kqwl dropped)" : "");
++		}
++		if ((sweet_sbx & 256) != 0) {
++			px_sa.psa_kqworkloop_soft_limit = 0;
++			px_sa.psa_kqworkloop_hard_limit = 0;
++		}
++#endif
+ 		if (imgp->ip_px_sa != NULL && (px_sa.psa_port_soft_limit > 0 || px_sa.psa_port_hard_limit > 0)) {
+ 			task_set_port_space_limits(new_task, (uint32_t)px_sa.psa_port_soft_limit,
+ 			    (uint32_t)px_sa.psa_port_hard_limit);
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index 138edec..12639ef 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2075,6 +2075,21 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
+ 	}
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	{
++		/* how every process ends (boot-arg sweetspeed&32) */
++		extern int sweet_exitlog_on(void);
++		static int eleft = 400;
++		if (eleft > 0 && p != initproc && sweet_exitlog_on()) {
++			eleft--;
++			char *d = exit_reason_get_string_desc(p->p_exit_reason);
++			printf("SWEET EXIT: %s[%d] signal %d exit %d reason ns %d code 0x%llx: %s\n", p->p_comm,
++			    proc_getpid(p), WTERMSIG(rv), WEXITSTATUS(rv),
++			    p->p_exit_reason ? (int)p->p_exit_reason->osr_namespace : -1,
++			    p->p_exit_reason ? p->p_exit_reason->osr_code : 0ULL, d ? d : "-");
++		}
++	}
++#endif
+ 	if (task) {
+ 		corpse_source = vm_map_is_corpse_source(get_task_map(task));
+ 	}
+diff --git a/bsd/kern/kern_sig.c b/bsd/kern/kern_sig.c
+index c25ed3f..f1ba26d 100644
+--- a/bsd/kern/kern_sig.c
++++ b/bsd/kern/kern_sig.c
+@@ -73,6 +73,7 @@
+ 
+ #define SIGPROP         /* include signal properties table */
+ #include <sys/param.h>
++#include <kern/backtrace.h>
+ #include <sys/resourcevar.h>
+ #include <sys/proc_internal.h>
+ #include <sys/kauth.h>
+@@ -1377,6 +1378,13 @@ sigaltstack(__unused proc_t p, struct sigaltstack_args *uap, __unused int32_t *r
+ 	return 0;
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++static void sweet_sig_note(proc_t from, proc_t to, int sig, const char *how, uint64_t ns, uint64_t code);
++#define SWEET_SIG_NOTE(f, t, s, h, n, c) sweet_sig_note(f, t, s, h, n, c)
++#else
++#define SWEET_SIG_NOTE(f, t, s, h, n, c) do { } while (0)
++#endif
++
+ int
+ kill(proc_t cp, struct kill_args *uap, __unused int32_t *retval)
+ {
+@@ -1408,6 +1416,7 @@ kill(proc_t cp, struct kill_args *uap, __unused int32_t *retval)
+ 			return EPERM;
+ 		}
+ 		if (uap->signum) {
++			SWEET_SIG_NOTE(cp, p, uap->signum, "kill", 0, 0);
+ 			psignal(p, uap->signum);
+ 		}
+ 		proc_rele(p);
+@@ -1559,6 +1568,38 @@ out_failed_copyin:
+ 	return exit_reason;
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++#include <pexpert/pexpert.h>
++/* Diagnostics (boot-arg sweetspeed&32): who signals whom, and how processes end (kern_exit.c); a kernel backtrace of
++ * every SIGKILL a process sends itself (psignal_internal) */
++int sweet_exitlog_on(void);
++int
++sweet_exitlog_on(void)
++{
++	extern uint32_t sweet_speed_flags(void);
++	return (sweet_speed_flags() & 32) != 0;
++}
++
++static void
++sweet_sig_note(proc_t from, proc_t to, int sig, const char *how, uint64_t ns, uint64_t code)
++{
++	static int left = 400;
++	if (left <= 0 || !sweet_exitlog_on()) {
++		return;
++	}
++	if (sig != SIGKILL && sig != SIGTERM && sig != SIGABRT && sig != SIGQUIT && sig != SIGHUP && sig != SIGINT &&
++	    sig != SIGSTOP && sig != SIGSEGV && sig != SIGBUS) {
++		return;
++	}
++	left--;
++	printf("SWEET SIG: %s[%d] -> %s[%d] sig %d by %s (ns %llu code %#llx)\n", from ? from->p_comm : "?",
++	    from ? proc_getpid(from) : -1, to ? to->p_comm : "?", to ? proc_getpid(to) : -1, sig, how, ns, code);
++}
++#define SWEET_SIG_NOTE(f, t, s, h, n, c) sweet_sig_note(f, t, s, h, n, c)
++#else
++#define SWEET_SIG_NOTE(f, t, s, h, n, c) do { } while (0)
++#endif
++
+ static int
+ terminate_with_payload_internal(struct proc *cur_proc, int target_pid, uint32_t reason_namespace,
+     uint64_t reason_code, user_addr_t payload, uint32_t payload_size,
+@@ -1599,6 +1640,7 @@ terminate_with_payload_internal(struct proc *cur_proc, int target_pid, uint32_t
+ 	    proc_getpid(target_proc), reason_namespace,
+ 	    reason_code, 0, 0);
+ 
++	SWEET_SIG_NOTE(cur_proc, target_proc, SIGKILL, "terminate_with_reason", reason_namespace, reason_code);
+ 	signal_reason = build_userspace_exit_reason(reason_namespace, reason_code, payload, payload_size,
+ 	    reason_string, (reason_flags | OS_REASON_FLAG_NO_CRASHED_TID));
+ 
+@@ -2070,6 +2112,30 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum,
+ 
+ 	mask = sigmask(signum);
+ 	prop = sigprop[signum];
++	if ((signum == SIGKILL || signum == SIGTERM) && p != PROC_NULL) {
++		SWEET_SIG_NOTE(current_proc(), p, signum, "psignal", signal_reason ? signal_reason->osr_namespace : 0,
++		    signal_reason ? signal_reason->osr_code : 0);
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++		{
++			/* kernel backtrace of self-sent SIGKILLs (boot-arg sweetspeed&32) */
++			static int btleft = 80;
++			extern int sweet_exitlog_on(void);
++			if (signum == SIGKILL && current_proc() == p && btleft > 0 && sweet_exitlog_on()) {
++				uintptr_t bt[12] = {0};
++				unsigned int n = backtrace(bt, 12, NULL, NULL);
++				btleft--;
++				printf("SWEET SIGBT: %s[%d] n %u: %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", p->p_comm,
++				    proc_getpid(p), n,
++				    (unsigned long)VM_KERNEL_UNSLIDE(bt[0]), (unsigned long)VM_KERNEL_UNSLIDE(bt[1]),
++				    (unsigned long)VM_KERNEL_UNSLIDE(bt[2]), (unsigned long)VM_KERNEL_UNSLIDE(bt[3]),
++				    (unsigned long)VM_KERNEL_UNSLIDE(bt[4]), (unsigned long)VM_KERNEL_UNSLIDE(bt[5]),
++				    (unsigned long)VM_KERNEL_UNSLIDE(bt[6]), (unsigned long)VM_KERNEL_UNSLIDE(bt[7]),
++				    (unsigned long)VM_KERNEL_UNSLIDE(bt[8]), (unsigned long)VM_KERNEL_UNSLIDE(bt[9]),
++				    (unsigned long)VM_KERNEL_UNSLIDE(bt[10]), (unsigned long)VM_KERNEL_UNSLIDE(bt[11]));
++			}
++		}
++#endif
++	}
+ 
+ #if SIGNAL_DEBUG
+ 	if (rdebug_proc && (p != PROC_NULL) && (p == rdebug_proc)) {
+diff --git a/iokit/Kernel/arm/StarbiteMali.cpp b/iokit/Kernel/arm/StarbiteMali.cpp
+index 222a13b..701b5ef 100644
+--- a/iokit/Kernel/arm/StarbiteMali.cpp
++++ b/iokit/Kernel/arm/StarbiteMali.cpp
+@@ -30,6 +30,11 @@
+ #include <sys/errno.h>
+ 
+ #include "SweetSurface.h"
++#include <pexpert/pexpert.h>
++
++/* boot-arg sweetspeed&64 lets clients that ask (SBM_ASYNC) have their submits return at once */
++extern "C" uint32_t sweet_speed_flags(void);
++static bool sbm_async_ok;
+ 
+ extern "C" void sweet_memstat_gpu_client(struct proc *p);  /* bsd/kern/kern_memorystatus.c */
+ extern "C" void *get_bsdtask_info(task_t);
+@@ -41,6 +46,8 @@ bool starlte_gpu_user_param(uint32_t param, uint64_t *value);
+ bool starlte_gpu_user_map(uint64_t va, const uint64_t *pages, unsigned n);
+ void starlte_gpu_user_unmap(uint64_t va, unsigned n);
+ int starlte_gpu_user_submit(uint64_t jc, uint32_t requirements);
++int starlte_gpu_user_submit2(uint64_t jc, uint32_t requirements, bool async, uint64_t *seq);
++int starlte_gpu_user_wait_seq(uint64_t seq, bool block);
+ void starbite_mali_publish(void);
+ }
+ 
+@@ -98,7 +105,7 @@ struct sbm_import_host {
+ enum {
+ 	SBM_SUBMIT = 0, SBM_WAIT_BO = 1, SBM_CREATE_BO = 2, SBM_MMAP_BO = 3, SBM_GET_PARAM = 4,
+ 	SBM_GET_BO_OFFSET = 5, SBM_MADVISE = 8, SBM_GEM_CLOSE = 0x100, SBM_VERSION = 0x101,
+-	SBM_LOG = 0x102, SBM_SURFACE = 0x103, SBM_IMPORT_HOST = 0x104,
++	SBM_LOG = 0x102, SBM_SURFACE = 0x103, SBM_IMPORT_HOST = 0x104, SBM_ASYNC = 0x105, SBM_WAIT_IDLE = 0x106,
+ };
+ 
+ #define SBM_MAX_BOS     8192u
+@@ -113,6 +120,7 @@ struct sbm_bo {
+ 	uint32_t pages;
+ 	uint32_t surface;                       /* IOSurface ID of an imported buffer, else 0 */
+ 	bool host;                              /* the caller's own pages, wired for the GPU (IMPORT_HOST) */
++	uint64_t seq;                           /* last chain that named it (async submits) */
+ };
+ 
+ /*
+@@ -216,6 +224,8 @@ class StarbiteMaliUserClient : public IOUserClient {
+ 	IOLock *fLock = NULL;
+ 	sbm_bo *fBos = NULL;            /* handle h is fBos[h - 1] */
+ 	uint32_t fCount = 0;
++	bool fAsync = false;
++	void markBOs(uint64_t list, uint32_t count, uint64_t seq);
+ 
+ 	IOReturn createBO(sbm_create_bo *a);
+ 	IOReturn importSurface(sbm_surface *a);
+@@ -296,6 +306,26 @@ StarbiteMaliUserClient::closeBO(sbm_bo *bo)
+ 	bo->pages = 0;
+ 	bo->surface = 0;
+ 	bo->host = false;
++	bo->seq = 0;
++}
++
++/* Async submits: the buffers a chain names are not closed or waited for as idle before it is done. */
++void
++StarbiteMaliUserClient::markBOs(uint64_t list, uint32_t count, uint64_t seq)
++{
++	uint32_t h[128];
++	for (uint32_t i = 0; i < count;) {
++		uint32_t n = count - i < 128u ? count - i : 128u;
++		if (copyin(list + (uint64_t)i * 4u, h, n * sizeof(uint32_t)) != 0) {
++			return;
++		}
++		for (uint32_t j = 0; j < n; j++) {
++			if (sbm_bo *bo = lookup(h[j])) {
++				bo->seq = seq;
++			}
++		}
++		i += n;
++	}
+ }
+ 
+ IOReturn
+@@ -560,6 +590,8 @@ StarbiteMaliUserClient::dispatchMethod(uint32_t selector, IOExternalMethodArgume
+ 		sbm_surface surface;
+ 		sbm_import_host host;
+ 		char text[256];
++		int64_t timeout;
++		uint32_t flag;
+ 	} u;
+ 	size_t want;
+ 	switch (selector) {
+@@ -575,6 +607,8 @@ StarbiteMaliUserClient::dispatchMethod(uint32_t selector, IOExternalMethodArgume
+ 	case SBM_LOG: want = args->structureInputSize; break;
+ 	case SBM_SURFACE: want = sizeof(u.surface); break;
+ 	case SBM_IMPORT_HOST: want = sizeof(u.host); break;
++	case SBM_ASYNC: want = sizeof(u.flag); break;
++	case SBM_WAIT_IDLE: want = sizeof(u.timeout); break;
+ 	default:
+ 		return kIOReturnUnsupported;
+ 	}
+@@ -596,12 +630,34 @@ StarbiteMaliUserClient::dispatchMethod(uint32_t selector, IOExternalMethodArgume
+ 	IOLockLock(fLock);
+ 	switch (selector) {
+ 	case SBM_SUBMIT: {
+-		int err = starlte_gpu_user_submit(u.submit.jc, u.submit.requirements);
++		int err;
++		if (fAsync) {
++			uint64_t seq = 0;
++			err = starlte_gpu_user_submit2(u.submit.jc, u.submit.requirements, true, &seq);
++			if (seq != 0) {
++				markBOs(u.submit.bo_handles, u.submit.bo_handle_count, seq);
++			}
++		} else {
++			err = starlte_gpu_user_submit(u.submit.jc, u.submit.requirements);
++		}
+ 		ret = err == 0 ? kIOReturnSuccess : err == ETIMEDOUT ? kIOReturnTimeout : kIOReturnIOError;
+ 		break;
+ 	}
+-	case SBM_WAIT_BO:
+-		ret = lookup(u.wait.handle) ? kIOReturnSuccess : kIOReturnBadArgument;
++	case SBM_WAIT_BO: {
++		sbm_bo *bo = lookup(u.wait.handle);
++		ret = bo ? kIOReturnSuccess : kIOReturnBadArgument;
++		if (bo != NULL && bo->seq != 0 && starlte_gpu_user_wait_seq(bo->seq, u.wait.timeout_ns != 0) != 0) {
++			ret = kIOReturnTimeout;
++		}
++		break;
++	}
++	case SBM_ASYNC:
++		fAsync = sbm_async_ok && u.flag != 0;
++		u.flag = fAsync;
++		break;
++	case SBM_WAIT_IDLE:
++		ret = starlte_gpu_user_wait_seq(0, u.timeout != 0) == 0 ? kIOReturnSuccess : kIOReturnTimeout;
++		want = 0;
+ 		break;
+ 	case SBM_CREATE_BO:
+ 		ret = createBO(&u.create);
+@@ -626,6 +682,9 @@ StarbiteMaliUserClient::dispatchMethod(uint32_t selector, IOExternalMethodArgume
+ 	case SBM_GEM_CLOSE: {
+ 		sbm_bo *bo = lookup(u.close.handle);
+ 		if (bo) {
++			if (bo->seq != 0) {
++				(void)starlte_gpu_user_wait_seq(bo->seq, true);
++			}
+ 			closeBO(bo);
+ 		}
+ 		ret = bo ? kIOReturnSuccess : kIOReturnBadArgument;
+@@ -663,7 +722,7 @@ StarbiteMaliUserClient::dispatchMethod(uint32_t selector, IOExternalMethodArgume
+  * its scrolling time in calls here): count and time of each call, all clients together, a line
+  * every 10 s while calls come: "STARLTE GPU CALLS: submit N x avg us (max), create ..., close ...".
+  */
+-static uint64_t sbm_calls[5], sbm_call_ns[5], sbm_call_max[5], sbm_calls_since;
++static uint64_t sbm_calls[6], sbm_call_ns[6], sbm_call_max[6], sbm_calls_since;
+ 
+ static unsigned
+ sbm_call_kind(uint32_t selector)
+@@ -673,6 +732,7 @@ sbm_call_kind(uint32_t selector)
+ 	case SBM_CREATE_BO: return 1;
+ 	case SBM_GEM_CLOSE: return 2;
+ 	case SBM_SURFACE: case SBM_IMPORT_HOST: return 3;
++	case SBM_WAIT_BO: case SBM_WAIT_IDLE: return 5;
+ 	default: return 4;
+ 	}
+ }
+@@ -698,10 +758,10 @@ StarbiteMaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArgume
+ 	uint64_t window = 0;
+ 	absolutetime_to_nanoseconds(t1 - sbm_calls_since, &window);
+ 	if (window >= 10ull * NSEC_PER_SEC) {
+-		static const char *names[5] = { "submit", "create", "close", "surface", "other" };
+-		char line[400];
++		static const char *names[6] = { "submit", "create", "close", "surface", "other", "wait" };
++		char line[720];
+ 		int n = snprintf(line, sizeof(line), "STARLTE GPU CALLS (%llu s):", window / NSEC_PER_SEC);
+-		for (unsigned i = 0; i < 5; i++) {
++		for (unsigned i = 0; i < 6; i++) {
+ 			n += snprintf(line + n, sizeof(line) - (size_t)n, " %s %llu x %llu us (max %llu), %llu ms;", names[i],
+ 			    sbm_calls[i], sbm_calls[i] ? sbm_call_ns[i] / sbm_calls[i] / 1000 : 0, sbm_call_max[i] / 1000,
+ 			    sbm_call_ns[i] / 1000000);
+@@ -722,6 +782,9 @@ IOReturn
+ StarbiteMaliUserClient::clientClose(void)
+ {
+ 	IOLockLock(fLock);
++	if (fAsync) {
++		(void)starlte_gpu_user_wait_seq(0, true);
++	}
+ 	for (uint32_t i = 0; i < fCount; i++) {
+ 		if (fBos[i].mem != NULL) {
+ 			closeBO(&fBos[i]);
+@@ -748,6 +811,8 @@ StarbiteMaliUserClient::free(void)
+ void
+ starbite_mali_publish(void)
+ {
++	sbm_async_ok = (sweet_speed_flags() & 64) != 0;
++	IOLog("STARLTE GPU: StarbiteMali async submits %s (sweetspeed&64)\n", sbm_async_ok ? "allowed" : "off");
+ 	sbm_va_lock = IOLockAlloc();
+ 	StarbiteMali *service = OSTypeAlloc(StarbiteMali);
+ 	IOService *provider = IOService::getResourceService();
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 3eff1c9..19cd12c 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -55,6 +55,72 @@ extern "C" uint64_t a5xelte_power_pressed_at;   /* bsd/dev/a5xelte_keys.c */
+ #include <kern/clock.h>
+ #include <kern/thread.h>
+ #include <sys/proc.h>
++extern "C" uint32_t sweet_speed_flags(void);     /* boot-arg sweetspeed (osfmk/arm64/sweet_a64e.c) */
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++/* the S6E3HA8 panel brightness (bsd/dev/hakios.s6e3ha8.c; on with boot-arg sweetspeed&512) */
++extern "C" void hakios_s6e3ha8_init(void);
++extern "C" int hakios_panel_brightness(int level);
++extern "C" int hakios_panel_brightness_nits(uint32_t nits);
++/* iOS 27 IOMobileFramebufferSwapSetBrightness (IOMobileFramebuffer kern_SwapSetBrightness): the swap record (the
++ * framebuffer object + 0x18) carries a "brightness set" byte at +0x354 and the brightness, a double, at +0x35e.
++ * A change goes to the panel (sweetspeed&512): <= 1.0 taken as a fraction, else as nits. Integer decode, no FP in here. */
++static uint32_t sweet_fb_sbx;
++static uint64_t sweet_fb_last_brightness = ~0ULL;
++static void
++sweet_fb_swap_brightness(const uint8_t *rec)
++{
++	uint64_t bits;
++	if ((sweet_fb_sbx & 512) == 0 || rec[0x354] == 0) {
++		return;
++	}
++	memcpy(&bits, rec + 0x35e, sizeof(bits));
++	if (bits == sweet_fb_last_brightness) {
++		return;
++	}
++	sweet_fb_last_brightness = bits;
++	/* value * 1000 as an integer (positive normal doubles only) */
++	uint64_t milli = 0;
++	int exp = (int)((bits >> 52) & 0x7ff) - 1023;
++	if ((bits >> 63) == 0 && exp >= -20 && exp < 40) {
++		uint64_t mant = (bits & ((1ULL << 52) - 1)) | (1ULL << 52);
++		int shift = 52 - exp;
++		milli = shift > 0 ? (mant * 1000) >> shift : 0;
++		if (shift > 0 && shift >= 64) {
++			milli = 0;
++		}
++	}
++	int level;
++	if (milli <= 1000) {
++		/* (a floor of 16/255 so a misread value never leaves the panel black) */
++		int want = (int)(milli * 255 / 1000);
++		want = want < 16 ? 16 : want;
++		level = hakios_panel_brightness(want) == 0 ? want : -1;
++	} else {
++		level = hakios_panel_brightness_nits((uint32_t)(milli / 1000 < 5 ? 5 : milli / 1000));
++	}
++	static unsigned said;
++	if (said < 60) {
++		said++;
++		IOLog("SWEET FB: swap brightness %llu.%03llu (raw %#llx) -> panel level %d\n", milli / 1000, milli % 1000,
++		    bits, level);
++	}
++}
++static bool
++sweet_fb_is_brightness(const char *key)
++{
++	static const char want[] = "brightness";
++	for (unsigned i = 0; i < sizeof(want); i++) {
++		char c = key[i];
++		if (c >= 'A' && c <= 'Z') {
++			c = (char)(c - 'A' + 'a');
++		}
++		if (c != want[i]) {
++			return false;
++		}
++	}
++	return true;
++}
++#endif
+ 
+ #if defined(ARM64_BOARD_CONFIG_HEROLTE)
+ static void sweet_fb_copy_init(void);
+@@ -111,6 +177,26 @@ enum {
+ /* relbuf state (defined with sweet_fb_swap_id() further down) */
+ static int sweet_fb_relbuf;
+ static uint32_t sweet_fb_relbuf_sent;
++/*
++ * sweetfb_cav=1 (default off): CoreAnimation pacing aids for iOS 27.
++ * iOS 27 backboardd does not pace on IOMFB vsync (type 5) or FrameInfo (type 3): IOMFBServer
++ * drives renders from its own CADisplayTimer, period = AppleInternalDisplay::heartbeat_rate()
++ * (1/60 s unless "IOMFBDisplayRefresh" says otherwise). CA::WindowServer::Server::render_for_time
++ * clamps the next update to >= now + 0.1 s (10 Hz) whenever CA's own display power state is not
++ * "on" (RequestPowerChange(0) was its last word; a5fb_keep_on keeps the panel lit, CA still
++ * throttles). With the boot-arg:
++ *  - "IOMFBDisplayRefresh" = { displayMinRefreshInterval = 2^32/60 (1/60 s in 2^-32 s),
++ *    displayRefreshStepMachTime = 16.667 ms in mach ticks } is published;
++ *  - once a second: "SWEET FB CAV: <n> swaps/s, CA power <on|off>" (CA power = last sel 12 arg);
++ *  - every sel 12 call with its uptime; the swap record's brightness fields when they change.
++ */
++static int sweet_fb_cav;
++static uint32_t sweet_fb_cav_swaps;             /* SwapEnd calls since the last rate line */
++static int sweet_fb_cav_power = -1;             /* last RequestPowerChange argument, -1 none yet */
++/* iOS 27 SwapEnd record = IOMFB's fb + 0x18 (kern_SwapEnd sends 0x6e0 bytes from there);
++ * kern_SwapSetBrightness stores a double at fb + 0x376 and sets the byte at fb + 0x36c */
++#define SWEET_FB_REC27_BRIGHT_SET       0x354
++#define SWEET_FB_REC27_BRIGHT           0x35e
+ static uint32_t sweet_fb_swap_id(const uint8_t *rec);
+ #define SWEET_FB_NOTIFY_VSYNC           5
+ #define SWEET_FB_VSYNC_US               16667
+@@ -177,6 +263,7 @@ public:
+ 	uint32_t      fFadeStep;      /* fade-out steps done while off */
+ 
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	IOReturn setProperties(OSObject *properties) APPLE_KEXT_OVERRIDE;
+ 	void addClient(IOMobileFramebufferUserClient *client);
+ 	void removeClient(IOMobileFramebufferUserClient *client);
+ 	void swap(const uint8_t *rec, uint32_t size);
+@@ -206,6 +293,7 @@ public:
+ 	bool initWithTask(task_t owningTask, void *securityID, UInt32 type) APPLE_KEXT_OVERRIDE;
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+ 	IOReturn clientClose(void) APPLE_KEXT_OVERRIDE;
++	IOReturn setProperties(OSObject *properties) APPLE_KEXT_OVERRIDE;
+ 	IOReturn registerNotificationPort(mach_port_t port, UInt32 type,
+ 	    io_user_reference_t refCon) APPLE_KEXT_OVERRIDE;
+ 	IOReturn externalMethod(uint32_t selector, IOExternalMethodArguments *args,
+@@ -354,11 +442,45 @@ AppleCLCD::start(IOService *provider)
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
++	PE_parse_boot_argn("sweetfb_cav", &sweet_fb_cav, sizeof(sweet_fb_cav));
++	{
++		/* also on with boot-arg sweetspeed&2048 */
++		if ((sweet_speed_flags() & 2048) != 0) {
++			sweet_fb_cav = 1;
++		}
++	}
++	if (sweet_fb_cav) {
++		uint64_t step = 0;
++		nanoseconds_to_absolutetime(16666667ULL, &step);
++		OSDictionary *refresh = OSDictionary::withCapacity(2);
++		OSNumber *interval = OSNumber::withNumber((4294967296ULL + 30) / 60, 32);  /* 1/60 s, 2^-32 s units */
++		OSNumber *ticks = OSNumber::withNumber(step, 32);
++		if (refresh != NULL && interval != NULL && ticks != NULL) {
++			refresh->setObject("displayMinRefreshInterval", interval);
++			refresh->setObject("displayRefreshStepMachTime", ticks);
++			setProperty("IOMFBDisplayRefresh", refresh);
++		}
++		OSSafeReleaseNULL(interval);
++		OSSafeReleaseNULL(ticks);
++		OSSafeReleaseNULL(refresh);
++		IOLog("SWEET FB CAV: sweetfb_cav=1: IOMFBDisplayRefresh published (step %llu ticks), rate log on\n", step);
++	}
++	{
++		/* with async GPU submits (sweetspeed&64) the GPU present waits for the app's chain
++		 * itself (starlte_gpu.c sg_run): tell hakios-gl not to glFinish every frame. */
++		if ((sweet_speed_flags() & 64) != 0) {
++			setProperty("HakiosWaitsForGPU", true);
++		}
++	}
+ 	PE_parse_boot_argn("sweetfb_relbuf", &sweet_fb_relbuf, sizeof(sweet_fb_relbuf));
+ 	if (sweet_fb_relbuf) {
+ 		setProperty("SupportRelbufInfoCb", 1ULL, 32);
+ 		IOLog("SWEET FB: sweetfb_relbuf=1: SupportRelbufInfoCb published, relbuf info sent per swap\n");
+ 	}
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	sweet_fb_sbx = sweet_speed_flags();
++	hakios_s6e3ha8_init();
++#endif
+ 	registerService();
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
+@@ -375,6 +497,11 @@ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ 	AppleCLCD *fb = (AppleCLCD *)owner;
+ 	uint64_t now = mach_absolute_time();
+ 	uint64_t count = ++fb->fVsyncCount;
++	if (sweet_fb_cav && (count % 60) == 0) {
++		uint32_t n = __atomic_exchange_n(&sweet_fb_cav_swaps, 0, __ATOMIC_RELAXED);
++		IOLog("SWEET FB CAV: %u swaps/s, CA power %s\n", n,
++		    sweet_fb_cav_power < 0 ? "?" : sweet_fb_cav_power ? "on" : "OFF (CA clamps to 10 Hz)");
++	}
+ 	uint64_t values[6] = {
+ 		(uint32_t)count, (uint32_t)(count >> 32),
+ 		(uint32_t)now, (uint32_t)(now >> 32),
+@@ -462,6 +589,23 @@ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ 		fb->fPerfFrames = fb->fPerfBytes = fb->fPerfNS = fb->fPerfMaxNS = 0;
+ 		fb->fPerfWindowStart = finished;
+ 	}
++#endif
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	/* boot-arg sweetspeed&1024: a fixed 60 Hz cadence. Re-arming 16.7 ms after the present (as below) made the
++	 * tick ~19-20 ms plus timer slack, so backboardd's 41-52 swaps/s while swiping showed as 33-36 frames. */
++	if ((sweet_fb_sbx & 1024) != 0) {
++		static uint64_t interval, next;
++		uint64_t t = mach_absolute_time();
++		if (interval == 0) {
++			nanoseconds_to_absolutetime(16666667ULL, &interval);
++		}
++		next = next == 0 ? t + interval : next + interval;
++		if (next <= t + interval / 8) {
++			next = t + interval / 8;        /* late (a long present): no burst, just the next one soon */
++		}
++		sender->wakeAtTime(next);
++		return;
++	}
+ #endif
+ 	sender->setTimeoutUS(SWEET_FB_VSYNC_US);
+ }
+@@ -645,6 +789,11 @@ sweet_fb_copy_rows(uintptr_t dst, uint64_t dstStride, uintptr_t src, uint64_t sr
+ void
+ AppleCLCD::swap(const uint8_t *rec, uint32_t size)
+ {
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	if (size >= 0x366) {
++		sweet_fb_swap_brightness(rec);
++	}
++#endif
+ 	IOLockLock(fLock);
+ 	uint32_t replaced = fDirty ? sweet_fb_swap_id(fPending) : 0;
+ 	memcpy(fPending, rec, SWEET_FB_SWAP_REC_MAX);
+@@ -682,6 +831,20 @@ AppleCLCD::swap(const uint8_t *rec, uint32_t size)
+ 		IOLog("HEROLTE FB: rec %llu%s\n", sweet_fb_swap_count, n ? line : " end");
+ 	}
+ #endif
++	if (sweet_fb_cav) {
++		__atomic_fetch_add(&sweet_fb_cav_swaps, 1, __ATOMIC_RELAXED);
++		static uint64_t lastBright = ~0ULL;
++		static unsigned brightLines;
++		if (size >= SWEET_FB_REC27_BRIGHT + 8 && rec[SWEET_FB_REC27_BRIGHT_SET] != 0) {
++			uint64_t bits;
++			memcpy(&bits, rec + SWEET_FB_REC27_BRIGHT, sizeof(bits));
++			if (bits != lastBright && brightLines < 200) {
++				brightLines++;
++				lastBright = bits;
++				IOLog("SWEET FB CAV: swap brightness (double bits) %#llx\n", bits);
++			}
++		}
++	}
+ 	if ((++sweet_fb_swap_count % 1000) == 0) {
+ 		IOLog("SWEET FB: %llu swaps\n", sweet_fb_swap_count);
+ 	}
+@@ -1408,6 +1571,13 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 	case kSweetFBRequestPowerChange:
+ 		if (args->scalarInputCount >= 1) {
+ 			bool off = args->scalarInput[0] == 0;
++			if (sweet_fb_cav) {
++				uint64_t up = 0;
++				absolutetime_to_nanoseconds(mach_absolute_time(), &up);
++				sweet_fb_cav_power = off ? 0 : 1;
++				IOLog("SWEET FB CAV: RequestPowerChange(%llu) at %llu ms: CA renders %s\n", args->scalarInput[0],
++				    up / 1000000ULL, off ? "at most 10 Hz from now on (display off)" : "on vsync");
++			}
+ #if defined(ARM64_BOARD_CONFIG_A5XELTE)
+ 			int keep_on = 0;
+ 			if (off && PE_parse_boot_argn("a5fb_keep_on", &keep_on, sizeof(keep_on)) && keep_on) {
+@@ -1446,6 +1616,26 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 	if (args->structureOutputDescriptor == NULL && args->structureOutput != NULL) {
+ 		bzero(args->structureOutput, args->structureOutputSize);
+ 	}
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	/* (sweetspeed&512) every call of the rarer selectors with its scalar inputs when they change (300 lines in all):
++	 * to see which one carries brightness etc. on iOS 27 */
++	if ((sweet_fb_sbx & 512) != 0 && selector != 3 && selector != 4 && selector != 5 && selector != 6 && selector < 128) {
++		static uint64_t last[128][2];
++		static unsigned left = 300;
++		uint64_t a0 = args->scalarInputCount > 0 ? args->scalarInput[0] : 0;
++		uint64_t a1 = args->scalarInputCount > 1 ? args->scalarInput[1] : 0;
++		if (left > 0 && (a0 != last[selector][0] || a1 != last[selector][1])) {
++			char who[32];
++			left--;
++			last[selector][0] = a0;
++			last[selector][1] = a1;
++			proc_selfname(who, sizeof(who));
++			IOLog("SWEET FB ARGS: %s sel %u n %u: %#llx %#llx %#llx %#llx struct %u\n", who, selector,
++			    args->scalarInputCount, a0, a1, args->scalarInputCount > 2 ? args->scalarInput[2] : 0ULL,
++			    args->scalarInputCount > 3 ? args->scalarInput[3] : 0ULL, args->structureInputSize);
++		}
++	}
++#endif
+ 	if (selector >= 64 || !(sweet_fb_logged & (1ULL << selector))) {
+ 		if (selector < 64) {
+ 			sweet_fb_logged |= 1ULL << selector;
+@@ -1458,4 +1648,63 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 	}
+ 	return ret;
+ }
++
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++/* brightness by property (sweetspeed&512) (IOConnectSetCFProperties / IORegistryEntrySetCFProperties): every key logged
++ * (first 64); a number under a key starting with "brightness" (0-1 or 0-255) goes to the panel. */
++static IOReturn
++sweet_fb_set_properties(const char *where, OSObject *properties)
++{
++	OSDictionary *dict = OSDynamicCast(OSDictionary, properties);
++	static unsigned said;
++	bool taken = false;
++	char who[32] = "?";
++	if ((sweet_fb_sbx & 512) == 0) {
++		return kIOReturnUnsupported;    /* as IOService::setProperties */
++	}
++	if (dict == NULL) {
++		return kIOReturnBadArgument;
++	}
++	OSCollectionIterator *keys = OSCollectionIterator::withCollection(dict);
++	if (keys == NULL) {
++		return kIOReturnNoMemory;
++	}
++	proc_selfname(who, sizeof(who));
++	OSObject *next;
++	while ((next = keys->getNextObject()) != NULL) {
++		const OSSymbol *key = OSDynamicCast(OSSymbol, next);
++		if (key == NULL) {
++			continue;
++		}
++		OSNumber *number = OSDynamicCast(OSNumber, dict->getObject(key));
++		if (said < 64) {
++			said++;
++			if (number != NULL) {
++				IOLog("SWEET FB: %s %s sets %s = %llu\n", who, where, key->getCStringNoCopy(), number->unsigned64BitValue());
++			} else {
++				IOLog("SWEET FB: %s %s sets %s (%s)\n", who, where, key->getCStringNoCopy(),
++				    dict->getObject(key) ? dict->getObject(key)->getMetaClass()->getClassName() : "?");
++			}
++		}
++		if (number != NULL && sweet_fb_is_brightness(key->getCStringNoCopy())) {
++			uint64_t v = number->unsigned64BitValue();
++			taken = hakios_panel_brightness(v <= 1 ? (int)(v * 255) : v > 255 ? 255 : (int)v) == 0;
++		}
++	}
++	keys->release();
++	return taken ? kIOReturnSuccess : kIOReturnUnsupported;
++}
++
++IOReturn
++AppleCLCD::setProperties(OSObject *properties)
++{
++	return sweet_fb_set_properties("service", properties);
++}
++
++IOReturn
++IOMobileFramebufferUserClient::setProperties(OSObject *properties)
++{
++	return sweet_fb_set_properties("client", properties);
++}
++#endif
+ #endif /* SWEET || A5XELTE */
+diff --git a/osfmk/kern/task.c b/osfmk/kern/task.c
+index bac41b9..eea166c 100644
+--- a/osfmk/kern/task.c
++++ b/osfmk/kern/task.c
+@@ -8662,6 +8662,13 @@ SENDING_NOTIFICATION__THIS_PROCESS_HAS_TOO_MANY_MACH_PORTS(task_t task, uint32_t
+ 	 * Only kernel_task and launchd may be allowed to
+ 	 * have really large ipc space.
+ 	 */
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	extern uint32_t sweet_speed_flags(void);
++	if (sweet_speed_flags() & 32) {
++		printf("SWEET RLIMIT: %s[%d] too many mach_ports: %u (soft %u hard %u)\n", procname, pid,
++		    (unsigned)current_size, (unsigned)soft_limit, (unsigned)hard_limit);
++	}
++#endif
+ 	if (pid == 0 || pid == 1) {
+ 		return;
+ 	}
+@@ -8724,6 +8731,13 @@ SENDING_NOTIFICATION__THIS_PROCESS_HAS_TOO_MANY_KQWORKLOOPS(task_t task, int cur
+ 	if (get_bsdtask_info(task) != NULL) {
+ 		procname = proc_name_address(get_bsdtask_info(task));
+ 	}
++#endif
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	extern uint32_t sweet_speed_flags(void);
++	if (sweet_speed_flags() & 32) {
++		printf("SWEET RLIMIT: %s[%d] too many kqworkloops: %u (soft %u hard %u)\n", procname, pid,
++		    (unsigned)current_size, (unsigned)soft_limit, (unsigned)hard_limit);
++	}
+ #endif
+ 	if (pid == 0 || pid == 1) {
+ 		return;
+@@ -8787,6 +8801,13 @@ SENDING_NOTIFICATION__THIS_PROCESS_HAS_TOO_MANY_FILE_DESCRIPTORS(task_t task, in
+ 	 * Only kernel_task and launchd may be allowed to
+ 	 * have really large ipc space.
+ 	 */
++#if defined(ARM64_BOARD_CONFIG_STARLTE)
++	extern uint32_t sweet_speed_flags(void);
++	if (sweet_speed_flags() & 32) {
++		printf("SWEET RLIMIT: %s[%d] too many file_descriptors: %u (soft %u hard %u)\n", procname, pid,
++		    (unsigned)current_size, (unsigned)soft_limit, (unsigned)hard_limit);
++	}
++#endif
+ 	if (pid == 0 || pid == 1) {
+ 		return;
+ 	}

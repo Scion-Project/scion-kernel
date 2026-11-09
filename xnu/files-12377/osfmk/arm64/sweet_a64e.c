@@ -63,6 +63,18 @@ extern int proc_selfpid(void);
  *       (tools/ios27/speed/a64e-rewrite2.py); a trapped one must agree with them, so set it only on a root rewritten that way
  *    8  "SBBOOT <ms> ms: <stage>" lines on the console from kernel_bootstrap, kernel_bootstrap_thread and bsd_init
  *   16  "STARLTE PIN: <program>[pid] ..." for each of the first 64 pins of a thread to an A55, then one every 10 s at most
+ * The changes of the night run (patch 0427, docs/ios27/NIGHT.md), all off unless asked for:
+ *   32  who ends what: "SWEET SIG" (kill, terminate_with_reason, psignal), "SWEET EXIT" per process exit, "SWEET SIGBT" (a kernel
+ *       backtrace of every SIGKILL a process sends itself), "SWEET LIMITS" (launchd's spawn resource limits per exec), "SWEET RLIMIT"
+ *   64  asynchronous GPU submits for StarbiteMali clients that ask (selectors 0x105, 0x106), and "HakiosWaitsForGPU" on the framebuffer
+ *  128  "SWEET PREWARM": the GL stack and the UI daemons read into the page cache from a kernel thread once the root is mounted
+ *  256  ignore the kqworkloop limits launchd sets at spawn (their hard-limit "fatal port" has no receiver here and kills the daemon)
+ *  512  the S6E3HA8 panel driver (as panel=1) with iOS 27's swap brightness and setProperties brightness keys sent to it, and
+ *       "SWEET FB ARGS" lines for the rarer IOMobileFramebuffer selectors
+ * 1024  the framebuffer's 60 Hz timer keeps an absolute deadline (a present no longer delays the next tick)
+ * 2048  CoreAnimation pacing aids (as sweetfb_cav=1: IOMFBDisplayRefresh, "SWEET FB CAV" lines)
+ * 4096  scripted input for a repeatable frame-rate run (starlte_touch.c script 5)
+ * 8192  scripted input that drags the brightness slider (script 6)
  */
 #define SWEET_SPEED_IORTC   1
 #define SWEET_SPEED_FP16    2
