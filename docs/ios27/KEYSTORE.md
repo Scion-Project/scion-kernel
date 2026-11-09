@@ -11,6 +11,7 @@ of the boot-argument `sweetspeed=<mask>` and are **off by default**:
 | `0x200000` (2097152) | with the bit above: the mount says `MNT_CPROTECT` (what `MKBDeviceFormattedForContentProtection()` and SQLite read), and an update mount keeps it | `core/hfs_vfsutils.c`, `bsd/vfs/vfs_syscalls.c` |
 | `0x400000` (4194304) | the key store answers as a device with **no passcode** does, in full (below) | `iokit/Kernel/arm/SweetKeyStore.cpp` |
 | `0x1000000` (16777216) | APFS's purgeable-file and directory-statistics `fsctl()`s are accepted (and forgotten) by the built-in HFS Plus | `core/hfs_readwrite.c` |
+| `0x2000000` (33554432) | sandbox extensions are issued and consumed by the sandbox stand-in: tokens that grant nothing, there being no sandbox | `bsd/kern/sweet_amfi.c` |
 
 **In short: nothing here encrypts anything.** There is no Secure Enclave, no passcode, no key that lives outside the kernel. A protection
 class is a label that programs can set and read back; a file marked A is as readable from the flash, and while the screen is locked, as one
@@ -39,7 +40,7 @@ Found on a Galaxy S9 running 24A446 (the kernel's own log of key store calls, an
 The selector numbers were not the problem: every `aks_*` function of 24A446 still calls the number it called on iOS 16 (table below); iOS 27
 only adds to the list.
 
-**What is verified, and how.** One Galaxy S9, the fork's commit 2adf535 (iOS-target STARLTE kernel), `sweetspeed` bits `0x100000` and `0x400000`, and the test of the last section (`dptest`, as root and as `mobile`), one boot: classes set by `fcntl`, `setattrlist`, `open_dprotected_np` and `NSFileManager` read back by `fcntl`, `getattrlist` and `NSURL`, also after reopening; a file made in a directory of class C came out C; what had no class read D. `MKBGetDeviceLockState` 3, `MKBDeviceUnlockedSinceBoot` 1, `MKBGetDeviceConfigurations` a dictionary (grace period 0, 10 attempts); selectors 7, 14, 17, 23, 31, 35, 40, 103, 107 as the table below says. A keychain item added, read back and deleted for each of "after first unlock", "when unlocked" and "always, this device only". `installcoordinationd` logged "Created .../InstallCoordination" and ".../Removability" and stayed up (it ended in `os_crash` before). The boot before that one found a panic: the configuration is asked for with a 32 KB buffer, which arrives as a memory descriptor, and the stand-in wrote to it unprepared ("IOGMD: not wired"); fixed in 2adf535. **Not run on a phone yet:** `0x200000` (`MNT_CPROTECT`) and `0x1000000` (the purgeable calls). A day of use with the bits on has not happened either.
+**What is verified, and how.** One Galaxy S9, the fork's commit 2adf535 (iOS-target STARLTE kernel), `sweetspeed` bits `0x100000` and `0x400000`, and the test of the last section (`dptest`, as root and as `mobile`), one boot: classes set by `fcntl`, `setattrlist`, `open_dprotected_np` and `NSFileManager` read back by `fcntl`, `getattrlist` and `NSURL`, also after reopening; a file made in a directory of class C came out C; what had no class read D. `MKBGetDeviceLockState` 3, `MKBDeviceUnlockedSinceBoot` 1, `MKBGetDeviceConfigurations` a dictionary (grace period 0, 10 attempts); selectors 7, 14, 17, 23, 31, 35, 40, 103, 107 as the table below says. A keychain item added, read back and deleted for each of "after first unlock", "when unlocked" and "always, this device only". `installcoordinationd` logged "Created .../InstallCoordination" and ".../Removability" and stayed up (it ended in `os_crash` before). The boot before that one found a panic: the configuration is asked for with a 32 KB buffer, which arrives as a memory descriptor, and the stand-in wrote to it unprepared ("IOGMD: not wired"); fixed in 2adf535. **`0x1000000` (the purgeable calls):** a second S9 ran 207 s with the newer forms accepted (six poster extensions started; PosterBoard still logged the error, it uses the one-word form); with that form accepted too (8c3e2c6) the phone left the USB bus 66 s into the boot, with nothing on the console. Not understood yet (the store coming up starts the poster renderers; the GPU side's wired memory is the suspect), so the bit is not cleared. **Not run on a phone yet:** `0x200000` (`MNT_CPROTECT`), `0x2000000` (sandbox extensions). A day of use with the bits on has not happened either.
 
 ## What the key store answers
 
@@ -99,6 +100,17 @@ the bit the calls succeed and are forgotten; the questions answer zeroes ("not c
 
 An image of the volume attached on a Mac shows nothing of this (the attribute is hidden there too); a kernel without the bit ignores the
 attributes and answers as before.
+
+## Sandbox extensions (`sweetspeed&0x2000000`)
+
+This kernel runs without a sandbox: the stand-in policy named "Sandbox" (`bsd/kern/sweet_amfi.c`) allows every check. A sandbox extension is
+how one process hands another the right to a file: `sandbox_extension_issue_*` makes a token (`__mac_syscall("Sandbox", 5, ...)`), the other
+side's `sandbox_extension_consume` (6) turns it into a handle, `release` (7) gives it back. The stand-in failed 5 and 6 with `ENOENT`, and
+the programs check: PosterKit logs "failed to issue sandbox extension to PID ..." for every poster path it sends to a poster extension. With
+the bit, issue answers a token (a fixed prefix, then the class and the path, readable) and consume answers a handle (a counter); nothing is
+recorded and nothing is checked, because there is nothing to grant. The argument layouts are libsystem_sandbox's of iOS 27.0.1: issue takes
+seven 8-byte fields (class, type, data, flags, the token buffer of 0x3ff0 bytes, pid, more flags), consume three (token, its length, where
+the handle goes). **Built, not run on a phone yet.**
 
 ## The user client as 24A446 calls it
 
