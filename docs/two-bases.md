@@ -12,8 +12,7 @@ background (UniXNU's layers and how this tree maps onto them).
 |---|---|---|
 | `profiles/<os>.conf` | the OS a build is for: XNU tag and commit, `base`, `machine`, `sdk`, `hfs`, `arch`, status | one per OS; several may share a base (ios-26 and ios-27 both name `xnu-12377`) |
 | `xnu-src/<xnu_tag>/` | the kernel tree being built: the profile's commit of Scion-Project/xnu (`docs/xnu-fork.md`), plus the drivers. Not in git | yes, one per tag, side by side |
-| `patches/<base>/series` | Scion's changes to Apple's files, in order (`patches/xnu-12377/`): what the fork's xnu-12377 branches were made from | yes |
-| `xnu/hakios.patch`, `xnu/files/`, `xnu/patches/` | xnu-8796's work as patches: what the fork's `scion/xnu-8796` was made from (`SCION_XNU_FROM_PATCHES=1` applies them). The generated `patches/xnu-8796/series` is gone: it had fallen behind them | xnu-8796 only |
+| the fork [Scion-Project/xnu](https://github.com/Scion-Project/xnu) | Scion's changes to Apple's files, as commits on Apple's tag, one branch per base (`scion/xnu-8796`, `scion/xnu-12377`, `scion/xnu-12377-starlte`); a profile pins a commit (`docs/xnu-fork.md`) | yes |
 | `drivers/<class>/` | the drivers, by subsystem, with `conf` and `map` | shared; a driver says which bases it is built on (below) |
 | `socs/<soc>/` | a SoC's numbers and layer (`exynos9810`, `lga` for the Tensor G5, ...) | shared |
 | `devices/<name>/` | a phone: `device.conf` (now with `profile`), configs, image recipe | shared; the device names its profile |
@@ -30,15 +29,15 @@ ios-16.5   real             arm64  xnu-8796.121.2
 ios-26     experimental     arm64e xnu-12377.121.6
 ios-27     not-implemented  arm64e xnu-12377.121.6
 $ tools/os-profile.py get src          # xnu-src/xnu-8796.121.2
-$ OS_PROFILE=ios-26 tools/os-profile.py get series   # patches/xnu-12377
+$ OS_PROFILE=ios-26 tools/os-profile.py get fork_branch   # scion/xnu-12377
 ```
 
 Which profile: `OS_PROFILE` if set, else the device's (`make NAME_defconfig` writes `.os-profile` from `devices/NAME/device.conf`'s
 `profile` line, and removes it for a device without one), else `ios-16.5`. So `make starlte_defconfig && make kernel` is what it
 always was, and `make blazer_defconfig && make kernel` is an xnu-12377 build.
 
-`xnu/apply.sh`, `xnu/apply-series.sh`, `xnu/sync-drivers.sh`, `xnu/export.sh`, `tools/make-kernel.sh`, `xnu-env.sh`, the
-`Makefile` and `tools/hakios-config.py` take the tree, series, machine configuration, SDK and HFS step from the profile. For
+`xnu/apply.sh`, `xnu/apply-series.sh`, `xnu/sync-drivers.sh`, `tools/make-kernel.sh`, `xnu-env.sh`, the
+`Makefile` and `tools/hakios-config.py` take the tree, fork commit, machine configuration, SDK and HFS step from the profile. For
 `ios-16.5` every one of them resolves to the value it had before, which is how the S9's kernel stays the same objects (below).
 Tools that only make sense on xnu-8796 (`tools/kernel-delta.sh`, `tools/guard-test.sh`, `tools/soc-compile.sh`, the APFS tools,
 `tools/new-workspace.sh`) still name its tree. `tools/kernel-version.py` takes the Darwin release and XNU tag from the profile
@@ -56,12 +55,12 @@ Tools that only make sense on xnu-8796 (`tools/kernel-delta.sh`, `tools/guard-te
 
 A driver is source in `drivers/`, copied into the tree by `drivers/map`, and built when `config/MASTER.hakios` and the
 HakiOS block of `bsd/conf/files` say so (`tools/hakios-config.py kernel`). Both series now carry the place for them
-(`xnu/hakios.patch`'s `bsd/conf/files` and `config/` hunks on 8796, `patches/xnu-12377/0080-hakios-drivers.patch` on 12377),
+(the `bsd/conf/files` and `config/` changes of `scion/xnu-8796` on 8796, the fork's commit `0080-hakios-drivers` on 12377),
 and a driver says which bases it is built on with a `bases` line in its `drivers/<class>/conf` (`xnu-8796` when it says none;
 a `standard` file takes it too). `tools/hakios-config.py kernel` puts into a tree only the drivers of that tree's base, and says
 which it left out; the drivers table (`docs/reference/drivers.md`) marks a driver built for a device only on the base of the
 device's profile. The first file on xnu-12377 is `drivers/core/hakios.version.c` (`kern.hakios.version`), with
-`patches/xnu-12377/0110` as its shim; no other driver names `xnu-12377` yet.
+`commit 0110 of scion/xnu-12377` as its shim; no other driver names `xnu-12377` yet.
 
 What is left, in order, each step on its own:
 
@@ -77,7 +76,7 @@ What is left, in order, each step on its own:
 Built on the Mac mini on 7 November 2026 (Xcode 27.2):
 
 - **ios-16.5, starlte:** built from this branch and from main with the same version suffix; every object compared (below).
-- **ios-26, VMAPPLE:** `OS_PROFILE=ios-26 make kernel` fetches Apple's tree, applies `patches/xnu-12377`, and links an arm64e
+- **ios-26, VMAPPLE:** `OS_PROFILE=ios-26 make kernel` fetches the fork's `scion/xnu-12377`, and links an arm64e
   kernel for Apple's virtual machine (`VMAPPLE`, the profile's `machine`), with no device's drivers (below). Linked, not booted.
 
 ### The S9 stays the same
@@ -109,9 +108,9 @@ and 8 of the build time in the two copies of the version string. The pull reques
    `setup.sh` fetches, with empty implementations, as for xnu-8796 (`xnu-deps/gen-iig-stubs.py` for what the linker then
    misses). The Linux path is written, not yet run.
 4. **What Apple keeps in its KDK.** Apple compiles the arm64 machine layer (`start.s`, `locore.s`, the caches, `pmap`) into a
-   binary library that comes with its Kernel Debug Kit, and includes headers it does not publish. `patches/xnu-12377`
-   (its `README.md` lists each patch) compiles that layer from the tree for `VMAPPLE` (`config/MASTER.arm64.vmapple`), links the
-   KDK library only if it is there, fetches the TrustCache headers from xnu-8796.101.5 (`imports`), and stands in, as Scion's
+   binary library that comes with its Kernel Debug Kit, and includes headers it does not publish. the fork's `scion/xnu-12377`
+   (one commit per patch; each message says what it does) compiles that layer from the tree for `VMAPPLE` (`config/MASTER.arm64.vmapple`), links the
+   KDK library only if it is there, has the TrustCache headers from xnu-8796.101.5 (its first commit), and stands in, as Scion's
    own code, for what is still missing: CoreEntitlements' V2 types, four entitlement names, SART, the UAT, the CPU tunables, the
    read-only region (`amcc_rorgn_scion.c`: none is locked), `ml_enable_monitor` and `ml_device_is_prod_fused`, the forced
    cache clean, `CPU_OVRD`, and three calls of `pmap.c` into the monitor.
@@ -157,8 +156,8 @@ after this is the Tensor G5 platform, written fresh (gaps, below).
 
 ## The S9's machine layer on xnu-12377 (the ios-27 profile)
 
-`profiles/ios-27.conf` builds the Galaxy S9 (`STARLTE`) on this base: its series is `patches/xnu-12377/series.ios27`, one ordered block in
-this directory beside `series` (which the `ios-26` profile reads, unchanged), with the files it adds in `xnu/files-12377/`. The Exynos 9810 has
+`profiles/ios-27.conf` builds the Galaxy S9 (`STARLTE`) on this base: its tree is the fork's branch `scion/xnu-12377-starlte`: one ordered block of commits on Apple's tag, beside
+`scion/xnu-12377` (which the `ios-26` profile pins, unchanged), with the files it adds in the same commits. The Exynos 9810 has
 no pointer authentication and no Apple SoC, so the machine layer is not `VMAPPLE`'s: it comes from Project Starbite and the layers under it, and
 `docs/ios27-starlte.md` says whose each is, what runs, and what the follow-up is (folding the drivers into `drivers/`, merging the stand-ins
 that both machine layers make with `0020`-`0100`, so that one layer serves both). `make kernel` does not build it yet;

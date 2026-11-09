@@ -1,7 +1,7 @@
 /* From danstronics/ios-s9plus-exynos core/drivers/input (MIT, "HakiOS authors"); see docs/star2lte-absorb.md. */
 #include <assert.h>
 #include <stdio.h>
-#include "../xnu/files/bsd/sys/hakios.touch_queue.h"
+#include "sys/hakios.touch_queue.h"      /* the fork of XNU's: cc -I "$(tools/xnu-tree.py added)/bsd" tools/touch-queue-test.c */
 
 static struct hakios_touch queue[512];
 static uint32_t head, tail, replaced;

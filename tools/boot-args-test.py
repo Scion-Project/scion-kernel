@@ -27,10 +27,12 @@ def check(label, ok, detail=""):
 
 
 def repo(files):
+    """A repository of `files`; the names that start with xnu/files/ are not in it but in the directory of the files the fork adds
+    to Apple's XNU, d + "-fork" (boot-args.py --fork-dir), as they are in the fork and not in this repository."""
     d = tempfile.mkdtemp(prefix="boot-args-test-")
     subprocess.run(["git", "init", "-q", d], check=True)
     for name, text in files.items():
-        path = os.path.join(d, name)
+        path = os.path.join(d + "-fork", name[len("xnu/files/"):]) if name.startswith("xnu/files/") else os.path.join(d, name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         open(path, "w", encoding="utf-8", newline="\n").write(text)
     subprocess.run(["git", "-C", d, "add", "-A"], check=True, capture_output=True)
@@ -38,7 +40,7 @@ def repo(files):
 
 
 def run(d, *args):
-    return subprocess.run([sys.executable, TOOL, "--root", d, *args], capture_output=True, text=True)
+    return subprocess.run([sys.executable, TOOL, "--root", d, "--fork-dir", d + "-fork", *args], capture_output=True, text=True)
 
 
 def found(d):
@@ -67,6 +69,8 @@ FILES = {
     "userland/src/HakiosMetalCA.m": 'void hm(void) { if (hm_boot_arg_set("u_hm_helper=1")) {} }\n',
     # the kernel also reads ku_both
     "drivers/net/hakios.net.c": 'void n(void) { PE_parse_boot_argn("ku_both", &v, 4); }\n',
+    # kernel: a file the fork adds to Apple's XNU
+    "xnu/files/bsd/dev/hakios.fork.c": 'void o(void) { PE_parse_boot_argn("k_fork", &v, 4); }\n',
     # NOT arguments: must not be found
     "xnu/files/bsd/dev/hakios.other.c": 'static bool option(int x);\nvoid p(void) { option("not_k_no_definition"); }\n',     # option() here is no wrapper: no definition of option(const char *name)
     "xnu/files/bsd/dev/hakios.comment.c": '/* boot-arg adreno_zap=0 for the second run; nothing reads it now */\nvoid q(void) {}\n',
@@ -78,12 +82,12 @@ d = repo(FILES)
 try:
     got = found(d)
     for name, layers in (("k_direct", "k"), ("k_string", "k"), ("k_tunable", "k"), ("k_writeable", "k"), ("k_wrapped", "k"),
-                         ("k_wifi_helper", "k"), ("k_wifi_lx", "k"), ("l_arg", "l"), ("u_strstr", "u"), ("u_helper", "u"), ("u_hm_helper", "u"),
+                         ("k_fork", "k"), ("k_wifi_helper", "k"), ("k_wifi_lx", "k"), ("l_arg", "l"), ("u_strstr", "u"), ("u_helper", "u"), ("u_hm_helper", "u"),
                          ("ku_both", "klu")):
         check("found: %-14s layers %s" % (name, layers), got.get(name) == layers, "got %r" % got.get(name))
     for name in ("not_k_no_definition", "adreno_zap", "metadata", "not_u_other", "not_k_dt", "name", "arguments"):
         check("NOT found: %s" % name, name not in got, "it is in the catalogue as %r" % got.get(name))
-    check("drivers/ is scanned as well as xnu/files/", "k_tunable" in got)
+    check("drivers/ is scanned as well as the fork's files", "k_tunable" in got and "k_fork" in got)
     check("the groups: the GPU file's argument is under GPU and display", "## GPU and display" in run(d, "--markdown").stdout)
     check("the page says which layers read ku_both", "| `ku_both` | KLU |" in run(d, "--markdown").stdout, run(d, "--markdown").stdout[-400:])
 
@@ -102,7 +106,7 @@ try:
     open(os.path.join(d, "configs", "boot-args.lst"), "w", newline="\n").write(run(d, "--lst").stdout)
     open(os.path.join(d, "configs", "symbols.tsv"), "w", newline="\n").write(run(d, "--symbols").stdout)
     check("--check: current files -> passes", run(d, "--check").returncode == 0, run(d, "--check").stdout)
-    open(os.path.join(d, "xnu", "files", "bsd", "dev", "hakios.adreno.c"), "a").write('void more(void) { PE_parse_boot_argn("a_new_one", &v, 4); }\n')
+    open(os.path.join(d + "-fork", "bsd", "dev", "hakios.adreno.c"), "a").write('void more(void) { PE_parse_boot_argn("a_new_one", &v, 4); }\n')
     subprocess.run(["git", "-C", d, "add", "-A"], check=True, capture_output=True)
     r = run(d, "--check")
     check("--check: a driver adds an argument -> the catalogue is out of date, fails", r.returncode != 0 and "out of date" in r.stdout, r.stdout)
@@ -116,6 +120,7 @@ try:
     check("--check: a configuration symbol whose argument nobody reads -> fails", r.returncode != 0 and "nobody_reads_this" in r.stdout, r.stdout)
 finally:
     shutil.rmtree(d, ignore_errors=True)
+    shutil.rmtree(d + "-fork", ignore_errors=True)
 
 # the real tree: the committed catalogue is current, and the table's symbols are all read somewhere
 ROOT = os.path.dirname(HERE)

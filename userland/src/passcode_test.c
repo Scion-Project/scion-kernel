@@ -1,5 +1,5 @@
 /*
- * passcode_test: the kernel key store's passcode (xnu/files/iokit/Kernel/MiniAppleKeyStore.cpp) on an HFS Plus
+ * passcode_test: the kernel key store's passcode (scion/xnu-8796:iokit/Kernel/MiniAppleKeyStore.cpp) on an HFS Plus
  * /private/var, in QEMU, across restarts: process 1 of a tiny APFS root (qemu/run-passcode-test.sh). It mounts the
  * volume on /private/var, as init does on the phone, and asks the kernel to run the step of its self-test that the
  * boot-argument passcode_selftest=N names (the kernel logs each check); then says what the kernel answered.

@@ -3,7 +3,7 @@
 Notes from the run that took the S9's home screen from CPU compositing (about 0.1 to 0.7 frames a second) to CoreAnimation rendering on
 the Mali-G72 (10 to 51 frames a second while it is used). The code is in the tree: `userland/src/sbca.c` (the renderer hook, with iOS 27.0.1's
 QuartzCore addresses, numbers only), `tools/ios27/ca-gpu/` (the build and the EAGL bridge), and in the kernel `SweetFramebuffer.cpp` (the GPU
-present, the release notifications) and `SweetSurface.cpp` (the IOSurface copy fallback) under `xnu/files-12377/iokit/Kernel/arm/`.
+present, the release notifications) and `SweetSurface.cpp` (the IOSurface copy fallback) under `scion/xnu-12377-starlte:iokit/Kernel/arm/`.
 Everything below was measured on one phone; none of it is a benchmark.
 
 ## What decided the frame rate

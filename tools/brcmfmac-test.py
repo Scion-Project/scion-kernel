@@ -11,8 +11,8 @@ usage: tools/brcmfmac-test.py
      (pcie.c, brcmf_pcie_fwnames) gives, the first line that matches as brcmf_fw_alloc_request() takes it; the RAM
      base chip.c gives them; the PCI ID in the driver's device table.
 
-  3. xnu/files/bsd/sys/hakios.bcm4361_cis.h, compiled with the host's cc: the module's ID in the chip's OTP (bcmdhd's CIS
-     tuples) read, and the NVRAM it chooses; then xnu/files/bsd/sys/hakios.macaddr.h, compiled with the host's cc: the phone's address as Samsung's Android writes it
+  3. bsd/sys/hakios.bcm4361_cis.h of the fork of XNU, compiled with the host's cc: the module's ID in the chip's OTP (bcmdhd's CIS
+     tuples) read, and the NVRAM it chooses; then bsd/sys/hakios.macaddr.h, compiled with the host's cc: the phone's address as Samsung's Android writes it
      in /efs/wifi/.mac.info (brcmfmac=6), and what is refused (all zeroes, a group's address, anything malformed).
   4. wifi/lx/brcmfmac/lx_rsn.h, compiled with the host's cc: an access point's RSN element read, and ours for the
      association request made (brcmfmac=8): CCMP, PSK, the group's CCMP or TKIP; WPA3, enterprise networks, protected
@@ -29,6 +29,11 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def fork_added():
+    """The files the ios-16.5 fork adds to Apple's XNU, at their paths in the tree (tools/xnu-tree.py added): Scion's own headers."""
+    return subprocess.run([sys.executable, os.path.join(ROOT, "tools", "xnu-tree.py"), "added", "ios-16.5"], check=True, capture_output=True,
+                          text=True).stdout.strip()
 failed = []
 
 
@@ -246,9 +251,9 @@ int main(void) {
 """
 
 for name, harness, include, what in (
-        ("macaddr", MAC_HARNESS, "xnu/files/bsd/sys",
+        ("macaddr", MAC_HARNESS, "@fork/bsd/sys",
          "hakios.macaddr.h: the phone's .mac.info and wifi_mac read; zeroes, a group's address and malformed text refused"),
-        ("cis", CIS_HARNESS, "xnu/files/bsd/sys",
+        ("cis", CIS_HARNESS, "@fork/bsd/sys",
          "hakios.bcm4361_cis.h: the module's ID in the chip's OTP read, and the NVRAM bcmdhd would take for it (SEMCO "
          "r02a/r02b, Murata r020..r031; a Murata ID bcmdhd's table lacks gets the vendor's murata_r041); blank OTP refused"),
         ("rsn", RSN_HARNESS, "wifi/lx/brcmfmac",
@@ -258,7 +263,7 @@ for name, harness, include, what in (
         src = os.path.join(tmp, "t.c")
         exe = os.path.join(tmp, "t")
         open(src, "w").write(harness)
-        cc = subprocess.run(["cc", "-std=c11", "-Wall", "-Werror", "-I", os.path.join(ROOT, include), src, "-o", exe],
+        cc = subprocess.run(["cc", "-std=c11", "-Wall", "-Werror", "-I", os.path.join(fork_added(), include[6:]) if include.startswith("@fork/") else os.path.join(ROOT, include), src, "-o", exe],
                             capture_output=True, text=True)
         if cc.returncode != 0:
             check("%s compiles on the host: %s" % (name, cc.stderr.strip()), False)

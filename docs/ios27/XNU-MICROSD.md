@@ -1,6 +1,6 @@
 # XNU microSD root driver (design)
 
-Status: v1 (PIO, read-only) implemented as patches/xnu-12377/starlte patches 0345/0346 and built (section 12),
+Status: v1 (PIO, read-only) implemented as commits 0345 and 0346 of the fork's `scion/xnu-12377-starlte` and built (section 12),
 with the review fixes (error recovery, failed-mount panic, early bring-up print, store-aware `lba:`).
 The probe payload `out/xnu-sdprobe.xnu` is built but not flashed or booted. The phone was not touched.
 
@@ -502,8 +502,8 @@ The same kernel keeps `rd=ufsroot0` working, so nothing about the daily iOS 26 b
 
 | Piece | Where |
 |---|---|
-| Driver | `patches/xnu-12377/starlte/0345-starlte-microsd-driver.patch`: `bsd/dev/starlte_sd.c` + its `bsd/conf/files` line |
-| Root hook | `patches/xnu-12377/starlte/0346-starlte-microsd-root.patch`: `IOFindBSDRoot` STARLTE block, `sdprobe=` before the UFS probe, `rd=sdroot0` next to `ufsroot0` |
+| Driver | `commit 0345 of scion/xnu-12377-starlte`: `bsd/dev/starlte_sd.c` + its `bsd/conf/files` line |
+| Root hook | `commit 0346 of scion/xnu-12377-starlte`: `IOFindBSDRoot` STARLTE block, `sdprobe=` before the UFS probe, `rd=sdroot0` next to `ufsroot0` |
 | Kernel | `out/kernel.development.starlte-12377` (incremental `tools/ios27/build-xnu-12377.sh`, no warnings in the new files); the kernel before it is kept as `out/kernel.development.starlte-12377.pre-sd` |
 | Payload tool | `tools/ios27/mkpayload-ios26.sh NAME CMDLINE` -> `out/xnu-NAME.xnu` (strip -x kernel + `out/starlte-iphone11.adt` + cmdline, `mkpayload.py`; a store entry, no BOOT image) |
 | Probe cmdline | `tools/cmdline/ios26-sdprobe.txt`: the daily set with `rd=ufsroot0 ufsroot=USERDATA ufsrw=1 rootrw=1 ufsmulti=1` replaced by `rd=sdroot0`, plus `herolog=0 sdprobe=2 sdhold=60 sdbench=16 sdroot=lba:249868288,131072 sweetreboot=1` (564 of 607 bytes). Should the probe ever return (sdprobe=1), the root is the card range, whose missing HFS header panics (EFTYPE): UFS is never brought up |

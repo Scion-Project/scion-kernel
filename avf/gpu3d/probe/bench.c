@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "../../shim/uart.h"
-#include "../../../xnu/files/bsd/sys/hakios.vgpu3d.h"
+#include <sys/hakios.vgpu3d.h>      /* the fork of XNU's: build.sh puts its bsd/ on -I */
 
 void cpu_blend_layer(uint8_t *dst, uint32_t w, uint32_t h, const uint8_t *tex, uint32_t tw, uint32_t th,
 		     uint8_t *row, const uint16_t *xmap);

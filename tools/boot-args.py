@@ -19,8 +19,8 @@ fails the build when the two files disagree with the code. It says WHICH driver 
 an argument means is in the head of that file, and for the stable ones in tools/hakios-config.py (`help SYMBOL`).
 
 What is looked for:
-  the kernel   PE_parse_boot_argn("name" ...) and PE_parse_boot_arg_str("name" ...), in xnu/files/ and in the lines
-               xnu/hakios.patch adds to Apple's files
+  the kernel   PE_parse_boot_argn("name" ...) and PE_parse_boot_arg_str("name" ...), in the files the ios-16.5 profile's fork adds
+               to Apple's XNU (tools/xnu-tree.py changed) and in the lines it adds to Apple's files, listed as `(patch)`
   the loader   starts_with(c, "name=...") on the payload's command line, in xnuloader/
   user space   a name given to strstr()/strncmp() on sysctl kern.bootargs, in userland/src/ (seen: sb_delay=, touch_lat=1,
                ca_vbl=1 ...), compared whole with a word of it (strcmp(word, "wifi=1")), or given to the Metal
@@ -28,6 +28,8 @@ What is looked for:
 """
 import argparse
 import collections
+import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -109,28 +111,88 @@ def tracked(root):
     return [p.decode() for p in out.split(b"\0") if p]
 
 
-def scan(root, keep=None):
-    """{name: {"kernel": {files}, "loader": {files}, "user": {files}, "str": {files}}} found in the tracked source.
-    `keep`, if given, is filled with {file name: text} of every source file read (the descriptions are taken from it)."""
-    found = collections.defaultdict(lambda: {"kernel": set(), "loader": set(), "user": set(), "str": set()})
-    for f in tracked(root):
-        if not f.endswith((".c", ".cpp", ".m", ".h", ".patch")):
+def xnu_tree():
+    """tools/xnu-tree.py as a module: the kernel source the fork holds (docs/xnu-fork.md)."""
+    spec = importlib.util.spec_from_file_location("xnu_tree", os.path.join(HERE, "xnu-tree.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+SOURCE = (".c", ".cpp", ".m", ".h")
+NUMBERED = re.compile(r"(\d{4}-[\w.-]+)$")       # the subject of a commit that is one of the numbered patches
+HFS_PATHS = ("bsd/hfs/", "bsd/hfs_encodings/")  # Apple's HFS Plus and the port's changes to it: no arguments of this port's own
+
+
+CACHE_VERSION = 1       # the reading rules below: change it when they change
+
+
+def fork_sources(profile="ios-16.5"):
+    """_fork_sources(), kept next to the checkout (xnu-src/fork-<12>-boot-args.json): reading the commits takes a few seconds and
+    tools/hakios-config.py asks for it every time it runs."""
+    xt = xnu_tree()
+    cache = xt.tree(profile) + "-boot-args.json"
+    try:
+        with open(cache, encoding="utf-8") as f:
+            have = json.load(f)
+        if have["version"] == CACHE_VERSION:
+            return [tuple(x) for x in have["sources"]]
+    except (OSError, ValueError, KeyError):
+        pass
+    sources = _fork_sources(xt, profile)
+    tmp = "%s.%d" % (cache, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"version": CACHE_VERSION, "sources": sources}, f)
+    os.replace(tmp, cache)
+    return sources
+
+
+def _fork_sources(xt, profile):
+    """[(name, text, kept)] of Scion's kernel as the profile's fork holds it, commit by commit (tools/xnu-tree.py log), read the way
+    the patch forms of it were: the files a commit adds to Apple's XNU, whole, under their own names; the lines it adds to Apple's
+    files, as one text named "(patch)"; and a numbered patch's commit (the subject is the patch's name) as the patch, whole, named
+    <subject>.patch. `kept` is what describe() takes the documentation lines from ("" for "(patch)"). HFS Plus is not read."""
+    sources, added = [], []
+    for sha, parent, subject in xt.commits(profile):
+        if NUMBERED.match(subject):
+            text = xt.git_out(profile, "diff", "--no-renames", "--no-color", "-U3", parent, sha)
+            sources.append((subject + ".patch", text, text))
             continue
-        # the ios-27 profile's files (the S9's Starbite kernel has arguments of its own, listed in docs/ios27-starlte.md; they join this
-        # catalogue when the drivers move into drivers/): their adapted copies of drivers/ files must not stand for them in `keep`
-        if f.startswith(("xnu/files-12377/", "patches/xnu-12377/")):
+        for f in xt.git_out(profile, "diff", "--name-only", "--no-renames", "--diff-filter=A", parent, sha).split("\n"):
+            if f.endswith(SOURCE) and not f.startswith(HFS_PATHS):
+                text = xt.git_out(profile, "show", sha + ":" + f)
+                sources.append((os.path.basename(f), text, text))
+        files = [f for f in xt.git_out(profile, "diff", "--name-only", "--no-renames", "--diff-filter=CMRTD", parent, sha).split("\n")
+                 if f.endswith(SOURCE) and not f.startswith(HFS_PATHS)]
+        if files:
+            added += [l[1:] for l in xt.git_out(profile, "diff", "-U0", "--no-renames", "--no-color", parent, sha, "--", *files).splitlines()
+                      if l.startswith("+") and not l.startswith("+++")]
+    sources.append(("(patch)", "\n".join(added), None))
+    return sources
+
+
+def scan(root, keep=None, fork=None):
+    """{name: {"kernel": {files}, "loader": {files}, "user": {files}, "str": {files}}} found in the tracked source and in `fork`
+    (fork_sources(): the kernel files of the fork, not tracked here; read from the fork, tools/xnu-tree.py, when not given).
+    `keep`, if given, is filled with {file name: text} of every source file read (the descriptions are taken from it)."""
+    if fork is None:
+        fork = fork_sources()
+    found = collections.defaultdict(lambda: {"kernel": set(), "loader": set(), "user": set(), "str": set()})
+    sources = []
+    for f in tracked(root):
+        if not f.endswith(SOURCE):
             continue
         try:
             text = open(os.path.join(root, f), encoding="utf-8", errors="replace").read()
         except OSError:
             continue
-        base = os.path.basename(f)
-        if keep is not None and f != "xnu/hakios.patch":
-            keep[base] = text
-        if f == "xnu/hakios.patch":
-            text = "\n".join(l[1:] for l in text.splitlines() if l.startswith("+") and not l.startswith("+++"))
-            base = "(patch)"
-        # the kernel's side: where the drivers are kept (xnu/files/ until they moved to drivers/<subsystem>/) and the Linux layer
+        sources.append((f, os.path.basename(f), text, text))
+    for base, text, kept in fork or ():
+        sources.append(("xnu/" + base, base, text, kept))
+    for f, base, text, kept in sources:
+        if keep is not None and kept is not None:
+            keep[base] = kept
+        # the kernel's side: the fork's files, where the drivers are kept (drivers/<subsystem>/) and the Linux layer
         if f.startswith(("xnu/", "drivers/", "wifi/lx/src/", "wifi/lx/brcmfmac/")):
             for m in KERNEL.finditer(text):
                 found[m.group(1)]["kernel"].add(base)
@@ -307,10 +369,17 @@ def main():
     what.add_argument("--symbols", action="store_true")
     what.add_argument("--check", action="store_true")
     ap.add_argument("--root", default=ROOT)
+    ap.add_argument("--fork-dir", help="read the kernel's files from this directory (every file in it is one the fork adds; for the tests) "
+                    "instead of the fork's checkout (tools/xnu-tree.py)")
     args = ap.parse_args()
     root = os.path.abspath(args.root)
     texts = {}
-    found = scan(root, keep=texts)
+    if args.fork_dir:
+        fork = [(f, text, text) for d, _, fs in sorted(os.walk(args.fork_dir)) for f in sorted(fs) if f.endswith(SOURCE)
+                for text in [open(os.path.join(d, f), encoding="utf-8", errors="replace").read()]]
+    else:
+        fork = fork_sources()
+    found = scan(root, keep=texts, fork=fork)
     config = symbols(root)
     rows = symbol_rows(found, texts, set(config))
     for row in rows:

@@ -118,7 +118,7 @@ device sheng
 
 A driver in `devices/<name>/drivers/<subsystem>/conf` is a `CONFIG_HAKIOS_<NAME>` symbol like the common ones. `make kernel` copies
 its files into the kernel tree (`xnu/sync-drivers.sh`, through `tools/hakios-config.py external-files`) and writes it into XNU's
-`conf/files` as `optional`; `xnu/export.sh` leaves it out of the common patch, because it is the device's. A device repository
+`conf/files` as `optional`; it is not in the fork, because it is the device's. A device repository
 cannot declare `standard` files: what every kernel has is the common repository's to decide.
 
 ## Publishing a device

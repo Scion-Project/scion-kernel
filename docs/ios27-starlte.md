@@ -10,22 +10,23 @@ has been booted on a real Galaxy S9 to SpringBoard's home screen, by a kernel bu
 section says what that is and where it sits; the sections after it are the morning's analysis, kept.
 
 **What it is.** `profiles/ios-27.conf`: Apple's `xnu-12377.121.6` (nothing newer is public; iOS 27.0.1's kernel is `xnu-13432.2.10`) with
-Darwin 27's system calls (`patches/xnu-12377/0120`) and a machine layer for the S9 (`STARLTE`: the Exynos 9810, plain arm64, 4 KiB kernel
+Darwin 27's system calls (`commit 0120 of scion/xnu-12377`) and a machine layer for the S9 (`STARLTE`: the Exynos 9810, plain arm64, 4 KiB kernel
 pages under 16 KiB user pages, no Apple SoC) that is the work of **Project Starbite** and the layers under it (below). iOS 27's user space
 is arm64e; the S9's Cortex-A55 and Mongoose M3 have no pointer authentication, so the kernel emulates the instructions that trap (the
 register forms of the PAC instructions, `FJCVTZS`, `FCADD`, `LDAPR` and the LSE atomics on the M3: `starlte/0319`, `0342`-`0355`;
 `tools/ios27/a64e` has the user-space side), some tens of thousands to a couple of hundred thousand traps a second. The root is the
 builder's own, from their own IPSW; nothing of Apple's is in this repository.
 
-**Where the pieces are.** One tree, one series directory:
+**Where the pieces are.** One tree, one branch of the fork:
 
 | Path | What |
 |---|---|
-| `profiles/ios-27.conf` | machine `STARLTE`, series `patches/xnu-12377/series.ios27`, status experimental |
-| `patches/xnu-12377/series.ios27` | the order: the edits darwin-xnu-build makes, the staging scripts (Apple's HFS and libpthread and BearSSL by commit; CoreEntitlements' headers from the Kernel Debug Kit you bring), `files` and `copy` lines, then the patches |
-| `patches/xnu-12377/starlte/` | the patches: hunks on Apple's files only (and on the sources the scripts stage). `README.md` there has the porting notes |
-| `xnu/files-12377/` | the files the series adds, in the tree's own layout: platform code, the Starbite and wardevsa drivers, the IOHID event services, the crypto stand-ins, the Mali and display services |
-| `xnu/apply-series.sh` | makes the tree; learned `files DIR`, `copy SOURCE TARGET`, `.sh` lines and `# drivers: series`, `# imports: none`, all inert for the ios-26 series |
+| `profiles/ios-27.conf` | machine `STARLTE`, fork branch `scion/xnu-12377-starlte` (`fork_commit`, `fork_stage`, `fork_copy`), `drivers none`, status experimental |
+| the fork's `scion/xnu-12377-starlte`, first commits | the order: the edits darwin-xnu-build makes, what the staging scripts made (Apple's HFS and libpthread and BearSSL by commit), the files the old series added (platform code, the Starbite and wardevsa drivers, the IOHID event services, the crypto stand-ins, the Mali and display services), then the patches |
+| the fork's `scion/xnu-12377-starlte`, the commits after them | the patches: hunks on Apple's files only (and on the sources the scripts staged). [starlte-porting-notes.md](ios27/starlte-porting-notes.md) has the Starbite author's porting notes |
+| `xnu/stage/` | `00_setup_coreentitlements.sh`, the profile's `fork_stage`: CoreEntitlements' V2 headers from the Kernel Debug Kit you bring, which cannot be in git |
+| `profiles/ios-27.copy` | the `fork_copy` list: the shared drivers and SoC headers of this repository that the tree takes at build time |
+| `xnu/apply-series.sh` | makes the tree: the fork's commit, `fork_stage`, `fork_copy`, and (`drivers none`) no driver from `drivers/` |
 | `xnuloader/sboot/` | the loader S-Boot starts (boot menu, OS store, recovery menu, USB console and fastboot subset); Scion's own path boots through Mu-Silicium's UEFI and `xnuloader/`, which this leaves alone |
 | `tools/ios27/` | build, packing and test tools (`build-xnu-12377.sh`, `-ios.sh`, `mkpayload-ios26.sh`, `make-xnu-boot.sh`, the ADT makers, `a64e/`, `gpu/`, `mesa-ios/`, `ca-gpu/`) and wardevsa's `herolte/` packing tools |
 | `tools/ios27/metal/` | Starbite's Metal stack (Metal 2 frontend, metal2vulkan, PanVK) rebuilt for iOS 27: build scripts, the root installer, `mtl27test`, `sbmtlc`; `docs/ios27/METAL.md` |
@@ -53,13 +54,13 @@ console: `/dev/cu.usbmodem*`), `rd=ufsroot0 ufsroot=USERDATA ufsrw=1 rootrw=1`, 
 own code-signing policy for the builder's own root (`cs_enforcement_disable=1 cs_integrity_skip=1 launchd_unsecure_cache=1`: its AMFI is a stand-in,
 `starlte/0025`, `0035`, `0036`, `0322`). `startop=1` adds trap statistics; `sweetm3unpin=N` (default off) lets a thread pinned to an A55 go back to the M3s after N ms (`docs/ios27/EIGHT-CORES.md`). The set is `tools/ios27/cmdline/starlte-8core.txt` (pass it to `tools/ios27/mkpayload-ios26.sh NAME FILE`; the payload
 holds 607 bytes of it); the set that booted on the phone at 4 cores is that with `cpus=4`. `docs/boot-args.md` lists what the 16.5 kernel and
-user space read; the S9's own are in the sources under `xnu/files-12377/`.
+user space read; the S9's own are in the sources of the fork's `scion/xnu-12377-starlte`.
 
-**The follow-up (not done, and why).** The series carries its own drivers: `# drivers: series` in `series.ios27` tells `xnu/apply-series.sh`
+**The follow-up (not done, and why).** The branch carries its own drivers: `drivers none` in `profiles/ios-27.conf` tells `xnu/apply-series.sh`
 to take none from `drivers/`. What is left to fold into this repository's modular layout, each step with the applied tree checked file for
-file as the last two were (`xnu/files-12377` and the `copy` lines):
+file as the last two were (the branch's files and the `copy` lines):
 
-1. The adapted Scion drivers that `xnu/files-12377` still holds. Done (9 November 2026, `docs/xnu-fork.md`): `hakios.dwc3.c` (its
+1. The adapted Scion drivers that the branch still holds. Done (9 November 2026, `docs/xnu-fork.md`): `hakios.dwc3.c` (its
    xnu-12377 include is behind `__has_include` in `drivers/usb`), `hakios.exynos_tmu.h` and `hakios.scion_gov.c` come from `drivers/` at
    build time (`profiles/ios-27.copy`) and the fork keeps no copy. Left: `hakios.exynos_cpufreq.c`, `hakios.exynos_tmu.c`, `hakios.exynos_pcie.c`, `hakios.exynos_dpu.c`,
    `hakios.exynos_acpm_dvfs.c`, `hakios.exynos9810_mem.h`, `hakios.exynos_soc.h` become `drivers/` files with `bases xnu-8796 xnu-12377` in their `conf`
@@ -110,7 +111,7 @@ The iOS 27.0.1 kernelcache for the iPhone 11 (`RELEASE_ARM64_T8030`) was read wi
 - **Kernel extensions.** The kernelcache links 260; Scion uses none of Apple's. What iOS 27's daemons ask of AMFI,
   AppleImage4, IOHIDFamily, IOSurface and the GPU family, beyond what iOS 26 asked, is only learned by booting.
 
-`patches/xnu-12377/0120-darwin27-syscalls.patch` adds the eight system calls to the xnu-12377 base, as Scion's own code
+`commit 0120 of scion/xnu-12377` adds the eight system calls to the xnu-12377 base, as Scion's own code
 (APSL, like the files it changes): `pipe2` (O_CLOEXEC, O_CLOFORK, O_NONBLOCK), `dup3` (O_CLOEXEC, O_CLOFORK; the same
 descriptor twice is EINVAL), `fchflagsat` and `fsctlat` (relative to a directory descriptor), `getumask`, and
 `guarded_ftruncate_np` (`ftruncate` checked against the descriptor's guard, as `guarded_pwrite_np` is). `aio_readv` and

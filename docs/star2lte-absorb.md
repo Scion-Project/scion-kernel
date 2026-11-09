@@ -6,7 +6,7 @@ was run. This page lists what it has that this tree does not, what was taken, an
 
 ## Licence position
 
-* Its `LICENSE` says two licences apply by directory: the kernel parts (`xnu/hakios.patch`, `xnu/files/`, `drivers/`) are
+* Its `LICENSE` says two licences apply by directory: the kernel parts (here: the fork `Scion-Project/xnu`, `drivers/`) are
   APSL 2.0 derivatives of Apple's XNU; "everything else that is ours" (loader, `userland/src/`, tools, scripts, docs, device
   layer) is MIT, (c) 2025-2026 the HakiOS authors. `NOTICE` and `SOURCES.md` add: no blanket licence for every component,
   original notices stay with the source, Mesa keeps its per-file licences, Metal/Vulkan work carries MIT and GPL-2.0+/LGPL-3.0+.

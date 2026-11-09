@@ -17,7 +17,7 @@ Read-only audit. Nothing was built, run or modified except this file.
 | `drivers/wifi/hakios.sta.c` | 371 |
 | `drivers/wifi/hakios.apple80211.c` | 739 |
 
-Also read for evidence: `tools/wpa-test/test_wpa.c`, `xnu/files/bsd/sys/hakios.sta.h`, `hakios_wifi_network()` in `hakios.wifi.c`, the boot seed in `xnuloader/loader.c` 3050-3080, `xnu/files/osfmk/minicrypto/mc_provider.c` (PRNG part).
+Also read for evidence: `tools/wpa-test/test_wpa.c`, `scion/xnu-8796:bsd/sys/hakios.sta.h`, `hakios_wifi_network()` in `hakios.wifi.c`, the boot seed in `xnuloader/loader.c` 3050-3080, `scion/xnu-8796:osfmk/minicrypto/mc_provider.c` (PRNG part).
 
 Method: full read of every file above, tracing every length that comes from the air, firmware or userland to its use, checking `lx_wpa.c` line by line against IEEE 802.11-2020 clause 12.7 (key hierarchy, EAPOL-Key layout, supplicant rules), RFC 8018 (PBKDF2), RFC 2104 and RFC 3394. The ath11k driver sources are not in this tree (`xnu-deps/build/ath11k` is absent), so driver and firmware behaviour is inferred from comments only. The test program in `tools/wpa-test` was read but not run (no C compiler on this host).
 

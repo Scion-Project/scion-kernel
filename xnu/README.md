@@ -1,16 +1,15 @@
 # The kernel
 
-Our changes to XNU `xnu-8796.121.2` (the kernel of Darwin userland 16.5, Darwin 22.5.0):
+Our changes to XNU `xnu-8796.121.2` (the kernel of Darwin userland 16.5, Darwin 22.5.0) are commits on Apple's tag in
+[Scion-Project/xnu](https://github.com/Scion-Project/xnu), branch `scion/xnu-8796` (`docs/xnu-fork.md`): changes to Apple's
+files, the new files at their paths in the XNU tree, HFS Plus, and the numbered patches (AVF platform, virtio-pci, display and
+input, virtio-gpu, camera), one commit each. This directory holds what puts the tree together:
 
-- `hakios.patch`: changes to Apple's files;
-- `files/`: new files at their paths in the XNU tree;
 - `../drivers/`: the drivers, by subsystem (`drivers/README.md`); `apply.sh` puts them at their paths in the tree;
-- `apply.sh`: fetches the sources from Apple's GitHub and lays all of this over them;
-  `export.sh`: the reverse, run before committing.
-- `patches/` (this fork): numbered patches that `apply.sh` lays on after `hakios.patch` and
-  `files/`, one track per range (AVF platform, virtio-pci, display and input, virtio-gpu, camera);
-  see `patches/README.md`. `export.sh` folds whatever is in the tree into `hakios.patch`, so export
-  from a tree without them.
+- `apply.sh`: fetches the fork at the commit the OS profile pins (`profiles/*.conf`, `fork_commit`) and lays the drivers and their
+  configuration over it (`apply-series.sh` does the same for the xnu-12377 profiles; `fork.sh` is what both share);
+- `stage/`: scripts that put what may not be in git into the tree at build time (the ios-27 profile's `fork_stage`);
+- `sync-drivers.sh`: copies a driver edited in `drivers/` into the tree.
 
 It builds on Linux with stock clang (no macOS, no Xcode) and on macOS with Xcode.
 
@@ -42,10 +41,10 @@ Things to know:
   (headers and implementation both); on Linux it hands out the macOS 26.1 SDK's headers (docs/two-bases.md).
 - A driver can be edited in `drivers/<subsystem>/`: `make kernel` runs `xnu/sync-drivers.sh`, which copies it into
   the tree when it is newer than the tree's copy (never the other way round). Everything else, and drivers edited
-  in the tree, go back with `xnu/export.sh`.
-- Edit `xnu-src/xnu-8796.121.2` directly (a git tree on branch `redwood`); `xnu/export.sh`
-  regenerates the patch and `files/` from the whole tree, so bring the tree up to the current patch
-  first if somebody else changed the kernel meanwhile.
+  in the tree, go back into `drivers/` by hand.
+- The tree `xnu/apply.sh` makes is a clone of the fork at the profile's commit: change the kernel there (commit, push to the fork,
+  then set the profile's `fork_commit` in a pull request here: `docs/xnu-fork.md`). Tools that only read the kernel's sources use
+  `tools/xnu-tree.py` (a cached pristine checkout of that commit), not a built tree.
 
 ## What is added
 
@@ -67,7 +66,7 @@ Things to know:
 | `drivers/haptic/hakios.haptic.c`, `hakios.camera.c`, `hakios.ufs.c` | the vibration motor, the cameras, the UFS storage |
 | `bsd/pthread/pthread_kext_static.c` | the pthread kext linked into the kernel |
 
-The patch also fixes what keeps open XNU from building and running outside Apple: the makefiles
+The changes also fix what keeps open XNU from building and running outside Apple: the makefiles
 on Linux, the `BCM2837` configuration it is based on, bugs in abandoned code.
 
 License: a derivative work of XNU, Apple Public Source License 2.0 (`LICENSE.APSL` at the top).

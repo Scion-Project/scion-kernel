@@ -57,6 +57,6 @@ Every `make` target is a script below it; run the script itself for its options 
 
 | Script | Does |
 |---|---|
-| `xnu/apply.sh` | Apple's XNU at the tag, with `hakios.patch`, `files/`, the drivers and the drivers' choice laid over it, into `xnu-src/` |
+| `xnu/apply.sh` | the fork of XNU at the profile's commit (Apple's tag with Scion's changes), with the drivers and the drivers' choice laid over it, into `xnu-src/` |
 | `xnu/sync-drivers.sh` | the drivers edited in `drivers/` (and the SoC's and device's) into the tree |
-| `xnu/export.sh` | the tree back into `hakios.patch`, `files/` and `drivers/` |
+| `tools/xnu-tree.py` | a cached checkout of the profile's fork commit (no drivers), for the tools that read the kernel's sources |

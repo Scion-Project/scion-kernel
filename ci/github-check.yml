@@ -80,10 +80,9 @@ jobs:
         run: sh tools/bcm-hci-test.sh
       - name: The Galaxy S9's sensor hub's SPI frames, packets, CRC-8, RPCs, firmware records and SSP hold together (sanitizers)
         run: sh tools/bcm-shub-test.sh
-      - name: The kernel patch applies to Apple's tree
+      - name: The commits of the fork of XNU that the profiles pin can be fetched
         run: |
-          git clone -q --depth 1 --branch xnu-8796.121.2 https://github.com/apple-oss-distributions/xnu.git /tmp/xnu
-          git -C /tmp/xnu apply --check "$PWD/xnu/hakios.patch"
+          for p in ios-16.5 ios-26 ios-27; do python3 tools/xnu-tree.py path "$p"; done
       - name: APFS tools self-test
         run: |
           [ -x tools/apfs/run-tests.sh ] && tools/apfs/run-tests.sh || echo "no self-test on this runner"

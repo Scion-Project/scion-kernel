@@ -29,8 +29,7 @@ made from the conf files. SoC numbers are not here: they are in `socs/<soc>/incl
 
 | Tool | Does |
 |---|---|
-| `xnu/apply.sh` | lays Apple's tag, `xnu/hakios.patch`, `xnu/files/` and these drivers into one tree |
-| `xnu/export.sh` | the reverse, run before committing; refuses a new `hakios.*` file that `drivers/map` does not list |
+| `xnu/apply.sh` | takes the fork of XNU at the profile's commit (Scion-Project/xnu, [docs/xnu-fork.md](../docs/xnu-fork.md)) and lays these drivers into it |
 | `tools/drivers-check.py` | CI: the map and the directories agree, nothing is listed twice, nothing is kept in two places |
 
 ## Adding a driver

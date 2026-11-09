@@ -9,7 +9,7 @@ Read-only audit. Files read in full unless noted.
 | drivers/camera/hakios.torch.c | 763 | all |
 | drivers/haptic/hakios.haptic.c | 1005 | all |
 | drivers/camera/hakios.camera.c | 4264 | all except 1568-1750 only skimmed (read-only RPMh/SMMU/PLL printers) |
-| xnu/files/bsd/sys/hakios.camera.h | - | all (user ABI) |
+| scion/xnu-8796:bsd/sys/hakios.camera.h | - | all (user ABI) |
 | userland/src/camera_device.c (1280-1420), camera_isp.c (840-1033) | - | the parts that talk to the kernel node and parse the `.isp` file |
 | tools/camsensor.py, tools/camtuning.py | - | header comments and pack lines only (to learn the on-disk format) |
 | hakios.buttons.c (spmi lock), loader_return.c (quiesce call site), hakios.wifi.c (`hakios_wifi_file`) | - | the few lines needed |

@@ -8,8 +8,8 @@ The commits say how; `docs/` says why.
 What a build is made of, and where each part is fetched from. Nothing of these is kept in the repositories but the
 changes to it; the scripts named fetch the release and put the changes on.
 
-- the kernel: Apple's [XNU](https://github.com/apple-oss-distributions/xnu), tag `xnu-8796.121.2` (the release the Darwin 16.5 user space was built from) -- `xnu/apply.sh`, the changes in `xnu/hakios.patch` and `xnu/files/`, the drivers in `drivers/`
-- the data volume: Apple's [HFS Plus](https://github.com/apple-oss-distributions/hfs), tag `hfs-627.100.6` -- `xnu/hfs/hfs.sh`, the changes in `xnu/hfs/hfs.patch`
+- the kernel: Apple's [XNU](https://github.com/apple-oss-distributions/xnu), tag `xnu-8796.121.2` (the release the Darwin 16.5 user space was built from) -- `xnu/apply.sh`, the changes as commits on Apple's tag in the fork [Scion-Project/xnu](https://github.com/Scion-Project/xnu) (branch `scion/xnu-8796`), the drivers in `drivers/`
+- the data volume: Apple's [HFS Plus](https://github.com/apple-oss-distributions/hfs), tag `hfs-627.100.6` -- as commits of the fork's `scion/xnu-8796` (Apple's files, then the port's changes)
 - the boot: [U-Boot](https://source.denx.de/u-boot/u-boot) `v2026.07` -- `hakios-uefi/u-boot/apply.sh`, the changes in `hakios-uefi/u-boot/hakios.patch` and `files/`; the device's part in `hakios-sm7325/u-boot/`
 - the UEFI (the other way to start): [Project Silicium's Mu-Silicium](https://github.com/Project-Silicium/Mu-Silicium) at `e51cd877e31c` -- `hakios-uefi/apply.sh`
 - the GPU's OpenGL ES: [Mesa](https://archive.mesa3d.org/) 25.0.7, the freedreno driver for the Adreno -- `tools/mk-mesa.sh`, the changes in `tools/mesa/`
@@ -21,10 +21,10 @@ changes to it; the scripts named fetch the release and put the changes on.
 
 ## 2026-11-08
 
-- iOS 27 on the Galaxy S9: the `ios-27` profile (machine `STARLTE`) builds a kernel that booted iOS 27.0.1 to SpringBoard on a phone: `patches/xnu-12377/series.ios27` (Project Starbite and the layers under it, wardevsa's S7 layer with his permission, Scion's `0400` and up), the files it adds in `xnu/files-12377/`, `xnuloader/sboot/` (the S-Boot loader), `tools/ios27/`, `userland/src/sbca.c` (CoreAnimation through OpenGL ES on the Mali-G72). Default `cpus=8`. `make kernel` does not build it yet. `docs/ios27-starlte.md`, `LICENSES.md`
+- iOS 27 on the Galaxy S9: the `ios-27` profile (machine `STARLTE`) builds a kernel that booted iOS 27.0.1 to SpringBoard on a phone: the fork's branch `scion/xnu-12377-starlte` (Project Starbite and the layers under it, wardevsa's S7 layer with his permission, Scion's `0400` and up), the files it adds, `xnuloader/sboot/` (the S-Boot loader), `tools/ios27/`, `userland/src/sbca.c` (CoreAnimation through OpenGL ES on the Mali-G72). Default `cpus=8`. `make kernel` does not build it yet. `docs/ios27-starlte.md`, `LICENSES.md`
 - HakiOS (oosexgang/hakios-xnu-kernel) merged up to its `63fc2b46`: 276 commits, below under their own dates. What stays Scion's: `VERSION`, the Galaxy S9's framebuffer paths, panfrost beside msm in `tools/mesa/hakios-drm`, the S9's SpringBoard defaults. What is new here and off for the S9: `fb_beam` starts no look on a SoC with no known display interface, `dl_max` (display-link rates) is opt-in, `wallpaper_freeze=1|2` and the Metal arguments are as upstream's, off unless given
 - `hakios-metal/` is in this tree now (MIT, its own LICENSE and NOTICE; the repository beside it has moved here upstream), with `userland/build.sh METAL_PLUGIN=ca`, `TURNIP=1` and `M2V=1`, `tools/mk-turnip.sh`, `tools/mk-m2v.sh`, `tools/ca-metallib.py` and the AIR front end of `tools/mesa/air`. Nothing of it is in the S9's configuration. `userland/src/vk_test.c` stays the gfxstream test; upstream's Turnip test is `vk_turnip_test.c` (`rc.jobs.vkturnip`). HakiosGPU's userptr request is 0x7d as upstream has it, so Scion's GPU-time request is 0x7c now
-- ios-26 base: three small fixes from UniXNU's series, credited (`patches/xnu-12377/0096` the PAR_EL1 ISB, `0097` the 64-bit physical address in the pmap's page-data sync, `0098` arm64 processes with the PAC keys off, only with `SCION_NATIVE_PAC=1`). Their notice: `patches/xnu-12377/LICENSE.UniXNU`
+- ios-26 base: three small fixes from UniXNU's series, credited (`commit 0096 of scion/xnu-12377` the PAR_EL1 ISB, `0097` the 64-bit physical address in the pmap's page-data sync, `0098` arm64 processes with the PAC keys off, only with `SCION_NATIVE_PAC=1`). Their notice: `LICENSES/BSD-2-Clause-Patent-UniXNU.txt`
 - licences to settle before any distribution of a Metal-on-Vulkan binary (`M2V=1`), and for `userland/src/HakiosMetalCA.m`, whose origin states none: `THIRD_PARTY_LICENSES.md`, `COMPLIANCE.md`
 
 ## 2026-11-05

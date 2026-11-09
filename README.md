@@ -161,7 +161,7 @@ XNU's `options` and `conf/files`), so a device's defconfig builds exactly the dr
 
 ## What is in the repository, and what never is
 
-In it: only our own code and data: the patch to Apple's open-source XNU (`xnu/hakios.patch`, APSL 2.0) and our files, the boot
+In it: only our own code and data: our changes to Apple's open-source XNU (the fork `Scion-Project/xnu`, APSL 2.0) and our files, the boot
 loader, our programs and libraries, the tools, `prebuilt/` (built from this source; the loader **without** any Apple data:
 `make loader` makes the one that starts Darwin, on your machine, from your own IPSW), and the device and SoC directories.
 
@@ -170,7 +170,7 @@ This fork adds:
 | Directory | Contents |
 |---|---|
 | `avf/` | XNU as a guest of Android's own hypervisor (AVF/crosvm) for [Scion](https://github.com/Scion-Project/scion); see `avf/README.md` |
-| `xnu/patches/` | numbered kernel patches applied after `hakios.patch` and the drivers (AVF platform, virtio-pci, virtio-gpu, display, camera, sound, torch, battery) |
+| `tools/xnu-tree.py` | the kernel's sources as the fork holds them (a cached checkout of the profile's commit), for the tools that read them |
 
 Never in it: any file of Darwin (you build the system image on your machine from an IPSW you get yourself and hand to
 `sysimage/unpack.sh`; nothing is downloaded for you, decrypted or circumvented); the phone's firmware (pulled from your own phone into

@@ -30,11 +30,12 @@ if [ ! -x "$APFSPROGS/apfsck/apfsck" ]; then
 	make -C "$APFSPROGS/apfsck" --silent --no-print-directory > /dev/null
 fi
 
+FORK=$(python3 "$ROOT/tools/xnu-tree.py" path ios-16.5)
 TOOL=$ROOT/apfs-work/apfs-tool
 stale=""
 [ -x "$TOOL" ] || stale=1
 for f in "$HERE/apfs-tool.c" "$HERE/build-tool.sh" \
-	"$ROOT"/xnu/files/bsd/miscfs/apfs/*.[ch] "$ROOT"/xnu/files/bsd/miscfs/apfs/libzbitmap/*.[ch]; do
+	"$FORK"/bsd/miscfs/apfs/*.[ch] "$FORK"/bsd/miscfs/apfs/libzbitmap/*.[ch]; do
 	[ -n "$stale" ] && break
 	[ "$f" -nt "$TOOL" ] && stale=1
 done

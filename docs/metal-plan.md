@@ -53,7 +53,7 @@ Without a phone, steps 1 and 2 are all that can be done and checked. Steps 3 to 
 
 ## Step 1: what is in the tree
 
-- `xnu/files/iokit/Kernel/MiniIOMobileFramebuffer.cpp`: with boot-arg `metal=1` the `IOAcceleratorES` service gets the
+- `scion/xnu-8796:iokit/Kernel/MiniIOMobileFramebuffer.cpp`: with boot-arg `metal=1` the `IOAcceleratorES` service gets the
   properties `MetalPluginName` = `HakiosMetal` and `MetalPluginClassName` = `HakiosMetalDevice`. Without the argument
   nothing changes: **the properties stay off by default, on purpose**. With them a program that asks for Metal gets a
   device, and CoreAnimation would pick Metal for the screen; until that device can draw, the screen without it is the

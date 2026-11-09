@@ -89,7 +89,7 @@ lx_brcmf_attached(struct device *dev)
 
 /*
  * Which module the chip is (Murata or SEMCO, and its revision), read from its OTP the way Samsung's bcmdhd reads it
- * before it chooses the NVRAM (xnu/files/bsd/sys/hakios.bcm4361_cis.h has the facts and the addresses): two of the chip's
+ * before it chooses the NVRAM (scion/xnu-8796:bsd/sys/hakios.bcm4361_cis.h has the facts and the addresses): two of the chip's
  * registers written and read back (OTP Control 1, the PMU's minimum resources: what bcmdhd writes there, to have the
  * OTP readable), then the 22 words of its CIS, given to the kernel (lx_os_radio_identity(), hakios.brcmfmac.c), which
  * reads them and from then on asks for this module's NVRAM (and Bluetooth's patch). Called by brcmfmac's probe once the

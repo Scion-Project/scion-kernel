@@ -12,10 +12,12 @@ ROOT=$(cd "$HERE/../.." && pwd)
 OUT=${1:-$ROOT/apfs-work/apfs-tool}
 
 SRC=""
-for d in "$ROOT/xnu-src/xnu-8796.121.2/bsd/miscfs/apfs" "$ROOT/xnu/files/bsd/miscfs/apfs"; do
+# the built kernel tree if there is one, else the fork of XNU (tools/xnu-tree.py: fetched once, the files are the same)
+for d in "$ROOT/xnu-src/xnu-8796.121.2/bsd/miscfs/apfs" ""; do
+	[ -n "$d" ] || d=$(python3 "$ROOT/tools/xnu-tree.py" path ios-16.5)/bsd/miscfs/apfs
 	[ -f "$d/apfs_lib.c" ] && { SRC=$d; break; }
 done
-[ -n "$SRC" ] || { echo "build-tool.sh: apfs_lib.c is in neither the kernel tree nor xnu/files" >&2; exit 1; }
+[ -n "$SRC" ] || { echo "build-tool.sh: apfs_lib.c is in neither the kernel tree nor the fork of XNU" >&2; exit 1; }
 
 mkdir -p "$(dirname "$OUT")"
 # TOOL_CFLAGS: more for the compiler, e.g. "-fsanitize=thread -g" with APFS_TOOL_THREADS

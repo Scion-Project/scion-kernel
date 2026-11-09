@@ -121,7 +121,7 @@ kernel writes only to a partition `darwin` that you create yourself. What is and
 
 ## What is in the repository, and what never is
 
-In it: only our own code and data: the patch to Apple's open-source XNU (`xnu/hakios.patch`, APSL 2.0) and our files, the boot loader, our
+In it: only our own code and data: our changes to Apple's open-source XNU (the fork `Scion-Project/xnu`, APSL 2.0) and our files, the boot loader, our
 programs and libraries, the tools, `prebuilt/` (built from this source; the loader **without** any Apple data: `make loader` makes the one
 that starts Darwin, on your machine, from your own IPSW), and the device and SoC directories. Third parties' files and patches to their
 code are listed with their licenses in [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md).

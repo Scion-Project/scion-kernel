@@ -980,7 +980,7 @@ def cmd_help(a):
 
 FILES_BEGIN = "# HakiOS drivers: made by tools/hakios-config.py kernel from drivers/*/conf. Edit those, not these lines."
 FILES_END = "# end of the HakiOS drivers"
-GENERATED_IN_TREE = ("config/MASTER.hakios", "bsd/dev/hakios.drivers.h")     # made per configuration; never exported (xnu/export.sh)
+GENERATED_IN_TREE = ("config/MASTER.hakios", "bsd/dev/hakios.drivers.h")     # made per configuration; not in the fork
 USES_OPTION = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef|elif)\b.*\bHAKIOS_[A-Z][A-Z0-9_]*", re.M)
 
 
@@ -1149,7 +1149,7 @@ def cmd_kernel(a):
 
 def cmd_external(a):
     """external-files: "<file in a SoC's or device's repository>\t<path in the kernel tree>" for each file of their drivers, for
-    xnu/apply.sh and xnu/sync-drivers.sh to copy into the tree and xnu/export.sh to leave where it is (it is not this repository's)."""
+    xnu/apply.sh and xnu/sync-drivers.sh to copy into the tree (they are not in the fork)."""
     if DRIVERS_ERROR:
         raise ConfigError(DRIVERS_ERROR)
     for d in DRIVERS:

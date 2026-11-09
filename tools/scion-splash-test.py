@@ -13,6 +13,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+
+def fork_added():
+    """The files the ios-16.5 fork adds to Apple's XNU, at their paths in the tree (tools/xnu-tree.py added): Scion's own headers."""
+    return subprocess.run([sys.executable, os.path.join(ROOT, "tools", "xnu-tree.py"), "added", "ios-16.5"], check=True, capture_output=True,
+                          text=True).stdout.strip()
 failed = 0
 
 
@@ -39,12 +44,13 @@ def main():
         sys.exit("scion-splash-test: no C compiler")
     with tempfile.TemporaryDirectory() as d:
         exe = os.path.join(d, "preview")
-        r = subprocess.run([cc, "-O2", "-Wall", "-Wextra", "-Werror", "-o", exe, os.path.join(HERE, "scion-splash-preview.c")],
+        r = subprocess.run([cc, "-O2", "-Wall", "-Wextra", "-Werror", "-I", os.path.join(fork_added(), "osfmk/console"), "-o", exe,
+                            os.path.join(HERE, "scion-splash-preview.c")],
                            capture_output=True, text=True)
         check("the preview builds with the loader's headers, no warnings", r.returncode == 0, r.stderr)
         if r.returncode:
             sys.exit(1)
-        hw = int(re.search(r"#define SPLASH_LOGO_HW\s+(\d+)", open(os.path.join(ROOT, "xnu/files/osfmk/console/scion_splash.h")).read()).group(1))
+        hw = int(re.search(r"#define SPLASH_LOGO_HW\s+(\d+)", open(os.path.join(fork_added(), "osfmk/console/scion_splash.h")).read()).group(1))
         logo = open(os.path.join(ROOT, "xnuloader/scion_splash_logo.h")).read()
         lw, lh = (int(re.search(r"#define SPLASH_LOGO_%s (\d+)" % k, logo).group(1)) for k in "WH")
         check("SPLASH_LOGO_HW is the sprout's height over its width", lh * 1000 // lw == hw, (lw, lh, hw))

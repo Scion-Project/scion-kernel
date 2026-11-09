@@ -4,7 +4,7 @@
 
 standard bsd/dev/hakios.version.c
 	bases   xnu-8796 xnu-12377
-	help    kern.hakios.version, and the version in the boot log (xnu-12377: patches/xnu-12377/0110)
+	help    kern.hakios.version, and the version in the boot log (xnu-12377: the fork's commit 0110-hakios-core)
 
 standard bsd/dev/hakios.platform.c
 	help    what the drivers share (the locks of the PMIC arbiter, the always-on processor, RPMh and the SMMU), and

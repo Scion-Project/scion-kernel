@@ -1,6 +1,6 @@
 /*
  * aes_test: IOAESAccelerator from user space, the way iOS's own clients call it
- * (xnu/files/iokit/Kernel/MiniIOAESAccelerator.cpp).
+ * (scion/xnu-8796:iokit/Kernel/MiniIOAESAccelerator.cpp).
  *
  *   /redwood/bin/aes_test
  *

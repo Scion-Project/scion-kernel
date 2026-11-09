@@ -4,7 +4,7 @@ Read-only audit; nothing was built, run or changed except this file.
 
 ## Scope and method
 
-Files (all under `xnu/files/bsd/dev/` unless noted):
+Files (all under `scion/xnu-8796:bsd/dev/` unless noted):
 
 | file | lines |
 |---|---|
@@ -16,7 +16,7 @@ Files (all under `xnu/files/bsd/dev/` unless noted):
 | `userland/src/audio_plugin.c` (writer/reader side, volume control) | 1041 |
 
 Also read because the sound path depends on them (not in the group, so only the parts the sound path uses):
-`xnu/files/bsd/sys/hakios.audio.h`, `hakios.guard.c` (the guard that limits what the amplifiers get), and in `hakios.adsp.c`
+`scion/xnu-8796:bsd/sys/hakios.audio.h`, `hakios.guard.c` (the guard that limits what the amplifiers get), and in `hakios.adsp.c`
 only `root_file()`/`hakios_adsp_fw_file()` (loader of aw882xx_acf.bin) and `apr_input()`/`hakios_adsp_apr()`.
 
 Method: whole-file reading of the five kernel files and the I/O and volume parts of the plug-in; each finding traced from

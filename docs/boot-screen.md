@@ -28,7 +28,7 @@ Anything that ends the run badly (the kernel hung, did not start, came back) put
   the screen from then on (`screen_quiet`). When the display is known it paints the ground, the sprout and the first of the line
   over the framebuffer, and moves the line at its stages (power-on to the payload: up to 25 %). Hold Volume Down or give `-v`:
   none of that happens.
-- **The kernel** (`xnu/files/osfmk/console/scion_splash.c`, `xnu/patches/1517-scion-boot-screen.patch`) is started by the loader in
+- **The kernel** (`scion/xnu-8796:osfmk/console/scion_splash.c`, `commit 1517-scion-boot-screen of scion/xnu-8796`) is started by the loader in
   the console's text mode, as `-v` is, and takes the characters that would be drawn as text: each finished line goes to the dim lines
   and moves the progress line on. The line is a guess and says so: the kernel's lines, `splash_lines` of them, take it from 25 % to
   95 %; from the start of IOKit a timer lets it creep to 99 % while the system comes up; the first frame the display driver puts on
@@ -42,7 +42,7 @@ Anything that ends the run badly (the kernel hung, did not start, came back) put
 ## Looking at it without a phone
 
 ```sh
-cc -O2 -o scion-splash-preview tools/scion-splash-preview.c
+cc -O2 -I "$(tools/xnu-tree.py added)/osfmk/console" -o scion-splash-preview tools/scion-splash-preview.c
 ./scion-splash-preview -w 1440 -h 2960 -p 400 > shot.ppm     # the S9's panel, the line at 40 %
 ```
 

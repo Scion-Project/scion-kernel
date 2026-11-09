@@ -14,6 +14,7 @@ cp $K prebuilt/hakios-kernel
 # here. It boots the open kernel (make qemu-open); to start Darwin, build the loader yourself (make loader).
 if command -v lld-link >/dev/null && command -v clang >/dev/null; then
 	T=$(mktemp -d)
+	export SCION_SPLASH_DIR="$(python3 tools/xnu-tree.py added ios-16.5)/osfmk/console"   # xnuloader/build.sh: the copy cannot find tools/
 	mkdir "$T/xnuloader"
 	cp xnuloader/*.c xnuloader/platform.h xnuloader/efi.h xnuloader/build.sh xnuloader/mkidentity.sh xnuloader/mkidentity.py xnuloader/im4p.py "$T/xnuloader/"
 	cp -R xnuloader/platforms "$T/xnuloader/"

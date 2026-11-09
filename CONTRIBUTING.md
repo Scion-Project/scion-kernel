@@ -7,8 +7,8 @@
   from the firmware. The build takes what it needs from the IPSW the user got
   themselves (`sysimage/unpack.sh`, `xnuloader/mkidentity.sh`); no script downloads Apple's files. CI refuses pictures and Darwin files.
 - Nothing of the vendor's either: firmware is pulled from the user's phone (`make firmware`).
-- Kernel changes are made in `xnu-src/` and exported with `xnu/export.sh` before committing;
-  the patch must apply to Apple's `xnu-8796.121.2` tag (CI checks).
+- Kernel changes are commits in the fork [Scion-Project/xnu](https://github.com/Scion-Project/xnu) (`docs/xnu-fork.md`); a pull request
+  here then moves the profile's `fork_commit` (CI checks that the pinned commits can be fetched).
 - Say in the commit message what the phone did, not only what the code does: a run's log line
   is worth more than an adjective.
 - Names: files are `hakios.<thing>.c`, identifiers `hakios_<thing>`, sysctls `kern.hakios.*`,

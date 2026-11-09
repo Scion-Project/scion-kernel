@@ -37,7 +37,7 @@ struct rwa_texture;
 /*
  * What the kernel answers about an IOSurface, and the request it answers in: kHakiosSurface
  * (0x7e) on HakiosGPUUserClient, `struct hakios_surface` in
- * xnu/files/iokit/Kernel/hakios.gpu.cpp. Field for field the same, and declared here rather
+ * scion/xnu-8796:iokit/Kernel/hakios.gpu.cpp. Field for field the same, and declared here rather
  * than included for the reason src/hakiosmetal_air.m gives for the Mesa contract: userland/build.sh
  * knows nothing of the kernel tree.
  *

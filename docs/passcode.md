@@ -17,7 +17,7 @@ With the key bag (on by default on the Galaxy S9; `keystore_real=0` turns it off
 
 | Piece | What it does |
 |---|---|
-| `xnu/files/iokit/Kernel/MiniAppleKeyStore.cpp` | The kernel's stand-in for AppleKeyStore. Keeps the verifier, the lock state, the failed attempts and their delay, the grace period and the passcode's metadata; answers MobileKeyBag's selectors. |
+| `scion/xnu-8796:iokit/Kernel/MiniAppleKeyStore.cpp` | The kernel's stand-in for AppleKeyStore. Keeps the verifier, the lock state, the failed attempts and their delay, the grace period and the passcode's metadata; answers MobileKeyBag's selectors. |
 | `userland/src/passcoded.m`, `com.hakios.passcoded.plist` | The stand-in for keybagd's XPC service `com.apple.mobile.keybagd.xpc` (Apple's keybagd stays out: it would look for a Secure Enclave). Changing the passcode and reading its metadata go through it to the kernel. It also posts keybagd's `lock_status` and `first_unlock` notifications. |
 | `/private/var/hakios-passcode` | The record: two 4 KB slots, written alternately with a generation number and a SHA-256, synced. On the phone it is on USERDATA and survives restarts; on a RAM boot and in QEMU it lasts until the next start. |
 
