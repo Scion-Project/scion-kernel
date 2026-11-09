@@ -41,3 +41,12 @@ some Settings rows lack icons.
 `DAEMON_SET=bp` (default) removes exactly the job set of the owner build so the first full-root boot is comparable with it;
 `DAEMON_SET=min` is the real iOS 27: only jobs for hardware the port has no driver for (`lists/daemons-hw.list`) and measured crash loops
 (`lists/daemons-crashloop.list`) are moved to `launchd-disabled.plist`. The CPU-hog list is opt-in and off.
+
+## Verification boot (what the tools are for)
+`verify-boot.sh SERIAL BOOT LABEL [MIN]` flashes BOOT (read-back checked), starts `console-capture.sh` for the phone's USB port *before* the
+reboot (the console moves from one /dev/cu.usbmodem to another about a minute after boot; the port's IOKit location identifies the phone),
+and prints `boot-metrics.py`: first frame, SpringBoard/backboardd restarts, crash and exit table, CPU in windows after the first frame, memory.
+`scripted-ui.py` writes console commands (`swipe`) at fixed times; the kernel's `touch` / `button` console commands are stubs on the
+12377 kernel, so a swipe from the bottom edge (unlock) needs a kernel change first.
+First numbers on the RC root (bp kernel and command line, GL compositor): cold first boot (fresh /var) first frame +104 s, warm boot +39 s,
+idle 2.4-2.6% of the 8 cores from minute 3, SpringBoard/backboardd never restarted.
