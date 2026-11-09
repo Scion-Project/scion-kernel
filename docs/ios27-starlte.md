@@ -28,7 +28,7 @@ builder's own, from their own IPSW; nothing of Apple's is in this repository.
 | `profiles/ios-27.copy` | the `fork_copy` list: the shared drivers and SoC headers of this repository that the tree takes at build time |
 | `xnu/apply-series.sh` | makes the tree: the fork's commit, `fork_stage`, `fork_copy`, and (`drivers none`) no driver from `drivers/` |
 | `xnuloader/sboot/` | the loader S-Boot starts (boot menu, OS store, recovery menu, USB console and fastboot subset); Scion's own path boots through Mu-Silicium's UEFI and `xnuloader/`, which this leaves alone |
-| `tools/ios27/` | build, packing and test tools (`build-xnu-12377.sh`, `-ios.sh`, `mkpayload-ios26.sh`, `make-xnu-boot.sh`, the ADT makers, `a64e/`, `gpu/`, `mesa-ios/`, `ca-gpu/`) and wardevsa's `herolte/` packing tools |
+| `tools/ios27/` | build, packing and test tools (`build-xnu-ios.sh`, which `OS_PROFILE=ios-27 make kernel` runs, with `dxb-common.sh`, `dxb.pin`, `dxb-ios.patch` and `firehose-ios.py`; `build-xnu-12377.sh` and `-ios.sh`, `mkpayload-ios26.sh`, `make-xnu-boot.sh`, the ADT makers, `a64e/`, `gpu/`, `mesa-ios/`, `ca-gpu/`) and wardevsa's `herolte/` packing tools |
 | `tools/ios27/metal/` | Starbite's Metal stack (Metal 2 frontend, metal2vulkan, PanVK) rebuilt for iOS 27: build scripts, the root installer, `mtl27test`, `sbmtlc`; `docs/ios27/METAL.md` |
 | `tools/ios27/speed/` | the boot-time and trap-cost work's root tools (the cache's PACGA and LDRA rewrite, the daemon list, the Settings patch, the kbd and QuartzCore patches of `docs/ios27/NIGHT.md`, `bench.py`) and `tools/ios27/cmdline/starlte-fast.txt`, its command line; `docs/ios27/SPEED.md` |
 | `tools/ios27/lse/` | the shared cache's LSE atomics rewritten into LL/SC thunks for the M3s (`lse-rewrite.py`, the root scripts, the differential test); `docs/ios27/EIGHT-CORES.md` |
@@ -43,8 +43,9 @@ permission; the Starbite author's STARLTE port `0300`-`0398`; Scion's `0400` and
 **Status.** It runs, slowly at first (CPU-composited, 1.5 GiB of RAM visible, Settings usable); with the GPU path of `sbca` (the
 `EDRClient` fix took the phone from about 0.1 to 10-50 frames a second, as the GPU track measured it) it is usable; frame pacing is in progress. 8-core mode is accepted as
 the default (below) and was built but not booted when this was written. The parity patches `0420`-`0424` (extra RAM, the CPU governor,
-Wi-Fi stage 1, TMU, DPU scan-out) are behind boot-arguments, off by default and not booted. `make kernel` does not build this profile; `tools/ios27/build-xnu-12377.sh` does,
-and `-ios.sh` builds it as an iOS-target XNU (`docs/ios27/IOS27-TARGET.md`). What was run on the phone is in each commit message; the
+Wi-Fi stage 1, TMU, DPU scan-out) are behind boot-arguments, off by default and not booted. `OS_PROFILE=ios-27 make kernel` builds this profile as an iOS-target XNU with darwin-xnu-build
+(`docs/ios27/IOS27-TARGET.md`; it needs Xcode and the Kernel Debug Kit 26.5 you bring: `DEVELOPER_DIR`, `KDKROOT`), and
+`tools/ios27/build-xnu-12377.sh` builds the macOS-target one. What was run on the phone is in each commit message; the
 repository's own checks (`docs/checks.md`) boot nothing.
 
 **Default boot arguments.** The kernel boots with `cpus=8` (four A55 and four M3: `starlte/0304` brings the M3s up, `0342`-`0344` emulate
@@ -70,7 +71,8 @@ file as the last two were (the branch's files and the `copy` lines):
    Scion already has (UFS, touch, the DPU, the S9's MUIC and battery) taken from there, and the boards this tree does not use (SWEET, A5XELTE, HEROLTE) dropped
    once STARLTE no longer needs their patches (its board layer is built on them today).
 3. The stand-ins the series makes twice (`sart.h`, `uat.h`, `tunables.s`, the read-only region, the crypto providers, AMFI) merged with `0020`-`0100` of the ios-26
-   series, so one machine layer serves `VMAPPLE` and `STARLTE`; then `make kernel` can build the profile.
+   series, so one machine layer serves `VMAPPLE` and `STARLTE`; then the profile could be built by `xnu-build.sh` in `xnu-src/` like the others
+   (`make kernel` builds it today, through darwin-xnu-build in `build/dxb-12377`).
 4. The loader: `xnuloader/sboot` only where `xnuloader/` has nothing equivalent (S-Boot hand-off, the menu); the USB console is the DWC3 gadget's.
 5. `userland/src/eagl.c` takes the iOS 26 and 27 function tables of `tools/ios27/ca-gpu/hakios/eagl.c`, and `tools/mesa-ios` is folded into `tools/mesa`.
 

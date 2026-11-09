@@ -48,6 +48,8 @@ jobs:
         run: python3 tools/mkesp-test.py
       - name: The kernel's version string is made as it should be
         run: python3 tools/kernel-version-test.py
+      - name: The iOS firehose library for the ios-27 kernel is the macOS one with three fields of its LC_BUILD_VERSION changed, and nothing else
+        run: python3 tools/ios27/firehose-ios-test.py
       - name: The backup tool only reads, copies exactly, and proves every copy
         run: python3 tools/backup-partitions-test.py
       - name: Saved var archives use the newest intact slot

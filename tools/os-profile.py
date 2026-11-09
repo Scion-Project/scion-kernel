@@ -3,6 +3,7 @@
 
   tools/os-profile.py get KEY     a key's value (xnu_tag, xnu_commit, base, ...); fails if the profile does not build
   tools/os-profile.py get src     the kernel tree the profile builds in: xnu-src/<xnu_tag>
+  tools/os-profile.py get builder who builds it, when not xnu-build.sh: dxb-ios (ios-27); fails when the profile has no such line
   tools/os-profile.py require     fails with the reason if the profile does not build
   tools/os-profile.py name        the profile chosen (see below)
   tools/os-profile.py list        every profile and its status
@@ -24,7 +25,10 @@ KEYS = {"status", "arch", "darwin", "xnu_tag", "xnu_commit", "base", "machine", 
 # where the kernel tree comes from (docs/xnu-fork.md): Scion-Project/xnu, a fork of Apple's repository, at one commit of one branch,
 # and what is still staged at build time on top of it (inputs that may not be in git: the Kernel Debug Kit's headers)
 # `drivers none`: the profile's fork carries its own drivers, so none is added from drivers/ (xnu/apply-series.sh)
-OPTIONAL = {"xnu_fork", "fork_branch", "fork_commit", "fork_stage", "fork_copy", "drivers"}
+# and who builds it (`builder`: absent, xnu-build.sh in xnu-src/ with xnu-deps/; dxb-ios, darwin-xnu-build in build/dxb-12377 as an
+# iOS-target XNU with the Kernel Debug Kit and Xcode you bring: tools/ios27/build-xnu-ios.sh, which tools/make-kernel.sh runs)
+OPTIONAL = {"xnu_fork", "fork_branch", "fork_commit", "fork_stage", "fork_copy", "drivers", "builder"}
+BUILDERS = ("dxb-ios",)
 STATUSES = ("real", "experimental", "not-implemented")
 
 
@@ -44,6 +48,8 @@ def read(name):
         sys.exit("os-profile: %s lacks %s" % (path, ", ".join(sorted(missing))))
     if fields["status"] not in STATUSES:
         sys.exit("os-profile: %s: status %s is not one of %s" % (path, fields["status"], ", ".join(STATUSES)))
+    if fields.get("builder", BUILDERS[0]) not in BUILDERS:
+        sys.exit("os-profile: %s: builder %s is not one of %s" % (path, fields["builder"], ", ".join(BUILDERS)))
     fields["src"] = os.path.join("xnu-src", fields["xnu_tag"])
     return fields
 

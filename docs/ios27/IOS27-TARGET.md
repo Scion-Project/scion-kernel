@@ -1,21 +1,46 @@
 # The iOS-target STARLTE kernel on xnu-12377
 
-Written 8 November 2026 from the builds of that day. `tools/ios27/build-xnu-12377.sh` builds the STARLTE tree the way
-darwin-xnu-build does, as a **macOS-target** XNU (`SDKROOT=macosx`, `XNU_TARGET_OS_OSX`), and the board's
-`config/MASTER.arm64.starlte` descends from `MASTER.arm64.MacOSX`. iOS 27 userland on it hit a run of Mac-isms, some of them
-bugs, some only wrong answers. `tools/ios27/build-xnu-12377-ios.sh` builds the same tree as an iPhoneOS-target XNU instead
-(`PLATFORM=iPhoneOS`, `XNU_TARGET_OS_IOS`, `XNU_PLATFORM_iPhoneOS`, `-miphoneos-version-min=18.5`, Mach-O platform IOS).
+Written 8 November 2026 from the builds of that day; the build is `make kernel` since 9 November. The macOS-target build
+(`tools/ios27/build-xnu-12377.sh`) builds the STARLTE tree the way darwin-xnu-build does, as a **macOS-target** XNU
+(`SDKROOT=macosx`, `XNU_TARGET_OS_OSX`), and the board's `config/MASTER.arm64.starlte` descends from `MASTER.arm64.MacOSX`. iOS 27
+userland on it hit a run of Mac-isms, some of them bugs, some only wrong answers. The iOS-target build makes the same tree as an
+iPhoneOS-target XNU instead (`PLATFORM=iPhoneOS`, `XNU_TARGET_OS_IOS`, `XNU_PLATFORM_iPhoneOS`, `-miphoneos-version-min=18.5`, Mach-O
+platform IOS), and it is the kernel of the `ios-27` profile.
 
 ## Build
 
-- `tools/ios27/build-xnu-12377-ios.sh` copies darwin-xnu-build's `build.sh` to `build-ios.sh` with `tools/ios27/dxb-ios.patch` (object
+```sh
+export DEVELOPER_DIR=<Xcode 16.4 (or 26)>/Contents/Developer      # Apple's, yours
+export KDKROOT=<the unpacked Kernel Debug Kit 26.5 (25F71)>        # Apple's, yours; not in this repository
+OS_PROFILE=ios-27 JOBS=4 make kernel                               # -> ./hakios-kernel
+```
+
+It needs a Mac, Xcode, the Kernel Debug Kit, and `jq`, `gum`, `xcodes`, `cmake` and `ninja` on `PATH` (`TOOLS_BIN=<directory>` adds
+one); without `DEVELOPER_DIR` or `KDKROOT` it stops with a message that says so. Nothing of Apple's is in the repository: the Kernel
+Debug Kit stays where you put it. A full build takes about 25 minutes at `-j4`, an incremental one one to two. `make kernel` is
+`tools/make-kernel.sh`, which for this profile (`builder dxb-ios` in `profiles/ios-27.conf`) runs `tools/ios27/build-xnu-ios.sh`, judges
+the log the way it does for the other profiles (a failed step that is not a kext symbol-set check fails the build) and copies the
+kernel to `hakios-kernel`. The pieces:
+
+- `tools/ios27/dxb-common.sh` (shared with `build-xnu-12377.sh`) makes `build/dxb-12377` once: darwin-xnu-build at the commit
+  `tools/ios27/dxb.pin` names (blacktop's, MIT; fetched by commit), its `build.sh` edited (plain arm64 firehose without ARMv8.1
+  atomics, `-j4`, patches skipped) and the profile's tree put in it as `xnu/` by `xnu/apply-series.sh`: the fork's commit, what the
+  profile's `fork_stage` scripts stage from the Kernel Debug Kit, the files of `fork_copy`. A changed profile (the fork's commit)
+  asks for `FRESH=1 OS_PROFILE=ios-27 make kernel`; the shared drivers of `fork_copy` that you edit in `drivers/` are copied again by themselves.
+- `tools/ios27/build-xnu-ios.sh` copies darwin-xnu-build's `build.sh` to `build-ios.sh` with `tools/ios27/dxb-ios.patch` (object
   directory `xnu-ios.obj`, `SDKROOT` from `XNU_SDKROOT` (default `iphoneos`), `UBSAN_CHECKS= UBSAN_RUNTIME=` (the iPhoneOS
-  DEVELOPMENT configuration otherwise turns on minimal UBSan), the firehose library from `build/firehose-ios/`).
-- The kernel file is `mach.development.starlte`, not `kernel.*`. Incremental builds take one to two minutes, a full build about
-  25 at `-j4`.
-- `build/firehose-ios/libfirehose_kernel.a` is the macOS-built `firehose_buffer.o` with its `LC_BUILD_VERSION` changed to iOS 18.5:
-  `ld` refuses a macOS object in an iOS link. It was patched by hand; `vtool -set-build-version` fails on the object. Not scripted yet.
+  DEVELOPMENT configuration otherwise turns on minimal UBSan), the firehose library from `build/firehose-ios/`, `-j` from `XNU_JOBS`) and
+  runs it.
+- The kernel file is `mach.development.starlte` (in `build/dxb-12377/build/xnu-ios.obj/DEVELOPMENT_ARM64_STARLTE/`), not `kernel.*`.
+- `build/firehose-ios/libfirehose_kernel.a` is the macOS-built `libfirehose_kernel.a` with the `LC_BUILD_VERSION` of its object changed to
+  iOS 18.5 (`ld` refuses a macOS object in an iOS link; libdispatch's own iOS build does not find `Availability.h`, and `vtool
+  -set-build-version` refuses the object, "not enough space to hold load commands"). `tools/ios27/firehose-ios.py` makes it, in place, three
+  fields (platform, minos, sdk) and no other byte; the patch calls it (`XNU_FIREHOSE_IOS`) once dxb has built the macOS library, and
+  `tools/ios27/firehose-ios-test.py` tests it. The object it makes is the one that was patched by hand before.
+- `tools/ios27/build-xnu-12377-ios.sh` is the earlier name of this build: it runs `build-xnu-ios.sh` and copies the kernel to
+  `out/kernel.development.starlte-12377-ios`.
 - `XNU_SDKROOT=macosx XNU_EXTRA_MAKEARGS=PLATFORM_FOR_CONFIG=iPhoneOS` selects a hybrid: macOS toolchain target, iOS configuration.
+- darwin-xnu-build is blacktop's (MIT, `github.com/blacktop/darwin-xnu-build`; credited in `NOTICE`); `dxb-ios.patch` is a patch to it.
 
 ## The configuration (patch `0410`)
 
