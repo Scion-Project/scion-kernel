@@ -111,4 +111,6 @@ kernel's configuration with the profiler and the bench off) showed 1404 MB extra
 (a boot's summary), `fp16census.py` and `fp16sites.py` (what a cache's images contain that traps), `dscsym.py` (the symbol index of your own cache; the index is derived from it and stays on
 your machine), `build-sbgl.sh` (the glue with the libOSMesa of `mk-mesa-ios.sh`), `test/fp16t.c` (the FP16 emulation against the hardware: 21.6 million checks, no mismatch). `tools/ios27/speed/`: `edit-libs.sh`,
 `edit-o7.sh` (the libraries into a root; the job off), `bench.py`. `tools/ios27/cmdline/starlte-owner.txt` is the command line of the owner's build: `starlte-fast.txt` with
-`extra_ram_mask=127`, `sweetm3unpin=2` and `sweetspeed=98303` (2047 of the night run, 32768 the canary, 65536 the cores).
+`extra_ram_mask=127`, `sweetm3unpin=2` and `sweetspeed=100351` (2047 of the night run, 32768 the canary, 65536 the cores).
+Until 9 November it said `sweetspeed=98303` (65536 + 32767): that sum takes bits 2048-16384 instead of 32768, so a kernel booted with it
+ran the CoreAnimation pacing aids, both scripted inputs (4096, 8192) and the profiler, and no canary (seen on the phone on 9 November).
