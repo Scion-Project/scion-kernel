@@ -153,7 +153,8 @@ are not checked against the kernel's and would need the interface headers above 
 
 1. One XNU interface header per group of driver `extern`s, and per-driver interface files for the largest drivers. No change to the code that runs.
 2. On a branch, generate pristine xnu-8796 plus `patches/xnu-8796/series` and the drivers from main, mechanically. A kernel from it has to match main's
-   apart from version and UUID, the same proof used for the driver tree.
+   apart from version and UUID, the same proof used for the driver tree. Done another way (9 November 2026): the kernel is a fork, Scion-Project/xnu,
+   with the work as commits on Apple's tags (`docs/xnu-fork.md`); the generated series had fallen behind `xnu/hakios.patch` and is gone.
 3. Descriptions beside the manifest (`board.toml`-like, `feeds.toml`-like) where they replace or generate what exists: `devices/manifest.conf`, the Apple
    tag in `apply.sh`. No second source of truth.
 4. Components as repositories, in the order DWC3, UFS, MFC, Kinibi: DWC3 is device-neutral already, UFS has per-SoC hooks and the most users, MFC and Kinibi

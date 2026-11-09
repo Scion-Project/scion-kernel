@@ -1,7 +1,7 @@
 # patches/xnu-12377: the ios-26 base
 
 Apple's `xnu-12377.121.6` plus `series`, applied by `xnu/apply-series.sh` when the OS profile's `base` is `xnu-12377`
-(`OS_PROFILE=ios-26`, or `make blazer_defconfig`). Patches here are Scion's own, under the APSL like `patches/xnu-8796/`. Nothing
+(`OS_PROFILE=ios-26`, or `make blazer_defconfig`). Patches here are Scion's own, under the APSL like xnu-8796's (`xnu/hakios.patch`). Nothing
 derived from `ios-tegu` (no licence) and no GPL code goes in: `docs/two-bases.md`.
 
 What the series does today is make Apple's open source build into a linked kernel for the `VMAPPLE` machine (arm64e, iPhoneOS
@@ -28,7 +28,7 @@ Debug Kit, and includes headers it does not publish. Scion's drivers have their 
 | `0096-at-par-sync.patch` | an `ISB` before `PAR_EL1` is read after `AT S1E1W` in `mmu_kvtop_wpreflight` (UniXNU's `native-at-par-sync`) |
 | `0097-pmap-sync-64bit-pa.patch` | `ptoa(pp)` where `pp << PAGE_SHIFT` dropped the high bits of a physical address at or above 4 GiB, in both pmaps' page-data sync (UniXNU's `zzx-pmap-sync-64bit-pa`) |
 | `0098-native-pac-user-jop.patch` | with `SCION_NATIVE_PAC=1`: an arm64 thread runs at EL0 with the PAC keys off, and `ml_default_jop_pid()` is 1 so arm64e processes get signed pointers (UniXNU's `native-pac-arm64-user-jop`) |
-| `../xnu-8796/0280-osfmk-minicrypto.patch` | minicrypto, the xnu-8796 series' own crypto provider, the same file (one copy in the repository) |
+| `0280-osfmk-minicrypto.patch` | minicrypto, the crypto provider of the xnu-8796 kernel (its files are in `xnu/files` there), kept here since the generated xnu-8796 series went |
 | `0100-minicrypto.patch` | minicrypto's digests, AES and HMAC-DRBG built on this base (not the key store's parts); registered at the end of `SYSCTL`, because this base runs `EARLY_BOOT` after `PE_init_iokit`, whose platform UUID already takes a SHA-1 |
 | `0110-hakios-core.patch` | what `drivers/core/hakios.version.c` needs here: `sys/hakios.version.h`, the `kern.hakios` sysctl node (`bsd/dev/hakios.base.c`, until `hakios.platform.c` builds on this base) and the call in `bsd_init()`; the first file of `drivers/` with `bases xnu-12377` |
 | `0120-darwin27-syscalls.patch` | Darwin 27's eight new system calls (`pipe2`, `dup3`, `fchflagsat`, `getumask`, `aio_readv`, `aio_writev`, `fsctlat`, `guarded_ftruncate_np`), numbered as in iOS 27.0.1's kernel, so iOS 27's `libsystem_kernel` finds them on this base; `aio_readv`/`aio_writev` answer ENOTSUP for now. Scion's own code (`docs/ios27-starlte.md`) |
