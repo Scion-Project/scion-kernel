@@ -21,7 +21,7 @@ cp "$SK/userland/src/audio_plugin.plist" "$O/HakiosAudio.driver/Info.plist"
 $CC -o "$O/hakios-inject" "$H/src/hakios_inject.c"
 $CC $DY -install_name /usr/lib/hakios.bluetool.dylib -framework CoreFoundation -lMobileGestalt -o "$O/hakios.bluetool.dylib" "$H/src/hakios_bluetool.c"
 $CC $DY -install_name /usr/lib/hakios.bluetoothd.dylib -o "$O/hakios.bluetoothd.dylib" "$H/src/hakios_bluetoothd.c"
-$CC -framework CoreFoundation -o "$O/hal_probe" "$H/src/hal_probe.c"
+$CC -framework CoreFoundation -framework AudioToolbox -o "$O/hal_probe" "$H/src/hal_probe.c"
 for f in "$O/HakiosAudio.driver/HakiosAudio" "$O/hakios-inject" "$O/hakios.bluetool.dylib" "$O/hakios.bluetoothd.dylib" "$O/hal_probe"; do
 	"$PY" -I "$SK/tools/ios27/a64e/a64e-rewrite.py" macho "$f" | tail -1
 done

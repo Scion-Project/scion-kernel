@@ -8,6 +8,7 @@
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreFoundation/CFPlugInCOM.h>
+#include <AudioToolbox/AudioToolbox.h>
 #include <mach/mach_time.h>
 #include <math.h>
 #include <stdio.h>
@@ -62,6 +63,46 @@ static const AudioServerPlugInHostInterface host = { h_changed, h_copy, h_write,
 
 static void
 fourcc(UInt32 v, char out[5]) { out[0] = (char)(v >> 24); out[1] = (char)(v >> 16); out[2] = (char)(v >> 8); out[3] = (char)v; out[4] = 0; }
+
+/* the whole iOS path: an AudioQueue (AudioToolbox) plays SECONDS of the tone through the audio server, which routes it */
+static double aq_phase; static int aq_amp; static UInt32 aq_left;
+static void
+aq_fill(void *ud, AudioQueueRef q, AudioQueueBufferRef b)
+{
+	(void)ud;
+	int16_t *s = b->mAudioData; UInt32 frames = b->mAudioDataBytesCapacity / 4;
+	for (UInt32 f = 0; f < frames; f++) { int16_t v = aq_left ? (int16_t)(aq_amp * sin(aq_phase)) : 0; s[2 * f] = s[2 * f + 1] = v; aq_phase += 2 * M_PI * 440 / 48000; }
+	b->mAudioDataByteSize = frames * 4;
+	aq_left = aq_left > frames ? aq_left - frames : 0;
+	AudioQueueEnqueueBuffer(q, b, 0, NULL);
+}
+static void
+aq_play(int secs, int amp)
+{
+	AudioStreamBasicDescription f = { 48000, kAudioFormatLinearPCM, kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked, 4, 1, 4, 2, 16, 0 };
+	AudioQueueRef q = NULL; OSStatus st;
+	aq_amp = amp; aq_left = (UInt32)secs * 48000;
+	st = AudioQueueNewOutput(&f, aq_fill, NULL, NULL, NULL, 0, &q);
+	printf("hal_probe: AudioQueueNewOutput %d\n", (int)st);
+	if (st != 0) { return; }
+	for (int i = 0; i < 3; i++) { AudioQueueBufferRef b; if (AudioQueueAllocateBuffer(q, 4800 * 4, &b) == 0) { aq_fill(NULL, q, b); } }
+	st = AudioQueueStart(q, NULL);
+	printf("hal_probe: AudioQueueStart %d: %d s of the tone through the audio server\n", (int)st, secs);
+	CFRunLoopRunInMode(kCFRunLoopDefaultMode, secs + 1, false);
+	AudioQueueStop(q, true); AudioQueueDispose(q, true);
+	printf("hal_probe: AudioQueue done\n");
+}
+
+/* a system sound: the audio server plays it itself (SystemSoundServer), so no audio session of ours is needed */
+static void
+system_sound(SystemSoundID id)
+{
+	__block int done = 0;
+	printf("hal_probe: AudioServicesPlaySystemSound(%u)\n", (unsigned)id);
+	AudioServicesPlaySystemSoundWithCompletion(id, ^{ done = 1; });
+	for (int i = 0; i < 40 && !done; i++) { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false); }
+	printf("hal_probe: system sound %u %s\n", (unsigned)id, done ? "completed" : "did not complete in 4 s");
+}
 
 int
 main(int argc, char **argv)
@@ -134,7 +175,7 @@ main(int argc, char **argv)
 		(void)(*drv)->GetPropertyData(drv, devs[i], getpid(), &sa, 0, NULL, sizeof(streams), &s3, streams);
 		if (strcmp(u, "Codec") == 0 && s3 >= 4) { codec = devs[i]; in = streams[0]; }
 	}
-	if (codec == 0) { printf("hal_probe: no Codec input\n"); return 0; }
+	if (codec == 0) { printf("hal_probe: no Codec input\n"); aq_play(secs, amp); return 0; }
 	st = (*drv)->StartIO(drv, codec, 2);
 	printf("hal_probe: StartIO %d on the Codec %u, stream %u: 3 s of the microphone\n", (int)st, codec, in);
 	int16_t mic[480]; double sum = 0; int peak = 0; UInt64 n = 0, zeros = 0;
@@ -149,6 +190,9 @@ main(int argc, char **argv)
 		if (c % 50 == 49) { printf("hal_probe: mic %d.%d s: RMS %.1f, peak %d, %llu of %llu samples 0\n", (c + 1) / 100, (c + 1) % 100 / 10, n ? sqrt(sum / (double)n) : 0, peak, zeros, n); }
 	}
 	st = (*drv)->StopIO(drv, codec, 2);
-	printf("hal_probe: microphone StopIO %d; done\n", (int)st);
+	printf("hal_probe: microphone StopIO %d\n", (int)st);
+	aq_play(secs, amp);
+	system_sound(1104);
+	printf("hal_probe: done\n");
 	return 0;
 }
