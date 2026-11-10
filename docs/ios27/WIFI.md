@@ -62,4 +62,10 @@ built-in boot-args (fork commit c1cfa83) keep `sweetreboot`, so a panic resets i
 |---|---|
 | kernel built (iOS target, STARLTE) with brcmfmac's object | done, 9 Nov |
 | iOS 27 userland checked for the ioctl path and the layouts | done (disassembly, 9 Nov); layouts fixed |
-| `wifi_pcie=1` and up on a phone | not yet |
+| `wifi_pcie=1` on a phone (phone 1, bp root) | 9 Nov 22:02Z: clean. S-Boot leaves every PCIe gate open, the PHY isolated, WLAN_REG_ON and PERST# low |
+| stage 1 to the chip's ID (phone 2, RC1 line) | 10 Nov 00:39Z: PLL locked, `LINK UP after 10 us: Gen1 x1`, `1:00.0 is 14e4:441f ... rev 05`, BARs placed; then `lx: no 46137344 bytes of memory in one piece` (the pool asked a minute after boot) |
+| firmware, scan, join, DHCP, ping, HTTP (phone 2, one boot, `wifi_pcie=6 brcmfmac=8`, the pool taken at boot) | 10 Nov 00:46Z: NVRAM from the OTP (SEMCO 91 33: `nvram.txt_r02a_b2`), `Firmware: BCM4361/5 wl0: ... 13.50.37`, CLM; scan; WPA2 on 5 GHz, the handshake by `lx_wpa.c`, joined 225 ms after connect; configd's DHCP on en0; console `wifi ping` gateway 4/4 (about 5 ms), 1.1.1.1 4/4 (about 15 ms); `wifi tcp example.com`: `HTTP/1.1 200 OK` |
+| Settings | wifid is not started: its launchd job has `_LimitLoadToDeviceTree` = `wlan` and the S9's ADT has no such node, so Settings shows Wi-Fi off. `tools/ios27/wifi/adt-wlan-node.py` adds `/arm-io/wlan` (opt-in): next run |
+
+Test images that join a network take it from the ADT (`tools/ios27/wifi/adt-wifi-network.py`; the kernel removes it from the
+registry and never logs it); such images are private.
