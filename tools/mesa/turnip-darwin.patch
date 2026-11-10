@@ -6,8 +6,8 @@ index f055df1..457fe06 100644
    # dependencies (such as vk-runtime) linking to it
    dep_libdrm = null_dep
  endif
--if host_machine.system() == 'darwin' and with_gallium_freedreno
-+if host_machine.system() == 'darwin' and (with_gallium_freedreno or with_freedreno_vk)
+-if host_machine.system() == 'darwin' and (with_gallium_freedreno or with_gallium_panfrost)
++if host_machine.system() == 'darwin' and (with_gallium_freedreno or with_gallium_panfrost or with_freedreno_vk)
    # No DRM on this system: freedreno's requests go to the kernel's driver through a stand-in
    # for libdrm (src/hakios-drm, put there by Darwin on redwood's tools/mk-mesa.sh; its one
    # source file is built with freedreno's drm layer, src/freedreno/drm).
