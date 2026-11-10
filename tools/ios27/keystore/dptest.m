@@ -1,5 +1,5 @@
 // dptest.m - private on-device data-protection / keystore probe (ios27-fable-keystore). Read-mostly.
-// Parent re-execs itself once per section (fork-safe for XPC/ObjC): dptest [mobile] [nosleep]
+// Parent re-execs itself once per section (fork-safe for XPC/ObjC): dptest [mobile|passcode] [nosleep]
 // child: dptest --sec N [IDX] LOGPATH SCRATCH
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <setjmp.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -61,7 +62,7 @@ static void hexdump(const unsigned char *p, size_t n) {
 static const char *LOGP, *SCR;
 
 // ---------- header ----------
-static void header(int mobile) {
+static void header(const char *mode) {
 	struct timeval tv; gettimeofday(&tv, 0); char tb[64]; struct tm tm; time_t t = tv.tv_sec; gmtime_r(&t, &tm);
 	strftime(tb, sizeof tb, "%Y-%m-%dT%H:%M:%SZ", &tm);
 	struct utsname u; uname(&u);
@@ -69,7 +70,7 @@ static void header(int mobile) {
 	l = sizeof ba; if (sysctlbyname("kern.bootargs", ba, &l, 0, 0)) snprintf(ba, sizeof ba, "(err %d %s)", ERR(errno));
 	struct timeval bts; l = sizeof bts; if (!sysctlbyname("kern.boottime", &bts, &l, 0, 0)) snprintf(bt, sizeof bt, "%ld", (long)bts.tv_sec);
 	L("");
-	L("==================== dptest start %s (unix %ld) mode=%s uid=%d euid=%d pid=%d ====================", tb, (long)tv.tv_sec, mobile ? "mobile" : "root", getuid(), geteuid(), getpid());
+	L("==================== dptest start %s (unix %ld) mode=%s uid=%d euid=%d pid=%d ====================", tb, (long)tv.tv_sec, mode, getuid(), geteuid(), getpid());
 	L("uname: %s %s %s %s", u.sysname, u.release, u.version, u.machine);
 	L("kern.version: %s", kv);
 	L("kern.bootargs: %s", ba);
@@ -356,6 +357,176 @@ static void sec7(void) {
 	count_dir("/private/var/mobile/Containers/Data/Application");
 }
 
+// ---------- passcode mode (root): dptest passcode [nosleep] ----------
+// Parent: list /private/var/keybags, re-exec self as "--pc LOG" (parts A+B), 150 s kill timer, then FINAL SAFETY NET in the parent.
+static sigjmp_buf PCJB;
+static void pc_alrm(int s) { (void)s; siglongjmp(PCJB, 1); }
+#define GUARD(label, ...) do { if (sigsetjmp(PCJB, 1) == 0) { alarm(25); __VA_ARGS__; alarm(0); } else { alarm(0); L("%s: TIMEOUT (25s)", label); } } while (0)
+
+typedef int (*mkb_chg_t)(CFDataRef, CFDataRef, CFDataRef, CFDictionaryRef, void *, void *);
+typedef int (*mkb_unl_t)(CFDataRef, CFDictionaryRef, void *, void *);
+typedef int (*mkb_lock_t)(CFDictionaryRef, void *, void *);
+typedef int (*mkb_gls_t)(CFDictionaryRef);
+typedef int (*mkb_uns_t)(void);
+typedef CFDictionaryRef (*mkb_gli_t)(CFDictionaryRef);
+static mkb_chg_t m_chg; static mkb_unl_t m_unl; static mkb_lock_t m_lock; static mkb_gls_t m_gls; static mkb_uns_t m_uns; static mkb_gli_t m_gli;
+
+static void mkb_load(void) {
+	void *h = dlopen("/System/Library/PrivateFrameworks/MobileKeyBag.framework/MobileKeyBag", RTLD_NOW);
+	if (!h) { L("dlopen MobileKeyBag FAIL: %s", dlerror()); return; }
+	m_chg = (mkb_chg_t)dlsym(h, "MKBKeyBagChangeSystemSecret"); m_unl = (mkb_unl_t)dlsym(h, "MKBUnlockDevice");
+	m_lock = (mkb_lock_t)dlsym(h, "MKBLockDevice"); m_gls = (mkb_gls_t)dlsym(h, "MKBGetDeviceLockState");
+	m_uns = (mkb_uns_t)dlsym(h, "MKBDeviceUnlockedSinceBoot"); m_gli = (mkb_gli_t)dlsym(h, "MKBGetDeviceLockStateInfo");
+	L("MKB symbols: ChangeSystemSecret=%p UnlockDevice=%p LockDevice=%p GetDeviceLockState=%p UnlockedSinceBoot=%p LockStateInfo=%p", m_chg, m_unl, m_lock, m_gls, m_uns, m_gli);
+}
+
+static void pc_keybags(const char *when) {
+	L("-- /private/var/keybags listing (%s):", when);
+	DIR *d = opendir("/private/var/keybags"); if (!d) { L("  opendir FAIL errno=%d %s", ERR(errno)); return; }
+	struct dirent *e; int n = 0;
+	while ((e = readdir(d))) {
+		if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+		char p[1024]; snprintf(p, sizeof p, "/private/var/keybags/%s", e->d_name); struct stat st;
+		if (stat(p, &st)) { L("  %s: stat FAIL errno=%d %s", e->d_name, ERR(errno)); continue; }
+		L("  %s: size=%lld mtime=%ld mode=%o", e->d_name, (long long)st.st_size, (long)st.st_mtime, st.st_mode & 07777); n++;
+	}
+	closedir(d); L("  (%d entries)", n);
+}
+
+static io_connect_t ks_open(void) {
+	io_service_t svc = IOServiceGetMatchingService(0, IOServiceMatching("AppleKeyStore"));
+	if (!svc) { L("no AppleKeyStore service"); return 0; }
+	io_connect_t c = 0; kern_return_t kr = IOServiceOpen(svc, mach_task_self(), 0, &c);
+	L("IOServiceOpen(AppleKeyStore, type 0) kr=0x%x (%s) conn=0x%x", kr, mach_error_string(kr), c);
+	IOObjectRelease(svc); return kr ? 0 : c;
+}
+static kern_return_t ks_call(io_connect_t c, uint32_t sel, const uint64_t *in, uint32_t nin, uint32_t nout, const void *sin, size_t sinl, const char *desc) {
+	uint64_t out[4] = {0}; uint32_t no = nout;
+	kern_return_t kr = IOConnectCallMethod(c, sel, in, nin, sin, sinl, nout ? out : NULL, nout ? &no : NULL, NULL, NULL);
+	if (nout) L("  %s (sel %u): kr=0x%x (%s) nScalarOut=%u out0=%llu (0x%llx)", desc, sel, kr, mach_error_string(kr), no, (unsigned long long)out[0], (unsigned long long)out[0]);
+	else L("  %s (sel %u): kr=0x%x (%s)", desc, sel, kr, mach_error_string(kr));
+	return kr;
+}
+static char EMPTYBUF[16];
+static kern_return_t ks_setpass(io_connect_t c, const char *oldp, const char *newp, const char *desc) {
+	uint64_t in[12] = {0};
+	in[3] = (uint64_t)(uintptr_t)(oldp ? oldp : EMPTYBUF); in[4] = oldp ? strlen(oldp) : 0;
+	in[5] = (uint64_t)(uintptr_t)(newp ? newp : EMPTYBUF); in[6] = newp ? strlen(newp) : 0;
+	return ks_call(c, 15, in, 12, 1, NULL, 0, desc);
+}
+static kern_return_t ks_unlock(io_connect_t c, const char *p, const char *desc) {
+	uint64_t in[4] = {0, (uint64_t)(uintptr_t)p, strlen(p), 0};
+	return ks_call(c, 9, in, 4, 0, NULL, 0, desc);
+}
+static void cfdesc(char *buf, size_t n, CFTypeRef o) {
+	buf[0] = 0; if (!o) { snprintf(buf, n, "(none)"); return; }
+	CFStringRef d = CFCopyDescription(o); if (d) { CFStringGetCString(d, buf, n, kCFStringEncodingUTF8); CFRelease(d); }
+	for (char *p = buf; *p; p++) if (*p == '\n' || *p == '\t') *p = ' ';
+}
+// STATE line; returns MKBGetDeviceLockState (or -1 if unavailable/timeout)
+static int pc_state(io_connect_t c) {
+	volatile int ls = -1, us = -1; char fa[256] = "n/a", boff[256] = "n/a", lsv[256] = "n/a", infoerr[64] = "";
+	uint64_t in0[1] = {0}, out[2] = {0}; uint32_t no = 1; kern_return_t kr = 0xdead;
+	if (c) { kr = IOConnectCallMethod(c, 7, in0, 1, NULL, 0, out, &no, NULL, NULL); }
+	if (m_gls) GUARD("STATE MKBGetDeviceLockState", ls = m_gls(NULL)); else L("STATE: MKBGetDeviceLockState symbol NULL, skipped");
+	if (m_uns) GUARD("STATE MKBDeviceUnlockedSinceBoot", us = m_uns()); else L("STATE: MKBDeviceUnlockedSinceBoot symbol NULL, skipped");
+	if (m_gli) {
+		volatile CFDictionaryRef d = NULL; GUARD("STATE MKBGetDeviceLockStateInfo", d = m_gli(NULL));
+		if (d && CFGetTypeID(d) == CFDictionaryGetTypeID()) {
+			cfdesc(fa, sizeof fa, CFDictionaryGetValue(d, CFSTR("fa"))); cfdesc(boff, sizeof boff, CFDictionaryGetValue(d, CFSTR("boff"))); cfdesc(lsv, sizeof lsv, CFDictionaryGetValue(d, CFSTR("ls")));
+		} else snprintf(infoerr, sizeof infoerr, " (info not a dictionary)");
+	}
+	L("STATE: MKBGetDeviceLockState=%d (0x%x) MKBDeviceUnlockedSinceBoot=%d (0x%x) raw sel7 kr=0x%x flags=0x%llx ; info fa=%s boff=%s ls=%s%s",
+	  ls, ls, us, us, kr, (unsigned long long)out[0], fa, boff, lsv, infoerr);
+	return ls;
+}
+static CFDataRef cfd(const char *s) { return CFDataCreate(0, (const UInt8 *)s, s ? (CFIndex)strlen(s) : 0); }
+
+static int pc_chg(const char *label, CFDataRef o, CFDataRef n) {
+	volatile int r = -99999;
+	if (!m_chg) { L("%s: symbol NULL, skipped", label); return -99999; }
+	GUARD(label, r = m_chg(o, n, NULL, NULL, NULL, NULL));
+	L("%s = %d (0x%x)", label, r, r); return r;
+}
+static void pc_child(const char *logp) {
+	LF = open(logp, O_WRONLY | O_APPEND | O_CREAT, 0666);
+	signal(SIGALRM, pc_alrm);
+	L(""); L("######## PASSCODE PART A/B (pid %d) ########", getpid());
+	@autoreleasepool {
+		mkb_load();
+		io_connect_t c = ks_open();
+		if (!c) L("A: no raw connection, part A skipped");
+		else {
+			static const char P[] = "2468", W[] = "0000";
+			L("-- A0"); pc_state(c);
+			L("-- A1 set passcode 2468 (sel 15)"); ks_setpass(c, NULL, P, "A1 set"); pc_state(c);
+			L("-- A2 lock (sel 8)"); { uint64_t in[1] = {0}; ks_call(c, 8, in, 1, 0, NULL, 0, "A2 lock"); } pc_state(c);
+			L("-- A3 unlock WRONG 0000 (sel 9)"); ks_unlock(c, W, "A3 unlock wrong"); pc_state(c);
+			L("-- A4 unlock 2468 (sel 9)"); ks_unlock(c, P, "A4 unlock"); pc_state(c);
+			L("-- A5 verify password (sel 42)");
+			{ uint8_t st[12]; uint32_t cnt = 1, len = 4; memcpy(st, &cnt, 4); memcpy(st + 4, &len, 4); memcpy(st + 8, P, 4); uint64_t in[1] = {0};
+			  uint64_t out[2] = {0}; uint32_t no = 0; kern_return_t kr = IOConnectCallMethod(c, 42, in, 1, st, sizeof st, out, &no, NULL, NULL);
+			  L("  A5 verify (sel 42): kr=0x%x (%s) nScalarOut=%u out0=%llu", kr, mach_error_string(kr), no, (unsigned long long)out[0]); }
+			L("-- A6 remove passcode (sel 15)"); ks_setpass(c, P, NULL, "A6 remove");
+			int ls = pc_state(c);
+			if (ls != 3) L("A: PASSCODE STILL SET !!!!!!!! (lock state %d after A6)", ls);
+		}
+		L("-- PART B");
+		int ls = pc_state(c);
+		if (ls != 3) L("B skipped: lock state is %d, not 3 (no passcode) at start of B", ls);
+		else {
+			int r1 = pc_chg("B1 MKBKeyBagChangeSystemSecret(NULL, 135790, NULL, NULL)", NULL, cfd("135790")); pc_state(c);
+			if (r1 != 0) L("B2 skipped: B1 returned %d", r1);
+			else {
+				volatile int r = 0;
+				if (m_lock) { GUARD("B2 MKBLockDevice(NULL)", r = m_lock(NULL, NULL, NULL)); L("B2 MKBLockDevice(NULL) = %d (0x%x)", r, r); } else L("B2 MKBLockDevice: symbol NULL, skipped");
+				pc_state(c);
+				if (m_unl) {
+					r = -99999; GUARD("B2 MKBUnlockDevice(000000)", r = m_unl(cfd("000000"), NULL, NULL, NULL)); L("B2 MKBUnlockDevice(000000) = %d (0x%x)", r, r); pc_state(c);
+					r = -99999; GUARD("B2 MKBUnlockDevice(135790)", r = m_unl(cfd("135790"), NULL, NULL, NULL)); L("B2 MKBUnlockDevice(135790) = %d (0x%x)", r, r); pc_state(c);
+				} else L("B2 MKBUnlockDevice: symbol NULL, skipped");
+				int rr = pc_chg("B2 MKBKeyBagChangeSystemSecret(135790, NULL, NULL, NULL)", cfd("135790"), NULL);
+				if (rr != 0) rr = pc_chg("B2 retry MKBKeyBagChangeSystemSecret(135790, empty CFData, NULL, NULL)", cfd("135790"), cfd(""));
+				pc_state(c);
+			}
+		}
+	}
+	L("-- PART A/B child done");
+	_exit(0);
+}
+static void pc_safety_net(void) {
+	L(""); L("######## FINAL SAFETY NET ########");
+	signal(SIGALRM, pc_alrm);
+	mkb_load();
+	io_connect_t c = ks_open();
+	int ls = pc_state(c);
+	if (ls != 3) {
+		if (!c) L("safety net: no raw connection, cannot remove passcode");
+		else {
+			const char *ps[] = {"2468", "135790"};
+			for (int i = 0; i < 2; i++) { char d[64]; snprintf(d, sizeof d, "net unlock %s", ps[i]); ks_unlock(c, ps[i], d); }
+			for (int i = 0; i < 2; i++) { char d[64]; snprintf(d, sizeof d, "net remove old=%s", ps[i]); ks_setpass(c, ps[i], NULL, d); }
+		}
+		ls = pc_state(c);
+	}
+	L("FINAL: lock state %d (3 = no passcode)", ls);
+	if (ls != 3) L("FINAL: PASSCODE MAY STILL BE SET (lock state != 3)");
+	pc_keybags("after final step");
+}
+static void pc_parent(const char *self, const char *logp) {
+	pc_keybags("before A0");
+	char *av[4] = {(char *)self, "--pc", (char *)logp, NULL}; pid_t pid; int st = 0;
+	int r = posix_spawn(&pid, self, NULL, NULL, av, environ);
+	if (r) L("posix_spawn FAIL %d %s", ERR(r));
+	else {
+		int done = 0; for (int i = 0; i < 1500; i++) { if (waitpid(pid, &st, WNOHANG) == pid) { done = 1; break; } usleep(100000); }
+		if (!done) { kill(pid, SIGKILL); waitpid(pid, &st, 0); L("  !! passcode child killed by parent after 150 s"); }
+		else if (WIFSIGNALED(st)) L("  !! passcode child died with signal %d (%s)", WTERMSIG(st), strsignal(WTERMSIG(st)));
+		else L("  (passcode child exit status %d)", WEXITSTATUS(st));
+	}
+	pc_safety_net();
+}
+
 // ---------- driver ----------
 static void child(int argc, char **argv) {
 	int sec = atoi(argv[2]); int ai = 3; int idx = 0;
@@ -387,16 +558,23 @@ done:
 int main(int argc, char **argv) {
 	setvbuf(stderr, NULL, _IONBF, 0);
 	if (argc > 2 && !strcmp(argv[1], "--sec")) child(argc, argv);
-	int mobile = 0, nosleep = 0;
-	for (int i = 1; i < argc; i++) { if (!strcmp(argv[i], "mobile")) mobile = 1; if (!strcmp(argv[i], "nosleep")) nosleep = 1; }
-	LOGP = mobile ? "/private/var/local/oslog/dptest-mobile.log" : "/private/var/local/oslog/dptest.log";
+	if (argc > 2 && !strcmp(argv[1], "--pc")) pc_child(argv[2]);
+	int mobile = 0, nosleep = 0, passcode = 0;
+	for (int i = 1; i < argc; i++) { if (!strcmp(argv[i], "mobile")) mobile = 1; if (!strcmp(argv[i], "nosleep")) nosleep = 1; if (!strcmp(argv[i], "passcode")) passcode = 1; }
+	LOGP = passcode ? "/private/var/local/oslog/dptest-passcode.log" : mobile ? "/private/var/local/oslog/dptest-mobile.log" : "/private/var/local/oslog/dptest.log";
 	SCR = mobile ? "/private/var/mobile/Library/dptest" : "/private/var/mobile/Library/dptest-root";
 	LF = open(LOGP, O_WRONLY | O_APPEND | O_CREAT, 0666);
 	if (LF < 0) { fprintf(stderr, "cannot open log %s: %s\n", LOGP, strerror(errno)); return 1; }
 	fchmod(LF, 0666);
-	header(mobile);
+	header(passcode ? "passcode" : mobile ? "mobile" : "root");
 	char self[1024]; uint32_t sl = sizeof self;
 	if (_NSGetExecutablePath(self, &sl)) strcpy(self, "/usr/local/bin/dptest");
+	if (passcode) {
+		if (!nosleep) { L("sleeping 75 s (SpringBoard warm-up)"); sleep(75); L("sleep done"); }
+		pc_parent(self, LOGP);
+		L("==================== dptest passcode done ====================");
+		return 0;
+	}
 	if (!nosleep) { L("sleeping 60 s (SpringBoard warm-up)"); sleep(60); L("sleep done"); }
 	const char *names[] = {"", "1 FS statfs", "2 data-protection classes", "3 MobileKeyBag", "4 AppleKeyStore user client", "5 Keychain", "6 MobileGestalt", "7 Containers"};
 	for (int s = 1; s <= 7; s++) {

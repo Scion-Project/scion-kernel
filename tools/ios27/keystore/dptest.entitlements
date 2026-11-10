@@ -8,5 +8,11 @@
 	<key>com.apple.keystore.device</key><true/>
 	<key>com.apple.private.security.no-sandbox</key><true/>
 	<key>platform-application</key><true/>
+	<key>com.apple.keystore.device.verify</key><true/>
+	<key>com.apple.keystore.config.set</key><true/>
+	<key>com.apple.mobile.keybagd.UserManager.sync</key><true/>
+	<key>com.apple.mobile.keybagd.xpc</key><true/>
+	<key>com.apple.keystore.stash.access</key><true/>
+	<key>com.apple.private.keychain.keybag</key><true/>
 </dict>
 </plist>
