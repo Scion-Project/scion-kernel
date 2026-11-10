@@ -1,6 +1,6 @@
 --- a/tools/ios27/metal2/NativeBridgeMetalFrontend.mm	2026-11-09 20:51:46
 +++ b/tools/ios27/metal2/NativeBridgeMetalFrontend.mm	2026-11-09 20:51:46
-@@ -470,15 +470,66 @@
+@@ -470,15 +470,72 @@
  // owners keep the mapping live through this phase. Maintain each exact CPU
  // range once; no address identity or decision is carried into another phase
  // or command, and distinct/partially overlapping ranges retain their calls.
@@ -32,6 +32,12 @@
 +static bool surfaceNeedsFlush(IOSurfaceRef surface,bool finish) {
 + const int mode=flushMode();
 + if(mode==0)return true;
++ // A surface over a client's own memory (CoreAnimation wraps an image's bitmap that way: pixel format 0, any alignment) is
++ // written with no lock and so no seed bump, and it may be wrapped first and drawn into after: its seed says nothing.
++ // Such a surface, and any small one (an icon is 12 KiB: its clean costs nothing), is cleaned at every commit as in mode 0.
++ // (A guess at Settings' row icons in stripes on the first Metal builds with mode 2; cleaning more is never wrong.)
++ if(!finish && (IOSurfaceGetPixelFormat(surface)==0 || IOSurfaceGetAllocSize(surface)<(1u<<20) ||
++    (reinterpret_cast<uintptr_t>(IOSurfaceGetBaseAddress(surface))&0x3fff)!=0)){gFlushDoneCommit++;return true;}
 + id object=(__bridge id)surface;
 + @synchronized(object) {
 +  NBSurfaceFlushState *state=objc_getAssociatedObject(object,&gFlushStateKey);
@@ -68,7 +74,7 @@
    void *rawBase=IOSurfaceGetBaseAddress(surface);
    const size_t allocation=IOSurfaceGetAllocSize(surface);
    if(!rawBase || !allocation)continue;
-@@ -1498,7 +1549,7 @@
+@@ -1498,7 +1555,7 @@
  }
  // After completion (or a refusal): invalidate the CPU's view of GPU-written imported surfaces, then completed handlers, once.
  - (void)finish {
@@ -77,7 +83,7 @@
   // Actual GPU completion (or a local refusal that never submitted) is the
   // release point. A retained completed command must not pin every old frame.
   [_surfaces removeAllObjects];[_writtenSurfaces removeAllObjects];[_resourceOwners removeAllObjects];
-@@ -2745,6 +2796,8 @@
+@@ -2745,6 +2802,8 @@
   row("J surface cache n=%llu bytes=%llu dup=%llu us=%llu max=%llu",(unsigned long long)gTimeSurfaceFlush.count.load(),
    (unsigned long long)gSurfaceFlushBytes.load(),(unsigned long long)gSurfaceFlushDuplicates.load(),
    (unsigned long long)gTimeSurfaceFlush.total.load(),(unsigned long long)gTimeSurfaceFlush.slowest.load());

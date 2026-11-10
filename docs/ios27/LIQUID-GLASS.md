@@ -142,3 +142,18 @@ and `sweetspeed` with 262144, 524288 and 134217728 added. Root: this bundle (`to
 repository's `starbite-drm`), `SWEET_MTL2_DEXR=1`, `SWEET_MTL2_FLUSH=2` and `STARBITE_DRM_LEAKS=0` in `/private/var/local/mtl2-env`, backboardd in
 `/private/var/local/mtl2-clients`, and `/private/var/local/m2v-cache` (mode 0777) for the pipeline cache. Back to OpenGL ES: backboardd out of
 `mtl2-clients` and no `sbgl=0`.
+
+## Open: Settings row icons under the Metal compositor (10 Nov, seen, not explained)
+
+On the RC1 full root with the Metal compositor (kernel q12, `SWEET_MTL2_FLUSH=2`) the top level of Settings draws some row icons right,
+four as horizontal coloured stripes (Bluetooth, Appearance, Camera, Control Center) and eight not at all (Wi-Fi, Battery, Sounds, Focus,
+Screen Time, Passcode, Emergency SOS, Privacy & Security). No picture of the same screen under the GL renderer was taken the same night.
+Two suspects, each with a switch, neither run on a phone yet:
+
+- kernel: a surface over the app's own memory that could not be wrapped is a one-time copy; what the app draws afterwards never reaches
+  it. `sweetspeed` bit 8388608 copies again at use.
+- frontend: modes 1 and 2 of `SWEET_MTL2_FLUSH` skip the commit-time clean of a surface whose seed did not move; a surface over client
+  memory is written with no lock, so its seed never moves. Control: mode 0. `frontend-flush.diff` now cleans at every commit any surface
+  with pixel format 0, a base that is not 16 KiB aligned, or under 1 MiB (unmeasured; cleaning more cannot draw wrong, an icon is 12 KiB).
+
+Test order: reference picture, the kernel bit alone, mode 0 alone, then the rebuilt bundle with mode 2, then one GL picture.
