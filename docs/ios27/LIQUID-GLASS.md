@@ -119,6 +119,10 @@ since (below): no gain.
   submit and its start. The frames came one refresh apart, each of them late. "Two frames in flight" at the swap does not bound it (the window server
   commits more than it swaps). `sgu_depth=N` (`2abb4031`; default 256, the whole queue, as before) makes a submit sleep when N chains wait, until half
   of them are done. **Not yet run**: 48 (a frame or two) is the first value to try, against the touch-to-picture delay, not against frames on time.
+- **Three knobs for a chain's cost, built and not yet run**, all off by default: `sgu_flushred=1` (`0537327e`: the Mali's flush reduction, as
+  Linux's Panfrost driver has it on this GPU: a chain carries the GPU's flush count from its submit and the cache flush at its start is left out
+  when one happened since, which for a queued chain is always), `sgu_spin_us=600` (the worker looks longer before its first nap) and `sgu_depth`
+  above. What to read from a run of each is the queue's own line: time per chain, time queued, depth.
 - The prewarm of the Metal plug-in did not shorten the device's start (4.4 s again), and chronod's abort comes 4.6 s after the device exists, just
   before the first frame: it waits for the render server's first display state, not for the device. Harmless (it is started again and runs).
 
