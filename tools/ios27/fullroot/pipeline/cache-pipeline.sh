@@ -10,6 +10,9 @@
 #   6 rewrite-grow    full AOT rewrite of every remaining non-ARMv8.0 instruction (LSE cold images, FP16, FCMA, DotProd, RDM,
 #                     BF16, I8MM, SHA3, JSCVT, LRCPC2, LOR) with stubs in grown TEXT mappings; fix-cs extends the code signature
 #   7 grow-check      off-phone replay of the shared-region mapping rules + re-decode of every site/thunk/body (must exit 0)
+#   8 textdata-guard  the passes above rewrite every __text word with the bit pattern of a missing instruction, and some of those words
+#                     are DATA (tables of hand-written assembly): the reviewed ones are put back from the stock cache, and a changed
+#                     word that is neither provably code nor reviewed stops the build (docs/ios27/TEXT-DATA.md)
 set -euo pipefail
 SRC=$1; OUT=$2
 PIPE=$(cd "$(dirname "$0")" && pwd); HERE=$PIPE/cache; TOOLS=${IOS27_TOOLS:-$PIPE/../../..}   # TOOLS = scion-kernel tools/ios27
@@ -31,4 +34,14 @@ cp -c -R "$C" "$PRE"                # APFS clone = pre-grow reference for fix-cs
 echo "== 6 rewrite-grow $(date -u +%T)"; nice -n 10 $PY $HERE/aot/rewrite-grow.py cache $M --log "$OUT/rewrite.log" | tee "$OUT/rewrite.out" | tail -3
 $PY $HERE/aot/fix-cs.py $M $PRE/dyld_shared_cache_arm64e | tee "$OUT/fixcs.out" | tail -2
 echo "== 7 grow-check $(date -u +%T)"; $PY $HERE/aot/grow-check.py $M $PRE/dyld_shared_cache_arm64e "$OUT/rewrite.log" | tee "$OUT/grow-check.out" | tail -12
+echo "== 8 text data $(date -u +%T)"
+TD=${IOS27_PRIVATE:-$PIPE/../private}   # textdata-reviewed.list (VADDR DAMAGED STOCK note / VADDR code note) and undef.txt (oracle: undecodable words)
+if [[ -f $TD/textdata-reviewed.list && -f $TD/undef.txt ]]; then
+    $PY -I $HERE/textdata-guard.py apply "$C" "$TD/textdata-reviewed.list"
+    $PY -I $HERE/textdata-guard.py check "$SRC/dyld_shared_cache_arm64e" "$M" --undef "$TD/undef.txt" --reviewed "$TD/textdata-reviewed.list" | tee "$OUT/textdata.out" | tail -5
+elif [[ ${ALLOW_UNCHECKED_TEXTDATA:-0} == 1 ]]; then
+    echo "no $TD/textdata-reviewed.list + undef.txt: DATA WORDS IN __text ARE NOT CHECKED (ALLOW_UNCHECKED_TEXTDATA=1)"
+else
+    echo "no $TD/textdata-reviewed.list + undef.txt: run textdata-guard.py scan, review, write the list (docs/ios27/TEXT-DATA.md); ALLOW_UNCHECKED_TEXTDATA=1 skips" >&2; exit 1
+fi
 echo "CACHE-PIPELINE-DONE $(date -u +%T)"
