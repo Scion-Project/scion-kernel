@@ -96,7 +96,8 @@
  *   bt_addr=<a>      at bt=7, the chip's address, "xx:xx:xx:xx:xx:xx" (default: the phone's own, the text of
  *                    /bluetooth/bt_addr in its EFS partition, read only, as Samsung's Android gives it to the chip;
  *                    bt_addr=0: the chip keeps Broadcom's default 43:61:b2:...)
- *   bt_vsc_ok=LIST   at bt=7: vendor commands the chip rejects are said once; those in LIST (hex opcodes, ',') are
+ *   bt_vsc_ok=LIST   at bt=7: vendor commands the chip rejects are said once; those in LIST (hex opcodes, ','; "all",
+ *                    "-OPCODE" to leave one out) are
  *                    answered as done for iOS's bluetoothd (kctl_pump(), vsc_byte()); "log": said only. Off by default
  *   bt_trace=N       at bt=7, the H4 packets on com.apple.uart.bluetooth, both ways, on the console: at most N lines a
  *                    second (each: the direction, the type, the opcode, event or handle, the length, the first bytes);
@@ -1723,12 +1724,12 @@ kctl_setopt(__unused kern_ctl_ref ref, __unused u_int32_t unit, __unused void *u
  * for Apple's controllers; the BCM4361 answers many with status 01 (unknown command). bluetoothd lives with most of them,
  * but not with all: on iOS 27 a rejected LE-scan setting ("OLYMPIC_SET_RETAIN_LE_SCAN_DUPLICATES_ON_START") restarts its
  * stack, again and again. With bt_vsc_ok given, each vendor command the chip rejects is said once (its opcode), and those
- * in LIST (hex opcodes joined by ',', e.g. bt_vsc_ok=0xfd5a,0xfd73; "log" to only say them, "all" (tests) for every one) are answered as done: the
+ * in LIST (hex opcodes joined by ',', e.g. bt_vsc_ok=0xfd5a,0xfd73; "log" to only say them, "all" (tests) for every one, "-OPCODE" to leave one out of "all") are answered as done: the
  * status byte of the chip's Command Complete is set to 00 on its way to bluetoothd. Nothing else in the stream changes.
  */
 static char vsc_arg[128];
-static uint16_t vsc_ok[16];
-static unsigned vsc_ok_n;
+static uint16_t vsc_ok[16], vsc_not[16];
+static unsigned vsc_ok_n, vsc_not_n;
 static bool vsc_on, vsc_all;
 static uint16_t vsc_said[64];
 static unsigned vsc_said_n;
@@ -1752,13 +1753,18 @@ vsc_init(void)
 		return;
 	}
 	vsc_on = true;
-	vsc_all = strcmp(vsc_arg, "all") == 0;  /* (tests) every rejected vendor command answered as done */
-	while (!vsc_all && *p != 0 && vsc_ok_n < sizeof(vsc_ok) / sizeof(vsc_ok[0])) {
+	vsc_all = strncmp(vsc_arg, "all", 3) == 0;      /* (tests) every rejected vendor command answered as done ... */
+	while (*p != 0) {
+		bool neg = *p == '-';                   /* ... but those named with '-': "all,-0xfdda" */
 		char *end = NULL;
-		unsigned long v = strtoul(p, &end, 16);
+		unsigned long v = strtoul(neg ? p + 1 : p, &end, 16);
 
-		if (end != NULL && end != p && v > 0 && v <= 0xffff) {
-			vsc_ok[vsc_ok_n++] = (uint16_t)v;
+		if (end != NULL && end != (neg ? p + 1 : p) && v > 0 && v <= 0xffff) {
+			if (neg && vsc_not_n < sizeof(vsc_not) / sizeof(vsc_not[0])) {
+				vsc_not[vsc_not_n++] = (uint16_t)v;
+			} else if (!neg && vsc_ok_n < sizeof(vsc_ok) / sizeof(vsc_ok[0])) {
+				vsc_ok[vsc_ok_n++] = (uint16_t)v;
+			}
 		}
 		p = end != NULL && end != p ? end : p + 1;
 		while (*p == ',' || *p == ' ') {
@@ -1800,6 +1806,9 @@ vsc_byte(uint8_t b)
 
 			for (unsigned k = 0; k < vsc_ok_n; k++) {
 				ok |= vsc_ok[k] == op;
+			}
+			for (unsigned k = 0; k < vsc_not_n; k++) {
+				ok &= vsc_not[k] != op;
 			}
 			for (unsigned k = 0; k < vsc_said_n; k++) {
 				said |= vsc_said[k] == op;
