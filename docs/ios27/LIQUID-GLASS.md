@@ -156,4 +156,10 @@ Two suspects, each with a switch, neither run on a phone yet:
   memory is written with no lock, so its seed never moves. Control: mode 0. `frontend-flush.diff` now cleans at every commit any surface
   with pixel format 0, a base that is not 16 KiB aligned, or under 1 MiB (unmeasured; cleaning more cannot draw wrong, an icon is 12 KiB).
 
-Test order: reference picture, the kernel bit alone, mode 0 alone, then the rebuilt bundle with mode 2, then one GL picture.
+The console of that boot points at the frontend: the kernel wrapped the icons' memory (56x56, pixel format 0, 16 KiB surfaces made by
+the render server) rather than copying it, with one copy in the whole boot; and one of those surfaces was empty when it was wrapped
+(`0 of 12544 bytes set`), so its picture was written afterwards with no seed change. Cleaned once at its first commit and never again,
+such a surface shows whatever cache lines happen to have been evicted: none (blank), some (runs of 16 pixels: stripes) or all (right).
+
+Test order: the rebuilt bundle with mode 2 first; if the icons are still wrong, mode 0 as the control, then the kernel bit alone, then
+one GL picture.
