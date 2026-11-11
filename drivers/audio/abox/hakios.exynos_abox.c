@@ -379,6 +379,12 @@ amps_start(void)
 		return;
 	}
 	if (amp == NULL || amp->start == NULL) {
+		for (int wait = 0; wait < 100 && (amp_hook == NULL || amp_hook->start == NULL); wait++) {
+			delay_for_interval(10, NSEC_PER_MSEC);
+		}
+		amp = amp_hook;
+	}
+	if (amp == NULL || amp->start == NULL) {
 		/* (looked for again the next time: a driver may register later) */
 		if (!amp_none_said) {
 			say("abox: %u: no amplifiers' driver registered (hakios_abox_set_amp): UAIF1 runs and nothing is heard\n", step);
