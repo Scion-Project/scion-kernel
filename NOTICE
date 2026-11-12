@@ -122,3 +122,5 @@ Fetched at build time, never committed:
   repository: tools/mk-star2-setfiles.sh makes them at build time, with his tools/extract-2l3-setfile.py and
   tools/extract-3m3-setfile.py, from three headers of Samsung's GPL-2.0 kernel (the S5K2L3's and S5K3M3's register tables and
   RAM patches) fetched from github.com/ananjaser1211/Apollo at a pinned commit.
+- Nils (github.com/dwaris): his commits to this repository, from 12 November 2026 (drivers/audio/abox/hakios.exynos_abox.c,
+  drivers/audio/codec/hakios.max98512.c), under the licence of the files they change.

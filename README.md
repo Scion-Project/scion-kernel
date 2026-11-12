@@ -199,6 +199,10 @@ from your own device.
   the Mali and the buses, the speakers' tone, Location Services and its tools, the GNSS bring-up of the BCM4775
   (`docs/gnss.md`, `/dev/hakios-gnss`, `gnsstool`), a kept data volume that survives a reset, and a long list of fixes to
   the build and the user space. His commits are in the history under his name. Thank you, Anan.
+- **Nils** ([@dwaris](https://github.com/dwaris)), a Galaxy S9+ owner and one of the installer's testers. Two fixes for the
+  speakers found on his own phone: the first sound no longer lost when the stream starts before the amplifiers' driver has
+  registered, and the MAX98512's enable given a moment before it is read back, with a pause between a bus transfer's
+  retries. His commits are in the history under his name. Thank you, Nils.
 
 ## Licenses and the legal side
 
