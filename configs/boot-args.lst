@@ -140,6 +140,10 @@ cam_s9_mmu_probe	k
 cam_s9_pack12	k
 cam_s9_probe	k
 cam_s9_sat	k
+cam_s9_selfread	k
+cam_s9_selfread_focus	k
+cam_s9_selfread_x	k
+cam_s9_selfread_y	k
 cam_s9_stride	k
 cam_sensor	k
 cam_settle	k

@@ -115,6 +115,7 @@ void hakios_ak737x_shot(vm_offset_t raw, uint32_t stride, uint32_t width, uint32
 uint32_t hakios_ak737x_focus(void);
 void hakios_ak737x_ask(uint32_t a, uint32_t b, uint32_t c, uint32_t d);
 void hakios_ak737x_closed(void);
+bool hakios_ak737x_searching(void);
 
 #define LENS                    0x0C
 #define REG_POS_HIGH            0x00
@@ -796,6 +797,15 @@ hakios_ak737x_frame(vm_offset_t raw, uint32_t stride, uint32_t width, uint32_t h
 	default:
 		return false;
 	}
+}
+
+/* a search is waiting to begin or under way (or a table): a picture taken now would be of a lens on its way */
+bool
+hakios_ak737x_searching(void)
+{
+	/* (in focus, but the frames since the lens was put there not yet gone by: still on its way) */
+	return cam_af >= 2 && lens_active && (search.state == ST_WAIT || search.state == ST_COARSE || search.state == ST_FINE ||
+	       search.state == ST_TABLE || (search.state == ST_FOCUSED && search.found_n == 0));
 }
 
 /* a camshot's frame: its sharpness in the log, with where the lens was */
