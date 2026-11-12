@@ -44,6 +44,9 @@ if [ -d BUILD/obj ] && [ "$(cat $STAMP 2>/dev/null)" != "$now" ]; then
 	rm -f BUILD/obj/*/mach.*.unstripped
 	echo "$now" > $STAMP
 fi
+# The kernel's makefiles pass -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang: clang 15 and older need
+# it, clang 16 and later (Xcode's today) refuse it. The compiler is asked once; xnu-deps/host/bin/xnu-clang keeps or drops it.
+export XNU_CLANG_TAVI_FLAG=$(/usr/bin/clang -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang -fsyntax-only -x c /dev/null >/dev/null 2>&1 && echo 1 || echo 0)
 exec make HAKIOS_OBJECTS="$LX" SDKROOT=iphoneos ARCH_CONFIGS=ARM64 MACHINE_CONFIGS=${MACHINE:-$(_scion_profile machine BCM2837)} KERNEL_CONFIGS=DEVELOPMENT \
   ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=${XNU_ARCH_STRING:-arm64} BUILD_WERROR=0 BUILD_LTO=0 DO_CTFMERGE=0 \
   HOST_CC="$HOSTCC" HOST_FLEX=flex HOST_BISON=bison HOST_GM4=m4 CC=xnu-clang CXX=xnu-clang++ LOGCOLORS=n $XNU_MAKE_ARGS "$@"

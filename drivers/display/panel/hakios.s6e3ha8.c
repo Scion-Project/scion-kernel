@@ -397,7 +397,7 @@ panel_gamma_init(uint32_t mode)
 
 	panel_id = (uint32_t)id[0] << 16 | (uint32_t)id[1] << 8 | id[2];
 	bool star2 = strcmp(HAKIOS_DEVICE, "star2lte") == 0;
-	gamma_panel = ha8_panel_of(panel_id, star2);
+	gamma_panel = ha8_panel_of_device(panel_id, star2);
 	say("s6e3ha8: ID %06x%s: Samsung's tables for the %s panel; keys %s; DSIM CONFIG %x (per-frame read %s)\n",
 	    panel_id, have_id ? "" : " (NOT READ)", gamma_panel->name, keys ? "opened and closed" : "NOT ALL SENT",
 	    rd(DSIM_CONFIG), (rd(DSIM_CONFIG) & PER_FRAME_READ) ? "on" : "off");

@@ -95,6 +95,14 @@
 #include <sys/hakios.xnu.h>
 
 /*
+ * The phone this kernel is configured for: the generated configuration's (tools/hakios-config.py, the 16.5 line). The ios-27
+ * tree takes this file as it is (profiles/ios-27.copy) and has no generated configuration; its one machine is the Galaxy S9.
+ */
+#ifndef HAKIOS_DEVICE
+#define HAKIOS_DEVICE           "starlte"
+#endif
+
+/*
  * Hardware, from Samsung's device tree for the S9 (exynos9810-starlte_eur_open_26.dts, nodes spi@13AC0000 and
  * BCM4773@0) and its drivers:
  *
