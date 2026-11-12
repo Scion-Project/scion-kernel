@@ -12,6 +12,7 @@ drivers/input/ssp/hakios.ssp.c bsd/dev/hakios.ssp.c
 drivers/input/ssp/hakios.bcm_shub.h bsd/dev/hakios.bcm_shub.h
 drivers/core/hakios.physmap.cpp iokit/Kernel/hakios.physmap.cpp
 drivers/display/panel/hakios.s6e3ha8_gamma.h bsd/dev/hakios.s6e3ha8_gamma.h
+drivers/display/panel/hakios.s6e3ha8_star2.h bsd/dev/hakios.s6e3ha8_star2.h
 drivers/usb/hakios.exynos_usb.c bsd/dev/hakios.exynos_usb.c
 drivers/usb/hakios.usb_acm.h bsd/dev/hakios.usb_acm.h
 drivers/usb/hakios.usb_glue.h bsd/dev/hakios.usb_glue.h
