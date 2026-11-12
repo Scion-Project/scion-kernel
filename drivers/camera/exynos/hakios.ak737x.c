@@ -116,6 +116,7 @@ uint32_t hakios_ak737x_focus(void);
 void hakios_ak737x_ask(uint32_t a, uint32_t b, uint32_t c, uint32_t d);
 void hakios_ak737x_closed(void);
 bool hakios_ak737x_searching(void);
+void hakios_ak737x_rear(struct hakios_hsi2c *bus);
 
 #define LENS                    0x0C
 #define REG_POS_HIGH            0x00
@@ -161,6 +162,16 @@ static struct hakios_hsi2c lens_bus = {
 	.ipclk_mhz = 400, .bus_hz = 400000,             /* clock-frequency = <400000> */
 };
 
+/*
+ * The bus in use. The rear camera's lens (cam_rear=1) is the same kind of chip at the same address on another bus,
+ * hsi2c@10870000, which it shares with the module's OIS controller and aperture driver: hakios.exynos_camera_rear.c
+ * owns that bus (its clocks, pins and reset) and hands it over with hakios_ak737x_rear() before the setup. There the
+ * device tree expects an AK7374 (0x0E; or an AK7371, 0x09), the first position is 120 as well, and the module's
+ * calibration is not in an EEPROM on this bus (it is in an SPI flash): none is read.
+ */
+static struct hakios_hsi2c *lbus = &lens_bus;
+static bool lens_rear;
+
 static int (*say)(const char *, ...);
 static uint32_t cam_af;                  /* cam_af */
 static uint32_t arg_pos = FIRST_POS, arg_lo, arg_hi = POS_MAX, arg_coarse = 32, arg_fine = 8, arg_settle = 2, arg_win = 384;
@@ -199,7 +210,7 @@ wait_ms(uint32_t ms)
 static uint32_t
 lens_get(uint8_t reg, uint8_t *value)
 {
-	return hakios_hsi2c_read_reg(&lens_bus, LENS, reg, value, 1);
+	return hakios_hsi2c_read_reg(lbus, LENS, reg, value, 1);
 }
 
 /* what may be written to the chip: the position's two registers and the mode's two values. Nothing else, ever. */
@@ -232,9 +243,9 @@ lens_put(uint8_t reg, uint8_t value)
 		}
 		return false;
 	}
-	if (hakios_hsi2c_message(&lens_bus, LENS, false, buf, 2, true) != 0) {
+	if (hakios_hsi2c_message(lbus, LENS, false, buf, 2, true) != 0) {
 		say("ak737x: the write of %#x = %#x was not acknowledged (%#x): the lens is left alone for the rest of the run\n", reg,
-		    value, lens_bus.last_error);
+		    value, lbus->last_error);
 		lens_broken = true;
 		return false;
 	}
@@ -288,8 +299,8 @@ eeprom_get(uint16_t address, uint8_t *buf, uint32_t len)
 		uint8_t a[2] = { (uint8_t)((address + done) >> 8), (uint8_t)(address + done) };
 		uint32_t n = len - done < 8 ? len - done : 8;
 
-		if (hakios_hsi2c_message(&lens_bus, EEPROM, false, a, 2, false) != 0 ||
-		    hakios_hsi2c_message(&lens_bus, EEPROM, true, buf + done, n, true) != 0) {
+		if (hakios_hsi2c_message(lbus, EEPROM, false, a, 2, false) != 0 ||
+		    hakios_hsi2c_message(lbus, EEPROM, true, buf + done, n, true) != 0) {
 			return false;
 		}
 	}
@@ -330,7 +341,7 @@ eeprom_look(void)
 	}
 	eeprom_looked = true;
 	if (!eeprom_get(0, header, sizeof(header))) {
-		say("ak737x: 1: the EEPROM at %#x does not answer (%#x): no calibration read\n", EEPROM, lens_bus.last_error);
+		say("ak737x: 1: the EEPROM at %#x does not answer (%#x): no calibration read\n", EEPROM, lbus->last_error);
 		return;
 	}
 	hex_lines("EEPROM", 0, header, sizeof(header));
@@ -355,7 +366,7 @@ eeprom_look(void)
 	say("ak737x: 1: THE EEPROM ANSWERS: header version \"%s\" (0x30), map version \"%s\" (0x40), project \"%s\" (0x4C)\n",
 	    version, map, project);
 	if (!eeprom_get(EEP_FOCUS, focus, sizeof(focus))) {
-		say("ak737x: 1: the EEPROM's focus section (%#x) could not be read (%#x)\n", EEP_FOCUS, lens_bus.last_error);
+		say("ak737x: 1: the EEPROM's focus section (%#x) could not be read (%#x)\n", EEP_FOCUS, lbus->last_error);
 		return;
 	}
 	hex_lines("EEPROM", EEP_FOCUS, focus, sizeof(focus));
@@ -364,6 +375,14 @@ eeprom_look(void)
 	say("ak737x: 1: the factory's focus positions, as 32-bit little-endian words: infinity (0x104) %u (%#x), macro (0x110) %u "
 	    "(%#x); the search's travel stays cam_af_lo to cam_af_hi (%u to %u)\n", cal_far, cal_far, cal_near, cal_near,
 	    arg_lo, arg_hi);
+}
+
+/* the rear camera's lens: its bus, powered and reset by its owner before hakios_ak737x_up() */
+void
+hakios_ak737x_rear(struct hakios_hsi2c *bus)
+{
+	lbus = bus;
+	lens_rear = true;
 }
 
 /* the stage and its numbers; the camera's own `say' for the log. 0: nothing asked, nothing done. */
@@ -378,7 +397,7 @@ hakios_ak737x_setup(uint32_t ipclk_mhz, int (*say_fn)(const char *, ...))
 	if (cam_af > 4) {
 		cam_af = 4;
 	}
-	lens_bus.ipclk_mhz = ipclk_mhz;
+	lens_bus.ipclk_mhz = ipclk_mhz;         /* (the rear camera's bus has its owner's) */
 	PE_parse_boot_argn("cam_af_pos", &arg_pos, sizeof(arg_pos));
 	PE_parse_boot_argn("cam_af_lo", &arg_lo, sizeof(arg_lo));
 	PE_parse_boot_argn("cam_af_hi", &arg_hi, sizeof(arg_hi));
@@ -481,23 +500,25 @@ hakios_ak737x_up(void)
 	if (cam_af == 0) {
 		return;
 	}
-	if (!lens_mapped) {
+	if (!lens_mapped && !lens_rear) {
 		say("ak737x: 1: the lens's bus: hsi2c@10900000 (USI09 of PERIC1), pins gpp5-4 and gpp5-5\n");
 		if (!hakios_hsi2c_map(&lens_bus, say)) {
 			cam_af = 0;
 			return;
 		}
-		lens_mapped = true;
 	}
-	hakios_hsi2c_power(&lens_bus);          /* its clocks, the mode word, the pins to function 2 */
-	hakios_hsi2c_reset(&lens_bus);
+	lens_mapped = true;
+	if (!lens_rear) {
+		hakios_hsi2c_power(&lens_bus);          /* its clocks, the mode word, the pins to function 2 */
+		hakios_hsi2c_reset(&lens_bus);
+	}
 	wait_ms(1);
 	if (lens_get(REG_PRODUCT, &id) != 0) {
 		wait_ms(10);
 		if (lens_get(REG_PRODUCT, &id) != 0) {
 			if (!lens_looked) {
 				say("ak737x: 1: nothing answers at %#x (%#x; INT_STAT: 0x200 no ack, 0x400 no device, 0x800 time-out): no lens "
-				    "in this run\n", LENS, lens_bus.last_error);
+				    "in this run\n", LENS, lbus->last_error);
 			}
 			lens_looked = true;
 			lens_answers = false;
@@ -513,12 +534,15 @@ hakios_ak737x_up(void)
 		(void)lens_get(REG_SETTING, &setting);
 		say("ak737x: 1: THE LENS'S CHIP ANSWERS at %#x: product %#x (%s); as found: position registers %#x %#x (position %u), "
 		    "mode %#x (0 active, 0x20 sleep), setting 0x10 = %#x; %llu transfers, %llu errors on the bus\n", LENS, id,
-		    id == 0x0C ? "AK7372, the one the device tree expects" : id == 0x09 ? "AK7371" : id == 0x0E ? "AK7374" :
+		    id == 0x0C ? (lens_rear ? "AK7372" : "AK7372, the one the device tree expects") : id == 0x09 ? "AK7371" :
+	    id == 0x0E ? (lens_rear ? "AK7374, the one the device tree expects" : "AK7374") :
 		    "NOT an AK737x this driver knows: nothing will be written to it", found[0], found[1],
-		    ((uint32_t)found[0] << 1) | (found[1] >> 7), found[2], setting, lens_bus.transfers, lens_bus.errors);
+		    ((uint32_t)found[0] << 1) | (found[1] >> 7), found[2], setting, lbus->transfers, lbus->errors);
 		lens_looked = true;
 	}
-	eeprom_look();
+	if (!lens_rear) {
+		eeprom_look();
+	}
 	if (cam_af < 2 || !lens_answers) {
 		return;
 	}
@@ -556,8 +580,10 @@ hakios_ak737x_down(void)
 		say("ak737x: the lens walked down from %u to %u and the chip put to sleep%s\n", was, lens_at,
 		    lens_answers && !lens_broken ? "" : " (NOT acknowledged)");
 	}
-	/* "off_i2c": the two pins back to inputs, as the sensor's bus is left */
-	*(volatile uint32_t *)lens_bus.pins &= ~lens_bus.pins_mask;
+	/* "off_i2c": the two pins back to inputs, as the sensor's bus is left (the rear camera's bus: its owner does it) */
+	if (!lens_rear) {
+		*(volatile uint32_t *)lens_bus.pins &= ~lens_bus.pins_mask;
+	}
 }
 
 /* ---- the search ---- */
