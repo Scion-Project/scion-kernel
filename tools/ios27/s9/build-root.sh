@@ -6,6 +6,7 @@
 #   sudo tools/ios27/s9/build-root.sh inputs     -> tools/ios27/fullroot/out/root-full.img (raw HFSX, 32 GiB sparse, about 20 GiB used)
 # Environment, all optional: PY=<python with numpy>; SIZE_GB (32); OUT=<image>; MIN_FREE_GB (62: the copy, the cache and working
 # room); DAEMON_SET=bp|min; METAL_CA_CLIENTS (default here: "backboardd SBRendererService", what the icon fixes were tested with);
+# ENABLE_SILEO=0 for a root without the package manager (docs/ios27/SILEO.md);
 # ENABLE_METAL_CA=0 for the OpenGL ES compositor (then boot with tools/ios27/cmdline/starlte-rc-gl.txt). About 40 minutes.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); FR=$(cd "$HERE/../fullroot" && pwd)

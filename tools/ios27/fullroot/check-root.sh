@@ -67,5 +67,19 @@ n=0; while IFS= read -r l; do h=${l%% *}; f=${l#*  }; f=${f#./}; [[ $(shasum -a 
 [[ $n == 0 ]] && ok "overlay files all present with matching sha256" || bad "$n overlay files differ"
 r=$("$PY" -I "${IOS27_PIPELINE:-$H/pipeline}/root/macho-rewrite.py" "${IOS27_PIPELINE:-$H/pipeline}/cache/a64e-rewrite.py" "$R" --dry-run 2>&1 | tail -1); echo "info  Mach-O a64e dry run: $r"
 case $r in *"'ret': 0, 'br': 0, 'blr': 0, 'pac': 0,"*"errors 0") ok "Mach-O a64e rewrite is complete (0 sites left, 0 errors)";; *) bad "Mach-O a64e rewrite incomplete";; esac
+# the package manager (steps.d/60-sileo.sh): all of it or none of it, and nothing it must not bring
+if [[ -d $R/jb ]]; then
+    for f in jb/Applications/Sileo.app/Sileo jb/usr/bin/dpkg jb/usr/bin/apt-get jb/prep.sh jb/.scion-stamp usr/local/bin/jb_seed usr/local/bin/var_sync; do
+        [[ -e $R/$f ]] && ok "present $f" || bad "missing $f"; done
+    for c in chmod cp mkdir mv rm; do [[ $(readlink "$R/bin/$c" 2>/dev/null) == /var/jb/usr/bin/$c ]] && ok "/bin/$c -> the prefix" || bad "/bin/$c is not the prefix's link"; done
+    [[ $(/usr/bin/python3 "$H/../sileo/jobs.py" "$R" list | grep -c ' present$') -ge 2 ]] && ok "launchd jobs com.scion.jbseed, com.scion.varsync" || bad "the prefix's launchd jobs are not in launchd.plist"
+    /usr/bin/python3 "$H/../sileo/jobs.py" "$R" list | grep -q 'sileotest.plist present' && info "com.scion.sileotest is on this root: a TEST root (SILEO_SELFTEST=1), not a release"
+    [[ ! -e $R/jb/usr/sbin/sshd && ! -e $R/jb/usr/lib/TweakLoader.dylib ]] && ok "no OpenSSH, no tweak injection in the prefix" || bad "OpenSSH or tweak injection is in the prefix"
+    [[ -z $(awk -F: '!/^#/ && NF >= 10 && $2 != "*" && $2 != "!"' "$R/jb/etc/master.passwd") ]] && ok "no account with a password in the prefix" || bad "an account with a password is in the prefix"
+    [[ -z $(find "$R/jb" ! -type l -perm -0002 | head -1) ]] && ok "nothing writable by everybody in the prefix" || bad "files writable by everybody in the prefix"
+    [[ $(stat -f %u "$R/jb/Applications/Sileo.app/giveMeRoot") == 0 ]] && ok "the prefix is root's" || info "the prefix is not root's on this mount (no owners, or made without root): jb_seed makes it so on the phone"
+else
+    info "no package manager on this root (ENABLE_SILEO=0)"
+fi
 df -h "$R" | tail -1 | sed 's/^/info  /'; echo "info  inodes/files: $(find "$R" -xdev 2>/dev/null | wc -l | tr -d ' ') entries"
 [[ $fail == 0 ]] && echo "CHECK-ROOT: ALL HARD CHECKS PASSED" || echo "CHECK-ROOT: FAILURES"; exit $fail
