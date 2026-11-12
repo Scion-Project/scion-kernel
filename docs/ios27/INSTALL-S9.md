@@ -68,7 +68,10 @@ header and Samsung's device-tree block are kept so that the phone's boot loader 
 
 Clean run: the loader built this way is byte for byte the one in the test phones' boot image, and the script given the test
 phones' kernel reproduces their boot image except for the 256 random bytes of the device tree's seed and the header's checksum.
-`pull-template` and `backup-boot` were not run (no phone was free); the template used was the copy made earlier from a test phone.
+On a phone (12 November 2026, a test phone that already held a project-made iOS 27 root): `pull-template`, `backup-boot`, the
+boot image made by these commands from the clean-run kernel and loader (command line `sweetspeed=140347391`, the OpenGL ES
+compositor that root was set up for), `flash.sh boot ... reboot`: the USB console came up 14 seconds after the flash, the first
+picture after 30 seconds, and SpringBoard's lock screen was on the panel with no panic. `to-recovery.sh` brought it back to TWRP.
 
 ## 4. The userland the root needs (hours; NOT a clean run, see below)
 
@@ -145,8 +148,9 @@ The phone in TWRP (hold Volume Up + Bixby + Power from off), on USB:
 Every write is read back and compared. Only `BOOT` and `USERDATA` are written. The first boot of a fresh root takes about two
 minutes to the first picture (later boots 20 to 40 seconds). The log is on the USB console: `screen /dev/cu.usbmodem*` on the Mac.
 
-This sequence, from images built by this page's commands, has **not** yet been run on a phone. The test phones run images made
-by the same tools in the project's private layout.
+Of this sequence, `info` and the `boot` line were run on a phone with an image built by this page's commands (section 3). The
+`root` line was not: no root image has been built from a clean clone yet (section 5), and the test phones' roots were written
+by the same `fastflash-root.py` from the project's private layout.
 
 ## Getting back
 
@@ -176,7 +180,8 @@ by the same tools in the project's private layout.
 - **Icons and Settings symbols** are right only with the rewrite's data-word guard (in this branch) and the CoreImage word in the
   patch list. That last word was proven on a phone only together with a kernel change that is still a draft
   (Scion-Project/xnu pull request 12); with the kernel this page builds, some Settings rows may have no symbol.
-- **The lock screen's clock is black**, and the **wallpaper picker** does not work; the wallpaper is a stand-in.
+- **The lock screen's clock is not drawn** (an empty box where the digits should be; the date line in the test boot read
+  "Wed Dec 31"), and the **wallpaper picker** does not work.
 - `chronod` aborts once about 20 seconds after boot and comes back; four widget extensions (Calculator, World Clock, the code
   scanner, the launcher control) crash three times each at start and stay off.
 - The command line and the patches are for build 24A446 only. Another restore image is refused.
