@@ -162,6 +162,13 @@ cohtest_delay	k
 console_quiet	k
 core0	kl
 core1	l
+cp	k
+cp_delay	k
+cp_ds	k
+cp_nv	k
+cp_rev	k
+cp_vss	k
+cp_wait	k
 cpufreq	k
 cpufreq_gov	k
 cpufreq_gov_big_max	k
