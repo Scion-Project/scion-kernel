@@ -4,10 +4,12 @@ set -uo pipefail
 R=$1; H=$(cd "$(dirname "$0")" && pwd); PY=${PY:-python3}
 fail=0; ok() { echo "ok    $*"; }; bad() { echo "FAIL  $*"; fail=1; }; info() { echo "info  $*"; }
 for f in sbin/launchd System/Library/CoreServices/SpringBoard.app/SpringBoard usr/libexec/backboardd Applications/Preferences.app/Preferences \
-         usr/lib/s.dylib usr/lib/m.dylib usr/lib/b.dylib usr/local/starbite/lib/libOSMesa.8.dylib usr/local/starbite/lib/libsbgl.dylib \
+         usr/lib/s.dylib usr/local/starbite/lib/libOSMesa.8.dylib usr/local/starbite/lib/libsbgl.dylib \
          System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e.01 \
          private/var/keybags/systembag.kb System/Library/xpc/launchd.plist System/Library/xpc/launchd-disabled.plist; do
     [[ -e $R/$f ]] && ok "present $f" || bad "missing $f"; done
+# the wallpaper stand-in and the brightness library: the phone starts without them (docs/ios27/INSTALL-S9.md, section 4)
+for f in usr/lib/m.dylib usr/lib/b.dylib; do [[ -e $R/$f ]] && ok "present $f" || info "absent $f (optional: wallpaper stand-in / brightness slider)"; done
 # full-ness: nothing trimmed, symbols out
 nl=$(find "$R/System/Library" -name '*.lproj' -type d ! -name 'en.lproj' ! -name Base.lproj ! -name English.lproj ! -name 'en_*.lproj' 2>/dev/null | wc -l | tr -d ' ')
 ne=$(find "$R/System" -name '*.espresso.*' 2>/dev/null | wc -l | tr -d ' '); nm=$(find "$R/System" -name '*.mlmodelc' -type d 2>/dev/null | wc -l | tr -d ' ')
@@ -22,7 +24,7 @@ nolink=0; for f in "$K"/*; do [[ $(stat -f %i "$f") == $(stat -f %i "$C/${f##*/}
 [[ $nolink == 0 ]] && ok "root cache = hard links of the cryptex cache" || bad "$nolink cache files not hard-linked"
 if [[ -f ${IOS27_PRIVATE:-$H/private}/patches.txt ]]; then
     while read -r va exp new rest; do [[ $va == \#* || -z $va ]] && continue
-        "$PY" -I "${IOS27_PIPELINE:-$H/pipeline}/cache/cachepatch.py" "$C" $va $new $new --dry-run 2>&1 | grep -q "already patched" && ok "cache word $va = $new" || bad "cache word $va != $new"
+        "$PY" -I "${IOS27_TOOLS:-$H/..}/speed/cachepatch.py" "$C" $va $new $new --dry-run 2>&1 | grep -q "already patched" && ok "cache word $va = $new" || bad "cache word $va != $new"
     done < "${IOS27_PRIVATE:-$H/private}/patches.txt"
 fi
 # launchd sanity

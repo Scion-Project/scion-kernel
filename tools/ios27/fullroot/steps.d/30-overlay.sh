@@ -6,7 +6,9 @@
 #   24 wallpaper HEIC layers as PNG data, var/local/{mtl2-clients,mtl2-env,oslog-clients,sbwallpaper.png}.
 set -euo pipefail
 R=$1; O=${OVERLAY:-${IOS27_PRIVATE:-$(cd "$(dirname "$0")/.." && pwd)/private}/overlay}
-(cd "$O" && shasum -a 256 -c MANIFEST.sha256 >/dev/null) || { echo "overlay manifest mismatch" >&2; exit 1; }
+[[ -f $O/MANIFEST.sha256 ]] || { echo "no overlay manifest at $O (tools/ios27/s9/prepare-root-inputs.sh)" >&2; exit 1; }
+# an empty manifest is an overlay with nothing in it (a root without a compositor): shasum -c calls that an error
+[[ ! -s $O/MANIFEST.sha256 ]] || (cd "$O" && shasum -a 256 -c MANIFEST.sha256 >/dev/null) || { echo "overlay manifest mismatch" >&2; exit 1; }
 [[ -e $R/usr/libexec/cc_fips_test.orig ]] || cp -p "$R/usr/libexec/cc_fips_test" "$R/usr/libexec/cc_fips_test.orig"
 n=0
 while IFS= read -r f; do
