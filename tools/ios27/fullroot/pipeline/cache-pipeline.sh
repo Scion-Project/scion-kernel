@@ -16,7 +16,7 @@
 #                     is the stock word (without a map: the reviewed data words are put back with apply, as before)
 set -euo pipefail
 SRC=$1; OUT=$2
-PIPE=$(cd "$(dirname "$0")" && pwd); HERE=$PIPE/cache; TOOLS=${IOS27_TOOLS:-$PIPE/../../..}   # TOOLS = scion-kernel tools/ios27
+PIPE=$(cd "$(dirname "$0")" && pwd); HERE=$PIPE/cache; TOOLS=${IOS27_TOOLS:-$PIPE/../..}   # TOOLS = scion-kernel tools/ios27
 PY=${PY:-python3}
 mkdir -p "$OUT"; cd "$OUT"
 C=$OUT/c; PRE=$OUT/pre
