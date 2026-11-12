@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **659 arguments**: 568 read by the kernel, 23 by the loader, 85 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **675 arguments**: 584 read by the kernel, 23 by the loader, 85 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -334,27 +334,27 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_keep_mb` | K | `hakios.camera.c` | `CONFIG_CAM_KEEP_MB` |  |
 | `cam_mode` | K | `hakios.camera.c` | `CONFIG_CAM_MODE` |  |
 | `cam_pattern` | K | `hakios.camera.c` | `CONFIG_CAM_PATTERN` |  |
-| `cam_s9` | K | `hakios.exynos_camera.c`, `hakios.exynos_iris.c`, `hakios.s2mpb02_torch.c` | `CONFIG_CAM_S9` |  |
-| `cam_s9_addr` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_ADDR` |  |
-| `cam_s9_ae` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_AE` |  |
-| `cam_s9_ae_frames` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_AE_FRAMES` |  |
-| `cam_s9_always` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_ALWAYS` |  |
-| `cam_s9_bayer` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_BAYER` |  |
+| `cam_s9` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c`, `hakios.exynos_iris.c`, `hakios.s2mpb02_torch.c` | `CONFIG_CAM_S9` |  |
+| `cam_s9_addr` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_ADDR` |  |
+| `cam_s9_ae` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_AE` |  |
+| `cam_s9_ae_frames` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_AE_FRAMES` |  |
+| `cam_s9_always` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_ALWAYS` |  |
+| `cam_s9_bayer` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_BAYER` |  |
 | `cam_s9_cached` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_CACHED` |  |
-| `cam_s9_dgain` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_DGAIN` |  |
-| `cam_s9_exp` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_EXP` |  |
-| `cam_s9_gain` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_GAIN` |  |
-| `cam_s9_ipclk` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_IPCLK` |  |
-| `cam_s9_ispdiv` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_ISPDIV` |  |
-| `cam_s9_mmu_probe` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_MMU_PROBE` |  |
-| `cam_s9_pack12` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_PACK12` |  |
-| `cam_s9_probe` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_PROBE` |  |
-| `cam_s9_sat` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SAT` |  |
+| `cam_s9_dgain` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_DGAIN` |  |
+| `cam_s9_exp` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_EXP` |  |
+| `cam_s9_gain` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_GAIN` |  |
+| `cam_s9_ipclk` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_IPCLK` |  |
+| `cam_s9_ispdiv` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_ISPDIV` |  |
+| `cam_s9_mmu_probe` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_MMU_PROBE` |  |
+| `cam_s9_pack12` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_PACK12` |  |
+| `cam_s9_probe` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_PROBE` |  |
+| `cam_s9_sat` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_SAT` |  |
 | `cam_s9_selfread` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD` |  |
 | `cam_s9_selfread_focus` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD_FOCUS` |  |
 | `cam_s9_selfread_x` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD_X` |  |
 | `cam_s9_selfread_y` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD_Y` |  |
-| `cam_s9_stride` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_STRIDE` |  |
+| `cam_s9_stride` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_STRIDE` |  |
 | `cam_sensor` | K | `hakios.camera.c` | `CONFIG_CAM_SENSOR` |  |
 | `cam_settle` | K | `hakios.camera.c` | `CONFIG_CAM_SETTLE` |  |
 | `cam_shutter` | K | `hakios.camera.c` | `CONFIG_CAM_SHUTTER` |  |
@@ -495,13 +495,15 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `usb_gadget_soc` | K | `hakios.dwc3.c` | `CONFIG_USB_GADGET_SOC` |  |
 | `usb_gadget_susphy` | K | `hakios.dwc3.c` | `CONFIG_USB_GADGET_SUSPHY` |  |
 
-## Haptics and torch (5)
+## Haptics and torch (7)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `haptic` | K | `hakios.haptic.c` | `CONFIG_HAPTIC` |  |
 | `haptic_effect` | K | `hakios.haptic.c` | `CONFIG_HAPTIC_EFFECT` |  |
 | `torch` | KL | `hakios.exynos_iris.c`, `hakios.s2mpb02_torch.c`, `hakios.sccam_torch.c`, `hakios.torch.c`, `loader.c` | `CONFIG_TORCH` |  |
+| `torch_code_max` | K | `hakios.s2mpb02_torch.c` | `CONFIG_TORCH_CODE_MAX` |  |
+| `torch_flash_ms` | K | `hakios.s2mpb02_torch.c` | `CONFIG_TORCH_FLASH_MS` |  |
 | `torch_max_s` | K | `hakios.s2mpb02_torch.c`, `hakios.torch.c` | `CONFIG_TORCH_MAX_S` |  |
 | `torch_secs` | K | `hakios.s2mpb02_torch.c`, `hakios.torch.c` | `CONFIG_TORCH_SECS` |  |
 
@@ -591,7 +593,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (156)
+## User space (170)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -638,6 +640,20 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_rear_ap` | K | `hakios.exynos_camera_rear.c` | `CONFIG_CAM_REAR_AP` |  |
 | `cam_rear_ois` | K | `hakios.exynos_camera_rear.c` | `CONFIG_CAM_REAR_OIS` |  |
 | `cam_rear_ois_mode` | K | `hakios.exynos_camera_rear.c` | `CONFIG_CAM_REAR_OIS_MODE` |  |
+| `cam_s9_af` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_AF` |  |
+| `cam_s9_rear` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR` |  |
+| `cam_s9_rear_bayer` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_BAYER` |  |
+| `cam_s9_rear_exp` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_EXP` |  |
+| `cam_s9_rear_ispdiv` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_ISPDIV` |  |
+| `cam_s9_rear_probe` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_PROBE` |  |
+| `cam_s9_rear_tp` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_TP` |  |
+| `cam_s9_rear_turn` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_TURN` |  |
+| `cam_s9_tele` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE` |  |
+| `cam_s9_tele_bayer` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE_BAYER` |  |
+| `cam_s9_tele_exp` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE_EXP` |  |
+| `cam_s9_tele_probe` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE_PROBE` |  |
+| `cam_s9_tele_tp` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE_TP` |  |
+| `cam_s9_tele_turn` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE_TURN` |  |
 | `camtl` | U | `inject.c` | `CONFIG_CAMTL` |  |
 | `cc_fade` | U | `inject_sb.c` | `CONFIG_CC_FADE` |  |
 | `cohtest` | K | `hakios.exynos_m3.c` | `CONFIG_COHTEST` |  |

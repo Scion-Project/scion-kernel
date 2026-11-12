@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 716 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 732 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -61,7 +61,7 @@ CONFIG_HAKIOS_TORCH=y
 # the Galaxy S9's flashlight: the S2MPB02's flash block on PERIC1's HSI2C, lit by a pin (torch=N there, the same steps ... [hakios.s2mpb02_torch.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C]
 CONFIG_HAKIOS_S2MPB02_TORCH=y
 
-# the Galaxy S9's front camera, stages 1 to 3 (cam_s9=N): the S5K3H1's supplies on the S2MPB02, its reset and MCLK, ... [hakios.exynos_camera.c, hakios.ak737x.c, hakios.exynos_camera_rear.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C]
+# the Galaxy S9's front camera, stages 1 to 3 (cam_s9=N): the S5K3H1's supplies on the S2MPB02, its reset and MCLK, ... [hakios.exynos_camera.c, hakios.ak737x.c, hakios.exynos_camera_rear.c, hakios.exynos_camera_star2.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C]
 # CONFIG_HAKIOS_EXYNOS_CAMERA is not set
 
 # the Galaxy S9's iris camera (iris_s9=N): the S5K5F1 infrared sensor on CSIS3, its supplies (the S2MPS18's LDO39-41 ... [hakios.exynos_iris.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C, CONFIG_HAKIOS_EXYNOS_ACPM]
@@ -1410,7 +1410,7 @@ CONFIG_MODEM_AGAIN=y
 # no auto-exposure: the frames as cam_s9_exp and cam_s9_gain have them (default 1: on)
 # CONFIG_CAM_S9_AE is not set
 
-# read by hakios.exynos_camera.c (kernel)
+# read by hakios.exynos_camera.c, hakios.exynos_camera_star2.c (kernel)
 # CONFIG_CAM_S9_AE_FRAMES is not set
 
 # with 7: the stream from the boot to the run's end, wanted or not (the old behaviour, for debugging)
@@ -1431,13 +1431,13 @@ CONFIG_MODEM_AGAIN=y
 # the first analog gain of step 5's frame, 0x20 being 1x (default 0x40, at most 0x200)
 # CONFIG_CAM_S9_GAIN is not set
 
-# read by hakios.exynos_camera.c (kernel)
+# read by hakios.exynos_camera.c, hakios.exynos_camera_star2.c (kernel)
 # CONFIG_CAM_S9_IPCLK is not set
 
 # CLKCMU_ISPPRE_BUS (CSIS1's and its WDMA's clock) = SHARED1_DIV4, 466 MHz, / (D + 1); default
 # CONFIG_CAM_S9_ISPDIV is not set
 
-# read by hakios.exynos_camera.c (kernel)
+# read by hakios.exynos_camera.c, hakios.exynos_camera_star2.c (kernel)
 # CONFIG_CAM_S9_MMU_PROBE is not set
 
 # the WDMA's PACK12 layout rather than RAW10 as it comes (the BSP sets PACK12 for its V4L2 SBGGR10 buffers)
@@ -1492,7 +1492,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_SCCAM_W is not set
 
 #
-# Haptics and torch (5)
+# Haptics and torch (6)
 #
 
 # the vibration motor (5 is what the README's phone line uses) [needs fw-haptic/ from the phone]
@@ -1503,6 +1503,9 @@ CONFIG_MODEM_AGAIN=y
 
 # a look, reading only: the bus as found, the chip's ID, the flash block's registers, the two pins
 # CONFIG_TORCH is not set
+
+# the torch current code iOS's full level maps to (1-9, default 3: the S9's 60 mA)
+# CONFIG_TORCH_CODE_MAX is not set
 
 # read by hakios.s2mpb02_torch.c, hakios.torch.c (kernel)
 # CONFIG_TORCH_MAX_S is not set
@@ -1672,8 +1675,23 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (155)
+# User space (170)
 #
+
+# Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
+# CONFIG_CAM_S9_REAR_PROBE is not set
+
+# Star2's primary rear camera (S5K2L3 on CSIS0) as the iOS back camera, 2016x1512 at 30; the front camera stays usable ... [requires CONFIG_CAM_S9=7]
+# CONFIG_CAM_S9_REAR is not set
+
+# Star2's telephoto camera (S5K3M3): 1 powers it up at boot as its stream would, reads its ID and revision, powers it ...
+# CONFIG_CAM_S9_TELE_PROBE is not set
+
+# Star2's telephoto camera (S5K3M3 on CSIS2) as the iOS back telephoto, 2016x1512 at 30; hidden again if it fails [requires CONFIG_CAM_S9=7]
+# CONFIG_CAM_S9_TELE is not set
+
+# test the Galaxy S9 rear camera flash at boot for this many milliseconds (1 to 500)
+# CONFIG_TORCH_FLASH_MS is not set
 
 # arguments only the kernel reads built into the kernel (HAKIOS_BUILTIN_ARGS); given on the line, an argument goes ...
 # CONFIG_BUILTIN_ARGS is not set
@@ -1806,6 +1824,36 @@ CONFIG_MODEM_AGAIN=y
 
 # with 2: 0 still (the default), 1 video, 5 centring
 # CONFIG_CAM_REAR_OIS_MODE is not set
+
+# no focus (the lens left where its spring holds it)
+# CONFIG_CAM_S9_AF is not set
+
+# the rear frames' Bayer order (default 1, GRBG: fimc-is-cis-2l3.c's GR_BG with 0x0101 = 3)
+# CONFIG_CAM_S9_REAR_BAYER is not set
+
+# the rear stream's first exposure in lines of 815 ns (default 30000, about 24 ms; its gain starts at 4x)
+# CONFIG_CAM_S9_REAR_EXP is not set
+
+# the ISPPRE bus clock for the rear stream, 466 MHz / (D + 1); default 0, Android's rate
+# CONFIG_CAM_S9_REAR_ISPDIV is not set
+
+# the rear sensor's MIPI CCS test pattern (0x0600: 1 solid colour, 2 colour bars) for its picture
+# CONFIG_CAM_S9_REAR_TP is not set
+
+# the rear frames turned half round for user space (default 0: the sensor flips itself)
+# CONFIG_CAM_S9_REAR_TURN is not set
+
+# the tele frames' Bayer order (default 1, GRBG: fimc-is-cis-3m3.c's GR_BG)
+# CONFIG_CAM_S9_TELE_BAYER is not set
+
+# the tele stream's first exposure in lines of 20.3 us (default 1000; its gain starts at 4x)
+# CONFIG_CAM_S9_TELE_EXP is not set
+
+# the tele sensor's MIPI CCS test pattern (0x0600: 1 solid colour, 2 colour bars) for its picture
+# CONFIG_CAM_S9_TELE_TP is not set
+
+# the tele frames turned half round for user space (default 0, as Apollo streams it: no flip)
+# CONFIG_CAM_S9_TELE_TURN is not set
 
 # read by inject.c (user space)
 # CONFIG_CAMTL is not set
