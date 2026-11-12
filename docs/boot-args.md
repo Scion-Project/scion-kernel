@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **612 arguments**: 521 read by the kernel, 23 by the loader, 85 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **634 arguments**: 543 read by the kernel, 23 by the loader, 85 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -313,7 +313,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `speaker_probe` | K | `hakios.speaker.c` | `CONFIG_SPEAKER_PROBE` |  |
 | `virtio_sound` | K | `hakios.virtio_sound.c` | `CONFIG_VIRTIO_SOUND` |  |
 
-## Cameras (34)
+## Cameras (39)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -332,6 +332,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_s9_ae_frames` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_AE_FRAMES` |  |
 | `cam_s9_always` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_ALWAYS` |  |
 | `cam_s9_bayer` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_BAYER` |  |
+| `cam_s9_cached` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_CACHED` |  |
 | `cam_s9_dgain` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_DGAIN` |  |
 | `cam_s9_exp` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_EXP` |  |
 | `cam_s9_gain` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_GAIN` |  |
@@ -341,6 +342,10 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_s9_pack12` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_PACK12` |  |
 | `cam_s9_probe` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_PROBE` |  |
 | `cam_s9_sat` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SAT` |  |
+| `cam_s9_selfread` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD` |  |
+| `cam_s9_selfread_focus` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD_FOCUS` |  |
+| `cam_s9_selfread_x` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD_X` |  |
+| `cam_s9_selfread_y` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD_Y` |  |
 | `cam_s9_stride` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_STRIDE` |  |
 | `cam_sensor` | K | `hakios.camera.c` | `CONFIG_CAM_SENSOR` |  |
 | `cam_settle` | K | `hakios.camera.c` | `CONFIG_CAM_SETTLE` |  |
@@ -571,7 +576,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (129)
+## User space (146)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -597,6 +602,23 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ca_prof` | U | `HakiosMetalCA.m` | `CONFIG_CA_PROF` |  |
 | `ca_vbl` | U | `inject.c` | `CONFIG_CA_VBL` |  |
 | `caenv` | U | `inject.c`, `inject_sb.c` | `CONFIG_CAENV` |  |
+| `cam_af` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF` |  |
+| `cam_af_coarse` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_COARSE` |  |
+| `cam_af_drop` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_DROP` |  |
+| `cam_af_fine` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_FINE` |  |
+| `cam_af_hi` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_HI` |  |
+| `cam_af_lo` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_LO` |  |
+| `cam_af_pos` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_POS` |  |
+| `cam_af_settle` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_SETTLE` |  |
+| `cam_af_walk` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_WALK` |  |
+| `cam_af_win` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_WIN` |  |
+| `cam_af_x` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_X` |  |
+| `cam_af_y` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_Y` |  |
+| `cam_rear` | K | `hakios.exynos_camera_rear.c` | `CONFIG_CAM_REAR` |  |
+| `cam_rear_addr` | K | `hakios.exynos_camera_rear.c` | `CONFIG_CAM_REAR_ADDR` |  |
+| `cam_rear_ap` | K | `hakios.exynos_camera_rear.c` | `CONFIG_CAM_REAR_AP` |  |
+| `cam_rear_ois` | K | `hakios.exynos_camera_rear.c` | `CONFIG_CAM_REAR_OIS` |  |
+| `cam_rear_ois_mode` | K | `hakios.exynos_camera_rear.c` | `CONFIG_CAM_REAR_OIS_MODE` |  |
 | `camtl` | U | `inject.c` | `CONFIG_CAMTL` |  |
 | `cc_fade` | U | `inject_sb.c` | `CONFIG_CC_FADE` |  |
 | `cohtest` | K | `hakios.exynos_m3.c` | `CONFIG_COHTEST` |  |

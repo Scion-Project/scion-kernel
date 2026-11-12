@@ -52,7 +52,11 @@ enum {
 	                                 * 3 BGRA); bytes follow */
 	HAKIOS_CAMERA_SENSOR = 3,      /* another sensor: a which (as in the frames' header), b its mode (~0: the usual one);
 	                                 * the frames stop, everything goes down, and the next read starts the other one */
-	HAKIOS_CAMERA_FOCUS = 4,       /* the lens to a: 0 (the furthest) to 1023, from the next frame or so */
+	HAKIOS_CAMERA_FOCUS = 4,       /* the lens to a: 0 (the furthest) to 1023, from the next frame or so. The Galaxy S9's
+	                                 * front camera (boot-arg cam_af=4, hakios.ak737x.c) also takes a =
+	                                 * HAKIOS_CAMERA_NO_FOCUS: the kernel's own search by contrast, at once, on a window:
+	                                 * with b not 0 its middle is c across and d down, in 1024ths of the picture as read
+	                                 * (a tap); with b 0, the picture's middle */
 };
 
 struct hakios_camera_command {
