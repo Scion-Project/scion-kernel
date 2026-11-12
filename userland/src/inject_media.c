@@ -42,6 +42,7 @@
 #include <mach-o/dyld.h>
 #include <mach/mach_time.h>
 #include <objc/message.h>
+#include <objc/objc-sync.h>
 #include <objc/runtime.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -368,9 +369,9 @@ audio_source_stop(id self, SEL selector, id *error)
 	/*
 	 * The kernel camera's audio output can remain live after a successful stop, even when the
 	 * microphone started normally. BWIrisStagingNode then waits for audio after video has ended,
-	 * and BWGraph stop traps after ten seconds waiting for its movie sink. Once the original
-	 * stop has shut down capture, close any outputs it left open. Outputs already ended are
-	 * left alone; failed stops retain their original error and state.
+	 * and BWGraph stop traps after ten seconds waiting for its movie sink. Close any outputs
+	 * the original stop left open. Share the output lock with emit_sample_buffer so an in-flight
+	 * audio sample finishes before its end marker, and later samples cannot reach a freed consumer.
 	 */
 	if (result && camera) {
 		id outputs = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("outputs"));
@@ -378,9 +379,13 @@ audio_source_stop(id self, SEL selector, id *error)
 		Ivar ended = class_getInstanceVariable(objc_getClass("BWNodeOutput"), "_receivedEOD");
 		for (unsigned long i = 0; ended != NULL && i < count; i++) {
 			id output = ((id (*)(id, SEL, unsigned long))objc_msgSend)(outputs, sel_registerName("objectAtIndex:"), i);
-			if (output != nil && *(unsigned char *)((char *)output + ivar_getOffset(ended)) == 0) {
+			if (output == nil) continue;
+			objc_sync_enter(output);
+			if (*(unsigned char *)((char *)output + ivar_getOffset(ended)) == 0) {
 				((void (*)(id, SEL))objc_msgSend)(output, sel_registerName("markEndOfLiveOutput"));
+				say("hakios: camera: audio output %lu closed after stop\n", i);
 			}
+			objc_sync_exit(output);
 		}
 	}
 	return result;
@@ -495,6 +500,21 @@ emit_sample_buffer(id self, SEL selector, CMSampleBufferRef sample_buffer)
 			said = true;
 			say("hakios: mediaserverd: a node's output was given no sample buffer (the silent audio source's): not passed on\n");
 		}
+		return;
+	}
+	if (camera && is_node(((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("node")), "BWAudioSourceNode")) {
+		/* The audio timer may still emit after stop has ended this output. */
+		Ivar ended = class_getInstanceVariable(objc_getClass("BWNodeOutput"), "_receivedEOD");
+		objc_sync_enter(self);
+		if (ended == NULL || *(unsigned char *)((char *)self + ivar_getOffset(ended)) == 0) {
+			((void (*)(id, SEL, CMSampleBufferRef))original_emit_sample_buffer)(self, selector, sample_buffer);
+		} else {
+			static bool said_late;
+			if (!__atomic_exchange_n(&said_late, true, __ATOMIC_RELAXED)) {
+				say("hakios: camera: audio sample after end of output dropped\n");
+			}
+		}
+		objc_sync_exit(self);
 		return;
 	}
 	time_photo_encoder(self, sample_buffer);
