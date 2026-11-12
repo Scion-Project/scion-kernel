@@ -1434,6 +1434,8 @@ worker(void *context)
 	while (s->running && failures < 5) {
 		ssize_t n;
 
+		tele = tele_state(); /* refresh after a telephoto probe or stream failure */
+
 		if (buffer == NULL) {
 			n = read(device, &head, sizeof(head));
 			if (n != (ssize_t)sizeof(head)) {
