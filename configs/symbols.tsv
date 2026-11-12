@@ -53,6 +53,7 @@ APFS_PAR	arg	apfs_par	Storage and APFS	k	apfs_vfsops.c	at most N threads on one 
 APFS_ROOT_C	arg	apfs_root_c	Storage and APFS	k	apfs_vfsops.c	
 APFS_ROOT_V	arg	apfs_root_v	Storage and APFS	k	apfs_vfsops.c	
 APFS_ROUND	arg	apfs_round	Storage and APFS	k	apfs_vfsops.c	
+APFS_SHARED_SPACE	arg	apfs_shared_space	CPU, memory and boot	k	(patch)	
 APFS_SKIP	arg	apfs_skip	Storage and APFS	k	hakios.apfs_check.c	directories not to go into, as paths inside the volume, comma separated
 APFS_SPARSE	arg	apfs_sparse	Storage and APFS	k	hakios.sparse.c	
 APFS_STORE_LEN	arg	apfs_store_len	Storage and APFS	k	hakios.apfs_check.c	how many bytes of payload (default 40000)
