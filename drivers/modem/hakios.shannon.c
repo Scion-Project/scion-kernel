@@ -83,7 +83,33 @@
  *      then registers on its network as it does under Android. Logged: the phone state, every registration state,
  *      the serving network's operator code, the signal words. Two minutes after it has registered (or 90 s after
  *      the request if it has not) low power mode is asked for again, confirmed, and the CP put back in reset.
- *      No call, message, data session, network or band selection is ever asked for.
+ *      No call, message, network or band selection is ever asked for; a data session only in stage 6.
+ *
+ *   6  that, and, ONLY with an access point name given by the builder (cp_apn=NAME: the operator's published default
+ *      one; none is built in), a data context: 5 s after the phone has registered the context is defined (Samsung
+ *      IPC's packet group 0x0D, number 1, "set": enable, context 1, type 2, the name) and, if the CP's general
+ *      response accepts that, activated (number 4, "set": enable, context 1, no user name or password). These are
+ *      the layouts of the public numbering for older Samsung modems, NOT confirmed for this one: the CP's answer
+ *      to each is the result of the stage, and a refusal ends it (no second form is tried). Logged: each result
+ *      word, the packet group's notifications (the call status' bytes; of the address configuration its length,
+ *      context and the first octet only), and how many packets the CP put on the data channels (their length and
+ *      IP version; nothing is sent on them and none is passed on). 20 s later the context is deactivated, then
+ *      low power mode, then reset, as in stage 5.
+ *
+ *   7  that, and three packets of our own through the context, made and checked in this file (no interface is
+ *      made, nothing of the system's is carried): with the context's IPv4 address and first DNS server taken from
+ *      the CP's address configuration (kept in memory for the run, never logged beyond one octet), one ICMP echo
+ *      request (to cp_ping=A.B.C.D, or to that DNS server) and one DNS question for the A record of example.com go
+ *      up, and whatever comes down is checked (lengths, header and data checksums, addresses, the echo's and the
+ *      question's identifiers) and counted: answered, not ours, IPv6, malformed. The rings, as Samsung's kernel
+ *      uses them on this phone (read as facts): a data packet has no frame header, its channel (10: context 1) is
+ *      in the upper half of its ring slot's size word; up through the "data" ring; down either through the "high
+ *      priority" ring or, for the "data" ring, into buffers of the 11 MB "ZMC" region behind the IPC memory: the
+ *      AP writes each slot's 64-bit data offset (from the IPC memory's start) and moves the ring's read counter
+ *      as its offer, the CP fills a buffer, sets the slot's size word and moves the write counter. Here slot k
+ *      always has the same 4 KB cell k, the offsets are never read back for use, the CP's counter is checked
+ *      against the ring's length and against what was offered, a length over 2048 is a malformed packet, and a
+ *      packet is copied out before it is looked at.
  *
  * NEVER DONE HERE: no partition is written; EFS is not read; no request that sets an identity, a band, a power or
  * a calibration value, no test or factory mode, no PIN; the radio is on only in stage 5. An answer that could carry
@@ -93,7 +119,9 @@
  * kern.hakios.cp.go: 1 the state printed, 2 the CP stopped (reset asserted), 3 the version asked again.
  *
  * THE ARGUMENTS
- *   cp=N         the first N of the Galaxy S9's modem's five stages (1 a look, 2 its image loaded and checked, 3 started, 4 the link, 5 the network); 0 or none: left alone
+ *   cp=N         the first N of the Galaxy S9's modem's six stages (1 a look, 2 its image loaded and checked, 3 started, 4 the link, 5 the network, 6 a data context, 7 three packets through it); 0 or none: left alone
+ *   cp_ping=A.B.C.D  the address stage 7 sends its one echo request to (none: the context's first DNS server)
+ *   cp_apn=NAME  the access point name stage 6 asks the data context for (the operator's published default; none: no stage 6)
  *   cp_nv=1      the phone's own NV data, a file nv_data.bin the image's builder put beside the kernel, is given to the modem (none: zeros, and no stage 4)
  *   cp_vss=0     the image's VSS part (the voice processor's) is not copied
  *   cp_rev=N     the board's revision told to the modem (26, this phone's)
@@ -217,6 +245,7 @@
 #define CH_BOOT                 215
 #define CH_FMT                  235
 #define CH_RFS                  245
+#define DATA_CID                1               /* the one data context this driver ever defines */
 
 /* the channels of this phone's device tree that get a ring, in its order (the ones for other regions left out) */
 static const struct ring_cfg {
@@ -268,6 +297,20 @@ static struct {
 	bool normal_asked, back_asked;  /* "normal" was asked for; then "low power" again */
 	uint64_t normal_ms, registered_ms, back_ms, sim_ms;
 	uint32_t reg_changes, signals, writes_dropped;
+	/* stage 6 */
+	char apn[64];                   /* cp_apn: letters, digits, '.' and '-' only */
+	uint32_t data_step;             /* 0 not begun, 1 defined (asked), 2 activation asked, 3 active (watched), 4 deactivation asked, 5 over */
+	uint64_t data_ms;
+	int data_result;                /* the general response's result word to the request waited for, -1 none yet */
+	uint8_t data_seq;               /* that request's sequence */
+	uint32_t data_notes, data_configs, data_packets, data_bytes;
+	/* stage 7: the context's addresses are here for the run only and are never logged */
+	uint8_t ip4[4], dns4[4], ping4[4];
+	bool have4, ping_given;
+	uint16_t zc_alloc, zc_pre;      /* the zero-copy ring: the next slot to offer, the next to take: ours, never read back */
+	uint16_t dns_port, dns_id;
+	uint64_t ping_sent_ms, ping_ms, dns_sent_ms, dns_ms;
+	uint32_t data_up, data_up_bytes, data_bad, data_v6, data_other, dns_rcode, dns_answers;
 	uint64_t init_end_ms, phone_start_ms;
 	uint64_t lpm_sent_ms;           /* when "low power mode" was asked */
 	int phone_state;                /* the CP's last "phone state" notification: 1 low power, 2 normal; -1 none yet */
@@ -888,6 +931,8 @@ boot_ask(uint32_t question, uint32_t expected)
 }
 
 /* the table of rings the running CP reads when it is told PIF_INIT_DONE */
+static void zc_offer(void);
+
 static void
 write_rings(void)
 {
@@ -938,6 +983,8 @@ write_rings(void)
 		}
 	}
 	__builtin_arm_dsb(0xf);
+	cp.zc_alloc = cp.zc_pre = 0;
+	zc_offer();                     /* (stage 7 only) */
 	say("cp: the ring table written: %u channels, the table ends at %u of 65536, the buffers at %u of %u\n",
 	    (uint32_t)NRINGS, desc, buffers, CP_IPC_BYTES);
 }
@@ -947,7 +994,7 @@ write_rings(void)
 static bool fmt_send(uint8_t group, uint8_t index, uint8_t type, const uint8_t *data, uint16_t n);
 
 static bool
-ring_send(uint32_t i, const uint8_t *frame, uint32_t n, bool tell)
+ring_send(uint32_t i, const uint8_t *frame, uint32_t n, bool tell, uint32_t tag)
 {
 	struct ring *r = &cp.ul[i];
 	uint16_t wp = ipc_rd16(r->wp), rp = ipc_rd16(r->rp);
@@ -957,7 +1004,7 @@ ring_send(uint32_t i, const uint8_t *frame, uint32_t n, bool tell)
 		return false;
 	}
 	memcpy(cp.ipc + r->buffers + (uint32_t)wp * r->size, frame, n);
-	ipc_wr32(r->size_v + 4u * wp, n);
+	ipc_wr32(r->size_v + 4u * wp, n | tag);         /* (a data ring: the packet's channel in the upper half) */
 	__builtin_arm_dsb(0xf);
 	ipc_wr16(r->wp, (uint16_t)((wp + 1) % r->len));
 	__builtin_arm_dsb(0xf);
@@ -971,7 +1018,7 @@ ring_send(uint32_t i, const uint8_t *frame, uint32_t n, bool tell)
 static bool
 fmt_send(uint8_t group, uint8_t index, uint8_t type, const uint8_t *data, uint16_t n)
 {
-	uint8_t frame[64];
+	uint8_t frame[160];
 	uint16_t len = (uint16_t)(7 + n);
 
 	if (!cp.link || n > sizeof(frame) - 11) {       /* (cp.link is set before INIT_END is sent) */
@@ -980,7 +1027,7 @@ fmt_send(uint8_t group, uint8_t index, uint8_t type, const uint8_t *data, uint16
 	frame[0] = 0xf8;
 	frame[1] = CH_FMT;
 	frame[2] = (uint8_t)(4 + len);
-	frame[3] = 0;
+	frame[3] = (uint8_t)((4u + len) >> 8);
 	frame[4] = (uint8_t)len;
 	frame[5] = (uint8_t)(len >> 8);
 	frame[6] = ++cp.mseq;
@@ -995,7 +1042,7 @@ fmt_send(uint8_t group, uint8_t index, uint8_t type, const uint8_t *data, uint16
 	    type, cp.mseq, n);
 	/* while the CP has not taken INIT_END the frame only waits in the ring: the "data" message would replace
 	 * INIT_END in the one message word (the watch loop tells the CP once it has) */
-	return ring_send(1, frame, 4u + len, cp.link_acked);
+	return ring_send(1, frame, 4u + len, cp.link_acked, 0);
 }
 
 /* the phone state asked for: 1 low power (bytes 01 00), 2 normal (02 02): Samsung IPC's power group 0x01, number
@@ -1076,6 +1123,38 @@ fmt_received(const uint8_t *m, uint32_t n)
 		/* the general response: which request it answers and a 16-bit result */
 		say("cp:   a general response to group %#x number %#x type %#x: result %#x\n", m[7], m[8], m[9],
 		    (uint32_t)(m[10] | m[11] << 8));
+		if (m[7] == 0x0d && cp.data_step != 0 && cp.data_result < 0 && m[3] == cp.data_seq) {
+			cp.data_result = m[10] | m[11] << 8;
+		}
+	} else if (group == 0x0d && index == 0x10 && n >= 7 + 2) {
+		/* the data call's status: context, state, then a cause: state words, no identity */
+		cp.data_notes++;
+		say("cp:   DATA CALL STATUS: context %u, state %u, then %02x %02x %02x (of %u)\n", m[7], m[8], n > 9 ? m[9] : 0,
+		    n > 10 ? m[10] : 0, n > 11 ? m[11] : 0, n - 7);
+	} else if (group == 0x0d && index == 0x09 && n >= 7 + 4) {
+		/* the context's address configuration: its length, context, flag byte and one octet; the addresses are not
+		 * logged */
+		cp.data_configs++;
+		uint32_t set = 0;
+
+		for (uint32_t k = 0; k < 5 && n >= 7 + 3 + 4 * (k + 1); k++) {
+			set |= (m[10 + 4 * k] | m[11 + 4 * k] | m[12 + 4 * k] | m[13 + 4 * k]) != 0 ? 1u << k : 0;
+		}
+		say("cp:   DATA ADDRESS CONFIGURATION: %u bytes, context %u, flags %#x, the first address' first octet %u (the "
+		    "rest is not logged); of the five 4-byte fields after the flags these are set: %#x\n", n - 7, m[7], m[8],
+		    m[10], set);
+		if (m[7] == DATA_CID && cp.data_step != 0 && n >= 7 + 3 + 8) {
+			/* the address and the first DNS server, for stage 7: used only if both look like host addresses */
+			memcpy(cp.ip4, m + 10, 4);
+			memcpy(cp.dns4, m + 14, 4);
+			cp.have4 = cp.ip4[0] != 0 && cp.ip4[0] != 127 && cp.ip4[0] < 224 && cp.dns4[0] != 0 &&
+			    cp.dns4[0] != 127 && cp.dns4[0] < 224;
+			if (!cp.ping_given) {
+				memcpy(cp.ping4, cp.dns4, 4);
+			}
+		}
+	} else if (group == 0x0d) {
+		cp.data_notes++;
 	} else if (group == 0x01 && index == 0x07 && n >= 7 + 1) {
 		/* the phone state: 1 low power (the radio off), 2 normal */
 		cp.phone_state = m[7];
@@ -1205,6 +1284,260 @@ rfs_received(const uint8_t *m, uint32_t n)
 	}
 }
 
+/* ---- the data rings (stage 7) ---- */
+
+#define RING_HIPRIO             7u              /* ring_cfgs' "data, high priority": ordinary buffers both ways */
+#define RING_DATA               8u              /* ring_cfgs' "data": up ordinary buffers, down the zero-copy slots */
+#define CH_PDP0                 10u             /* context 1's channel */
+#define ZMB_OFFSET              CP_IPC_BYTES    /* the "ZMC" region is right behind the IPC memory */
+#define ZMB_BYTES               0x00b00000u
+#define ZMB_CELL                4096u
+#define ZMB_HEADROOM            64u
+#define DATA_MAX                2048u
+#define PING_ID                 0x5339u
+
+/* where slot k's packet goes, counted from the IPC memory's start */
+static inline uint32_t
+zc_offset(uint32_t slot)
+{
+	return ZMB_OFFSET + slot * ZMB_CELL + ZMB_HEADROOM;
+}
+
+/* every free slot of the zero-copy ring offered to the CP */
+static void
+zc_offer(void)
+{
+	struct ring *r = &cp.dl[RING_DATA];
+	uint32_t n = 0;
+
+	if (cp.stage < 7 || r->len < 2 || r->size != 8 || (uint32_t)r->len * ZMB_CELL > ZMB_BYTES || cp.zc_alloc >= r->len ||
+	    cp.zc_pre >= r->len) {
+		return;
+	}
+	while ((uint16_t)((cp.zc_alloc + 1u) % r->len) != cp.zc_pre) {
+		uint64_t offset = zc_offset(cp.zc_alloc);
+
+		memcpy(cp.ipc + r->buffers + (uint32_t)cp.zc_alloc * 8u, &offset, 8);
+		cp.zc_alloc = (uint16_t)((cp.zc_alloc + 1u) % r->len);
+		n++;
+	}
+	if (n != 0) {
+		__builtin_arm_dsb(0xf);
+		ipc_wr16(r->rp, cp.zc_alloc);
+		__builtin_arm_dsb(0xf);
+	}
+}
+
+/* the Internet checksum over n bytes, begun with sum */
+static uint16_t
+ip_sum(const uint8_t *p, uint32_t n, uint32_t sum)
+{
+	for (uint32_t i = 0; i + 1 < n; i += 2) {
+		sum += (uint32_t)p[i] << 8 | p[i + 1];
+	}
+	if (n & 1) {
+		sum += (uint32_t)p[n - 1] << 8;
+	}
+	while (sum >> 16) {
+		sum = (sum & 0xffff) + (sum >> 16);
+	}
+	return (uint16_t)~sum;
+}
+
+/* a packet from the CP (a copy, n >= 1 bytes of it): checked, counted, never passed on; the answers to our two */
+static void
+data_received(uint8_t ch, const uint8_t *p, uint32_t n)
+{
+	uint32_t ihl, total, version = p[0] >> 4;
+
+	cp.data_packets++;
+	cp.data_bytes += n;
+	if (cp.data_packets <= 4) {
+		say("cp: from the CP on data channel %u: a packet of %u bytes, IP version %u, protocol %u (addresses not logged)\n",
+		    ch, n, version, version == 4 && n >= 20 ? p[9] : version == 6 && n >= 40 ? p[6] : 0);
+	}
+	if (version == 6 && n >= 40) {
+		cp.data_v6++;
+		return;
+	}
+	ihl = (p[0] & 0xfu) * 4u;
+	if (version != 4 || n < 20 || ihl < 20 || ihl > n) {
+		cp.data_bad++;
+		return;
+	}
+	total = (uint32_t)p[2] << 8 | p[3];
+	if (total < ihl || total > n || ip_sum(p, ihl, 0) != 0) {
+		cp.data_bad++;
+		return;
+	}
+	if (!cp.have4 || memcmp(p + 16, cp.ip4, 4) != 0 || (p[6] & 0x3f) != 0 || p[7] != 0) {
+		cp.data_other++;                /* not to our address, or a fragment */
+		return;
+	}
+	if (p[9] == 1 && total >= ihl + 8) {
+		const uint8_t *c = p + ihl;
+
+		if (ip_sum(c, total - ihl, 0) != 0) {
+			cp.data_bad++;
+		} else if (c[0] == 0 && c[1] == 0 && memcmp(p + 12, cp.ping4, 4) == 0 && c[4] == (PING_ID >> 8) &&
+		    c[5] == (PING_ID & 0xff) && c[6] == 0 && c[7] == 1 && cp.ping_sent_ms != 0 && cp.ping_ms == 0) {
+			cp.ping_ms = MAX(now_ms() - cp.ping_sent_ms, 1);
+			say("cp: STAGE 7: THE ECHO REQUEST WAS ANSWERED after %llu ms (a reply of %u bytes, its checksums right)\n",
+			    cp.ping_ms, total);
+		} else {
+			cp.data_other++;
+		}
+	} else if (p[9] == 17 && total >= ihl + 8 + 12) {
+		const uint8_t *u = p + ihl;
+		uint32_t ulen = (uint32_t)u[4] << 8 | u[5];
+		uint32_t pseudo = ((uint32_t)p[12] << 8 | p[13]) + ((uint32_t)p[14] << 8 | p[15]) + ((uint32_t)p[16] << 8 | p[17]) +
+		    ((uint32_t)p[18] << 8 | p[19]) + 17u + ulen;
+
+		if (ulen < 8 + 12 || ulen > total - ihl || ((u[6] | u[7]) != 0 && ip_sum(u, ulen, pseudo) != 0)) {
+			cp.data_bad++;
+		} else if (u[0] == 0 && u[1] == 53 && ((uint32_t)u[2] << 8 | u[3]) == cp.dns_port && memcmp(p + 12, cp.dns4, 4) == 0 &&
+		    ((uint32_t)u[8] << 8 | u[9]) == cp.dns_id && (u[10] & 0x80) != 0 && cp.dns_sent_ms != 0 && cp.dns_ms == 0) {
+			cp.dns_ms = MAX(now_ms() - cp.dns_sent_ms, 1);
+			cp.dns_rcode = u[11] & 0xfu;
+			cp.dns_answers = (uint32_t)u[14] << 8 | u[15];
+			say("cp: STAGE 7: THE DNS QUESTION WAS ANSWERED after %llu ms: response code %u, %u answer records (%u bytes, "
+			    "its checksums right)\n", cp.dns_ms, cp.dns_rcode, cp.dns_answers, total);
+		} else {
+			cp.data_other++;
+		}
+	} else {
+		cp.data_other++;
+	}
+}
+
+/* what the CP put into the zero-copy slots */
+static void
+zc_receive(void)
+{
+	struct ring *r = &cp.dl[RING_DATA];
+	uint16_t fill;
+	uint32_t budget = 64;
+
+	if (cp.stage < 7 || r->len < 2 || r->size != 8 || cp.zc_pre >= r->len) {
+		return;
+	}
+	fill = ipc_rd16(r->wp);
+	if (fill >= r->len) {
+		cp.data_bad++;                  /* a counter of the CP's outside the ring */
+		return;
+	}
+	while (cp.zc_pre != fill && budget-- != 0) {
+		static uint8_t packet[DATA_MAX];
+		uint32_t word, n;
+		uint64_t offset = 0;
+
+		if (cp.zc_pre == cp.zc_alloc) {
+			cp.data_bad++;          /* a slot filled that was never offered */
+			break;
+		}
+		word = ipc_rd32(r->size_v + 4u * cp.zc_pre);
+		n = word & 0xffff;
+		memcpy(&offset, cp.ipc + r->buffers + (uint32_t)cp.zc_pre * 8u, 8);
+		if (offset != zc_offset(cp.zc_pre) || n == 0 || n > DATA_MAX) {
+			cp.data_bad++;          /* the slot's offset is not the one given, or no packet's length */
+		} else {
+			memcpy(packet, cp.ipc + zc_offset(cp.zc_pre), n);
+			data_received((uint8_t)(word >> 16), packet, n);
+			bzero(packet, n);
+		}
+		cp.zc_pre = (uint16_t)((cp.zc_pre + 1u) % r->len);
+	}
+	zc_offer();
+}
+
+/* one IPv4 packet of ours up through the data ring: the header made here, from the context's address */
+static bool
+data_send(uint8_t protocol, const uint8_t *to, const uint8_t *payload, uint32_t n)
+{
+	uint8_t packet[128];
+	uint16_t sum;
+
+	if (!cp.have4 || cp.data_step != 3 || n > sizeof(packet) - 20) {
+		return false;
+	}
+	bzero(packet, 20);
+	packet[0] = 0x45;
+	packet[2] = (uint8_t)((20 + n) >> 8);
+	packet[3] = (uint8_t)(20 + n);
+	packet[4] = (uint8_t)(cp.dns_id >> 8);
+	packet[5] = (uint8_t)(cp.dns_id + protocol);
+	packet[6] = 0x40;               /* not to be fragmented */
+	packet[8] = 64;
+	packet[9] = protocol;
+	memcpy(packet + 12, cp.ip4, 4);
+	memcpy(packet + 16, to, 4);
+	sum = ip_sum(packet, 20, 0);
+	packet[10] = (uint8_t)(sum >> 8);
+	packet[11] = (uint8_t)sum;
+	memcpy(packet + 20, payload, n);
+	if (!ring_send(RING_DATA, packet, 20 + n, true, (CH_PDP0 + DATA_CID - 1u) << 16)) {
+		return false;
+	}
+	cp.data_up++;
+	cp.data_up_bytes += 20 + n;
+	return true;
+}
+
+static void
+send_ping(void)
+{
+	uint8_t c[8 + 32];
+	uint16_t sum;
+
+	bzero(c, sizeof(c));
+	c[0] = 8;                       /* echo request */
+	c[4] = (uint8_t)(PING_ID >> 8);
+	c[5] = (uint8_t)PING_ID;
+	c[7] = 1;
+	for (uint32_t i = 0; i < 32; i++) {
+		c[8 + i] = (uint8_t)i;
+	}
+	sum = ip_sum(c, sizeof(c), 0);
+	c[2] = (uint8_t)(sum >> 8);
+	c[3] = (uint8_t)sum;
+	cp.ping_sent_ms = now_ms();
+	say("cp: STAGE 7: one echo request of %u bytes sent up (%s): %s\n", 20 + (uint32_t)sizeof(c), cp.ping_given ?
+	    "to the builder's cp_ping address" : "to the context's first DNS server", data_send(1, cp.ping4, c, sizeof(c)) ?
+	    "in the ring" : "NOT SENT");
+}
+
+static void
+send_dns(void)
+{
+	static const uint8_t question[] = { 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0, 0, 1, 0, 1 };
+	uint8_t u[8 + 12 + sizeof(question)];
+	uint32_t pseudo, ulen = sizeof(u);
+	uint16_t sum;
+
+	bzero(u, sizeof(u));
+	u[0] = (uint8_t)(cp.dns_port >> 8);
+	u[1] = (uint8_t)cp.dns_port;
+	u[3] = 53;
+	u[4] = (uint8_t)(ulen >> 8);
+	u[5] = (uint8_t)ulen;
+	u[8] = (uint8_t)(cp.dns_id >> 8);
+	u[9] = (uint8_t)cp.dns_id;
+	u[10] = 0x01;                   /* recursion wanted */
+	u[13] = 1;                      /* one question */
+	memcpy(u + 20, question, sizeof(question));
+	pseudo = ((uint32_t)cp.ip4[0] << 8 | cp.ip4[1]) + ((uint32_t)cp.ip4[2] << 8 | cp.ip4[3]) + ((uint32_t)cp.dns4[0] << 8 |
+	    cp.dns4[1]) + ((uint32_t)cp.dns4[2] << 8 | cp.dns4[3]) + 17u + ulen;
+	sum = ip_sum(u, ulen, pseudo);
+	if (sum == 0) {
+		sum = 0xffff;
+	}
+	u[6] = (uint8_t)(sum >> 8);
+	u[7] = (uint8_t)sum;
+	cp.dns_sent_ms = now_ms();
+	say("cp: STAGE 7: one DNS question of %u bytes (the A record of example.com) sent up to the context's first DNS "
+	    "server: %s\n", 20 + ulen, data_send(17, cp.dns4, u, ulen) ? "in the ring" : "NOT SENT");
+}
+
 static void
 rings_receive(void)
 {
@@ -1212,6 +1545,10 @@ rings_receive(void)
 		struct ring *r = &cp.dl[i];
 		uint16_t wp, rp;
 
+		if (i == RING_DATA) {
+			zc_receive();
+			continue;
+		}
 		if (r->size < 64) {
 			continue;       /* the data ring of addresses: nothing can arrive, no buffers were given */
 		}
@@ -1219,11 +1556,26 @@ rings_receive(void)
 		rp = ipc_rd16(r->rp);
 		while (rp != wp && wp < r->len && rp < r->len) {
 			static uint8_t frame[4096];
-			uint32_t n = ipc_rd32(r->size_v + 4u * rp) & 0xffff;
+			uint32_t word = ipc_rd32(r->size_v + 4u * rp);
+			uint32_t n = word & 0xffff;
 			uint32_t hdr;
 
 			if (n > r->size) {
 				n = r->size;
+			}
+			if (i == RING_HIPRIO) {
+				/* a data ring: the packet itself, no frame header; its channel is in the size word's upper half */
+				memcpy(frame, cp.ipc + r->buffers + (uint32_t)rp * r->size, n);
+				rp = (uint16_t)((rp + 1) % r->len);
+				ipc_wr16(r->rp, rp);
+				cp.frames[i]++;
+				if (n == 0) {
+					cp.data_bad++;
+				} else {
+					data_received((uint8_t)(word >> 16), frame, n);
+				}
+				bzero(frame, n);
+				continue;
 			}
 			if (cp.more[i] != 0) {
 				/* the rest of a frame longer than one buffer (a file request with data): counted, not copied,
@@ -1477,6 +1829,116 @@ start(void)
 	return true;
 }
 
+/* ---- stage 6: the data context ---- */
+
+
+/* one step of the data stage, called while the phone is registered: NULL while it goes on, else why it is over */
+static const char *
+data_stage(void)
+{
+	uint64_t now = now_ms();
+	uint8_t d[127];
+
+	bzero(d, sizeof(d));
+	switch (cp.data_step) {
+	case 0:
+		if (now - cp.registered_ms < 5000) {
+			return NULL;
+		}
+		/* the context defined: enable, the context's number, type 2, the access point's name in 124 bytes */
+		d[0] = 1;
+		d[1] = DATA_CID;
+		d[2] = 2;
+		strlcpy((char *)d + 3, cp.apn, 124);
+		say("cp: STAGE 6: defining data context %u with the builder's access point name (%u characters)\n", DATA_CID,
+		    (uint32_t)strlen(cp.apn));
+		cp.data_result = -1;
+		if (!fmt_send(0x0d, 0x01, 0x03, d, 127)) {
+			return "the data context's definition could not be sent";
+		}
+		cp.data_seq = cp.mseq;
+		cp.data_step = 1;
+		cp.data_ms = now;
+		return NULL;
+	case 1:
+		if (cp.data_result < 0) {
+			return now - cp.data_ms > 10000 ? "no answer to the data context's definition in 10 s" : NULL;
+		}
+		if (cp.data_result != 0x8000) {
+			say("cp: STAGE 6: THE CP REFUSED THE DEFINITION (result %#x): nothing else is tried\n", cp.data_result);
+			return "the CP refused the data context's definition";
+		}
+		/* accepted: the context activated: enable, the context's number, no user name, no password */
+		d[0] = 1;
+		d[1] = DATA_CID;
+		say("cp: STAGE 6: the definition is accepted; asking for the context's activation\n");
+		cp.data_result = -1;
+		if (!fmt_send(0x0d, 0x04, 0x03, d, 101)) {
+			return "the activation could not be sent";
+		}
+		cp.data_seq = cp.mseq;
+		cp.data_step = 2;
+		cp.data_ms = now;
+		return NULL;
+	case 2:
+		if (cp.data_result < 0) {
+			return now - cp.data_ms > 30000 ? "no answer to the activation in 30 s" : NULL;
+		}
+		if (cp.data_result != 0x8000) {
+			say("cp: STAGE 6: THE CP REFUSED THE ACTIVATION (result %#x): nothing else is tried\n", cp.data_result);
+			return "the CP refused the activation";
+		}
+		say("cp: STAGE 6: THE ACTIVATION IS ACCEPTED %llu ms after it was asked; watching it\n", now - cp.data_ms);
+		cp.data_step = 3;
+		cp.data_ms = now;
+		return NULL;
+	case 3:
+		if (cp.stage >= 7 && cp.have4) {
+			/* stage 7: our two packets, 2 and 3 s after the activation; done 5 s after it at the earliest */
+			if (cp.ping_sent_ms == 0 && now - cp.data_ms >= 2000) {
+				send_ping();
+			}
+			if (cp.dns_sent_ms == 0 && now - cp.data_ms >= 3000) {
+				send_dns();
+			}
+			if (now - cp.data_ms < 5000 || ((cp.ping_ms == 0 || cp.dns_ms == 0) && now - cp.data_ms < 12000)) {
+				return NULL;
+			}
+		} else if (now - cp.data_ms < (cp.stage >= 7 ? 6000 : 20000)) {
+			return NULL;
+		}
+		if (cp.stage >= 7 && !cp.have4) {
+			say("cp: STAGE 7: no IPv4 address and DNS server were read from the CP's address configuration: no packet "
+			    "is sent\n");
+		}
+		d[1] = DATA_CID;
+		say("cp: STAGE 6: %llu s with the context (%u status notes, %u address configurations, %u packets of %u bytes "
+		    "from the CP): asking for its deactivation\n", (now - cp.data_ms) / 1000, cp.data_notes, cp.data_configs,
+		    cp.data_packets, cp.data_bytes);
+		cp.data_result = -1;
+		if (!fmt_send(0x0d, 0x04, 0x03, d, 101)) {
+			return "the deactivation could not be sent";
+		}
+		cp.data_seq = cp.mseq;
+		cp.data_step = 4;
+		cp.data_ms = now;
+		return NULL;
+	case 4:
+		if (cp.data_result < 0 && now - cp.data_ms < 5000) {
+			return NULL;
+		}
+		if (cp.data_result < 0) {
+			say("cp: STAGE 6: no answer to the deactivation in 5 s (low power mode ends the context anyway)\n");
+		} else {
+			say("cp: STAGE 6: the deactivation's result %#x\n", cp.data_result);
+		}
+		cp.data_step = 5;
+		return "the data stage is over";
+	default:
+		return "the data stage is over";
+	}
+}
+
 static void
 print_state(void)
 {
@@ -1626,6 +2088,9 @@ cp_thread(__unused void *arg, __unused wait_result_t result)
 			} else if (cp.stop || go == 2) {
 				back = "asked to stop";
 			}
+			if (back == NULL && cp.stage >= 6 && cp.apn[0] != 0 && cp.registered_ms != 0) {
+				back = data_stage();
+			}
 			if (back != NULL) {
 				say("cp: STAGE 5: %s (last registration state %d, %u changes, %u signal reports): asking for LOW POWER MODE\n",
 				    back, cp.reg_state, cp.reg_changes, cp.signals);
@@ -1675,6 +2140,22 @@ cp_thread(__unused void *arg, __unused wait_result_t result)
 		    cp.registered_ms != 0 ? "YES" : "no", cp.reg_state, cp.reg_changes, cp.signals,
 		    cp.back_asked && cp.phone_state == 1 ? "confirmed" : "NOT confirmed", cp.writes_dropped);
 	}
+	if (cp.data_step != 0) {
+		say("cp: STAGE 6 SUMMARY: the data stage got to step %u (1 defined, 2 activation asked, 3 active, 4 deactivation "
+		    "asked, 5 over); %u status notes, %u address configurations, %u packets of %u bytes from the CP on the data "
+		    "channels\n", cp.data_step, cp.data_notes, cp.data_configs, cp.data_packets,
+		    cp.data_bytes);
+	}
+	if (cp.stage >= 7 && cp.data_step != 0) {
+		say("cp: STAGE 7 SUMMARY: up %u packets of %u bytes; down %u packets of %u bytes: echo %s (%llu ms), DNS %s (%llu ms, "
+		    "response code %u, %u answers), not ours %u, IPv6 %u, MALFORMED %u; the zero-copy ring's next slot to offer %u, to "
+		    "take %u\n", cp.data_up, cp.data_up_bytes, cp.data_packets, cp.data_bytes, cp.ping_ms != 0 ? "ANSWERED" :
+		    "not answered", cp.ping_ms, cp.dns_ms != 0 ? "ANSWERED" : "not answered", cp.dns_ms, cp.dns_rcode,
+		    cp.dns_answers, cp.data_other, cp.data_v6, cp.data_bad, cp.zc_alloc, cp.zc_pre);
+	}
+	bzero(cp.ip4, sizeof(cp.ip4));
+	bzero(cp.dns4, sizeof(cp.dns4));
+	cp.have4 = false;
 	print_state();
 	cp_stop(!alive ? "it crashed" : why != NULL ? why : why5 != NULL ? why5 : "the watch is over, or asked to");
 	set_state(alive && why == NULL ? 200 : 104);
@@ -1703,7 +2184,7 @@ hakios_shannon_init(void)
 	if (!PE_parse_boot_argn("cp", &n, sizeof(n)) || n == 0) {
 		return;
 	}
-	cp.stage = n > 5 ? 5 : n;
+	cp.stage = n > 7 ? 7 : n;
 	cp.rev = 26;
 	cp.wait_s = cp.stage >= 4 ? 25 : 20;
 	cp.delay_s = 30;
@@ -1715,6 +2196,45 @@ hakios_shannon_init(void)
 	PE_parse_boot_argn("cp_ds", &cp.ds, sizeof(cp.ds));
 	PE_parse_boot_argn("cp_wait", &cp.wait_s, sizeof(cp.wait_s));
 	PE_parse_boot_argn("cp_delay", &cp.delay_s, sizeof(cp.delay_s));
+	if (PE_parse_boot_argn("cp_apn", cp.apn, sizeof(cp.apn))) {
+		cp.apn[sizeof(cp.apn) - 1] = 0;
+		for (uint32_t i = 0; cp.apn[i] != 0; i++) {
+			char c = cp.apn[i];
+
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-')) {
+				cp.apn[0] = 0;          /* not a name: no stage 6 */
+				break;
+			}
+		}
+	}
+	cp.data_result = -1;
+	{
+		char text[20] = "";
+		uint32_t part = 0, value = 0, digits = 0;
+		bool good = PE_parse_boot_argn("cp_ping", text, sizeof(text));
+
+		/* A.B.C.D, four numbers of at most 255 */
+		text[sizeof(text) - 1] = 0;
+		for (uint32_t i = 0; good; i++) {
+			char c = text[i];
+
+			if (c >= '0' && c <= '9') {
+				value = value * 10 + (uint32_t)(c - '0');
+				good = ++digits <= 3 && value <= 255;
+			} else if (((c == '.' && part < 3) || (c == 0 && part == 3)) && digits != 0) {
+				cp.ping4[part++] = (uint8_t)value;
+				value = digits = 0;
+				if (c == 0) {
+					break;
+				}
+			} else {
+				good = false;
+			}
+		}
+		cp.ping_given = good && part == 4 && cp.ping4[0] != 0 && cp.ping4[0] != 127 && cp.ping4[0] < 224;
+	}
+	cp.dns_id = (uint16_t)(mach_absolute_time() >> 4);
+	cp.dns_port = (uint16_t)(0xc000u | (mach_absolute_time() & 0x3fffu));
 	if (cp.delay_s > 600) {
 		cp.delay_s = 600;
 	}
