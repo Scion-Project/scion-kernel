@@ -340,7 +340,7 @@ video_stabilization_type(id self, SEL selector)
  */
 #define ERROR_NO_SUCH_THING     1852797029      /* 'nope' */
 
-static IMP original_audio_source_start;
+static IMP original_audio_source_start, original_audio_source_stop;
 
 static BOOL
 audio_source_start(id self, SEL selector, id *error)
@@ -359,6 +359,31 @@ audio_source_start(id self, SEL selector, id *error)
 		    "and the camera runs without it\n");
 	}
 	return true;
+}
+
+static BOOL
+audio_source_stop(id self, SEL selector, id *error)
+{
+	BOOL result = ((BOOL (*)(id, SEL, id *))original_audio_source_stop)(self, selector, error);
+	/*
+	 * The kernel camera's audio output can remain live after a successful stop, even when the
+	 * microphone started normally. BWIrisStagingNode then waits for audio after video has ended,
+	 * and BWGraph stop traps after ten seconds waiting for its movie sink. Once the original
+	 * stop has shut down capture, close any outputs it left open. Outputs already ended are
+	 * left alone; failed stops retain their original error and state.
+	 */
+	if (result && camera) {
+		id outputs = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("outputs"));
+		unsigned long count = outputs ? ((unsigned long (*)(id, SEL))objc_msgSend)(outputs, sel_registerName("count")) : 0;
+		Ivar ended = class_getInstanceVariable(objc_getClass("BWNodeOutput"), "_receivedEOD");
+		for (unsigned long i = 0; ended != NULL && i < count; i++) {
+			id output = ((id (*)(id, SEL, unsigned long))objc_msgSend)(outputs, sel_registerName("objectAtIndex:"), i);
+			if (output != nil && *(unsigned char *)((char *)output + ivar_getOffset(ended)) == 0) {
+				((void (*)(id, SEL))objc_msgSend)(output, sel_registerName("markEndOfLiveOutput"));
+			}
+		}
+	}
+	return result;
 }
 
 /*
@@ -569,6 +594,7 @@ static struct replacement {
 	{ "BWFigCaptureDeviceVendor", "sharedCaptureDeviceVendor", 0x1a1ef0d04UL,
 	  (IMP)shared_vendor, &original_shared_vendor, false, false },
 	{ "BWAudioSourceNode", "start:", 0x1a1eefa18UL, (IMP)audio_source_start, &original_audio_source_start, true, false },
+	{ "BWAudioSourceNode", "stop:", 0x1a1f4dc70UL, (IMP)audio_source_stop, &original_audio_source_stop, true, false },
 	{ "FigVideoCaptureConnectionConfiguration", "videoStabilizationMethod", 0x1a1e99ef8UL,
 	  (IMP)video_stabilization_method, NULL, true, false },
 	{ "FigVideoCaptureConnectionConfiguration", "videoStabilizationType", 0x1a20d8f48UL,
