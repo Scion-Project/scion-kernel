@@ -439,6 +439,8 @@ SHUB_LOG	arg	shub_log	Sensors	k	hakios.ssp.c	log the first bytes of every SPI fr
 SHUB_MS	arg	shub_ms	Sensors	k	hakios.ssp.c	sample period in ms (default 20; light, proximity and pressure use 200)
 SHUB_REQ_LEN	arg	shub_req_len	Sensors	k	hakios.ssp.c	
 SHUB_REQ_RPC	arg	shub_req_rpc	Sensors	k	hakios.ssp.c	RPC that carries SSP to the hub
+SHUB_SAY	arg	shub_say	Sensors	k	hakios.ssp.c	with step 6: every n seconds two lines, the accelerometer's and the gyroscope's: the mean over
+SHUB_SELFREAD	arg	shub_selfread	Sensors	k	hakios.ssp.c	with step 6: thirty seconds after the boot, /dev/hakios-sensors opened and read for n seconds
 SHUB_SENSORS	arg	shub_sensors	Sensors	k	hakios.ssp.c	
 SLEEP_CORES	arg	sleep_cores	CPU, memory and boot	k	GenericARMPE.cpp	sleep_cores_after= seconds (default 10) after the screen went off, the cores of the performance
 SLEEP_CORES_AFTER	arg	sleep_cores_after	CPU, memory and boot	k	GenericARMPE.cpp	
