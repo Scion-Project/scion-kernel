@@ -9,8 +9,10 @@
  *
  * Depends on: the Exynos SPI driver (sys/hakios.exynos_spi.h), PMIC access through ACPM (sys/hakios.exynos_acpm.h),
  * the protocol layers in hakios.bcm_shub.h (tested on a host by tools/bcm_shub_test.c) and the hub firmware patch
- * fw/bcm_sensorhub_a1.bin in the small image (devices/starlte/firmware/sensorhub/). Runs only when the SoC base
- * address is the Exynos 9810's (0x10000000).
+ * fw/bcm_sensorhub_a1.bin, which travels with the kernel (devices/starlte/firmware/sensorhub/ says where it comes from):
+ * in the small image's fw/ on the trees with a RAM disk, in the device tree's /scion-firmware node on the ios-27 tree
+ * (tools/ios27/adt-firmware.py puts it there; the fork's bsd/dev/starlte_fw.c answers hakios_image_file() from it).
+ * Runs only when the SoC base address is the Exynos 9810's (0x10000000).
  *
  * Boot args. Nothing is touched without shub=N; the others apply only to the steps that use them.
  *   shub=N   run steps 1..N (N is capped at 6); each step includes the ones before it:
@@ -27,7 +29,9 @@
  *               tree), read the sensors found (SENSOR_SCANNING), the firmware revision and the accelerometer range
  *            6  enable the sensors in shub_sensors and read samples for as long as the phone runs. The USB console's
  *               "sensors" shows the last of each; /dev/hakios-sensors hands them to user space (sys/hakios.sensors.h;
- *               the reader is userland/src/inject.c in backboardd, which turns them into HID events)
+ *               the reader is userland/src/inject.c in backboardd, which turns them into HID events; on the ios-27 tree
+ *               the kernel's own HID services take them (hakios_ssp_tap()) and tools/ios27/sensors/orientation.c in
+ *               backboardd reads the device for the orientation). A line of text written to the device is logged.
  *   shub_sensors=<mask>  sensors step 6 enables, a bitmap of Samsung's sensor numbers (sensor_list.h: 0 accel, 1 gyro,
  *            4 magnetometer, 5 pressure, 7 proximity, 9 light). Default 0x2b3, those six. Only sensors the hub
  *            found are enabled.
@@ -42,6 +46,14 @@
  *   shub_hello=1         wait for MCU_RESP before every exchange, as Samsung's driver does. Default: raise MCU_REQ,
  *            wait 1 ms, then transfer: on the S9 MCU_RESP reads 0 whatever the chip does, and the chip answers
  *            without it.
+ *   shub_say=<n>         with step 6: every n seconds two lines, the accelerometer's and the gyroscope's: the mean over
+ *            those seconds (counts; mm/s2 and thousandths of a degree a second), how many samples came, the longest
+ *            step between two by the hub's own clock, how many steps were late (over two and a half periods), and how
+ *            far the gyroscope says the phone has turned about each axis since the start (its samples summed)
+ *   shub_selfread=<n>    with step 6: thirty seconds after the boot, /dev/hakios-sensors opened and read for n seconds
+ *            from inside the kernel, as a program would (vnode_open, vn_rdwr); says each sensor's samples a second,
+ *            the longest step between two and how many the queue lost. For a kernel whose user space has no reader
+ *            yet. sysctl kern.hakios.sensors_selfread=n reads for n more.
  *   shub_req_rpc=<n>     RPC that carries SSP to the hub. Default 0x20: inferred from the hub's answers in RPC 0x21,
  *            not observed (lhd builds it). shub_req_len=0 sends the SSP bytes without the u16 length before them.
  */
@@ -60,8 +72,11 @@
 #include <sys/hakios.input.h>
 #include <sys/hakios.sensors.h>
 #include <sys/proc.h>
+#include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
+#include <sys/vnode.h>
+#include <sys/fcntl.h>
 #include <miscfs/devfs/devfs.h>
 #include <sys/hakios.exynos_soc.h>
 #include "hakios.bcm_shub.h"
@@ -477,7 +492,12 @@ hello(void)
 {
 	mcu_req(true);
 	if (no_hello) {
-		delay(1000);
+		/*
+		 * 1 ms, asleep, not spinning: this runs for every frame the hub has (about fifty a second with the sensors on),
+		 * on a kernel thread that any user thread would have to wait for; a spin here took a millisecond of a
+		 * processor each time, away from the compositor.
+		 */
+		sleep_ms(1);
 		return true;
 	}
 	for (int count = 0; !mcu_resp(); count++) {
@@ -975,8 +995,8 @@ load_patch(void)
 		}
 	}
 	if (patch == NULL) {
-		say("shub: 4: no fw/%s in the small image (devices/starlte/firmware/sensorhub/, userland/build.sh "
-		    "DEVICE=starlte)\n", PATCH_FILE);
+		say("shub: 4: no fw/%s came with the kernel (devices/starlte/firmware/sensorhub/; the small image's fw/, "
+		    "or the device tree's /scion-firmware on the ios-27 tree)\n", PATCH_FILE);
 		return false;
 	}
 	if (!shub_patch_check(patch, (size_t)size, &info)) {
@@ -1050,11 +1070,98 @@ static struct {
 
 static void post_sample(const struct shub_sample *s);
 
+/*
+ * shub_say: the accelerometer's (0) and the gyroscope's (1) samples since the last line, and since the start. Under
+ * shub_lock. `turn` is the gyroscope's sum of counts x ms by the hub's clock: a rotation's angle in the hub's units.
+ */
+static struct tally {
+	int64_t sum[3];
+	uint32_t n;
+	uint64_t last_hub, longest_ns;  /* the longest step between two samples since the last line */
+	int64_t turn[3];
+	uint64_t all, late;             /* since the start: samples, and steps longer than two and a half periods */
+} tally[2];
+static uint32_t say_s;
+
+static void
+tally_sample(const struct shub_sample *s)
+{
+	struct tally *t = &tally[s->sensor == SSP_GYRO];
+	const uint8_t *d = s->data;
+	int32_t v[3];
+	uint64_t step = t->last_hub != 0 && s->time > t->last_hub ? s->time - t->last_hub : 0;
+
+	if (s->sensor == SSP_GYRO) {
+		v[0] = (int32_t)shub_le32(d);
+		v[1] = (int32_t)shub_le32(d + 4);
+		v[2] = (int32_t)shub_le32(d + 8);
+	} else {
+		v[0] = (int16_t)shub_le16(d);
+		v[1] = (int16_t)shub_le16(d + 2);
+		v[2] = (int16_t)shub_le16(d + 4);
+	}
+	for (int i = 0; i < 3; i++) {
+		t->sum[i] += v[i];
+		if (s->sensor == SSP_GYRO && step != 0 && step < NSEC_PER_SEC) {
+			t->turn[i] += (int64_t)v[i] * (int64_t)(step / 1000) / 1000;
+		}
+	}
+	t->n++;
+	t->all++;
+	if (step > t->longest_ns) {
+		t->longest_ns = step;
+	}
+	if (step > (uint64_t)period_ms * NSEC_PER_MSEC * 5 / 2) {
+		t->late++;
+	}
+	t->last_hub = s->time;
+}
+
+/* One line for shub_say, from the hub's thread. */
+static void
+tally_say(uint32_t seconds)
+{
+	struct tally a, g;
+	int32_t range = ssp.accel_range ? ssp.accel_range : 8;
+	int64_t ac[3] = { 0, 0, 0 }, mm[3], gc[3] = { 0, 0, 0 };
+	int big = 0;
+
+	lck_mtx_lock(&shub_lock);
+	a = tally[0];
+	g = tally[1];
+	for (int k = 0; k < 2; k++) {
+		memset(tally[k].sum, 0, sizeof(tally[k].sum));
+		tally[k].n = 0;
+		tally[k].longest_ns = 0;
+	}
+	lck_mtx_unlock(&shub_lock);
+	for (int i = 0; i < 3; i++) {
+		ac[i] = a.n ? a.sum[i] / (int64_t)a.n : 0;
+		gc[i] = g.n ? g.sum[i] / (int64_t)g.n : 0;
+		mm[i] = ac[i] * 9807 * range / 32768;         /* 32768 counts are `range` g; 1 g = 9807 mm/s2 */
+		if ((ac[i] < 0 ? -ac[i] : ac[i]) > (ac[big] < 0 ? -ac[big] : ac[big])) {
+			big = i;
+		}
+	}
+	say("shub: accelerometer: %u samples in %u s, longest step %llu ms, %llu late of %llu: mean x %lld y %lld z %lld "
+	    "counts = %lld %lld %lld mm/s2 (gravity 9807), most on %c%c\n", a.n, seconds, a.longest_ns / NSEC_PER_MSEC, a.late,
+	    a.all, ac[0], ac[1], ac[2], mm[0], mm[1], mm[2], ac[big] < 0 ? '-' : '+', "xyz"[big]);
+	/* the gyroscope: a count is a thousandth of the chip's 35 mdps step at its 1000 dps range (the hub's own log lines
+	 * give both: "Sensor_Gyro" in steps and rad/s, "SSP Gyro Send" in counts), so 28571 counts are a degree a second */
+	say("shub: gyroscope: %u samples, longest step %llu ms, %llu late of %llu: mean x %lld y %lld z %lld counts = %lld "
+	    "%lld %lld mdps; turned since the start x %lld y %lld z %lld mdeg\n", g.n, g.longest_ns / NSEC_PER_MSEC, g.late,
+	    g.all, gc[0], gc[1], gc[2], gc[0] * 35 / 1000, gc[1] * 35 / 1000, gc[2] * 35 / 1000, g.turn[0] * 35 / 1000000,
+	    g.turn[1] * 35 / 1000000, g.turn[2] * 35 / 1000000);
+}
+
 static void
 on_sample(void *ctx, const struct shub_sample *s)
 {
 	(void)ctx;
 	lck_mtx_lock(&shub_lock);
+	if (s->sensor == SSP_ACCEL || s->sensor == SSP_GYRO) {
+		tally_sample(s);
+	}
 	memcpy(last[s->sensor].data, s->data, s->size);
 	last[s->sensor].size = s->size;
 	last[s->sensor].count++;
@@ -1311,13 +1418,31 @@ convert(const struct shub_sample *s, struct hakios_sensor_sample *o)
 	}
 }
 
+/*
+ * A consumer inside the kernel: `tap` is called on the hub's thread with every sample that is also queued for
+ * /dev/hakios-sensors, readers or not. One consumer; the ios-27 tree's HID services take the accelerometer and the
+ * gyroscope this way (the fork's iokit/Kernel/arm/hid/SweetHIDSensors.cpp, boot-arg shub_hid=N). It must not block.
+ */
+void hakios_ssp_tap(void (*tap)(const struct hakios_sensor_sample *));
+static void (*volatile sample_tap)(const struct hakios_sensor_sample *);
+
+void
+hakios_ssp_tap(void (*tap)(const struct hakios_sensor_sample *))
+{
+	sample_tap = tap;
+}
+
 static void
 post_sample(const struct shub_sample *s)
 {
 	struct hakios_sensor_sample o;
+	void (*tap)(const struct hakios_sensor_sample *) = sample_tap;
 
 	if (!convert(s, &o)) {
 		return;
+	}
+	if (tap != NULL) {
+		tap(&o);
 	}
 	lck_mtx_lock(&shub_lock);
 	if (q_readers > 0) {
@@ -1383,11 +1508,45 @@ sensors_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	return error;
 }
 
+/*
+ * A line of text written to the device goes to the kernel's log with the writer's name: what the reader in user space
+ * has to say (it found the device, which orientation it worked out) is then on the USB console beside the hub's own
+ * lines, on systems whose user space has no other way there. At most 200 characters a write.
+ */
+static int
+sensors_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+{
+	char text[201], name[32] = "?";
+	size_t n = (size_t)uio_resid(uio);
+	int error;
+
+	if (n > sizeof(text) - 1) {
+		n = sizeof(text) - 1;
+	}
+	error = uiomove(text, (int)n, uio);
+	if (error != 0) {
+		return error;
+	}
+	uio_setresid(uio, 0);           /* the rest of a longer write is dropped, not an error */
+	while (n > 0 && (text[n - 1] == '\n' || text[n - 1] == '\r')) {
+		n--;
+	}
+	text[n] = 0;
+	for (size_t i = 0; i < n; i++) {
+		if (text[i] < 0x20 || text[i] > 0x7e) {
+			text[i] = '.';
+		}
+	}
+	proc_selfname(name, (int)sizeof(name));
+	say("sensors: %s[%d] says: %s\n", name, proc_selfpid(), text);
+	return 0;
+}
+
 static const struct cdevsw sensors_cdevsw = {
 	.d_open = sensors_open,
 	.d_close = sensors_close,
 	.d_read = sensors_read,
-	.d_write = eno_rdwrt,
+	.d_write = sensors_write,
 	.d_ioctl = eno_ioctl,
 	.d_stop = eno_stop,
 	.d_reset = eno_reset,
@@ -1410,6 +1569,102 @@ make_device(void)
 	say("shub: /dev/%s made\n", HAKIOS_SENSORS_NAME);
 }
 
+/*
+ * ---- shub_selfread=N: the device read from inside the kernel, as a program would read it ----
+ *
+ * /dev/hakios-sensors opened by its path and read through VFS (vnode_open, vn_rdwr into kernel memory, vnode_close):
+ * the same open(), read() and close() of this file as a process's. For a kernel whose user space has no reader yet,
+ * and to see that the queue hands every sample over at the hub's rate.
+ */
+static int selfread_ask;        /* seconds asked for (the boot-arg's, then the sysctl's) */
+SYSCTL_DECL(_kern_hakios);
+SYSCTL_INT(_kern_hakios, OID_AUTO, sensors_selfread, CTLFLAG_RW | CTLFLAG_KERN | CTLFLAG_LOCKED, &selfread_ask, 0,
+    "set to N in a run with shub_selfread=: /dev/hakios-sensors read for N seconds from inside the kernel (hakios.ssp.c)");
+
+static void
+selfread_run(uint32_t seconds)
+{
+	static const char *const names[] = { "", "accelerometer", "gyroscope", "magnetometer", "barometer", "light",
+		                             "proximity" };
+	struct { uint64_t n, last_hub, longest_ns, last_mach, backwards; struct hakios_sensor_sample last; } per[7];
+	struct hakios_sensor_sample buf[16];
+	vfs_context_t ctx = vfs_context_kernel();
+	uint64_t start = now_ns(), end = start + (uint64_t)seconds * NSEC_PER_SEC, total = 0, reads = 0, ms, most = 0;
+	uint32_t lost0;
+	vnode_t vp = NULLVP;
+	int error;
+
+	memset(per, 0, sizeof(per));
+	error = vnode_open(HAKIOS_SENSORS_DEVICE, FREAD, 0, 0, &vp, ctx);
+	if (error != 0) {
+		say("shub: selfread: %s cannot be opened (%d)\n", HAKIOS_SENSORS_DEVICE, error);
+		return;
+	}
+	lost0 = q_lost;
+	say("shub: selfread: %s opened from inside the kernel; reading for %u s, %zu bytes a sample\n", HAKIOS_SENSORS_DEVICE,
+	    seconds, sizeof(buf[0]));
+	while (now_ns() < end) {
+		int resid = (int)sizeof(buf), got;
+
+		error = vn_rdwr(UIO_READ, vp, (caddr_t)buf, (int)sizeof(buf), 0, UIO_SYSSPACE, 0, vfs_context_ucred(ctx), &resid,
+		    vfs_context_proc(ctx));
+		if (error != 0) {
+			say("shub: selfread: read failed (%d) after %llu samples\n", error, total);
+			break;
+		}
+		got = (int)(sizeof(buf) - (size_t)resid) / (int)sizeof(buf[0]);
+		reads++;
+		if ((uint64_t)got > most) {
+			most = (uint64_t)got;
+		}
+		for (int i = 0; i < got; i++) {
+			const struct hakios_sensor_sample *o = &buf[i];
+			uint32_t t = o->type < 7 ? o->type : 0;
+
+			if (per[t].n != 0 && o->hub_ns > per[t].last_hub && o->hub_ns - per[t].last_hub > per[t].longest_ns) {
+				per[t].longest_ns = o->hub_ns - per[t].last_hub;
+			}
+			per[t].backwards += per[t].n != 0 && (o->hub_ns <= per[t].last_hub || o->time < per[t].last_mach);
+			per[t].last_hub = o->hub_ns;
+			per[t].last_mach = o->time;
+			per[t].last = *o;
+			per[t].n++;
+			total++;
+		}
+	}
+	ms = (now_ns() - start) / NSEC_PER_MSEC;
+	(void)vnode_close(vp, FREAD, ctx);
+	say("shub: selfread: %llu SAMPLES READ THROUGH %s in %llu ms, %llu reads (at most %llu samples in one), %u lost in the "
+	    "queue, %llu of a type the header does not name\n", total, HAKIOS_SENSORS_DEVICE, ms, reads, most, q_lost - lost0,
+	    per[0].n);
+	for (uint32_t t = 1; t < 7; t++) {
+		uint64_t tenths = ms ? per[t].n * 10000 / ms : 0;
+
+		if (per[t].n == 0) {
+			continue;
+		}
+		say("shub: selfread: %-13s %llu samples, %llu.%llu a second, the longest step between two %llu ms by the hub's "
+		    "clock, %llu out of order; the last: %d %d %d %d (scale %d)\n", names[t], per[t].n, tenths / 10, tenths % 10,
+		    per[t].longest_ns / NSEC_PER_MSEC, per[t].backwards, per[t].last.v[0], per[t].last.v[1], per[t].last.v[2],
+		    per[t].last.v[3], per[t].last.scale);
+	}
+}
+
+static void
+selfread_thread(void *arg, __unused wait_result_t result)
+{
+	sleep_ms(30000);                /* the root and /dev are there by then */
+	__atomic_store_n(&selfread_ask, (int)(uintptr_t)arg, __ATOMIC_RELEASE);
+	for (;;) {
+		int n = __atomic_exchange_n(&selfread_ask, 0, __ATOMIC_ACQ_REL);
+
+		if (n > 0) {
+			selfread_run(n > 3600 ? 3600 : (uint32_t)n);
+		}
+		sleep_ms(500);
+	}
+}
+
 static volatile uint64_t console_want_on, console_want_off;
 static volatile bool console_cmd_pending;
 static char console_cmd[64];
@@ -1421,6 +1676,7 @@ run(void)
 	static const struct { uint8_t id; uint32_t ms; } slow[] = { { SSP_LIGHT, 200 }, { SSP_PROXIMITY, 200 },
 		                                                   { SSP_PRESSURE, 200 } };
 	uint32_t frames_at_time = 0;
+	uint64_t said_ns = now_ns();
 
 	for (uint8_t id = 0; id < SSP_SENSORS; id++) {
 		uint32_t ms = period_ms;
@@ -1459,6 +1715,10 @@ run(void)
 			console_do();
 		}
 		pump(100, NULL);
+		if (say_s != 0 && now_ns() - said_ns >= (uint64_t)say_s * NSEC_PER_SEC) {
+			tally_say((uint32_t)((now_ns() - said_ns) / NSEC_PER_SEC));
+			said_ns = now_ns();
+		}
 		if (ssp.frames - frames_at_time >= 3000) {
 			frames_at_time = ssp.frames;
 			send_time();
@@ -1745,8 +2005,15 @@ hakios_ssp_init(void)
 	if (period_ms < 5) {
 		period_ms = 5;
 	}
+	PE_parse_boot_argn("shub_say", &say_s, sizeof(say_s));
 	if (n >= 6) {
+		uint32_t selfread = 0;
+
 		make_device();          /* before the hub thread starts, so backboardd finds it at launch */
+		if (PE_parse_boot_argn("shub_selfread", &selfread, sizeof(selfread)) && selfread != 0 &&
+		    kernel_thread_start(selfread_thread, (void *)(uintptr_t)selfread, &thread) == KERN_SUCCESS) {
+			thread_deallocate(thread);
+		}
 	}
 	if (kernel_thread_start(shub_thread, (void *)(uintptr_t)n, &thread) == KERN_SUCCESS) {
 		thread_deallocate(thread);
