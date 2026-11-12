@@ -87,13 +87,16 @@ Lay the results out like the root (`usr/lib/sbca.dylib`, `usr/lib/s.dylib` as a 
 `usr/local/starbite/lib/libsbgl.dylib`, and for Metal `System/Library/Extensions/StarbiteMetal.bundle/`) in a directory, here `overlay/`.
 
 **This is the weakest part of the page.** These scripts were written and run on the project's Mac over several days; nobody has
-yet run them in order from a fresh clone, and there is no single command for them. Three files the test phones also carry have no
+yet run them in order from a fresh clone, and there is no single command for them. To try, you need Homebrew with `bison`, `flex`,
+`meson` and LLVM 23, Rust through `rustup` (the script installs it under the build directory), about 10 GB and some hours. The
+Metal bundle on the test phones also has two later changes that are only on a draft branch (scion-kernel pull request 281); the
+OpenGL ES compositor needs neither and is the one to start with. Three files the test phones also carry have no
 public build recipe yet: `m.dylib` (a static wallpaper stand-in; its source is `tools/ios27/metal/sbwall.m`), `b.dylib` (the
 brightness slider) and the 24 stock wallpaper layers converted from HEIC to PNG. Without them the phone still starts; expect a
 black wallpaper and a brightness slider that does nothing. Without `overlay/` altogether the root builds and the kernel boots it,
 but nothing is drawn after the boot console.
 
-## 5. The root image (about an hour; the cache step is a clean run, the rest is not)
+## 5. The root image (about an hour; the cache rewrite is a clean run, the rest is not)
 
     hdiutil attach -readonly -nobrowse -imagekey diskimage-class=CRawDiskImage -mountpoint /tmp/sysos inputs/systemos.dmg
     tools/ios27/s9/prepare-root-inputs.sh /tmp/sysos/System/Library/Caches/com.apple.dyld overlay
@@ -110,10 +113,25 @@ installs `overlay/`. The result is a raw HFS+ volume image, 32 GiB sparse with a
 `prepare-root-inputs.sh` makes the build's private directory (`tools/ios27/fullroot/private/`, never in git): instruction tables
 from your cache, the checked patch list, and one script of wardevsa's fetched from his public repository at a fixed commit.
 
-Clean run so far: `prepare-root-inputs.sh` and the whole cache rewrite (`pipeline/cache-pipeline.sh`), unprivileged, with their
-checks. **Not run from a clean clone:** the copy into the image, the root steps and the offline checks (`build-full-root.sh build`
-needs root and 62 GB; the build machine had neither to give). The project's own roots were made with the same scripts in their
-private layout. Expect to have to fix something here, and please report it.
+One library is left exactly as Apple built it: `libcorecrypto` (and its two variants). It checks a hash of its own code when it
+starts, so rewriting it makes its self-test fail; the project's own phones run a rewritten copy with a local stand-in for the
+self-test's helper, and neither the stand-in nor a way to make one is published (`docs/ios27/SPEED.md`, "Not published"). Your root
+does not need it: the kernel emulates the pointer-authentication instructions of that library as they trap, which is how every
+root booted before that local step existed (the home screens of 8 November and the morning of the 9th). What you pay is time in cryptographic
+calls; how much has not been measured on its own.
+
+Clean run: `prepare-root-inputs.sh` (81 seconds) and the whole cache rewrite (`pipeline/cache-pipeline.sh`, 8 minutes), unprivileged,
+with their checks passing (the mapping replay prints `FAILS 0`, no protected data word changed). Given the same inputs as the
+project's own build of 10 November, the clean run's 79 cache files are that build's byte for byte, except inside the three
+`libcorecrypto` images. With your inputs it differs from that build in three stated ways: the CoreImage word of the patch list;
+no private review list (145 places that might be data are left as they are, 105 of them small functions that keep trapping); and
+instruction tables made from the untouched cache, which protect 1,613 more words.
+
+**Not run from a clean clone:** the copy into the image, the root steps and the offline checks, that is everything
+`build-full-root.sh build` does after the cache. It needs an administrator password (`sudo`: the files must keep their owners) and
+62 GB free; the build machine could give this work neither. The project's own roots were made by the same scripts in their
+private layout, and several mistakes of the move to the public layout were found and fixed while writing this page. Expect to find
+another one here, and please report it.
 
 ## 6. Install (about half an hour) and first boot
 

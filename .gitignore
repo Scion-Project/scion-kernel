@@ -159,3 +159,6 @@ __pycache__/
 /tools/ios27/fullroot/out/
 /tools/ios27/fullroot/pipeline/cache/aot/oracle/
 /tools/ios27/fullroot/pipeline/cache/aot/stubdec/
+
+# the loader S-Boot starts, as built (tools/ios27/s9/build-loader.sh)
+/xnuloader/sboot/out/
