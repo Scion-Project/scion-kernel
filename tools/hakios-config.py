@@ -1052,7 +1052,10 @@ def drivers_header(built, sources, device="", soc="", builtin_args=()):
     return ("/* The drivers this kernel is built with: made by tools/hakios-config.py kernel from %s. Not part of the patch. */\n"
             "#define HAKIOS_DRIVERS_LIST     \"%s\"\n#define HAKIOS_DRIVERS_COUNT    %d\n#define HAKIOS_DRIVERS_CONFIG   \"%s\"\n"
             "#define HAKIOS_DEVICE           \"%s\"\n#define HAKIOS_BUILTIN_ARGS     \"%s\"\n" %
-            (sources, " ".join(on), len(on), sources, device, " ".join(builtin_args))) + soc
+            (sources, " ".join(on), len(on), sources, device, " ".join(builtin_args)) +
+            # the device again as a name the preprocessor can test (#ifdef HAKIOS_DEVICE_IS_STAR2LTE): for the files that are
+            # one phone's whole driver (drivers/camera/exynos: the S9's and the S9+'s camera drivers, one of them in a kernel)
+            ("#define HAKIOS_DEVICE_IS_%s 1\n" % re.sub(r"[^A-Za-z0-9]", "_", device).upper() if device else "")) + soc
 
 
 def write_if_changed(path, text):

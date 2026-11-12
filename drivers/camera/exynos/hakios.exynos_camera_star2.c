@@ -288,6 +288,15 @@
 #include "hakios.s5k2l3_setfiles.h"
 #include "hakios.s5k3m3_setfiles.h"
 
+/*
+ * Two camera drivers share the configuration symbol EXYNOS_CAMERA and the kernel's three entry points: hakios.exynos_camera.c (with
+ * hakios.ak737x.c and hakios.exynos_camera_rear.c), run on the Galaxy S9, and this one, Anan Jaser's, run on the
+ * Galaxy S9+. A kernel has one of them: the S9+'s configuration (HAKIOS_DEVICE_IS_STAR2LTE, written into
+ * dev/hakios.drivers.h by tools/hakios-config.py) compiles those files to nothing, every other one compiles this file to
+ * nothing. Bringing the two into one driver waits until both phones can be run (docs/exynos9810-cameras.md).
+ */
+#ifdef HAKIOS_DEVICE_IS_STAR2LTE
+
 /* the S2MPB02's I2C controller is the flashlight's too (hakios.s2mpb02_torch.c): one transfer at a time */
 void hakios_s2mpb02_bus_lock(void);
 void hakios_s2mpb02_bus_unlock(void);
@@ -4451,3 +4460,5 @@ hakios_exynos_camera_init(void)
 		thread_deallocate(thread);
 	}
 }
+
+#endif /* HAKIOS_DEVICE_IS_STAR2LTE */

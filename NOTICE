@@ -118,3 +118,7 @@ Fetched at build time, never committed:
   change or, for new files, as their headers say. drivers/display/panel/hakios.s6e3ha8_star2.h is data (the Galaxy S9+ panel's
   dimming tables) made by tools/extract-star2-panel.py from the tables of Samsung's GPL-2.0 kernel as carried in his Apollo tree;
   no code of that kernel is in it.
+  drivers/camera/exynos/hakios.exynos_camera_star2.c (his Galaxy S9+ camera driver) includes two headers that are not in this
+  repository: tools/mk-star2-setfiles.sh makes them at build time, with his tools/extract-2l3-setfile.py and
+  tools/extract-3m3-setfile.py, from three headers of Samsung's GPL-2.0 kernel (the S5K2L3's and S5K3M3's register tables and
+  RAM patches) fetched from github.com/ananjaser1211/Apollo at a pinned commit.
