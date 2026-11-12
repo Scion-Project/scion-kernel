@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 669 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 693 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -61,7 +61,7 @@ CONFIG_HAKIOS_TORCH=y
 # the Galaxy S9's flashlight: the S2MPB02's flash block on PERIC1's HSI2C, lit by a pin (torch=N there, the same steps ... [hakios.s2mpb02_torch.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C]
 CONFIG_HAKIOS_S2MPB02_TORCH=y
 
-# the Galaxy S9's front camera, stages 1 to 3 (cam_s9=N): the S5K3H1's supplies on the S2MPB02, its reset and MCLK, ... [hakios.exynos_camera.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C]
+# the Galaxy S9's front camera, stages 1 to 3 (cam_s9=N): the S5K3H1's supplies on the S2MPB02, its reset and MCLK, ... [hakios.exynos_camera.c, hakios.ak737x.c, hakios.exynos_camera_rear.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C]
 # CONFIG_HAKIOS_EXYNOS_CAMERA is not set
 
 # the Galaxy S9's iris camera (iris_s9=N): the S5K5F1 infrared sensor on CSIS3, its supplies (the S2MPS18's LDO39-41 ... [hakios.exynos_iris.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C, CONFIG_HAKIOS_EXYNOS_ACPM]
@@ -1344,7 +1344,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_SOC_SMEM is not set
 
 #
-# Cameras (34)
+# Cameras (39)
 #
 
 # the cameras (5 is what the README uses) [needs fw-camera/ from the phone]
@@ -1392,6 +1392,9 @@ CONFIG_MODEM_AGAIN=y
 # camshot's Bayer order: 0 RGGB, 1 GRBG (the default, the sensor's), 2 GBRG, 3 BGGR
 # CONFIG_CAM_S9_BAYER is not set
 
+# read() copies the frame through a second, cached mapping of the ring (see cam_cached below)
+# CONFIG_CAM_S9_CACHED is not set
+
 # the most digital gain the auto-exposure may use, 0x100 being 1x (default 0x400, at most 0x1000)
 # CONFIG_CAM_S9_DGAIN is not set
 
@@ -1418,6 +1421,18 @@ CONFIG_MODEM_AGAIN=y
 
 # camshot's colour saturation in per cent (default 140; 100: none; at most 300)
 # CONFIG_CAM_S9_SAT is not set
+
+# read by hakios.exynos_camera.c (kernel)
+# CONFIG_CAM_S9_SELFREAD is not set
+
+# the reader also writes HAKIOS_CAMERA_FOCUS, as a capture device would (cam_af=4): after its
+# CONFIG_CAM_S9_SELFREAD_FOCUS is not set
+
+# read by hakios.exynos_camera.c (kernel)
+# CONFIG_CAM_S9_SELFREAD_X is not set
+
+# read by hakios.exynos_camera.c (kernel)
+# CONFIG_CAM_S9_SELFREAD_Y is not set
 
 # camshot's bytes a line of the frame (default 3264: the WDMA's RAW10 is a pixel in 16 bits)
 # CONFIG_CAM_S9_STRIDE is not set
@@ -1630,7 +1645,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (128)
+# User space (145)
 #
 
 # arguments only the kernel reads built into the kernel (HAKIOS_BUILTIN_ARGS); given on the line, an argument goes ...
@@ -1701,6 +1716,57 @@ CONFIG_MODEM_AGAIN=y
 
 # CoreAnimation's switches here as in the window server (inject.c), set before QuartzCore reads them
 # CONFIG_CAENV is not set
+
+# read by hakios.ak737x.c (kernel)
+# CONFIG_CAM_AF is not set
+
+# read by hakios.ak737x.c (kernel)
+# CONFIG_CAM_AF_COARSE is not set
+
+# the sharpness, in per cent of what the search found, below which it is made again (60)
+# CONFIG_CAM_AF_DROP is not set
+
+# read by hakios.ak737x.c (kernel)
+# CONFIG_CAM_AF_FINE is not set
+
+# read by hakios.ak737x.c (kernel)
+# CONFIG_CAM_AF_HI is not set
+
+# read by hakios.ak737x.c (kernel)
+# CONFIG_CAM_AF_LO is not set
+
+# stage 2's position, and where the lens is put first at 3 and 4 (0-511; 120 unless said)
+# CONFIG_CAM_AF_POS is not set
+
+# frames let go by after a move before the measurement (1-6, 2 unless said)
+# CONFIG_CAM_AF_SETTLE is not set
+
+# stage 2: the table once, by itself
+# CONFIG_CAM_AF_WALK is not set
+
+# the window's side in pixels (64-512, 384 unless said)
+# CONFIG_CAM_AF_WIN is not set
+
+# read by hakios.ak737x.c (kernel)
+# CONFIG_CAM_AF_X is not set
+
+# read by hakios.ak737x.c (kernel)
+# CONFIG_CAM_AF_Y is not set
+
+# the camera of this run (cam_s9=N's steps, camshot, the stream) is the rear one
+# CONFIG_CAM_REAR is not set
+
+# the sensor's 7-bit I2C address, if not 0x10 (the device tree's)
+# CONFIG_CAM_REAR_ADDR is not set
+
+# the iris: 1 a look, 15 or 24 put at F1.5 or F2.4 at each power-up (0 or none: left where it rests)
+# CONFIG_CAM_REAR_AP is not set
+
+# read by hakios.exynos_camera_rear.c (kernel)
+# CONFIG_CAM_REAR_OIS is not set
+
+# with 2: 0 still (the default), 1 video, 5 centring
+# CONFIG_CAM_REAR_OIS_MODE is not set
 
 # read by inject.c (user space)
 # CONFIG_CAMTL is not set
@@ -2028,7 +2094,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_BOOTARGS is not set
 
 #
-# Sensors (10)
+# Sensors (12)
 #
 
 # read by hakios.ssp.c (kernel)
@@ -2057,6 +2123,12 @@ CONFIG_MODEM_AGAIN=y
 
 # RPC that carries SSP to the hub
 # CONFIG_SHUB_REQ_RPC is not set
+
+# with step 6: every n seconds two lines, the accelerometer's and the gyroscope's: the mean over
+# CONFIG_SHUB_SAY is not set
+
+# with step 6: thirty seconds after the boot, /dev/hakios-sensors opened and read for n seconds
+# CONFIG_SHUB_SELFREAD is not set
 
 # read by hakios.ssp.c (kernel)
 # CONFIG_SHUB_SENSORS is not set
