@@ -42,15 +42,16 @@ A clean run on the build machine took 258 seconds at `JOBS=3`. The result has th
 instruction words as the kernel the test phones run; the only differences are the build's time stamp and the path of the build
 directory in 258 assertion strings, and the addresses that shift because of them.
 
-## 2. Your inputs from the restore image (about 15 minutes; written down, not a clean run)
+## 2. Your inputs from the restore image (about 15 minutes; all but the decryption was a clean run)
 
     tools/ios27/s9/fetch-apple-inputs.sh ~/Downloads/iPhone12,1_27.0.1_24A446_Restore.ipsw inputs
 
 It reads the image's manifest, checks the build, and writes `inputs/os.dmg`, `inputs/systemos.dmg`, `inputs/appos.dmg` and
 `inputs/n104ap.adt` (the iPhone 11's device tree). Two of the three images are Apple Encrypted Archives; the key for each is the
 one Apple's own key service returns for the address in the archive's header, and macOS's `aea` does the decryption. The project's
-phones were made with these same commands run by hand; the script that strings them together has had its manifest reading tested,
-not a whole run (there was no room for a second copy of the image on the build machine).
+phones were made with these same commands run by hand. The script was run in the clean room on a stand-in image holding the real
+manifest and device tree: it reads the manifest, unpacks, and its `n104ap.adt` is the one the test images were made from. The
+decryption of the two archives was not repeated (no room for a second copy of the images on the build machine).
 
 ## 3. The loader and the boot image (under a minute; clean run)
 
