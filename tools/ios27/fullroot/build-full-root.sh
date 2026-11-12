@@ -54,7 +54,7 @@ build)
     trap cleanup EXIT
     if [[ ${REUSE_CACHE:-0} == 1 && -f $W/cache/DONE ]]; then log "reusing $W/cache"; else
         log "cache pipeline (a64e, LSE, corecrypto, PACGA, patches, full AOT rewrite)"
-        sudo -u "$OWNER" -H env PY="$PY" "$PIPE/cache-pipeline.sh" "$SYSMNT/System/Library/Caches/com.apple.dyld" "$W/cache" 2>&1 | tee "$W/cache-pipeline.log"
+        sudo -u "$OWNER" -H env PY="$PY" IOS27_PRIVATE="$IOS27_PRIVATE" "$PIPE/cache-pipeline.sh" "$SYSMNT/System/Library/Caches/com.apple.dyld" "$W/cache" 2>&1 | tee "$W/cache-pipeline.log"
         grep -q CACHE-PIPELINE-DONE "$W/cache-pipeline.log" || { echo "cache pipeline failed" >&2; exit 1; }
         sudo -u "$OWNER" touch "$W/cache/DONE"
     fi
@@ -72,7 +72,7 @@ build)
     n=0; for app in "$ROOTMNT"/private/var/staged_system_apps/*.app; do [[ -d $app && -d $ROOTMNT/Applications/$(basename "$app") ]] || continue; rm -rf "$app"; n=$((n+1)); done
     echo "staged_system_apps: removed $n copies already in /Applications"
     # ---- 4. steps ----
-    for s in "$HERE"/tools/steps.d/[0-9][0-9]-*.sh; do log "step $(basename "$s")"; bash "$s" "$ROOTMNT"; done
+    for s in "$HERE"/steps.d/[0-9][0-9]-*.sh; do log "step $(basename "$s")"; bash "$s" "$ROOTMNT"; done
     sync
     log "offline checks"; chk=0; bash "$HERE/check-root.sh" "$ROOTMNT" | tee "$W/check-root.log" || true; grep -q "ALL HARD CHECKS PASSED" "$W/check-root.log" || chk=1
     df -h "$ROOTMNT"; sync

@@ -17,11 +17,14 @@
 # Idempotent; works on a root mounted with owners (as root: files become root:wheel) or without (-owners off: in-place writes).
 # ios27-fable-hard, 9 Nov 2026. Files: ./files/StarbiteMetal.bundle (MANIFEST.sha256). See README.md.
 set -euo pipefail
-R=$1; H=$(cd "$(dirname "$0")" && pwd); F=$H/files
+R=$1; H=$(cd "$(dirname "$0")" && pwd); F=${METAL_CA_FILES:-$H/files}   # the bundle you built (never in git): tools/ios27/s9/prepare-root-inputs.sh
 ON=${ENABLE_METAL_CA:-1}
 CLIENTS=${METAL_CA_CLIENTS:-backboardd}
 L=$R/private/var/local; B=$R/System/Library/Extensions/StarbiteMetal.bundle
-(cd "$F" && shasum -a 256 -c MANIFEST.sha256 >/dev/null) || { echo "80-metal-ca: files/MANIFEST.sha256 mismatch" >&2; exit 1; }
+if [[ $ON == 1 ]]; then
+    [[ -f $F/MANIFEST.sha256 ]] || { echo "80-metal-ca: no StarbiteMetal.bundle in $F: build it (docs/ios27/METAL.md, docs/ios27/INSTALL-S9.md) or run with ENABLE_METAL_CA=0 (OpenGL ES compositor)" >&2; exit 1; }
+    (cd "$F" && shasum -a 256 -c MANIFEST.sha256 >/dev/null) || { echo "80-metal-ca: $F/MANIFEST.sha256 mismatch" >&2; exit 1; }
+fi
 put() {  # put SRC DST MODE : in place when DST exists (owner, flags and xattrs stay), else a new root:wheel file
     if [[ -f $2 ]]; then cmp -s "$1" "$2" || cat "$1" > "$2"; else mkdir -p "$(dirname "$2")"; cat "$1" > "$2"; chown 0:0 "$2" 2>/dev/null || true; fi
     chmod "$3" "$2"
