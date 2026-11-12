@@ -99,6 +99,18 @@ CA_METALLIB	arg	ca_metallib	User space	u	inject.c
 CA_PROF	arg	ca_prof	User space	u	HakiosMetalCA.m	
 CA_VBL	arg	ca_vbl	User space	u	inject.c	CoreAnimation's frame clock from the display driver's refresh notifications
 CAENV	arg	caenv	User space	u	inject.c,inject_sb.c	CoreAnimation's switches here as in the window server (inject.c), set before QuartzCore reads them
+CAM_AF	arg	cam_af	User space	k	hakios.ak737x.c	
+CAM_AF_COARSE	arg	cam_af_coarse	User space	k	hakios.ak737x.c	
+CAM_AF_DROP	arg	cam_af_drop	User space	k	hakios.ak737x.c	the sharpness, in per cent of what the search found, below which it is made again (60)
+CAM_AF_FINE	arg	cam_af_fine	User space	k	hakios.ak737x.c	
+CAM_AF_HI	arg	cam_af_hi	User space	k	hakios.ak737x.c	
+CAM_AF_LO	arg	cam_af_lo	User space	k	hakios.ak737x.c	
+CAM_AF_POS	arg	cam_af_pos	User space	k	hakios.ak737x.c	stage 2's position, and where the lens is put first at 3 and 4 (0-511; 120 unless said)
+CAM_AF_SETTLE	arg	cam_af_settle	User space	k	hakios.ak737x.c	frames let go by after a move before the measurement (1-6, 2 unless said)
+CAM_AF_WALK	arg	cam_af_walk	User space	k	hakios.ak737x.c	stage 2: the table once, by itself
+CAM_AF_WIN	arg	cam_af_win	User space	k	hakios.ak737x.c	the window's side in pixels (64-512, 384 unless said)
+CAM_AF_X	arg	cam_af_x	User space	k	hakios.ak737x.c	
+CAM_AF_Y	arg	cam_af_y	User space	k	hakios.ak737x.c	
 CAM_AFTER	arg	cam_after	Cameras	k	hakios.camera.c	
 CAM_FAKE	arg	cam_fake	Cameras	k	hakios.camera.c	
 CAM_FAKE_FPS	arg	cam_fake_fps	Cameras	k	hakios.camera.c	
@@ -122,6 +134,10 @@ CAM_S9_MMU_PROBE	arg	cam_s9_mmu_probe	Cameras	k	hakios.exynos_camera.c
 CAM_S9_PACK12	arg	cam_s9_pack12	Cameras	k	hakios.exynos_camera.c	the WDMA's PACK12 layout rather than RAW10 as it comes (the BSP sets PACK12 for its V4L2 SBGGR10 buffers)
 CAM_S9_PROBE	arg	cam_s9_probe	Cameras	k	hakios.exynos_camera.c	the risky reads too, for the log: CMU_ISPPRE's whole Q-channel sweep with each DBG_NFO (+0x4000)
 CAM_S9_SAT	arg	cam_s9_sat	Cameras	k	hakios.exynos_camera.c	camshot's colour saturation in per cent (default 140; 100: none; at most 300)
+CAM_S9_SELFREAD	arg	cam_s9_selfread	Cameras	k	hakios.exynos_camera.c	
+CAM_S9_SELFREAD_FOCUS	arg	cam_s9_selfread_focus	Cameras	k	hakios.exynos_camera.c	the reader also writes HAKIOS_CAMERA_FOCUS, as a capture device would (cam_af=4): after its
+CAM_S9_SELFREAD_X	arg	cam_s9_selfread_x	Cameras	k	hakios.exynos_camera.c	
+CAM_S9_SELFREAD_Y	arg	cam_s9_selfread_y	Cameras	k	hakios.exynos_camera.c	
 CAM_S9_STRIDE	arg	cam_s9_stride	Cameras	k	hakios.exynos_camera.c	camshot's bytes a line of the frame (default 3264: the WDMA's RAW10 is a pixel in 16 bits)
 CAM_SENSOR	arg	cam_sensor	Cameras	k	hakios.camera.c	
 CAM_SETTLE	arg	cam_settle	Cameras	k	hakios.camera.c	

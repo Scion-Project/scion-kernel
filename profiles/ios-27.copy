@@ -4,6 +4,9 @@
 # and the ones the series carried copies of (hakios.dwc3.c, hakios.exynos_tmu.h, hakios.scion_gov.c; docs/xnu-fork.md).
 # hakios.s6e3ha8.c is not here: the fork's branch changes it for this tree (patch 0428), so the branch keeps its copy.
 drivers/soc/exynos/hakios.exynos_hsi2c.c bsd/dev/hakios.exynos_hsi2c.c
+drivers/camera/exynos/hakios.exynos_camera.c bsd/dev/hakios.exynos_camera.c
+drivers/camera/exynos/hakios.ak737x.c bsd/dev/hakios.ak737x.c
+drivers/core/hakios.physmap.cpp iokit/Kernel/hakios.physmap.cpp
 drivers/display/panel/hakios.s6e3ha8_gamma.h bsd/dev/hakios.s6e3ha8_gamma.h
 drivers/usb/hakios.exynos_usb.c bsd/dev/hakios.exynos_usb.c
 drivers/usb/hakios.usb_acm.h bsd/dev/hakios.usb_acm.h
