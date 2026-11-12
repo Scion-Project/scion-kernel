@@ -46,6 +46,7 @@ camera   bsd/dev/hakios.torch.c
 camera/exynos bsd/dev/hakios.s2mpb02_torch.c
 camera/exynos bsd/dev/hakios.exynos_camera.c
 camera/exynos bsd/dev/hakios.ak737x.c
+camera/exynos bsd/dev/hakios.exynos_camera_rear.c
 camera/exynos bsd/dev/hakios.exynos_iris.c
 
 haptic   bsd/dev/hakios.haptic.c

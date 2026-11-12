@@ -6,6 +6,7 @@
 drivers/soc/exynos/hakios.exynos_hsi2c.c bsd/dev/hakios.exynos_hsi2c.c
 drivers/camera/exynos/hakios.exynos_camera.c bsd/dev/hakios.exynos_camera.c
 drivers/camera/exynos/hakios.ak737x.c bsd/dev/hakios.ak737x.c
+drivers/camera/exynos/hakios.exynos_camera_rear.c bsd/dev/hakios.exynos_camera_rear.c
 drivers/core/hakios.physmap.cpp iokit/Kernel/hakios.physmap.cpp
 drivers/display/panel/hakios.s6e3ha8_gamma.h bsd/dev/hakios.s6e3ha8_gamma.h
 drivers/usb/hakios.exynos_usb.c bsd/dev/hakios.exynos_usb.c
