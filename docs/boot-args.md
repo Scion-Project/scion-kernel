@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **612 arguments**: 521 read by the kernel, 23 by the loader, 85 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **624 arguments**: 533 read by the kernel, 23 by the loader, 85 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -571,7 +571,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (129)
+## User space (141)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -597,6 +597,18 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ca_prof` | U | `HakiosMetalCA.m` | `CONFIG_CA_PROF` |  |
 | `ca_vbl` | U | `inject.c` | `CONFIG_CA_VBL` |  |
 | `caenv` | U | `inject.c`, `inject_sb.c` | `CONFIG_CAENV` |  |
+| `cam_af` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF` |  |
+| `cam_af_coarse` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_COARSE` |  |
+| `cam_af_drop` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_DROP` |  |
+| `cam_af_fine` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_FINE` |  |
+| `cam_af_hi` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_HI` |  |
+| `cam_af_lo` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_LO` |  |
+| `cam_af_pos` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_POS` |  |
+| `cam_af_settle` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_SETTLE` |  |
+| `cam_af_walk` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_WALK` |  |
+| `cam_af_win` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_WIN` |  |
+| `cam_af_x` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_X` |  |
+| `cam_af_y` | K | `hakios.ak737x.c` | `CONFIG_CAM_AF_Y` |  |
 | `camtl` | U | `inject.c` | `CONFIG_CAMTL` |  |
 | `cc_fade` | U | `inject_sb.c` | `CONFIG_CC_FADE` |  |
 | `cohtest` | K | `hakios.exynos_m3.c` | `CONFIG_COHTEST` |  |

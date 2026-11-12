@@ -183,6 +183,9 @@
  *                      and the other three CSISs' DMA commons (read, and their interrupt masks for the pattern's while).
  *                      Off by default: on 3 November the sweep's read of CMU_ISPPRE 0x303C took a synchronous external
  *                      abort (isp_status(), the phone's cam-fix.img)
+ *   cam_af=N           the lens (hakios.ak737x.c, which reads the cam_af_* ones): 1 its chip and the EEPROM looked at, 2
+ *                      the lens held at a position, 3 the autofocus, 4 that and HAKIOS_CAMERA_FOCUS. None or 0: no
+ *                      lens, as before (VDDAF is switched with the sensor's supplies either way: Android's order)
  *   cam_s9_mmu_probe=1 the SysMMU (0x16310000) mapped and read: MMU_CTRL/CFG/STATUS/VERSION in the log, and a SysMMU
  *                      found translating stops the DMA. Off by default (its clock or Q-channel may be off, and a read
  *                      then aborts, as the PCIe SysMMU's did): the SysMMU is taken as off, pass-through, and the DMA
@@ -342,6 +345,20 @@ static bool broken;                     /* a write did not read back, or the bus
 static bool powered;                    /* the sensor's power-up was begun */
 static uint32_t gate_found, mux_found, div_found, qch_found;
 static bool clock_mine;
+
+/*
+ * The lens (hakios.ak737x.c: the AK737x on hsi2c@10900000, the EEPROM, the autofocus), only with boot-arg cam_af=N.
+ * Without it cam_af is 0 and none of these is called: the camera is as it was before there was a lens driver.
+ */
+uint32_t hakios_ak737x_setup(uint32_t ipclk_mhz, int (*say)(const char *, ...));
+void hakios_ak737x_up(void);
+void hakios_ak737x_down(void);
+bool hakios_ak737x_frame(vm_offset_t raw, uint32_t stride, uint32_t width, uint32_t height, uint64_t number, bool settled);
+void hakios_ak737x_shot(vm_offset_t raw, uint32_t stride, uint32_t width, uint32_t height);
+uint32_t hakios_ak737x_focus(void);
+void hakios_ak737x_ask(uint32_t a, uint32_t b, uint32_t c, uint32_t d);
+void hakios_ak737x_closed(void);
+static uint32_t cam_af;
 
 static inline uint32_t
 rd(vm_offset_t base, uint32_t off)
@@ -549,6 +566,9 @@ power_down(void)
 {
 	if (!powered) {
 		return;
+	}
+	if (cam_af) {
+		hakios_ak737x_down();   /* the lens parked and its chip asleep while VDDAF is still there */
 	}
 	pin_out(peric1 + GPC1, MCLK_PIN, false);
 	pin_out(peric0 + GPG2, RESET_PIN, false);
@@ -2230,6 +2250,9 @@ sensor_up(void)
 	(void)sensor_get(0x0100, &mode, 1);
 	say("exynos_camera: 2: THE SENSOR ANSWERS: model ID %#06x, revision %#x, frame count %u, mode_select %#x "
 	    "(0: standby)\n", (model[0] << 8) | model[1], revision, frames, mode);
+	if (cam_af) {
+		hakios_ak737x_up();     /* VDDAF came up with the sensor's supplies: the lens's chip and the EEPROM */
+	}
 	return true;
 }
 
@@ -2492,6 +2515,9 @@ shot_run(uint32_t n, bool pattern)
 		shot_failed(why);
 		return;
 	}
+	if (cam_af && !pattern) {
+		hakios_ak737x_shot(frame, cam_stride >= LINE_BYTES ? cam_stride : LINE_BYTES, FRAME_W, FRAME_H);
+	}
 	shot_send(n, pattern);
 }
 
@@ -2540,7 +2566,8 @@ hakios_exynos_camera_shot(uint32_t n, int pattern)
  * 64; a buffer of the header's size learns the size. write(): HAKIOS_CAMERA_EXPOSURE (a lines, b analog gain; the auto-exposure off while
  * they come, back on two seconds after the last, or at once with a = 0), HAKIOS_CAMERA_SENSOR (there is one camera here: taken, and the frames carry the
  * number asked for, so that a capture device that asks for its back camera gets these frames), HAKIOS_CAMERA_FOCUS
- * (no lens motor: taken, nothing done). EIO once the stream has failed.
+ * (taken, nothing done, and the frames say HAKIOS_CAMERA_NO_FOCUS; with cam_af=4 the lens's driver, hakios.ak737x.c,
+ * takes it and the frames carry the lens's position). EIO once the stream has failed.
  */
 #define RAW10_LINE              (FRAME_W * 5 / 4)       /* 2040 */
 #define LINE_NS                 26283                   /* 10608 clocks of 403.6 MHz */
@@ -2643,7 +2670,7 @@ s9dev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	f.frame_lines_max = MODE_LINES;
 	f.margin = MODE_MARGIN;
 	f.sensor = asked_sensor;
-	f.focus = HAKIOS_CAMERA_NO_FOCUS;
+	f.focus = cam_af ? hakios_ak737x_focus() : HAKIOS_CAMERA_NO_FOCUS;
 	stream_readers++;
 	lck_mtx_unlock(&s9cam_lock);
 
@@ -2701,6 +2728,10 @@ s9dev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		}
 		break;
 	case HAKIOS_CAMERA_FOCUS:
+		if (cam_af) {
+			hakios_ak737x_ask(c.a, c.b, c.c, c.d);
+		}
+		break;
 	case HAKIOS_CAMERA_KEEP:
 		break;
 	default:
@@ -2749,7 +2780,7 @@ stream_session(void)
 	uint32_t timeouts = 0;
 	struct meter m = { { 0, 0, 0 }, 0, 0 };
 	static uint64_t numbered;       /* the frames of the earlier streams: the numbers go on */
-	bool ok = false;
+	bool ok = false, ae_near = false, lens_holds;
 	int slot;
 
 	say("exynos_camera: 7: THE STREAM: the front camera up, 1632 x 1224 RAW10 at 30 frames a second into the ring "
@@ -2811,15 +2842,22 @@ stream_session(void)
 			manual = false;         /* the reader that asked has gone quiet: the kernel's own exposure again */
 			say("exynos_camera: 7: no exposure asked for two seconds: the auto-exposure again\n");
 		}
-		if (cam_ae && !manual && frm_now >= next_meter) {
+		/* the lens's turn (cam_af): while it searches, the exposure is left as it is */
+		lens_holds = cam_af && hakios_ak737x_frame(buffer + (uint64_t)slot * SLOT_BYTES, LINE_BYTES, FRAME_W, FRAME_H,
+		    frm_now, ae_near);
+		if (cam_ae && !manual && !lens_holds && frm_now >= next_meter) {
 			meter(buffer + (uint64_t)slot * SLOT_BYTES, &m);
-			next_meter = frm_now + (ae_step(&m, true) ? 6 : 3);
+			ae_near = ae_step(&m, true);
+			next_meter = frm_now + (ae_near ? 6 : 3);
 		}
 		if (__atomic_load_n(&shot_asked, __ATOMIC_ACQUIRE) && (seen >= cam_ae_frames || !cam_ae)) {
 			/* camshot: the newest frame out of the ring (the auto-exposure has had its frames), then the picture */
 			memcpy((void *)(buffer + STILL_OFF), (const void *)(buffer + (uint64_t)slot * SLOT_BYTES), SLOT_BYTES);
 			frame = buffer + STILL_OFF;
 			frame_last = FRAME_H * LINE_BYTES;
+			if (cam_af) {
+				hakios_ak737x_shot(frame, LINE_BYTES, FRAME_W, FRAME_H);
+			}
 			say("exynos_camera: camshot %u: frame %llu of the stream (slot %d; exposure %u lines, gain %#x, digital "
 			    "%#x)\n", ++n_camshots, frm_now, slot, ae_lines, ae_again, ae_dgain);
 			shot_send(shot_n, false);
@@ -2846,6 +2884,9 @@ stream_session(void)
 	say("exynos_camera: 7: the stream ends (%s): %llu frames, %llu seen, %llu lost, %u FIFO errors\n",
 	    ok ? "nobody reads" : "no frames", frm_last, seen, lost, dma_errors);
 down:
+	if (cam_af) {
+		hakios_ak737x_closed();
+	}
 	all_down();
 	lck_mtx_lock(&s9cam_lock);
 	stream_running = false;
@@ -3004,6 +3045,7 @@ hakios_exynos_camera_init(void)
 		ipclk = 400;
 	}
 	pmic_bus.ipclk_mhz = sensor_bus.ipclk_mhz = ipclk;
+	cam_af = hakios_ak737x_setup(ipclk, say);
 	PE_parse_boot_argn("cam_s9_exp", &cam_exp, sizeof(cam_exp));
 	PE_parse_boot_argn("cam_s9_gain", &cam_gain, sizeof(cam_gain));
 	if (cam_gain < 0x20 || cam_gain > 0x200) {
