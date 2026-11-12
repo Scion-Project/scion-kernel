@@ -342,10 +342,12 @@ video_stabilization_type(id self, SEL selector)
 #define ERROR_NO_SUCH_THING     1852797029      /* 'nope' */
 
 static IMP original_audio_source_start, original_audio_source_stop;
+static char audio_source_stopped;
 
 static BOOL
 audio_source_start(id self, SEL selector, id *error)
 {
+	if (camera) objc_setAssociatedObject(self, &audio_source_stopped, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	BOOL started = ((BOOL (*)(id, SEL, id *))original_audio_source_start)(self, selector, error);
 	id made = error != NULL ? *error : NULL;
 	static bool said;
@@ -374,6 +376,7 @@ audio_source_stop(id self, SEL selector, id *error)
 	 * audio sample finishes before its end marker, and later samples cannot reach a freed consumer.
 	 */
 	if (result && camera) {
+		objc_setAssociatedObject(self, &audio_source_stopped, (id)kCFBooleanTrue, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		id outputs = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("outputs"));
 		unsigned long count = outputs ? ((unsigned long (*)(id, SEL))objc_msgSend)(outputs, sel_registerName("count")) : 0;
 		Ivar ended = class_getInstanceVariable(objc_getClass("BWNodeOutput"), "_receivedEOD");
@@ -521,6 +524,53 @@ emit_sample_buffer(id self, SEL selector, CMSampleBufferRef sample_buffer)
 	((void (*)(id, SEL, CMSampleBufferRef))original_emit_sample_buffer)(self, selector, sample_buffer);
 }
 
+/* makeOutputsLiveIfNeeded can leave a format notification queued past the source's stop. */
+static IMP original_make_format_live;
+
+static void
+make_format_live(id self, SEL selector)
+{
+	id node = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("node"));
+	if (camera && is_node(node, "BWAudioSourceNode")) {
+		objc_sync_enter(self);
+		if (objc_getAssociatedObject(node, &audio_source_stopped) == nil) {
+			((void (*)(id, SEL))original_make_format_live)(self, selector);
+		} else {
+			static bool said;
+			if (!__atomic_exchange_n(&said, true, __ATOMIC_RELAXED)) {
+				say("hakios: camera: audio format notification after stop dropped\n");
+			}
+		}
+		objc_sync_exit(self);
+		return;
+	}
+	((void (*)(id, SEL))original_make_format_live)(self, selector);
+}
+
+/* The native stop's queued marker may arrive after audio_source_stop closed the output. */
+static IMP original_mark_end;
+
+static void
+mark_end(id self, SEL selector)
+{
+	id node = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("node"));
+	if (camera && is_node(node, "BWAudioSourceNode")) {
+		Ivar ended = class_getInstanceVariable(objc_getClass("BWNodeOutput"), "_receivedEOD");
+		objc_sync_enter(self);
+		if (ended == NULL || *(unsigned char *)((char *)self + ivar_getOffset(ended)) == 0) {
+			((void (*)(id, SEL))original_mark_end)(self, selector);
+		} else {
+			static bool said;
+			if (!__atomic_exchange_n(&said, true, __ATOMIC_RELAXED)) {
+				say("hakios: camera: duplicate audio end marker dropped\n");
+			}
+		}
+		objc_sync_exit(self);
+		return;
+	}
+	((void (*)(id, SEL))original_mark_end)(self, selector);
+}
+
 /*
  * The photograph's encoder. Camera.app asks for HEIC -- HEVC inside a HEIF file, which CMPhoto makes
  * through VideoToolbox -- and VideoToolbox here has no HEVC encoder but the iPhone's hardware ones
@@ -622,6 +672,10 @@ static struct replacement {
 	{ "FigCaptureStillImageSettings", "qualityPrioritization", 0x1a1f533dcUL,
 	  (IMP)quality_prioritization, &original_quality_prioritization, true, false },
 	{ "BWGNRNode", "renderSampleBuffer:forInput:", 0x1a1ec83b8UL, (IMP)gnr_render, NULL, true, false },
+	{ "BWNodeOutput", "markEndOfLiveOutput", 0x1a1f1b6ccUL,
+	  (IMP)mark_end, &original_mark_end, true, false },
+	{ "BWNodeOutput", "makeConfiguredFormatLive", 0x1a1ef402cUL,
+	  (IMP)make_format_live, &original_make_format_live, true, false },
 	{ "BWNodeOutput", "emitSampleBuffer:", 0x1a1ea37e0UL, (IMP)emit_sample_buffer, &original_emit_sample_buffer, true, false },
 };
 
