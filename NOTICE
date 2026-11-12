@@ -118,3 +118,5 @@ Fetched at build time, never committed:
   change or, for new files, as their headers say. drivers/display/panel/hakios.s6e3ha8_star2.h is data (the Galaxy S9+ panel's
   dimming tables) made by tools/extract-star2-panel.py from the tables of Samsung's GPL-2.0 kernel as carried in his Apollo tree;
   no code of that kernel is in it.
+- Nils (github.com/dwaris): his commits to this repository, from 12 November 2026 (drivers/audio/abox/hakios.exynos_abox.c,
+  drivers/audio/codec/hakios.max98512.c), under the licence of the files they change.

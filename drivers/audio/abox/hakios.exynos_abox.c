@@ -360,7 +360,7 @@ static bool area_kept;                  /* RDMA0 did not say it stopped: the mem
 static const struct hakios_abox_amp *volatile amp_hook;
 static const struct hakios_abox_amp *amp_running;      /* the one started, which is the one stopped */
 static unsigned amp_failures;           /* starts that failed this run (amps_start) */
-static bool amp_given_up, amp_none_said;
+static bool amp_given_up, amp_none_said, amp_waited;
 
 void
 hakios_abox_set_amp(const struct hakios_abox_amp *amp)
@@ -377,6 +377,18 @@ amps_start(void)
 
 	if (amp_running != NULL || amp_given_up) {
 		return;
+	}
+	if ((amp == NULL || amp->start == NULL) && !amp_waited) {
+		/*
+		 * The amplifiers' driver may register a moment after the first sound: it is waited for, up to a second, once in
+		 * a run. Not at every sound: on a machine or a configuration where no such driver ever registers, each start
+		 * would otherwise hold the stream's thread for that second (this is called again at the next sound).
+		 */
+		amp_waited = true;
+		for (int wait = 0; wait < 100 && (amp_hook == NULL || amp_hook->start == NULL); wait++) {
+			delay_for_interval(10, NSEC_PER_MSEC);
+		}
+		amp = amp_hook;
 	}
 	if (amp == NULL || amp->start == NULL) {
 		/* (looked for again the next time: a driver may register later) */

@@ -312,6 +312,9 @@ raw_write(const struct amp *a, uint16_t at, uint8_t value)
 	for (int i = 0; i < TRIES && error != 0; i++) {
 		uint8_t buf[3] = { (uint8_t)(at >> 8), (uint8_t)at, value };
 
+		if (i > 0) {
+			delay_for_interval(1, NSEC_PER_MSEC);
+		}
 		lck_mtx_lock(&bus_lock);
 		error = hakios_hsi2c_message(&bus, a->addr, false, buf, sizeof(buf), true);
 		lck_mtx_unlock(&bus_lock);
@@ -327,6 +330,9 @@ raw_read(const struct amp *a, uint16_t at, uint8_t *value)
 	for (int i = 0; i < TRIES && error != 0; i++) {
 		uint8_t buf[2] = { (uint8_t)(at >> 8), (uint8_t)at };
 
+		if (i > 0) {
+			delay_for_interval(1, NSEC_PER_MSEC);
+		}
 		lck_mtx_lock(&bus_lock);
 		error = hakios_hsi2c_message(&bus, a->addr, false, buf, sizeof(buf), false);
 		if (error == 0) {
@@ -379,6 +385,9 @@ write_checked(const struct amp *a, uint16_t reg, uint8_t value, uint8_t check, b
 	error = raw_write(a, at, value);
 	if (r->check == 0) {
 		return true;                    /* SOFT_RESET: it clears itself; reset() looks whether it took */
+	}
+	if (reg == GLOBAL_SHDN && (value & 1)) {
+		delay_for_interval(2, NSEC_PER_MSEC);
 	}
 	if (error == 0) {
 		error = raw_read(a, at, &back);
