@@ -167,8 +167,10 @@ by the same `fastflash-root.py` from the project's private layout.
 | | |
 |---|---|
 | Works | Boot to the home screen; the display at 60 Hz; touch; the Mali-G72 GPU (OpenGL ES compositor, or CoreAnimation's Metal renderer with Liquid Glass through PanVK); storage (the system on the phone's UFS, read-write); all eight cores; about 3.6 GB of RAM; the panel's brightness (with the brightness library of section 4); the USB console; Settings and the stock apps start (those that want a network have none). |
-| In the kernel only | The front and rear cameras: sensor, lens, focus, stabiliser and iris are driven and frames can be read from `/dev/hakios-camera` (boot-arguments, off by default). No iOS app sees a camera. |
-| Not in this build | **Wi-Fi** (its driver is not in what this page builds; a licence review is pending), **cellular** (no modem; the phone-call services are removed), **audio and Bluetooth** (drivers exist on unmerged branches only), the motion and light sensors, a passcode (there is no Secure Enclave; the key store answers as a phone without a passcode). With no network there is no activation, no iCloud and no App Store; Setup is marked done by the build. Anything not named under "Works" should be taken as not working. |
+| In the kernel only | The front and rear cameras: sensor, lens, focus, stabiliser and iris are driven and frames can be read from `/dev/hakios-camera` (boot-arguments, off by default). No iOS app sees a camera, and **the Camera app does not appear on the home screen yet**. |
+| Works with extra steps | **The accelerometer and the gyroscope, and screen rotation** ([SENSORS.md](SENSORS.md)): the sensor hub's driver and two HID services in the kernel (`shub=6 shub_hid=3`, off by default) and a small library in backboardd (`tools/ios27/sensors/`, added to the root and to `sweetinject=` by hand). Seen on a phone on 12 November: the orientation followed the hand, and Notes turned to landscape and back. **Rotation works with the OpenGL ES compositor; with the Metal compositor a turn freezes the screen** until that is fixed, so do not use the two together. The magnetometer, barometer, light and proximity sensors are read by the kernel only (`/dev/hakios-sensors`); iOS does not get them. |
+| Built in, off, not part of this page's build | **Wi-Fi** ([WIFI.md](WIFI.md)): the kernel has the S9's Wi-Fi since 12 November behind `wifi_pcie=6 brcmfmac=N`, but the radio driver itself (Linux's brcmfmac, fetched and built by `tools/mk-brcmfmac.sh`) is linked in only if you build it before the kernel, and the phone's own firmware files must be put into the root (`tools/ios27/wifi/60-wifi-firmware.sh`). What a phone has done: in one boot on 10 November, on the work's own branch, the radio loaded its firmware, joined a WPA2 network, got an address by DHCP and answered `ping` and an HTTP request from the kernel's console. iOS itself did not use it: Settings showed Wi-Fi off (wifid is not started). The kernel as merged has been built, with and without the driver, and not booted with Wi-Fi on. |
+| Not in this build | **Cellular** (no modem; the phone-call services are removed), **audio and Bluetooth** (for iOS 27 their drivers exist on unmerged branches only; nothing of them is in this kernel), a passcode (there is no Secure Enclave; the key store answers as a phone without a passcode). With no network there is no activation, no iCloud and no App Store; Setup is marked done by the build. Anything not named under "Works" should be taken as not working. |
 
 ## Known problems
 
@@ -177,9 +179,12 @@ by the same `fastflash-root.py` from the project's private layout.
   to TWRP exists because of this.
 - **It is slow in places.** Swiping the home screen with the Metal compositor keeps 43 to 67 % of frames on time; scrolling inside
   an app about 95 %. The first frame after boot takes 18 to 40 seconds.
-- **Icons and Settings symbols** are right only with the rewrite's data-word guard (in this branch) and the CoreImage word in the
-  patch list. That last word was proven on a phone only together with a kernel change that is still a draft
-  (Scion-Project/xnu pull request 12); with the kernel this page builds, some Settings rows may have no symbol.
+- **Icons and Settings symbols** are right only with the rewrite's data-word guard and the CoreImage word in the patch list.
+  That last word was proven on a phone only together with a kernel switch, bit 268435456 of `sweetspeed` (IOSurface tells iOS
+  its largest sizes). The kernel this page builds has the switch since 12 November, off: the command line above
+  (`sweetspeed=140347391`) does not set it, `sweetspeed=408782847` does. With it set, and the root's icon steps, the Clock,
+  Settings and Safari icons were drawn on a phone on 12 November; what the switch alone changes has not been measured.
+  Without it some Settings rows may have no symbol.
 - **The lock screen's clock is not drawn** (an empty box where the digits should be; the date line in the test boot read
   "Wed Dec 31"), and the **wallpaper picker** does not work.
 - `chronod` aborts once about 20 seconds after boot and comes back; four widget extensions (Calculator, World Clock, the code
