@@ -321,6 +321,11 @@ hakios_input_init(void)
 	hakios_s2mpb02_torch_init();
 	hakios_exynos_iris_init();
 	hakios_exynos_tee_init();
+	{
+		/* boot-arg cp=N on the Galaxy S9: its own modem (drivers/modem/hakios.shannon.c) */
+		extern void hakios_shannon_init(void);
+		hakios_shannon_init();
+	}
 	hakios_ufs_init();
 	hakios_net_init();
 	hakios_adreno_init();

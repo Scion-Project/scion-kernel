@@ -88,6 +88,9 @@ Fetched at build time, never committed:
 - the phone's firmware (GPU, Wi-Fi, audio DSP, modem, haptics, cameras): the vendor's, pulled from the
   user's own phone (devices/redwood/pull-firmware.sh).
 - lzfse (Apple, BSD-3-Clause), built by xnuloader/mkidentity.sh when no LZFSE decoder is installed.
+- Android's list of access point names (device/sample etc/apns-full-conf.xml, The Android Open Source Project, Apache-2.0), for an
+  image that carries a table of them: fetched at a pinned commit, its SHA-256 checked, and made into the table by tools/apn-table.py,
+  entries unchanged. Neither the list nor the table is in this repository.
 - Mesa (for GL=1 images; Turnip for TURNIP=1, tools/mk-turnip.sh), Procursus and Sileo packages (tools/mk-jb.sh): their own licenses.
 - Mesa's PanVK (Mesa 25.0.7, MIT), for PANVK_DIR= images: fetched by tools/mk-panvk.sh, patched with tools/mesa/*.patch
   and tools/mesa/panvk/*.patch (Mesa's licence applies to the lines those add) and built into libvulkan_panfrost.dylib.
