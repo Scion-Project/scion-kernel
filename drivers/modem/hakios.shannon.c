@@ -120,6 +120,7 @@
  *
  * THE ARGUMENTS
  *   cp=N         the first N of the Galaxy S9's modem's six stages (1 a look, 2 its image loaded and checked, 3 started, 4 the link, 5 the network, 6 a data context, 7 three packets through it); 0 or none: left alone
+ *   cp_sim=1     in low power mode, once the SIM is ready, one read of its administrative data file (EF_AD, 4 bytes: no identity) is asked, to see if the modem takes the public numbering's SIM read (seen twice on an SM-G960F: refused, result 0x8001)
  *   cp_ping=A.B.C.D  the address stage 7 sends its one echo request to (none: the context's first DNS server)
  *   cp_apn=NAME  the access point name stage 6 asks the data context for (the operator's published default; none: no stage 6)
  *   cp_nv=1      the phone's own NV data, a file nv_data.bin the image's builder put beside the kernel, is given to the modem (none: zeros, and no stage 4)
@@ -297,6 +298,8 @@ static struct {
 	bool normal_asked, back_asked;  /* "normal" was asked for; then "low power" again */
 	uint64_t normal_ms, registered_ms, back_ms, sim_ms;
 	uint32_t reg_changes, signals, writes_dropped;
+	uint32_t sim_probe;             /* cp_sim=1 */
+	bool sim_asked;
 	/* stage 6 */
 	char apn[64];                   /* cp_apn: letters, digits, '.' and '-' only */
 	uint32_t data_step;             /* 0 not begun, 1 defined (asked), 2 activation asked, 3 active (watched), 4 deactivation asked, 5 over */
@@ -1177,6 +1180,13 @@ fmt_received(const uint8_t *m, uint32_t n)
 			cp.sim_status = m[7];
 			cp.sim_ms = now_ms();
 		}
+	} else if (group == 0x05 && index == 0x05 && type == 2 && cp.sim_asked && n >= 7 + 3) {
+		/* the answer to our one SIM file read (EF_AD): the card's two status words, the length, and of the data only
+		 * how many digits the network code has (its fourth byte's low half) */
+		uint32_t got = m[9];
+
+		say("cp: THE SIM FILE READ WAS ANSWERED (EF_AD): status words %02x %02x, %u bytes of data; the network code's "
+		    "digits: %u\n", m[7], m[8], got, got >= 4 && n >= 7 + 3 + 4 ? m[13] & 0xfu : 0);
 	} else if (group == 0x08 && index == 0x05 && n >= 7 + 3) {
 		/* the registration state: technology, domain, state (1 none, 2 home, 3 searching, 4 emergency only, 5 unknown,
 		 * 6 roaming). The cell's numbers after them are not logged. */
@@ -2125,6 +2135,18 @@ cp_thread(__unused void *arg, __unused wait_result_t result)
 			asked = 1;
 			ask_version();
 		}
+		if (cp.sim_probe != 0 && !cp.sim_asked && cp.version_answered && cp.phone_state == 1 && !cp.normal_asked &&
+		    cp.sim_status == 0x83 && now_ms() - cp.sim_ms > 2000) {
+			/* (only once the SIM says "all its files are ready", 0x83: asked 2 s after "ready", 0x82, the read was
+			 * refused with result 0x8001)
+			 * Samsung IPC's SIM group (0x05), number 5 "get": the command (0xB0: read), the file (0x6FAD, low byte
+			 * first), three parameters (offset 0, 0, 4 bytes): the public numbering's layout for older modems */
+			static const uint8_t read_ad[6] = { 0xb0, 0xad, 0x6f, 0x00, 0x00, 0x04 };
+
+			cp.sim_asked = true;
+			say("cp: one SIM file read asked (EF_AD, 4 bytes, no identity in it)\n");
+			(void)fmt_send(0x05, 0x05, 0x02, read_ad, sizeof(read_ad));
+		}
 		if (cp.version_answered && !cp.bands_asked && cp.phone_state == 1) {
 			cp.bands_asked = true;
 			ask_bands();
@@ -2196,6 +2218,7 @@ hakios_shannon_init(void)
 	PE_parse_boot_argn("cp_ds", &cp.ds, sizeof(cp.ds));
 	PE_parse_boot_argn("cp_wait", &cp.wait_s, sizeof(cp.wait_s));
 	PE_parse_boot_argn("cp_delay", &cp.delay_s, sizeof(cp.delay_s));
+	PE_parse_boot_argn("cp_sim", &cp.sim_probe, sizeof(cp.sim_probe));
 	if (PE_parse_boot_argn("cp_apn", cp.apn, sizeof(cp.apn))) {
 		cp.apn[sizeof(cp.apn) - 1] = 0;
 		for (uint32_t i = 0; cp.apn[i] != 0; i++) {

@@ -163,6 +163,7 @@ CP_DS	arg	cp_ds	User space	k	hakios.shannon.c	the dual SIM field told to the mod
 CP_NV	arg	cp_nv	User space	k	hakios.shannon.c	the phone's own NV data, a file nv_data.bin the image's builder put beside the kernel, is given to the modem (none: zeros, and no stage 4)
 CP_PING	arg	cp_ping	User space	k	hakios.shannon.c	the address stage 7 sends its one echo request to (none: the context's first DNS server)
 CP_REV	arg	cp_rev	User space	k	hakios.shannon.c	the board's revision told to the modem (26, this phone's)
+CP_SIM	arg	cp_sim	User space	k	hakios.shannon.c	in low power mode, once the SIM is ready, one read of its administrative data file (EF_AD, 4 bytes: no identity) is asked, to see if the modem takes
 CP_VSS	arg	cp_vss	User space	k	hakios.shannon.c	the image's VSS part (the voice processor's) is not copied
 CP_WAIT	arg	cp_wait	User space	k	hakios.shannon.c	seconds the started modem is watched before it is put back in reset (20; 25 with the link)
 CPUFREQ_GOV	arg	cpufreq_gov	User space	k	hakios.exynos_cpufreq.c	run it (0, or none: the fixed rates of cpufreq_lit= and cpufreq_big=)
