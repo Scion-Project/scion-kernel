@@ -118,6 +118,15 @@
 #include <sys/systm.h>
 #include <sys/hakios.xnu.h>
 
+/*
+ * Two camera drivers share the configuration symbol EXYNOS_CAMERA and the kernel's three entry points: this one (with
+ * hakios.ak737x.c and hakios.exynos_camera_rear.c), run on the Galaxy S9, and hakios.exynos_camera_star2.c, Anan Jaser's, run
+ * on the Galaxy S9+. A kernel has one of them: the S9+'s configuration (HAKIOS_DEVICE_IS_STAR2LTE, written into
+ * dev/hakios.drivers.h by tools/hakios-config.py) compiles this file to nothing, every other one compiles that file to
+ * nothing. Bringing the two into one driver waits until both phones can be run (docs/exynos9810-cameras.md).
+ */
+#ifndef HAKIOS_DEVICE_IS_STAR2LTE
+
 /* what hakios.exynos_camera.c calls (it declares them too) */
 uint32_t hakios_s9rear_setup(uint32_t ipclk_mhz, int (*say)(const char *, ...));
 bool hakios_s9rear_map(vm_offset_t peric0, vm_offset_t peric1, vm_offset_t cmu_top);
@@ -1382,3 +1391,5 @@ hakios_s9rear_poll(uint64_t frame)
 		}
 	}
 }
+
+#endif /* HAKIOS_DEVICE_IS_STAR2LTE */
