@@ -166,9 +166,12 @@ cp	k
 cp_apn	k
 cp_delay	k
 cp_ds	k
+cp_if	k
+cp_if_kb	k
 cp_nv	k
 cp_ping	k
 cp_rev	k
+cp_route	k
 cp_sim	k
 cp_vss	k
 cp_wait	k

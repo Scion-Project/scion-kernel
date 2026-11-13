@@ -17,3 +17,4 @@ drivers/usb/hakios.dwc3.c bsd/dev/hakios.dwc3.c
 drivers/power/exynos/hakios.exynos_tmu.h bsd/sys/hakios.exynos_tmu.h
 drivers/power/exynos/hakios.scion_gov.c bsd/dev/hakios.scion_gov.c
 drivers/modem/hakios.shannon.c bsd/dev/hakios.shannon.c
+drivers/modem/hakios.ext4ro.h bsd/sys/hakios.ext4ro.h
