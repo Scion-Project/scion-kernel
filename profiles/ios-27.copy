@@ -27,3 +27,4 @@ drivers/wifi/hakios.sta.c bsd/dev/hakios.sta.c
 drivers/wifi/hakios.apple80211.c bsd/dev/hakios.apple80211.c
 drivers/wifi/hakios.wlan.cpp iokit/Kernel/hakios.wlan.cpp
 drivers/net/hakios.net.c bsd/dev/hakios.net.c
+drivers/modem/hakios.shannon.c bsd/dev/hakios.shannon.c
