@@ -6,6 +6,7 @@
 # 60-sileo.sh), it waits up to NETTEST_WAIT seconds (default 900) for an IPv4 address on any interface but lo0, then says into
 # /private/var/log/scion-nettest.log: the interfaces and routes, an HTTP GET of a public page done by user space (bash's
 # /dev/tcp, so the name goes through iOS's own resolver), and `apt-get update` (https, the prefix's sources). Nothing listens.
+# Hosts to fetch: /private/var/scion-test/nettest-hosts (default "example.com captive.apple.com"; an address works without DNS).
 # The interface to test is named in /private/var/scion-test/nettest-if (default: whatever has an address; "pdp_ip0" for the
 # modem's), so the same step tests Wi-Fi (en0) and the cellular interface.
 set -euo pipefail
@@ -37,19 +38,21 @@ echo "address after $((i * 5)) s: ${addr:-none}"
 /sbin/ifconfig -a 2>&1 | grep -E '^[a-z]|inet |status' | head -40
 /usr/sbin/netstat -rn -f inet 2>&1 | head -20
 [[ -n $addr ]] || { echo "=== no address: no fetch"; exit 0; }
-fetch() {   # fetch HOST PATH: an HTTP/1.1 GET by bash itself (name through iOS's resolver), at most 45 s
+fetch() {   # fetch HOST PATH: an HTTP/1.1 GET by bash itself (a name goes through iOS's resolver); 20 s a line at most
 	local t0=$(date +%s) out=/tmp/scion-nettest.$$
 	echo "fetch http://$1$2: start"
-	timeout 45 bash -c 'exec 3<>"/dev/tcp/$1/80" || exit 7
-		printf "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: scion-nettest\r\n\r\n" "$2" "$1" >&3
-		head -c 4000 <&3' _ "$1" "$2" > $out
+	( exec 3<>"/dev/tcp/$1/80" || exit 7
+	  printf 'GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: scion-nettest\r\n\r\n' "$2" "$1" >&3
+	  n=0
+	  while [ $n -lt 30 ] && IFS= read -r -t 20 line <&3; do printf '%s\n' "$line"; n=$((n + 1)); done ) > $out 2>&1
 	local rc=$?
 	echo "fetch http://$1$2: rc $rc, $(wc -c < $out) bytes in $(( $(date +%s) - t0 )) s, first lines:"
 	head -3 $out | tr -d '\r'; grep -o '<title>[^<]*' $out | head -1
 	rm -f $out
 }
-fetch example.com /
-fetch captive.apple.com /hotspot-detect.html
+for h in $(cat /private/var/scion-test/nettest-hosts 2>/dev/null || echo example.com captive.apple.com); do
+	fetch "$h" /
+done
 if [[ ! -f /private/var/scion-test/nettest-noapt ]]; then
 	echo "--- apt-get update"
 	/var/jb/usr/bin/timeout 180 /var/jb/usr/bin/apt-get update 2>&1 | tail -8
