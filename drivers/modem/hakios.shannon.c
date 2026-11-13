@@ -16,9 +16,12 @@
  *                  contents of 32-byte entries (name[12], offset in the partition, address for the CP, size, CRC-32,
  *                  number): TOC, BOOT, MAIN, VSS, NV, OFFSET. An entry goes to (its address - BOOT's address) in the
  *                  CP's memory. NV has no bytes in RADIO: it is the place of the phone's own non-volatile data
- *                  (Android's boot daemon copies /efs/nv_data.bin there). This driver never reads or writes the EFS
- *                  partition: with cp_nv=1 it takes a file "nv_data.bin" that the boot image's builder put beside
- *                  the kernel (hakios_image_file("fw", ...)), and without it the place is filled with zeros.
+ *                  (Android's boot daemon copies /efs/nv_data.bin there). This driver never writes the EFS partition
+ *                  and never mounts it. With cp_nv=2 (the owner's decision of 13 Nov 2026) it READS /nv_data.bin out
+ *                  of EFS at boot through a read-only ext4 reader (hakios.ext4ro.h over hakios_ufs_read_partition,
+ *                  which has no write path), keeps it in RAM for the run and gives it to the CP; only its size and a
+ *                  CRC prefix are logged. With cp_nv=1 it takes a file "nv_data.bin" that the boot image's builder
+ *                  put beside the kernel (hakios_image_file("fw", ...)); without either the place is filled with zeros.
  *   the secure     the image is checked and the CP's memory closed by Samsung's EL3 monitor, not by us:
  *   world          SMC 0x82000700 with x1 = the mode (2: open the memory for loading; 0, or'ed with the memory's
  *                  address when the image carries its memory table: check BOOT and MAIN and lock), x2 = BOOT's size,
@@ -124,6 +127,10 @@
  *   cp_ping=A.B.C.D  the address stage 7 sends its one echo request to (none: the context's first DNS server)
  *   cp_apn=NAME  the access point name stage 6 asks the data context for (the operator's published default; none: no stage 6)
  *   cp_nv=1      the phone's own NV data, a file nv_data.bin the image's builder put beside the kernel, is given to the modem (none: zeros, and no stage 4)
+ *   cp_if=1      with cp=6 or 7 and cp_apn: the active data context becomes a network interface, pdp_ip0 (IPv4, point to point, the CP's address for it), and stays up: no deactivation, no return to low power, no two-minute limit; the modem runs until kern.hakios.cp.go=2. Off: the stages end as before
+ *   cp_if_kb=N   with cp_if=1: at most N KB through pdp_ip0 in a boot, both ways (2048 by default; the owner's mobile plan), then it drops
+ *   cp_route=1   with cp_if=1: an IPv4 default route through pdp_ip0 (only when there is none yet: Wi-Fi's wins)
+ *   cp_nv=2      the phone's own NV data read at boot from the EFS partition (/nv_data.bin, read-only, never mounted, never written), kept in RAM only; the CP's file requests for it (RFS NV read/write) are answered from that copy and its writes kept there for the run, never written back
  *   cp_vss=0     the image's VSS part (the voice processor's) is not copied
  *   cp_rev=N     the board's revision told to the modem (26, this phone's)
  *   cp_ds=N      the dual SIM field told to the modem (0)
@@ -135,6 +142,7 @@
  * checks that no page of the 146 MB is XNU's and that the kernel is not in it, and does nothing if either fails.
  */
 #include <kern/clock.h>
+#include <kern/kalloc.h>
 #include <kern/thread.h>
 #include <libkern/libkern.h>
 #include <mach/mach_time.h>
@@ -149,6 +157,18 @@
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/hakios.xnu.h>
+#include <sys/hakios.ext4ro.h>
+#include <net/kpi_interface.h>
+#include <net/kpi_protocol.h>
+#include <net/if_types.h>
+#include <net/route.h>
+#include <net/if_dl.h>
+#include <netinet/in.h>
+#include <netinet/in_var.h>
+#include <sys/kpi_mbuf.h>
+#include <sys/kpi_socket.h>
+#include <sys/sockio.h>
+#include <sys/socket.h>
 
 /* ---- addresses ---- */
 
@@ -324,6 +344,15 @@ static struct {
 	uint32_t more[NRINGS];          /* bytes still to come of a frame longer than one buffer */
 	bool multi[NRINGS];             /* the frames now coming on a ring are the rest of a message already seen */
 	uint32_t rfs_more;              /* bytes of a file request still to come in later frames */
+	/* cp_nv=2: the NV data in RAM (kernel memory only; never written anywhere) and an NV write being received */
+	uint8_t *nv_ram;
+	uint32_t nv_ram_size;
+	bool w_active;
+	uint8_t w_id;
+	uint32_t w_off, w_len, w_got;
+	uint32_t rfs_answered, nv_writes_kept, nv_reads_answered;
+	uint32_t if_on, route_on;       /* cp_if=1, cp_route=1 */
+	uint32_t if_kb;                 /* cp_if_kb=N */
 	uint32_t dropped[NRINGS];       /* such frames dropped */
 } cp;
 
@@ -744,6 +773,63 @@ copy_entry(const struct toc_entry *e)
 	return crc == e->crc;
 }
 
+/* cp_nv=2: EFS read through hakios_ufs_read_partition, which only reads (bsd/dev/herolte_ufs.c) */
+static int
+efs_read(__unused void *ctx, uint64_t off, void *dst, uint32_t len)
+{
+	return hakios_ufs_read_partition("EFS", off, dst, len, NULL);
+}
+
+/*
+ * cp_nv=2: /nv_data.bin of the EFS partition into cp.nv_ram (size bytes, the NV place's size), read-only. EFS is not
+ * mounted and nothing is ever written to it: the reader has no write path, and the copy stays in kernel memory for the
+ * run. Logged: sizes, and the first four hex digits of the copy's CRC-32. Nothing of its bytes.
+ */
+static bool
+nv_from_efs(uint32_t size)
+{
+	struct ext4ro fs = { .read = efs_read, .ctx = NULL };
+	uint64_t part = 0, got = 0, t0 = now_ms();
+	int e;
+
+	if ((e = hakios_ufs_read_partition("EFS", 0, NULL, 0, &part)) != 0) {
+		say("cp: cp_nv=2: the EFS partition cannot be read (errno %d): not going on\n", e);
+		return false;
+	}
+	if ((e = ext4ro_open(&fs)) != 0) {
+		say("cp: cp_nv=2: EFS (%llu bytes) is no ext4 this reader knows (errno %d): not going on\n", part, e);
+		return false;
+	}
+	fs.blk = kalloc_data(fs.block_size, Z_WAITOK);
+	fs.blk2 = kalloc_data(fs.block_size, Z_WAITOK);
+	cp.nv_ram = kalloc_data(size, Z_WAITOK | Z_ZERO);
+	if (fs.blk == NULL || fs.blk2 == NULL || cp.nv_ram == NULL) {
+		e = ENOMEM;
+	} else {
+		e = ext4ro_read_file(&fs, "/nv_data.bin", cp.nv_ram, size, &got);
+	}
+	if (fs.blk != NULL) {
+		kfree_data(fs.blk, fs.block_size);
+	}
+	if (fs.blk2 != NULL) {
+		kfree_data(fs.blk2, fs.block_size);
+	}
+	if (e != 0 || got != size) {
+		say("cp: cp_nv=2: EFS's /nv_data.bin not read (errno %d, %llu bytes, the NV place has %u): not going on\n", e,
+		    got, size);
+		if (cp.nv_ram != NULL) {
+			bzero(cp.nv_ram, size);
+			kfree_data(cp.nv_ram, size);
+			cp.nv_ram = NULL;
+		}
+		return false;
+	}
+	cp.nv_ram_size = size;
+	say("cp: NV: EFS's /nv_data.bin read READ-ONLY (EFS %llu bytes, ext4 blocks of %u; the file %u bytes, CRC-32 %04x..., "
+	    "%llu ms): kept in RAM only\n", part, fs.block_size, size, crc32_of(cp.nv_ram, size) >> 16, now_ms() - t0);
+	return true;
+}
+
 static bool
 fill_nv(void)
 {
@@ -763,7 +849,14 @@ fill_nv(void)
 		return false;
 	}
 	dst = (uint8_t *)cp.mem + at;
-	if (cp.nv_file) {
+	if (cp.nv_file == 2) {
+		if (!nv_from_efs(size)) {
+			return false;
+		}
+		memcpy(dst, cp.nv_ram, size);
+		cp.nv_loaded = true;
+		say("cp: NV: the RAM copy of EFS's nv_data.bin (%u bytes) copied to the CP's memory at %#x\n", size, at);
+	} else if (cp.nv_file) {
 		file = hakios_image_file("fw", "nv_data.bin", &file_size, NULL);
 		if (file == NULL || file_size != size) {
 			say("cp: cp_nv=1, but the boot image carries no nv_data.bin of %u bytes (found %llu): not going on\n", size,
@@ -1234,7 +1327,82 @@ fmt_received(const uint8_t *m, uint32_t n)
 	/* everything else: the header above and the length only (a message may carry an identity) */
 }
 
-/* a file request of the CP: logged, never answered, nothing of it kept */
+#define RING_RFS                3u              /* ring_cfgs' "rfs0" */
+
+/* cp_nv=2: an answer to the CP on the file channel: Samsung IPC's RFS header (length, command, id) and the body */
+static bool
+rfs_answer(uint8_t cmd, uint8_t id, const uint8_t *body, uint32_t n)
+{
+	uint8_t frame[2048];
+	uint32_t len = 6 + n;
+
+	if (4 + len > sizeof(frame) || 4 + len > cp.ul[RING_RFS].size) {
+		say("cp: an answer of %u bytes to file request command %#x does not fit one frame: not sent\n", len, cmd);
+		return false;
+	}
+	frame[0] = 0xf8;
+	frame[1] = CH_RFS;
+	frame[2] = (uint8_t)(4 + len);
+	frame[3] = (uint8_t)((4 + len) >> 8);
+	frame[4] = (uint8_t)len;
+	frame[5] = (uint8_t)(len >> 8);
+	frame[6] = (uint8_t)(len >> 16);
+	frame[7] = (uint8_t)(len >> 24);
+	frame[8] = cmd;
+	frame[9] = id;
+	if (n != 0) {
+		memcpy(frame + 10, body, n);
+	}
+	cp.rfs_answered++;
+	return ring_send(RING_RFS, frame, 4 + len, cp.link_acked, 0);
+}
+
+/* the answer to an NV read or write: confirm (1 done, 0 refused), offset, length; a read's data follows */
+static void
+rfs_nv_answer(uint8_t cmd, uint8_t id, bool ok, uint32_t offset, uint32_t length)
+{
+	static uint8_t body[2048];
+	uint32_t n = 9;
+
+	body[0] = ok ? 1 : 0;
+	memcpy(body + 1, &offset, 4);
+	memcpy(body + 5, &length, 4);
+	if (cmd == 1 && ok) {
+		memcpy(body + 9, cp.nv_ram + offset, length);
+		n += length;
+	}
+	(void)rfs_answer(cmd, id, body, n);
+	bzero(body, n);
+}
+
+/* more bytes of an NV write being received (cp_nv=2): into the RAM copy only */
+static void
+rfs_write_data(const uint8_t *d, uint32_t n)
+{
+	uint32_t take = MIN(n, cp.w_len - cp.w_got);
+
+	memcpy(cp.nv_ram + cp.w_off + cp.w_got, d, take);
+	cp.w_got += take;
+	if (cp.w_got == cp.w_len) {
+		cp.w_active = false;
+		cp.rfs_more = 0;
+		cp.nv_writes_kept++;
+		rfs_nv_answer(2, cp.w_id, true, cp.w_off, cp.w_len);
+		say("cp: NV write %u of the CP (offset %#x, %u bytes) kept in RAM only, answered\n", cp.nv_writes_kept, cp.w_off,
+		    cp.w_len);
+	}
+}
+
+/* a frame that continues a file request (multi-frame or a long frame) */
+static void
+rfs_continued(const uint8_t *m, uint32_t n)
+{
+	if (cp.w_active) {
+		rfs_write_data(m, n);
+	}
+}
+
+/* a file request of the CP: logged; with cp_nv=2 an NV read or write is answered from the RAM copy, nothing else is */
 static void
 rfs_received(const uint8_t *m, uint32_t n)
 {
@@ -1245,6 +1413,7 @@ rfs_received(const uint8_t *m, uint32_t n)
 	 * data) goes on through the next frames with nothing to mark them. Those frames are data: counted, dropped,
 	 * never looked into (seen twice: taken for requests, their first bytes were printed) */
 	if (cp.rfs_more != 0) {
+		rfs_continued(m, MIN(n, cp.rfs_more));
 		cp.rfs_more -= MIN(cp.rfs_more, n);
 		cp.dropped[3]++;
 		return;
@@ -1265,6 +1434,34 @@ rfs_received(const uint8_t *m, uint32_t n)
 
 		memcpy(&offset, m + 6, 4);
 		memcpy(&length, m + 10, 4);
+		if (cp.nv_ram != NULL) {
+			bool fits = offset <= cp.nv_ram_size && length <= cp.nv_ram_size - offset;
+
+			if (cmd == 1) {
+				bool ok = fits && length <= 2048u - 4u - 6u - 9u;     /* one frame */
+
+				rfs_nv_answer(1, id, ok, offset, ok ? length : 0);
+				cp.nv_reads_answered += ok;
+				say("cp: FILE REQUEST %u from the CP: an NV READ, offset %#x, %u bytes: %s\n", cp.rfs_requests, offset,
+				    length, ok ? "answered from the RAM copy" : "refused (out of the NV data or too long for one frame)");
+				return;
+			}
+			if (!fits) {
+				rfs_nv_answer(2, id, false, offset, length);
+				say("cp: FILE REQUEST %u from the CP: an NV WRITE out of the NV data (offset %#x, %u bytes): refused\n",
+				    cp.rfs_requests, offset, length);
+				return;
+			}
+			say("cp: FILE REQUEST %u from the CP: an NV WRITE, offset %#x, %u bytes: into the RAM copy only\n",
+			    cp.rfs_requests, offset, length);
+			cp.w_active = true;
+			cp.w_id = id;
+			cp.w_off = offset;
+			cp.w_len = length;
+			cp.w_got = 0;
+			rfs_write_data(m + 14, MIN(n - 14, length));
+			return;
+		}
 		say("cp: FILE REQUEST %u from the CP (not answered): %s of the NV data, offset %#x, %u bytes (request %u, id %u)\n",
 		    cp.rfs_requests, cmd == 1 ? "a READ" : "a WRITE (its data dropped, never kept)", offset, length, len, id);
 		cp.writes_dropped += cmd == 2;
@@ -1355,6 +1552,283 @@ ip_sum(const uint8_t *p, uint32_t n, uint32_t sum)
 }
 
 /* a packet from the CP (a copy, n >= 1 bytes of it): checked, counted, never passed on; the answers to our two */
+/* ---- cp_if=1: the data context as the network interface pdp_ip0 ---- */
+
+#define PDP_QUEUE               64u
+#define PDP_MTU                 1400u
+
+static LCK_GRP_DECLARE(pdp_lck_grp, "hakios.pdp");
+static LCK_MTX_DECLARE(pdp_lock, &pdp_lck_grp);
+
+/* up: packets the stack gave pdp_ip0, waiting for the modem's thread to put them in the data ring */
+static struct {
+	ifnet_t ifp;
+	uint16_t head, tail;
+	uint16_t len[PDP_QUEUE];
+	uint8_t pkt[PDP_QUEUE][DATA_MAX];
+	uint64_t in, in_bytes, out, out_bytes, dropped_in, dropped_out;
+	bool addressed, routed, capped;
+} pdp;
+
+/* cp_if_kb: the boot's budget through pdp_ip0, both ways; past it everything is dropped */
+static bool
+pdp_over_budget(uint32_t n)
+{
+	if (pdp.in_bytes + pdp.out_bytes + n <= (uint64_t)cp.if_kb * 1024) {
+		return false;
+	}
+	if (!pdp.capped) {
+		pdp.capped = true;
+		say("cp: pdp_ip0: the boot's budget of %u KB is used up (cp_if_kb): everything is dropped from now on\n", cp.if_kb);
+	}
+	return true;
+}
+
+static errno_t
+pdp_output(ifnet_t ifp, mbuf_t m)
+{
+	size_t n = mbuf_pkthdr_len(m);
+	uint16_t next;
+
+	lck_mtx_lock(&pdp_lock);
+	next = (uint16_t)((pdp.tail + 1) % PDP_QUEUE);
+	if (n < 20 || n > DATA_MAX || next == pdp.head || mbuf_copydata(m, 0, n, pdp.pkt[pdp.tail]) != 0) {
+		pdp.dropped_out++;
+		lck_mtx_unlock(&pdp_lock);
+		ifnet_stat_increment_out(ifp, 0, 0, 1);
+		mbuf_freem(m);
+		return 0;
+	}
+	pdp.len[pdp.tail] = (uint16_t)n;
+	pdp.tail = next;
+	lck_mtx_unlock(&pdp_lock);
+	ifnet_stat_increment_out(ifp, 1, (u_int32_t)n, 0);
+	mbuf_freem(m);
+	return 0;
+}
+
+/* the modem's thread: the waiting packets into the data ring of context DATA_CID */
+static void
+pdp_drain(void)
+{
+	static uint8_t b[DATA_MAX];
+
+	for (;;) {
+		uint16_t n;
+
+		lck_mtx_lock(&pdp_lock);
+		if (pdp.head == pdp.tail) {
+			lck_mtx_unlock(&pdp_lock);
+			return;
+		}
+		n = pdp.len[pdp.head];
+		memcpy(b, pdp.pkt[pdp.head], n);
+		pdp.head = (uint16_t)((pdp.head + 1) % PDP_QUEUE);
+		lck_mtx_unlock(&pdp_lock);
+		if ((b[0] >> 4) != 4 || pdp_over_budget(n) || !ring_send(RING_DATA, b, n, true, (CH_PDP0 + DATA_CID - 1u) << 16)) {
+			pdp.dropped_out++;
+		} else {
+			pdp.out++;
+			pdp.out_bytes += n;
+			cp.data_up++;
+			cp.data_up_bytes += n;
+		}
+		bzero(b, n);
+	}
+}
+
+/* down: an IPv4 packet of the context to the stack */
+static void
+pdp_input(const uint8_t *p, uint32_t n)
+{
+	struct ifnet_stat_increment_param st;
+	unsigned int chunks = 1;
+	mbuf_t m = NULL;
+
+	if (pdp.ifp == NULL || n == 0 || n > DATA_MAX || pdp_over_budget(n) ||
+	    mbuf_allocpacket(MBUF_DONTWAIT, n, &chunks, &m) != 0) {
+		pdp.dropped_in++;
+		return;
+	}
+	if (mbuf_copyback(m, 0, n, p, MBUF_DONTWAIT) != 0) {
+		mbuf_freem(m);
+		pdp.dropped_in++;
+		return;
+	}
+	mbuf_pkthdr_setrcvif(m, pdp.ifp);
+	mbuf_pkthdr_setheader(m, mbuf_data(m));
+	bzero(&st, sizeof(st));
+	st.packets_in = 1;
+	st.bytes_in = n;
+	pdp.in++;
+	pdp.in_bytes += n;
+	ifnet_input(pdp.ifp, m, &st);
+}
+
+static errno_t
+pdp_demux(__unused ifnet_t ifp, __unused mbuf_t m, __unused char *frame_header, protocol_family_t *protocol)
+{
+	*protocol = PF_INET;
+	return 0;
+}
+
+static errno_t
+pdp_add_proto(__unused ifnet_t ifp, protocol_family_t protocol, __unused const struct ifnet_demux_desc *d,
+    __unused u_int32_t n)
+{
+	return protocol == PF_INET ? 0 : ENOPROTOOPT;
+}
+
+static errno_t
+pdp_del_proto(__unused ifnet_t ifp, __unused protocol_family_t protocol)
+{
+	return 0;
+}
+
+static errno_t
+pdp_ioctl(ifnet_t ifp, u_long command, __unused void *data)
+{
+	switch (command) {
+	case SIOCSIFADDR:
+	case SIOCAIFADDR:
+	case SIOCSIFDSTADDR:
+		ifnet_set_flags(ifp, IFF_UP | IFF_RUNNING, IFF_UP | IFF_RUNNING);
+		return 0;
+	case SIOCSIFFLAGS:
+		ifnet_set_flags(ifp, (ifnet_flags(ifp) & IFF_UP) ? IFF_RUNNING : 0, IFF_RUNNING);
+		return 0;
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+		return 0;
+	default:
+		return EOPNOTSUPP;
+	}
+}
+
+static errno_t
+pdp_proto_input(__unused ifnet_t ifp, protocol_family_t protocol, mbuf_t m, __unused char *header)
+{
+	if (proto_input(protocol, m) != 0) {
+		mbuf_freem(m);
+	}
+	return 0;
+}
+
+static errno_t
+pdp_proto_pre_output(__unused ifnet_t ifp, protocol_family_t protocol, __unused mbuf_t *m,
+    __unused const struct sockaddr *dest, __unused void *route, char *frame_type, __unused char *link_layer_dest)
+{
+	*(protocol_family_t *)(void *)frame_type = protocol;
+	return 0;
+}
+
+/* pdp_ip0 made and attached once, the context's address put on it, a default route if asked and there is none */
+static void
+pdp_attach(void)
+{
+	struct ifnet_init_eparams init = {
+		.ver = IFNET_INIT_CURRENT_VERSION,
+		.len = sizeof(init),
+		.flags = IFNET_INIT_LEGACY | IFNET_INIT_NX_NOAUTO,
+		.uniqueid = "hakios-pdp0",
+		.uniqueid_len = 11,
+		.name = "pdp_ip",
+		.unit = 0,
+		.family = IFNET_FAMILY_CELLULAR,
+		.type = IFT_CELLULAR,
+		.output = pdp_output,
+		.demux = pdp_demux,
+		.add_proto = pdp_add_proto,
+		.del_proto = pdp_del_proto,
+		.ioctl = pdp_ioctl,
+	};
+	struct ifnet_attach_proto_param proto;
+	struct in_aliasreq ifra;
+	socket_t so = NULL;
+	ifnet_t ifp = NULL;
+	errno_t e;
+
+	if (pdp.ifp == NULL) {
+		if ((e = ifnet_allocate_extended(&init, &ifp)) != 0) {
+			say("cp: pdp_ip0 cannot be made: error %d\n", e);
+			cp.if_on = 0;
+			return;
+		}
+		ifnet_set_mtu(ifp, PDP_MTU);
+		ifnet_set_flags(ifp, IFF_POINTOPOINT | IFF_MULTICAST | IFF_NOARP, 0xffff);
+		ifnet_set_hdrlen(ifp, 0);
+		ifnet_set_addrlen(ifp, 0);
+		ifnet_set_baudrate(ifp, 50 * 1000 * 1000);
+		if ((e = ifnet_attach(ifp, NULL)) != 0) {
+			say("cp: pdp_ip0 cannot be attached: error %d\n", e);
+			ifnet_release(ifp);
+			cp.if_on = 0;
+			return;
+		}
+		bzero(&proto, sizeof(proto));
+		proto.input = pdp_proto_input;
+		proto.pre_output = pdp_proto_pre_output;
+		if ((e = ifnet_attach_protocol(ifp, PF_INET, &proto)) != 0) {
+			say("cp: pdp_ip0: IPv4 cannot be attached: error %d\n", e);
+		}
+		pdp.ifp = ifp;
+		say("cp: pdp_ip0 attached (IPv4, point to point, MTU %u): the data context %u's packets go through it\n", PDP_MTU,
+		    DATA_CID);
+	}
+	if (!pdp.addressed && sock_socket(PF_INET, SOCK_DGRAM, 0, NULL, NULL, &so) == 0) {
+		struct sockaddr_in *a = (struct sockaddr_in *)&ifra.ifra_addr;
+		struct sockaddr_in *d = (struct sockaddr_in *)&ifra.ifra_broadaddr;
+		struct sockaddr_in *m = (struct sockaddr_in *)&ifra.ifra_mask;
+
+		bzero(&ifra, sizeof(ifra));
+		strlcpy(ifra.ifra_name, "pdp_ip0", sizeof(ifra.ifra_name));
+		a->sin_len = d->sin_len = m->sin_len = sizeof(struct sockaddr_in);
+		a->sin_family = d->sin_family = m->sin_family = AF_INET;
+		memcpy(&a->sin_addr, cp.ip4, 4);
+		memcpy(&d->sin_addr, cp.ip4, 4);        /* point to point: the peer as the CP gives it, its own address */
+		m->sin_addr.s_addr = 0xffffffffu;
+		e = sock_ioctl(so, SIOCAIFADDR, &ifra);
+		pdp.addressed = e == 0;
+		say("cp: pdp_ip0: the context's IPv4 address (first octet %u; the rest not logged) put on it: %s (%d)\n", cp.ip4[0],
+		    e == 0 ? "done" : "FAILED", e);
+		sock_close(so);
+		so = NULL;
+	}
+	if (pdp.addressed && cp.route_on && !pdp.routed && sock_socket(PF_ROUTE, SOCK_RAW, AF_INET, NULL, NULL, &so) == 0) {
+		struct {
+			struct rt_msghdr h;
+			struct sockaddr_in dst;
+			struct sockaddr_dl gw;
+			struct sockaddr_in mask;
+		} msg;
+		struct iovec iov = { &msg, sizeof(msg) };
+		struct msghdr mh;
+		size_t sent = 0;
+
+		bzero(&msg, sizeof(msg));
+		msg.h.rtm_msglen = sizeof(msg);
+		msg.h.rtm_version = RTM_VERSION;
+		msg.h.rtm_type = RTM_ADD;
+		msg.h.rtm_flags = RTF_UP | RTF_STATIC;
+		msg.h.rtm_addrs = RTA_DST | RTA_GATEWAY | RTA_NETMASK;
+		msg.h.rtm_seq = 1;
+		msg.dst.sin_len = msg.mask.sin_len = sizeof(struct sockaddr_in);
+		msg.dst.sin_family = msg.mask.sin_family = AF_INET;
+		msg.gw.sdl_len = sizeof(msg.gw);
+		msg.gw.sdl_family = AF_LINK;
+		msg.gw.sdl_index = (u_short)ifnet_index(pdp.ifp);
+		msg.gw.sdl_type = IFT_CELLULAR;
+		bzero(&mh, sizeof(mh));
+		mh.msg_iov = &iov;
+		mh.msg_iovlen = 1;
+		e = sock_send(so, &mh, 0, &sent);
+		pdp.routed = e == 0;
+		say("cp: pdp_ip0: an IPv4 default route through it: %s (%d)\n", e == 0 ? "added" :
+		    e == EEXIST ? "there is one already (Wi-Fi's?): none added" : "FAILED", e);
+		sock_close(so);
+	}
+}
+
 static void
 data_received(uint8_t ch, const uint8_t *p, uint32_t n)
 {
@@ -1379,6 +1853,9 @@ data_received(uint8_t ch, const uint8_t *p, uint32_t n)
 	if (total < ihl || total > n || ip_sum(p, ihl, 0) != 0) {
 		cp.data_bad++;
 		return;
+	}
+	if (pdp.ifp != NULL && cp.have4 && memcmp(p + 16, cp.ip4, 4) == 0) {
+		pdp_input(p, total);            /* cp_if=1: to the stack (and still looked at below, for stage 7's own) */
 	}
 	if (!cp.have4 || memcmp(p + 16, cp.ip4, 4) != 0 || (p[6] & 0x3f) != 0 || p[7] != 0) {
 		cp.data_other++;                /* not to our address, or a fragment */
@@ -1419,6 +1896,7 @@ data_received(uint8_t ch, const uint8_t *p, uint32_t n)
 		cp.data_other++;
 	}
 }
+
 
 /* what the CP put into the zero-copy slots */
 static void
@@ -1589,7 +2067,14 @@ rings_receive(void)
 			}
 			if (cp.more[i] != 0) {
 				/* the rest of a frame longer than one buffer (a file request with data): counted, not copied,
-				 * not looked into */
+				 * not looked into; with cp_nv=2 an NV write's bytes go to the RAM copy */
+				if (i == RING_RFS && cp.w_active) {
+					uint32_t k = MIN(n, cp.more[i]);
+
+					memcpy(frame, cp.ipc + r->buffers + (uint32_t)rp * r->size, k);
+					rfs_continued(frame, k);
+					bzero(frame, k);
+				}
 				cp.more[i] -= MIN(cp.more[i], n);
 				rp = (uint16_t)((rp + 1) % r->len);
 				ipc_wr16(r->rp, rp);
@@ -1615,6 +2100,9 @@ rings_receive(void)
 				bool rest = cp.multi[i];
 
 				cp.multi[i] = (frame[4] & 0x80) != 0;
+				if (rest && i == RING_RFS && cp.w_active) {
+					rfs_continued(frame + hdr, n - hdr);
+				}
 				if (rest) {
 					cp.frames[i]--;
 					cp.dropped[i]++;
@@ -1903,6 +2391,25 @@ data_stage(void)
 		cp.data_ms = now;
 		return NULL;
 	case 3:
+		if (cp.if_on && cp.have4) {
+			/* cp_if=1: the context stays; its packets go through pdp_ip0 until asked to stop */
+			static uint64_t next_try, next_say;
+
+			if ((pdp.ifp == NULL || !pdp.addressed || (cp.route_on && !pdp.routed && now - cp.data_ms < 60000)) &&
+			    now - cp.data_ms >= 1000 && now >= next_try) {
+				next_try = now + 5000;
+				pdp_attach();
+			}
+			pdp_drain();
+			if (next_say == 0) {
+				next_say = now + 60000;
+			} else if (now >= next_say) {
+				next_say = now + 60000;
+				say("cp: pdp_ip0: up %llu packets (%llu bytes), down %llu (%llu bytes), dropped %llu up %llu down\n", pdp.out,
+				    pdp.out_bytes, pdp.in, pdp.in_bytes, pdp.dropped_out, pdp.dropped_in);
+			}
+			return NULL;
+		}
 		if (cp.stage >= 7 && cp.have4) {
 			/* stage 7: our two packets, 2 and 3 s after the activation; done 5 s after it at the earliest */
 			if (cp.ping_sent_ms == 0 && now - cp.data_ms >= 2000) {
@@ -1956,9 +2463,9 @@ print_state(void)
 	for (uint32_t i = 0; i < NRINGS; i++) {
 		say(" %s %u", ring_cfgs[i].name, cp.frames[i]);
 	}
-	say("; control messages %u, file requests %u (none answered; %u frames of their data dropped unread), PHONE_START "
-	    "%u times, last phone state %d\n", cp.fmt_messages, cp.rfs_requests, cp.dropped[3], cp.phone_starts,
-	    cp.phone_state);
+	say("; control messages %u, file requests %u (%u answered: %u NV writes kept in RAM, %u NV reads; %u frames of other "
+	    "data dropped unread), PHONE_START %u times, last phone state %d\n", cp.fmt_messages, cp.rfs_requests,
+	    cp.rfs_answered, cp.nv_writes_kept, cp.nv_reads_answered, cp.dropped[3], cp.phone_starts, cp.phone_state);
 	if (cp.mbox != 0) {
 		look_mbox("now");
 		look_pmu("now");
@@ -1976,7 +2483,8 @@ cp_thread(__unused void *arg, __unused wait_result_t result)
 	/* not at once: the boot's own flood of lines would push these out of the log before the USB console has it */
 	IOSleep(cp.delay_s * 1000);
 	say("cp: stage %u asked for (1 a look, 2 load and check, 3 start, 4 the link, 5 the network)%s\n", cp.stage,
-	    cp.nv_file ? ", with the builder's nv_data.bin" : ", no non-volatile data (zeros)");
+	    cp.nv_file == 2 ? ", with EFS's nv_data.bin (RAM copy)" : cp.nv_file ? ", with the builder's nv_data.bin" :
+	    ", no non-volatile data (zeros)");
 
 	if (!memory_is_free()) {
 		set_state(101);
@@ -2086,7 +2594,7 @@ cp_thread(__unused void *arg, __unused wait_result_t result)
 			/* stage 5, steps 2 and 3: registered for two minutes, or not in time, then low power again */
 			const char *back = NULL;
 
-			if (cp.registered_ms != 0 && now_ms() - cp.registered_ms > 120000) {
+			if (cp.registered_ms != 0 && now_ms() - cp.registered_ms > 120000 && !cp.if_on) {
 				back = "registered for two minutes";
 			} else if (cp.registered_ms == 0 && now_ms() - cp.normal_ms > 90000) {
 				back = "NOT registered 90 s after normal mode was asked for";
@@ -2213,6 +2721,10 @@ hakios_shannon_init(void)
 	cp.phone_state = cp.sim_status = cp.reg_state = -1;
 	cp.vss_on = 1;
 	PE_parse_boot_argn("cp_nv", &cp.nv_file, sizeof(cp.nv_file));
+	PE_parse_boot_argn("cp_if", &cp.if_on, sizeof(cp.if_on));
+	PE_parse_boot_argn("cp_route", &cp.route_on, sizeof(cp.route_on));
+	cp.if_kb = 2048;
+	PE_parse_boot_argn("cp_if_kb", &cp.if_kb, sizeof(cp.if_kb));
 	PE_parse_boot_argn("cp_vss", &cp.vss_on, sizeof(cp.vss_on));
 	PE_parse_boot_argn("cp_rev", &cp.rev, sizeof(cp.rev));
 	PE_parse_boot_argn("cp_ds", &cp.ds, sizeof(cp.ds));
