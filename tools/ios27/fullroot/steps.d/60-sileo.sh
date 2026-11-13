@@ -106,6 +106,8 @@ if block not in s:
     s = s.replace(key, block + key, 1)
 open(p, 'w').write(s)
 PY2
+# the prefix's applications copied into /Applications at every boot and from uicache (their icons on this port)
+/usr/bin/python3 "$H/../../sileo/prep-apps.py" "$N"
 printf 'ios27-r%s-%s' "$REV" "$(cat "$JB/.stamp")" > "$N/.scion-stamp"
 
 # the checks: what must not be there
