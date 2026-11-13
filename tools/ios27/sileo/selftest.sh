@@ -43,10 +43,11 @@ done
 want "not root's outside var/ in the prefix and in /jb" "$(find /var/jb/usr /var/jb/bin /var/jb/sbin /var/jb/Applications /var/jb/Library /var/jb/etc /jb ! -user 0 2>/dev/null | wc -l | tr -d ' ')" "0"
 want "writable by everybody in the prefix" "$(find /private/var/jb ! -type l -perm -0002 2>/dev/null | wc -l | tr -d ' ')" "0"
 info "set-ID programs: $(find /private/var/jb -type f -perm /6000 2>/dev/null | sed 's|/private/var/jb/||' | sort | tr '\n' ' ')"
-want "accounts with a password" "$(awk -F: '!/^#/ && NF >= 10 && $2 != "*" && $2 != "!"' /var/jb/etc/master.passwd | wc -l | tr -d ' ')" "0"
+# (no awk in the plain bootstrap: grep and cut only)
+want "accounts with a password" "$(grep -v '^#' /var/jb/etc/master.passwd | grep ':.*:.*:.*:.*:.*:.*:.*:.*:' | cut -d: -f2 | grep -v -x -e '[*]' -e '!' | wc -l | tr -d ' ')" "0"
 [ ! -e /var/jb/usr/sbin/sshd ] && ok "no OpenSSH server in the prefix" || bad "an OpenSSH server is in the prefix"
 if command -v netstat >/dev/null 2>&1; then
-	info "listening TCP sockets: $(netstat -an -p tcp 2>/dev/null | grep -c LISTEN) ($(netstat -an -p tcp 2>/dev/null | grep LISTEN | awk '{print $4}' | tr '\n' ' '))"
+	info "listening TCP sockets: $(netstat -an -p tcp 2>/dev/null | grep -c LISTEN) ($(netstat -an -p tcp 2>/dev/null | grep LISTEN | tr -s ' ' | cut -d' ' -f4 | tr '\n' ' '))"
 else
 	info "no netstat on this root: listening sockets not listed"
 fi
@@ -55,7 +56,10 @@ fi
 want "dpkg --audit" "$(dpkg --audit 2>&1 | wc -l | tr -d ' ')" "0"
 want "Sileo in dpkg" "$(dpkg-query -W -f='${Status}' org.coolstar.sileo 2>&1)" "install ok installed"
 info "packages: $(dpkg-query -W 2>/dev/null | wc -l | tr -d ' '), firmware $(dpkg-query -W -f='${Version}' firmware 2>&1)"
-uicache -l 2>/dev/null | grep -q org.coolstar.sileo && ok "Sileo registered with LaunchServices" || bad "Sileo is not registered (uicache -l)"
+# uicache can neither register nor list on this port (it answers "Unable to register" for every path and lists
+# nothing): Sileo is registered by lsd's own rebuild, from its copy in /Applications (60-sileo.sh)
+[ -x /Applications/Sileo.app/Sileo ] && [ -e /Applications/Sileo.app/.scion-prefix-app ] && ok "Sileo's copy in /Applications" || bad "no copy of Sileo in /Applications"
+want "owner of /Applications/Sileo.app/giveMeRoot" "$(stat -c '%u:%g %a' /Applications/Sileo.app/giveMeRoot 2>/dev/null)" "0:0 4755"
 info "repositories: $(ls /var/jb/etc/apt/sources.list.d | tr '\n' ' ')"
 
 # what was written before is read after
@@ -94,14 +98,14 @@ if [ -f $T/repo/Packages ] && [ -f $T/repo/test.conf ]; then
 	[ -f $S ] && ok "the added repository is still listed" || bad "the added repository is gone"
 	if [ -n "${APPID:-}" ]; then
 		sleep 10
-		uicache -l 2>/dev/null | grep -q "$APPID" && ok "$APPID registered with LaunchServices" || bad "$APPID is not registered"
+		uicache -l 2>/dev/null | grep -q "$APPID" && ok "$APPID registered with LaunchServices" || bad "$APPID is not registered (an application installed by a package is not registered on this port yet: uicache cannot)"
 	fi
 else
 	info "no repository in $T/repo: the install test is not run"
 fi
 
 # the network, as it stands (nothing here needs it)
-info "interfaces with an address: $(ifconfig -a 2>/dev/null | awk '/^[a-z]/ { i = $1 } /inet / && $2 != "127.0.0.1" { printf "%s %s ", i, $2 }')"
+info "addresses: $(ifconfig -a 2>/dev/null | grep 'inet ' | grep -v 127.0.0.1 | tr -s ' \t' ' ' | cut -d' ' -f3 | tr '\n' ' ')"
 if apt-get update -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=0 -o Dir::Etc::sourcelist=/var/jb/etc/apt/sources.list.d/procursus.sources -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 > $T/apt-net.log 2>&1 &&
 	! grep -q '^W:\|^E:\|^Err' $T/apt-net.log; then
 	info "network: apt-get update from apt.procurs.us worked"

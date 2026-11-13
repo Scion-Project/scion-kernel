@@ -101,6 +101,25 @@ What the package manager adds to that picture, and what was done so that it does
 - **What is fetched** is pinned by SHA-256, from Procursus's own server.
 - A repository added in Sileo is trusted like any apt source: its packages run their scripts as root.
 
+## What the phone showed (13 Nov 2026, phone 1)
+
+- **apt and the system cfprefsd.** Procursus' apt runs its download methods as its sandbox user `_apt` (uid 1001). iOS's
+  own `/etc/passwd` has no such uid, and the system `cfprefsd` crashes (a `CFEqual` on NULL in `-[CFPrefsDaemon
+  handleSourceMessage:...]`) on the first preferences request of a client it cannot name. The method retries, launchd
+  restarts `cfprefsd` every ten seconds, and every root process that reads a preference waits for ever: `apt-get update`
+  stopped at its first file, `uicache` with it, and a minute later SpringBoard (a synchronous call to the pasteboard) and
+  with it the whole interface. The step now writes `APT::Sandbox::User "root";` into the prefix
+  (`etc/apt/apt.conf.d/00scion-sandbox`). With it, no cfprefsd crash in the three boots since.
+- **LaunchServices.** `uicache -p` answers "Unable to register" for every path on this port, `/Applications/*.app`
+  included, and `uicache -l` lists nothing; lsd's own rebuild at boot does register what is in `/Applications`. So the
+  step puts a real copy of `Sileo.app` there (marked `.scion-prefix-app`; `prep.sh` makes it root's and `giveMeRoot`
+  set-user-ID at every boot, for roots edited without owners) and drops the LaunchServices databases so that lsd rebuilds
+  them. An application installed later by a package lands in `/var/jb/Applications` and is not registered: making
+  `uicache` work (probably the entitlements lsd wants of it) is the open item.
+- **Sileo's first start** listed Havoc and Chariz besides Procursus (its own defaults); on the next start only Procursus
+  and the test repository. A flat repository needs a `Release` file for Sileo (apt does without one).
+- The plain bootstrap has no `awk`; the self-test uses `grep` and `cut` instead.
+
 ## The self-test
 
 The port has no shell to ask. `SILEO_SELFTEST=1` with the step (a test root, never a release; `check-root.sh` says so)

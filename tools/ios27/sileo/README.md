@@ -48,4 +48,5 @@ phone's own copy and everything installed into it as well).
 | | |
 |---|---|
 | The step, its undo, a second run, `check-root.sh` | Run on a clone of a full RC2 root image on the Mac: applies, repeats without change, undo leaves `launchd.plist` identical, `fsck_hfs` clean |
-| On a phone | Not yet: see the pull request that brought this for what has been seen since |
+| On a phone (phone 1, iOS 27 full root, 13 Nov 2026) | Seeded at the first boot (6357 files, 9 s), owners right, no password, no OpenSSH. With REV 1: `apt-get update` hung and the UI froze (cfprefsd, below); uicache could register nothing. With the REV 2 changes (applied to the phone's root by hand, the same edits this step now makes): `apt-get` installs, runs, removes and installs again from a repository on the phone, the package and an app package are still installed after a reboot; Sileo's icon on the home screen, Sileo opens, lists the installed packages and refreshes its sources (no network on this port yet: Procursus "offline") |
+| Not yet on a phone | An install from Sileo's own interface (giveMeRoot); a source over the network (no Wi-Fi); an application brought by a package (it is installed but not registered: uicache) |

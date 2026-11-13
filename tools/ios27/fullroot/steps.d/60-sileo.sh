@@ -12,6 +12,12 @@
 #                                shut down; without it what was installed in the last seconds is gone)
 #   /bin/{chmod,cp,mkdir,mv,rm}  links into the prefix: Sileo runs them by these names and iOS's /bin has df and ps only
 #   two launchd jobs             com.scion.jbseed (once a boot), com.scion.varsync (stays), in /System/Library/xpc/launchd.plist
+#   /Applications/Sileo.app      a real copy of the prefix's (marked .scion-prefix-app): on this port uicache -p answers
+#                                "Unable to register" for every path (also /Applications/*.app; seen on phone 1, 13 Nov 2026),
+#                                while lsd's own rebuild at boot registers what is in /Applications. The LaunchServices
+#                                databases are dropped so that lsd rebuilds them at the next boot (as 70-lsd-extkit does).
+#                                prep.sh (root, every boot) makes such copies root's and giveMeRoot 4755 again. A Sileo
+#                                upgraded by apt lands in /var/jb/Applications: the copy is refreshed at the next build.
 # What it does NOT put there, checked here so that a prefix made with other settings stops the build: no OpenSSH, no
 # tweak injection (ElleKit), no repository but Procursus (and the project's own, if SCION_REPO_URL names where it is
 # hosted), no account with a password, no file that everybody may write, no set-user-ID program beyond the bootstrap's
@@ -28,7 +34,8 @@ set -euo pipefail
 R=${1:?usage: 60-sileo.sh ROOT [undo]}; DO=${2:-apply}
 H=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$H/../../../.." && pwd)
 JB=${JB_ROOT:-$REPO/jb}
-REV=1                                   # of what this step makes of the prefix: raise it and phones seed again
+REV=2                                   # of what this step makes of the prefix: raise it and phones seed again
+                                        # 2: apt's methods stay root; prep.sh owns the /Applications copies
 BIN_NAMES="chmod cp mkdir mv rm"
 SETID="Applications/Sileo.app/giveMeRoot usr/bin/chpass usr/bin/login usr/bin/newgrp usr/bin/passwd usr/bin/quota usr/bin/su usr/bin/sudo"
 die() { echo "60-sileo: $*" >&2; exit 1; }
@@ -42,6 +49,7 @@ if [[ $DO == undo ]]; then
 	rm -f "$R/usr/local/bin/jb_seed" "$R/usr/local/bin/var_sync" "$R/usr/local/libexec/scion-sileo-selftest.sh"
 	rmdir "$R/usr/local/libexec" 2>/dev/null || true
 	rm -rf "$R/jb" "$R/jb.new"
+	[[ -e $R/Applications/Sileo.app/.scion-prefix-app ]] && rm -rf "$R/Applications/Sileo.app"
 	[[ ${PURGE_PREFIX:-0} == 1 ]] && rm -rf "$R/private/var/jb" "$R/private/var/.jb-seeding" "$R/private/var/log/scion-jbseed.log" "$R/private/var/log/scion-varsync.log" "$R/private/var/scion-test"
 	echo "60-sileo: taken off the root$([[ ${PURGE_PREFIX:-0} == 1 ]] && echo ', the phone'"'"'s copy too' || echo '; /private/var/jb, if the phone has made one, stays')"
 	exit 0
@@ -80,6 +88,24 @@ rm -f "$N/etc/pwd.db" "$N/etc/spwd.db"
 # what mk-jb.sh takes out of dpkg's database and leaves on the disk (a set-user-ID daemon of a jailbreak's kernel
 # access, and its job): nothing here has a use for it
 rm -f "$N/usr/sbin/shshd" "$N/Library/LaunchDaemons/us.diatr.shshd.plist"
+# apt's methods run as root, not as its sandbox user _apt (uid 1001): iOS's own /etc/passwd does not know that uid, and
+# the system cfprefsd crashes (CFEqual on NULL) on every request of a client it cannot name; the method retries, launchd
+# restarts cfprefsd every 10 s, and every root process that reads a preference waits for ever (seen on phone 1, 13 Nov
+# 2026: apt-get update hung at its first file, uicache and then SpringBoard's pasteboard calls with it, the UI froze)
+printf '// scion: no sandbox user (iOS has no uid for _apt; see 60-sileo.sh)\nAPT::Sandbox::User "root";\n' > "$N/etc/apt/apt.conf.d/00scion-sandbox"
+# prep.sh (once a boot, as root): the copies of the prefix's applications in /Applications are root's
+/usr/bin/python3 - "$N/prep.sh" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+block = ('# scion: copies of the prefix\'s applications in /Applications (LaunchServices registers them there) are root\'s,\n'
+         'for a in /Applications/*.app; do [ -e "$a/.scion-prefix-app" ] || continue; /var/jb/usr/sbin/chown -R 0:0 "$a"; '
+         '/var/jb/usr/bin/chmod -R go-w "$a"; [ -f "$a/giveMeRoot" ] && /var/jb/usr/bin/chmod 4755 "$a/giveMeRoot"; done\n')
+key = 'for app in /var/jb/Applications/*.app; do'
+if block not in s:
+    assert key in s, 'prep.sh changed: no loop over /var/jb/Applications'
+    s = s.replace(key, block + key, 1)
+open(p, 'w').write(s)
+PY2
 printf 'ios27-r%s-%s' "$REV" "$(cat "$JB/.stamp")" > "$N/.scion-stamp"
 
 # the checks: what must not be there
@@ -127,6 +153,18 @@ if [[ $EUID == 0 ]]; then
 fi
 rm -rf "$R/jb"
 mv "$N" "$R/jb"
+
+# Sileo where LaunchServices registers it (see the head of this file)
+if [[ -e $R/Applications/Sileo.app && ! -e $R/Applications/Sileo.app/.scion-prefix-app ]]; then
+	die "a Sileo.app that is not this step's is in /Applications"
+fi
+rm -rf "$R/Applications/Sileo.app"
+cp -a "$R/jb/Applications/Sileo.app" "$R/Applications/Sileo.app"
+: > "$R/Applications/Sileo.app/.scion-prefix-app"
+[[ $EUID != 0 ]] || { chown -R 0:0 "$R/Applications/Sileo.app"; chmod 4755 "$R/Applications/Sileo.app/giveMeRoot"; }
+for c in "$R"/private/var/mobile/Containers/Data/InternalDaemon/*/Library/Caches/*com.apple.LaunchServices-*.csstore; do
+	[[ -f $c ]] && rm -f "$c" && echo "60-sileo: LaunchServices database dropped (lsd rebuilds it at the next boot): ${c##*/}"
+done
 
 install -d -m 0755 "$R/usr/local/bin"
 for t in jb_seed var_sync; do
