@@ -9,7 +9,8 @@
  *   name=TEXT     the network name shown (default: from the operator code, a small table; else the code itself)
  *   status=N      the entry's status value for "registered" (default 3: active), type=N the technology (default: found by
  *                 its description, "LTE"), mode=hook|publish|both (default hook: SpringBoard's own status bar data;
- *                 publish: StatusKit's status bar overrides domain), discover=1 (the classes' methods into the log)
+ *                 publish: StatusKit's status bar overrides domain), discover=1 (the classes' methods into the log),
+ *                 poke=SELECTOR (a method of SpringBoard's status bar aggregator called after a change, to rebuild its data)
  * Safety: a boot counter (/private/var/local/scion-bars.boots) turns it off after 3 SpringBoard starts in a row that did not
  * live 90 s. Everything it does is logged to the console as "SCIONBAR[pid]: ...".
  */
@@ -41,7 +42,7 @@ say(NSString *fmt, ...)
 
 static NSDictionary *cfg;
 static id current;              /* our cellular entry, nil while the modem is not registered */
-static IMP orig_getter, orig_entry_for_key;
+static IMP orig_getter, orig_entry_for_key, orig_setter;
 static long last_gen = -2;
 
 static long
@@ -163,6 +164,38 @@ my_entry_for_key(id self, SEL _cmd, id key)
 }
 
 static void
+my_setter(id self, SEL _cmd, id entry)
+{
+	id e = current;
+	((void (*)(id, SEL, id))orig_setter)(self, _cmd, e != nil ? e : entry);
+}
+
+/* poke=SELECTOR: a no-argument method of SpringBoard's status bar aggregator called after each change, so that it builds
+ * its data again (found with discover=1) */
+static void
+poke(void)
+{
+	NSString *sel = cfg[@"poke"];
+	Class c = objc_getClass("SBStatusBarStateAggregator");
+	if (sel.length == 0 || c == Nil) {
+		return;
+	}
+	@try {
+		id agg = [c respondsToSelector:sel_registerName("sharedInstance")] ?
+		    ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance")) : nil;
+		SEL s = NSSelectorFromString(sel);
+		if (agg != nil && [agg respondsToSelector:s]) {
+			((void (*)(id, SEL))objc_msgSend)(agg, s);
+			say(@"poke: -[SBStatusBarStateAggregator %@] called", sel);
+		} else {
+			say(@"poke: no aggregator (%@) or no %@", agg, sel);
+		}
+	} @catch (NSException *x) {
+		say(@"poke: %@", x.reason);
+	}
+}
+
+static void
 hook(void)
 {
 	Class c = objc_getClass("STStatusBarData");
@@ -174,7 +207,13 @@ hook(void)
 	if (k != NULL) {
 		orig_entry_for_key = method_setImplementation(k, (IMP)my_entry_for_key);
 	}
-	say(@"hook: STStatusBarData -cellularEntry %s, -entryForKey: %s", m ? "hooked" : "NOT FOUND", k ? "hooked" : "not found");
+	Class mc = objc_getClass("STMutableStatusBarData");
+	Method st = mc ? class_getInstanceMethod(mc, sel_registerName("setCellularEntry:")) : NULL;
+	if (st != NULL) {
+		orig_setter = method_setImplementation(st, (IMP)my_setter);
+	}
+	say(@"hook: STStatusBarData -cellularEntry %s, -entryForKey: %s, STMutableStatusBarData -setCellularEntry: %s",
+	    m ? "hooked" : "NOT FOUND", k ? "hooked" : "not found", st ? "hooked" : "not found");
 }
 
 static void
@@ -246,6 +285,7 @@ tick(void)
 	if (e != nil && ([mode isEqualToString:@"publish"] || [mode isEqualToString:@"both"])) {
 		publish(e);
 	}
+	poke();
 }
 
 __attribute__((constructor)) static void
