@@ -96,6 +96,13 @@ dt_prop_padded(struct dt_writer *w, const char *name, const char *value, uint32_
  * what the framebuffer is: sRGB.
  */
 static int gamut_p3;    /* boot-arg gamut=p3 (a test): the iPhone's own "P3" left in place */
+/*
+ * boot-arg adt_layer=s9: the kernel is an ios-27 one (xnu-12377) of the S9's machine layer, built for another board of it
+ * (FRANKEL: the Pixel 10). That layer finds its platform expert, cores and display by other names than xnu-8796's HakiOS
+ * kernels do, wants 256 bytes of seed, and its console by /defaults "serial-device" (docs/ios27/PIXEL10.md). Off: the tree is
+ * exactly what it was for every other kernel.
+ */
+static int adt_layer_s9;
 
 static void
 dt_identity(struct dt_writer *w, const struct identity_prop *props, uint32_t count, const unsigned char *data)
@@ -104,6 +111,18 @@ dt_identity(struct dt_writer *w, const struct identity_prop *props, uint32_t cou
 		if (str_eq(props[i].name, "artwork-display-gamut") && !gamut_p3) {
 			dt_prop(w, props[i].name, "sRGB", 5);
 			continue;
+		}
+		if (adt_layer_s9 && props == identity_root && str_eq(props[i].name, "compatible")) {
+			/* the identity's names, then the board's: SweetPlatformExpert matches "google,lga" (KernelConfigTables.cpp, FRANKEL) */
+			static char compat[160];
+			static const char board[] = "google,lga-frankel\0google,lga";
+			uint32_t n = props[i].length, b = (uint32_t)sizeof(board);
+			if (n + b <= sizeof(compat)) {
+				memcpy(compat, data + props[i].offset, n);
+				memcpy(compat + n, board, b);
+				dt_prop(w, props[i].name, compat, n + b);
+				continue;
+			}
 		}
 		dt_prop(w, props[i].name, data + props[i].offset, props[i].length);
 	}

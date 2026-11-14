@@ -1,5 +1,8 @@
 /* What a device is to the loader: one struct platform per device (platforms/), told apart at boot. */
 
+/* adt_layer=s9: the console UART node's phandle, named by /defaults "serial-device" */
+#define ADT_UART_PHANDLE 0x5c10a000u
+
 struct platform {
 	const char *name;
 	uint64_t io_base, io_size;       /* one window covering the SoC peripherals */
@@ -35,4 +38,5 @@ struct platform {
 	uint8_t extra_ram_off;           /* ... only with extra_ram=1 among the kernel's arguments (otherwise: unless extra_ram=0) */
 	const char *data_part;           /* a port with no darwin: the one partition, by name, ufs_write=1 may write (block_is_data_part) */
 	const struct platform *sibling_of; /* not NULL: told apart from this one only by loader_platform= (platform_sibling) */
+	uint64_t dw_uart;                /* a DesignWare 16550 UART (reg-shift 2, 32-bit), for kernels that take one (adt_layer=s9), 0: none */
 };
