@@ -84,6 +84,10 @@ mkdir -p "$TMP/control" && tar -C "$TMP/control" -xf "$TMP"/control.tar.* 2>/dev
 	echo "Status: install ok installed"
 	echo
 } >> "$OUT/root/var/jb/Library/dpkg/status"
+# and its record in dpkg's info directory (file list, sums, scripts): without the list dpkg warns "files list file for
+# package 'org.coolstar.sileo' missing" at every run, "dpkg --audit" calls it broken, and an upgrade or removal of Sileo
+# cannot know its files (tools/ios27/sileo/dpkg-info.py)
+python3 "$(dirname "$0")/ios27/sileo/dpkg-info.py" "$OUT/debs/sileo.deb" "$OUT/root/var/jb/Library/dpkg" --prefix-root "$OUT/root"
 
 # ElleKit: the tweak-injection framework (Cydia Substrate's modern replacement). It is what loads a
 # tweak's .dylib into a process and does the function and method hooking; on a rootless jailbreak the
@@ -117,6 +121,7 @@ ln -s /var/jb/usr/lib/TweakInject "$OUT/root/var/jb/Library/MobileSubstrate/Dyna
 	echo "Status: install ok installed"
 	echo
 } >> "$OUT/root/var/jb/Library/dpkg/status"
+python3 "$(dirname "$0")/ios27/sileo/dpkg-info.py" "$OUT/debs/$EK" "$OUT/root/var/jb/Library/dpkg" --prefix-root "$OUT/root"
 fi
 
 # Newer versions of what the bootstrap carries, and anything else worth having before the first boot:
@@ -223,6 +228,11 @@ cat > "$OUT/root/var/jb/prep.sh" <<'PREP'
 # Run once per boot, after the prefix is at /var/jb (com.hakios.jbseed does it; rc.jobs.sileo too). What is
 # done once for a prefix is done once for one that stays, on a kept /private/var: the mark says so.
 [ -e /var/jb/.prepared ] || /var/jb/usr/libexec/firmware
+# firmware's packages ("firmware", cy+*, gsc.*) have a file list that names no file and no sums file, which "dpkg --audit"
+# reports as 165 packages to reinstall: for a package with no files, an empty sums file is the truth
+for l in /var/jb/Library/dpkg/info/*.list; do
+	[ -e "${l%.list}.md5sums" ] || [ -n "$(/var/jb/usr/bin/grep -v -x -e /. "$l" | /var/jb/usr/bin/head -1)" ] || : > "${l%.list}.md5sums"
+done
 # The prefix's applications: in the system image they are in /Applications already (userland/build.sh),
 # where LaunchServices finds them by itself; with the Darwin volume on the flash as the root they are not,
 # and are registered from the prefix as a rootless jailbreak does it (uikittools' uicache) -- by where the
