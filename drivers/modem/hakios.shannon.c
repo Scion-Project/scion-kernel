@@ -131,6 +131,8 @@
  *   cp_if_kb=N   with cp_if=1: at most N KB through pdp_ip0 in a boot, both ways (2048 by default; the owner's mobile plan), then it drops
  *   cp_route=1   with cp_if=1: an IPv4 default route through pdp_ip0 (only when there is none yet: Wi-Fi's wins)
  *   cp_nv=2      the phone's own NV data read at boot from the EFS partition (/nv_data.bin, read-only, never mounted, never written), kept in RAM only; the CP's file requests for it (RFS NV read/write) are answered from that copy and its writes kept there for the run, never written back
+ *   cp_rfs=1     with cp_nv=2: the CP's file opens (RFS command 0x11, e.g. CP_OMC_AUDIO_SLSI.bin) answered "not there" (handle -1,
+ *                ENOENT) from RAM; nothing is read or opened. Off: they stay unanswered
  *   cp_vss=0     the image's VSS part (the voice processor's) is not copied
  *   cp_rev=N     the board's revision told to the modem (26, this phone's)
  *   cp_ds=N      the dual SIM field told to the modem (0)
@@ -154,6 +156,7 @@
 #include <sys/hakios.input.h>
 #include <sys/hakios.log.h>
 #include <sys/hakios.physmap.h>
+#include <sys/kauth.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/hakios.xnu.h>
@@ -354,6 +357,13 @@ static struct {
 	uint32_t if_on, route_on;       /* cp_if=1, cp_route=1 */
 	uint32_t if_kb;                 /* cp_if_kb=N */
 	uint32_t dropped[NRINGS];       /* such frames dropped */
+	/* the modem's state for user space (kern.hakios.cp.info; kern.hakios.cp.addr for root): no identity in any of it */
+	uint8_t dns4b[4];               /* the context's second DNS server (never logged) */
+	int tech, bars, dbm;            /* the registration's technology, the icon's bars, the strength in dBm; -1/0 none yet */
+	char oper[8];                   /* the serving network's operator code (country + network: the same for everyone on it) */
+	uint32_t gen;                   /* bumped on every change of the above */
+	uint32_t rfs_open, rfs_opens;   /* cp_rfs=1: the CP's file opens answered "not there" (from RAM: nothing is read) */
+	uint64_t busy_ms;               /* the last time something came from the CP or waited to go to it */
 } cp;
 
 static int cp_go;
@@ -1243,6 +1253,10 @@ fmt_received(const uint8_t *m, uint32_t n)
 			/* the address and the first DNS server, for stage 7: used only if both look like host addresses */
 			memcpy(cp.ip4, m + 10, 4);
 			memcpy(cp.dns4, m + 14, 4);
+			if (n >= 7 + 3 + 12) {
+				memcpy(cp.dns4b, m + 18, 4);
+			}
+			cp.gen++;
 			cp.have4 = cp.ip4[0] != 0 && cp.ip4[0] != 127 && cp.ip4[0] < 224 && cp.dns4[0] != 0 &&
 			    cp.dns4[0] != 127 && cp.dns4[0] < 224;
 			if (!cp.ping_given) {
@@ -1289,6 +1303,8 @@ fmt_received(const uint8_t *m, uint32_t n)
 			cp.reg_changes++;
 		}
 		cp.reg_state = m[9];
+		cp.tech = m[7];
+		cp.gen++;
 		if ((m[9] == 2 || m[9] == 6) && cp.registered_ms == 0 && cp.normal_asked) {
 			cp.registered_ms = now_ms();
 			say("cp:   REGISTERED %llu ms after normal mode was asked for\n", cp.registered_ms - cp.normal_ms);
@@ -1315,10 +1331,20 @@ fmt_received(const uint8_t *m, uint32_t n)
 			}
 		}
 		code[k] = 0;
+		if (k != 0) {
+			strlcpy(cp.oper, code, sizeof(cp.oper));
+			cp.gen++;
+		}
 		say("cp:   SERVING NETWORK: operator code %s (of %u bytes)\n", k != 0 ? code : "not found in it", n - 7);
 	} else if (group == 0x07 && (index == 0x01 || index == 0x06) && n >= 7 + 4) {
 		/* signal: the display group's icon (number 1) and strength (number 6) words: levels, no identity */
 		cp.signals++;
+		if (index == 1 && (m[7] & 1) != 0) {
+			cp.bars = m[8];         /* the icon's flags (bit 0: the signal's part is valid), then its bars */
+		} else if (index == 6) {
+			cp.dbm = -(int)m[7];    /* the strength report: minus dBm */
+		}
+		cp.gen++;
 		if (cp.signals <= 6 || cp.signals % 10 == 0) {
 			say("cp:   SIGNAL (%s, the %uth): %02x %02x %02x %02x %02x %02x\n", index == 1 ? "icons" : "strength",
 			    cp.signals, m[7], m[8], m[9], m[10], n > 11 ? m[11] : 0, n > 12 ? m[12] : 0);
@@ -1473,8 +1499,20 @@ rfs_received(const uint8_t *m, uint32_t n)
 		    cp.rfs_requests, cmd, id, len);
 		return;
 	}
-	say("cp: FILE REQUEST %u from the CP (not answered): command %#x, id %u, %u bytes in all\n", cp.rfs_requests, cmd, id,
-	    len);
+	if (cmd == 0x11 && cp.rfs_open != 0 && cp.nv_ram != NULL) {
+		/* cp_rfs=1: an OPEN FILE answered from RAM: the file is not there. The confirmation is the RFS header and two
+		 * 32-bit words, the handle (-1) and errno (2, ENOENT): 14 bytes, as Samsung's file server sends it. Nothing is
+		 * read or opened anywhere */
+		static const int32_t none[2] = { -1, 2 };
+
+		cp.rfs_opens++;
+		(void)rfs_answer(0x11, id, (const uint8_t *)none, sizeof(none));
+		say("cp: FILE REQUEST %u from the CP: OPEN FILE (id %u, %u bytes): answered \"not there\" (ENOENT), the %uth\n",
+		    cp.rfs_requests, id, len, cp.rfs_opens);
+	} else {
+		say("cp: FILE REQUEST %u from the CP (not answered): command %#x, id %u, %u bytes in all\n", cp.rfs_requests, cmd,
+		    id, len);
+	}
 	/* a path, if the request starts with one after a few words: printable text of 4 characters or more with a '/' or '.' */
 	for (uint32_t i = 6; i + 4 < n && i < 64; i++) {
 		uint32_t k = i;
@@ -1828,6 +1866,50 @@ pdp_attach(void)
 		sock_close(so);
 	}
 }
+
+/* kern.hakios.cp.info: the modem's state as one line for user space (scion-celld, the status bar's library):
+ * registration, technology, bars, dBm, operator code, SIM status, phone state, data (1: pdp_ip0 up with its address),
+ * bytes through pdp_ip0 this boot, the budget, and a counter that moves on every change. No identity in it. */
+static int
+cp_info_sysctl SYSCTL_HANDLER_ARGS
+{
+#pragma unused(oidp, arg1, arg2)
+	char line[200];
+
+	snprintf(line, sizeof(line), "stage=%u state=%u reg=%d tech=%d bars=%d dbm=%d oper=%s sim=%d phone=%d data=%d used=%llu "
+	    "budget=%llu gen=%u", cp.stage, cp.state, cp.reg_state, cp.tech, cp.bars, cp.dbm, cp.oper[0] != 0 ? cp.oper : "-",
+	    cp.sim_status, cp.phone_state, pdp.addressed && cp.data_step == 3 ? 1 : 0, pdp.in_bytes + pdp.out_bytes,
+	    (uint64_t)cp.if_kb * 1024, cp.gen);
+	return SYSCTL_OUT(req, line, strlen(line) + 1);
+}
+
+/* kern.hakios.cp.addr: "ADDRESS DNS1 DNS2" of the active context, root only (empty while there is none): what
+ * scion-celld gives configd. Never logged. */
+static int
+cp_addr_sysctl SYSCTL_HANDLER_ARGS
+{
+#pragma unused(oidp, arg1, arg2)
+	char line[64] = "";
+
+	if (req->newptr != USER_ADDR_NULL) {
+		return EPERM;
+	}
+	if (!kauth_cred_issuser(kauth_cred_get())) {
+		return EPERM;
+	}
+	if (pdp.addressed && cp.have4 && cp.data_step == 3) {
+		snprintf(line, sizeof(line), "%u.%u.%u.%u %u.%u.%u.%u %u.%u.%u.%u", cp.ip4[0], cp.ip4[1], cp.ip4[2], cp.ip4[3],
+		    cp.dns4[0], cp.dns4[1], cp.dns4[2], cp.dns4[3], cp.dns4b[0], cp.dns4b[1], cp.dns4b[2], cp.dns4b[3]);
+	}
+	int e = SYSCTL_OUT(req, line, strlen(line) + 1);
+	bzero(line, sizeof(line));
+	return e;
+}
+
+SYSCTL_PROC(_kern_hakios_cp, OID_AUTO, info, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, NULL, 0, cp_info_sysctl, "A",
+    "the modem's state for user space: registration, technology, bars, dBm, operator code, SIM, phone state, data");
+SYSCTL_PROC(_kern_hakios_cp, OID_AUTO, addr, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, NULL, 0, cp_addr_sysctl, "A",
+    "the data context's address and DNS servers (root only; empty without one)");
 
 static void
 data_received(uint8_t ch, const uint8_t *p, uint32_t n)
@@ -2223,6 +2305,8 @@ poll_once(void)
 
 	if (pending != 0) {
 		uint16_t msg = (uint16_t)rd(cp.mbox, MBOX_ISSR(WORD_CP_MSG));
+
+		cp.busy_ms = now_ms();
 
 		wr(cp.mbox, MBOX_INTCR0, pending);
 		if (pending & (1u << (16 + IRQ_CP_MSG))) {
@@ -2662,7 +2746,19 @@ cp_thread(__unused void *arg, __unused wait_result_t result)
 		if (now_ms() >= until) {
 			break;
 		}
-		IOSleep(1);
+		if (cp.if_on && cp.data_step == 3 && pdp.ifp != NULL && cp.normal_asked && !cp.back_asked) {
+			/* the everyday steady state (cp_if=1, the context up): every 1 ms while anything moves, every 10 ms after
+			 * 0.3 s of quiet, every 50 ms after 5 s (the mailbox is polled: its interrupts stay masked) */
+			uint64_t quiet;
+
+			if (pdp.head != pdp.tail) {
+				cp.busy_ms = now_ms();
+			}
+			quiet = now_ms() - cp.busy_ms;
+			IOSleep(quiet > 5000 ? 50 : quiet > 300 ? 10 : 1);
+		} else {
+			IOSleep(1);
+		}
 	}
 	if (cp.normal_asked) {
 		say("cp: STAGE 5 SUMMARY: normal mode asked; registered: %s; last registration state %d; %u changes of it; %u "
@@ -2698,7 +2794,7 @@ hakios_shannon_quiesce(void)
 {
 	if (cp.started) {
 		cp_go = 2;
-		for (uint32_t i = 0; i < 300 && cp.started; i++) {
+		for (uint32_t i = 0; i < 500 && cp.started; i++) {
 			IOSleep(10);
 		}
 	}
@@ -2719,6 +2815,8 @@ hakios_shannon_init(void)
 	cp.wait_s = cp.stage >= 4 ? 25 : 20;
 	cp.delay_s = 30;
 	cp.phone_state = cp.sim_status = cp.reg_state = -1;
+	cp.tech = cp.bars = -1;
+	PE_parse_boot_argn("cp_rfs", &cp.rfs_open, sizeof(cp.rfs_open));
 	cp.vss_on = 1;
 	PE_parse_boot_argn("cp_nv", &cp.nv_file, sizeof(cp.nv_file));
 	PE_parse_boot_argn("cp_if", &cp.if_on, sizeof(cp.if_on));
