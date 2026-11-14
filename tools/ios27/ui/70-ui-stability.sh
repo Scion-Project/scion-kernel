@@ -9,15 +9,28 @@
 #    the network set the time. The job keeps the time in /private/var/db/scion-lasttime (every 5 minutes, and at the
 #    end of a clean shutdown it is at most 5 minutes old) and, once a boot, puts the clock forward to it when the clock
 #    is behind. Nothing is put back; timed's network time wins as soon as it comes.
+# 3. With SCION_TZ=Area/City (e.g. Europe/Dublin): the system time zone (/private/var/db/timezone/localtime), which this root
+#    had as US/Pacific. The link it had is kept in /private/var/db/scion-localtime-before; undo puts it back.
 # Undo removes the job and its script; the directories of 1 stay (harmless, and the media library may have filled them).
 set -euo pipefail
 R=$1
 J=$R/System/Library/xpc/launchd.plist
 [[ -f $J ]] || { echo "70-ui-stability: $R has no launchd.plist" >&2; exit 1; }
 S=$R/usr/local/libexec/scion-lasttime.sh
+Z=$R/private/var/db/timezone; ZB=$R/private/var/db/scion-localtime-before    # the zone directory is mode 555: opened for the link only
+zlink() { local m; m=$(stat -f %Lp "$Z"); chmod u+w "$Z"; ln -sfn "$1" "$Z/localtime"; chmod "$m" "$Z"; }
 if [[ ${2:-} == undo ]]; then
 	rm -f "$S"
+	if [[ -f $ZB ]]; then
+		zlink "$(cat "$ZB")" && rm -f "$ZB"
+	fi
 else
+	if [[ -n ${SCION_TZ:-} ]]; then
+		[[ -e $R/usr/share/zoneinfo.default/$SCION_TZ || -e $R/usr/share/zoneinfo/$SCION_TZ ]] || { echo "70-ui-stability: no zone $SCION_TZ" >&2; exit 1; }
+		[[ -f $ZB ]] || readlink "$Z/localtime" > "$ZB"
+		zlink "/var/db/timezone/zoneinfo/$SCION_TZ"
+		echo "70-ui-stability: time zone $SCION_TZ (was $(cat "$ZB"))"
+	fi
 	M=$R/private/var/mobile/Media/iTunes_Control
 	mkdir -p "$M/iTunes" "$M/Music"
 	chmod 0755 "$M" "$M/iTunes" "$M/Music"
