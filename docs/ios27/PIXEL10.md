@@ -66,7 +66,7 @@ a boot argument; not done here.
 | Page size | 4 KB (A5XELTE layout) | 16 KB (SWEET's, iOS's own) | the iOS-native page size |
 | Console | framebuffer, USB CDC-ACM (dwc3) | DesignWare 16550 at `0x0DB62000` (reg-shift 2, 32-bit) on USB-C SBU after `fastboot oem uart enable`; framebuffer; ramoops | `snps,dw-apb-uart` support added |
 | Boot chain | S-Boot -> Starbite shim (GPL, private) -> XNU | ABL -> lga shim (Scion) -> xnuloader (Scion) -> XNU | Scion's own code end to end; an ADT built by `xnuloader` (`adt_layer=s9`) |
-| Display | command-mode panel through DECON, kicked by the S9 driver | command-mode DSI (flea), DC9x00, frame kick at `OUTPUT0_START` | the 8796 line's `lga_kick` is not yet on this base (gap) |
+| Display | command-mode panel through DECON, kicked by the S9 driver | command-mode DSI (flea), DC9x00, frame kick at `OUTPUT0_START` | the 8796 line's frame kicker (`lga_kick=HZ`), carried to this base |
 | RAM | 4 GB, banks | 12 GB, ABL's map | xnuloader's window (largest free block, up to 6 GB) |
 
 What the S9 has that the Pixel does not need: the AOT/PAC rewrite and its repair steps, PAC trap emulation (`sweet_a64e`, compiled
@@ -80,7 +80,7 @@ in but nothing reaches it), the LSE stubs, the Exynos PMU reset path for `sweetr
 | Timers / GIC | the layer's GICv3 (`pe_fiq.c`, SWEET), `GICR_PE_SIZE` 256 KB, timer INTID 27 | `lga.dtsi`, `frankel.c` | QEMU `virt,gic-version=4`: 8 cores, SGIs verified |
 | CPU bring-up / PSCI | SweetCPU, PSCI `CPU_ON` by `hvc #0` to the shim | `frankel.c` (`psci_hvc`) | QEMU: 8/8 cores came alive through the shim. A520/X4 errata: open (blazer kept to the A725s) |
 | UFS | Scion's `hakios.ufs.c` + `hakios.ufshc.c` (read only; `lga` entry, `ufs_native_cold=1` path behind its existing argument), `rd=ufsroot0 ufs_root=NAME` | `lga-check.md`, Google `ufs-google.c` | QEMU (`lga-qemu`, QEMU's UFS): GPT read, iOS 27 root mounted read only. lga entry: not run; `lga-check` mismatches M1-M2 (LPB state) still open |
-| Display | framebuffer from boot_args (xnuloader's GOP via the shim), `sweet-fbcon`, AppleCLCD (`sweet,display`) | `pixel10-bringup.md` | written; QEMU had no framebuffer in these runs. **Frame kicker not ported** to this base: on the phone a command-mode panel may show nothing new |
+| Display | framebuffer from boot_args (xnuloader's GOP via the shim), `sweet-fbcon`, AppleCLCD (`sweet,display`); the frame kicker `hakios.lga_dpu.c` (`lga_kick=HZ`, off without it; only on a controller that reads as a DC9x00) | `pixel10-bringup.md`, `lga-check.md` | framebuffer: written, QEMU had none in these runs. Kicker: QEMU against RAM standing in for the DC9x00 (`q/k1-kicker.log`): it reads the chip id, writes `OUTPUT0_START`/`SW_CONFIG` every 33 ms; the counter cannot move there (plumbing only, as on 16.5) |
 | Touch | none (FocalTech on the AOC's SPI, bus negotiated with the AOC) | `frankel` README | missing |
 | USB | none (DWC3 at 0x0C400000) | | missing; the S9's dwc3 console is refused on this board |
 | PMIC / charging | none, read or write; the S9 PMIC entry points are answered "no" (`frankel_stubs.c`) | | missing by design; any write needs the owner's go |
@@ -102,6 +102,7 @@ it). One tree for both phones: FRANKEL is a machine configuration of the same la
 - UFS: `profiles/ios-27.copy` (scion-kernel `p10/ios27-frankel`) copies Scion's UFS driver and PCI bridge into the tree; only FRANKEL
   compiles them. `hakios.ufs.c` now maps an unmapped buffer (`buf_map`) instead of copying to NULL (the first QEMU root mount hit that).
 - The SWEET board's Redmi-specific early framebuffer (`0x9c000000`) is off for FRANKEL.
+- The 16.5 line's frame kicker (`hakios.lga_dpu.c`, `lga_kick=HZ lga_dpu=BASE`) is built for FRANKEL, unchanged, behind the same argument.
 
 Build (mini, as the S9's): the S9's `kbuild` with `MACHINE_CONFIG=FRANKEL`; `~/s9/agents/p10-ios27-port/kbuild.sh TAG FRANKEL`
 (`out/TAG/kernel`, `mach.development.frankel`). It links; about 20.9 MB.
@@ -158,7 +159,7 @@ mini has 40 GB free and the build wants 62; the QEMU runs used an existing S9 ro
   1792); `xnuloader`'s `identity.h` must be made from the iOS 27 N104AP device tree (`mkidentity.py`, the builder's own IPSW), not
   the 16.5 one the mini's copy has.
 - **Graphics**: CPU only (CoreAnimation software path) until there is a PowerVR driver; expect the S9's pre-GPU speed or slower at
-  first (no frame kicker yet on this base).
+  first.
 
 ## First test (for the owner)
 
@@ -178,7 +179,7 @@ changes a Pixel, and no iOS 27 Pixel image has been made: the plan says what wou
 4. Back to Android: every run is `fastboot boot`, so a restart (hold Power) brings Android back; `fastboot erase userdata` (or a factory
    reset) undoes the system image write. Re-locking wipes again.
 5. Risks: unlock wipes (decisive for a daily phone: a second-hand Pixel 10 is the better test phone); a command-mode panel may stay dark
-   (the frame kicker is not on this base yet: run the 16.5 probes first); the A520/X4 errata (start with `cpus=1`, then the A725s, as
+   (the frame kicker is there, but whether a kick is needed and works is the 16.5 probes' question: run them first); the A520/X4 errata (start with `cpus=1`, then the A725s, as
    blazer did); everything else in the 16.5 plan (ABL refusing, SMMU, UFS host down). No PMIC, OTP, fuse, GSA, bl31 or RPMB write
    exists in this kernel or the shim (the shim's `audit.py` passes; the cold UFS path keeps its own audit).
 
@@ -186,7 +187,7 @@ changes a Pixel, and no iOS 27 Pixel image has been made: the plan says what wou
 
 - Kernel builds: FRANKEL links on the mini (Xcode 16.4 toolchain `x164`, KDK 26.5 25F71), iOS target.
 - **S9 byte check** (mini, 14 November, both builds with scion-kernel `p10/ios27-frankel` at one build path `dxb-s9cmp`, `NOWIFI`):
-  the STARLTE kernel from the integration branch (`7fbd34c`) and from `p10/frankel-ios27` (`edec0d1`). Of 1226 objects, 1221 are
+  the STARLTE kernel from the integration branch (`7fbd34c`) and from `p10/frankel-ios27` (`edec0d1`, and again at `153e1bf` with the same result). Of 1226 objects, 1221 are
   byte-identical; `version.o` differs (build date, commit), and `KernelConfigTables.cpo`, `pe_serial.o`, `arm_vm_init.o`,
   `sweet_early.o` differ only inside their DWARF debug sections (source file checksums): their code and every other section are
   identical. The two kernels have all 93983 symbols at the same addresses and every section identical except `__TEXT,__const` (34
