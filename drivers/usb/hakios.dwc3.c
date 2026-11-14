@@ -1265,6 +1265,146 @@ console_sysctl(char *arg)
 }
 
 /*
+ * devsh=1 (boot-arg, off by default; for a test image only): a line of shell for a root helper in user space, typed on
+ * this console. "sh WORDS" queues WORDS (a line that ends in a backslash is continued by the next "sh" line, up to
+ * DEVSH_MAX bytes, since a console line is at most 127); the helper (tools/ios27/devsh/, a launchd job that only a test
+ * root carries) takes each with sysctl kern.hakios.devsh.cmd (root only; the read takes the line off the queue) and puts
+ * what it prints back here, one line at a time, with sysctl kern.hakios.devsh.out (root only), as "sh| ...". Nothing
+ * listens on the network; the only way in is the USB cable. Without devsh=1 both names answer ENOENT and "sh" says so.
+ */
+#include <sys/kauth.h>
+#define DEVSH_MAX       1024
+#define DEVSH_SLOTS     8
+static int devsh_on = -1;
+static char devsh_part[DEVSH_MAX];
+static size_t devsh_part_len;
+static char devsh_q[DEVSH_SLOTS][DEVSH_MAX];
+static uint32_t devsh_head, devsh_tail;
+static uint64_t devsh_n;
+static LCK_GRP_DECLARE(devsh_grp, "hakios_devsh");
+static LCK_SPIN_DECLARE(devsh_lock, &devsh_grp);
+
+static bool
+devsh_enabled(void)
+{
+	if (devsh_on < 0) {
+		int v = 0;
+
+		(void)PE_parse_boot_argn("devsh", &v, sizeof(v));
+		devsh_on = v != 0;
+	}
+	return devsh_on == 1;
+}
+
+/* sh WORDS[\] */
+static void
+console_devsh(const char *arg)
+{
+	size_t n = strlen(arg);
+	bool more = n > 0 && arg[n - 1] == '\\';
+	bool queued = false, full = false;
+
+	if (!devsh_enabled()) {
+		con("usb: sh: off (boot-arg devsh=1, a test image only)\n");
+		return;
+	}
+	if (more) {
+		n--;
+	}
+	lck_spin_lock(&devsh_lock);
+	if (devsh_part_len + n >= DEVSH_MAX) {
+		devsh_part_len = 0;
+		lck_spin_unlock(&devsh_lock);
+		con("usb: sh: longer than %d bytes, dropped\n", DEVSH_MAX - 1);
+		return;
+	}
+	memcpy(devsh_part + devsh_part_len, arg, n);
+	devsh_part_len += n;
+	devsh_part[devsh_part_len] = 0;
+	if (!more) {
+		if (devsh_head - devsh_tail >= DEVSH_SLOTS) {
+			full = true;
+		} else {
+			strlcpy(devsh_q[devsh_head % DEVSH_SLOTS], devsh_part, DEVSH_MAX);
+			devsh_head++;
+			devsh_n++;
+			queued = true;
+		}
+		devsh_part_len = 0;
+	}
+	lck_spin_unlock(&devsh_lock);
+	if (full) {
+		con("usb: sh: %d lines wait already (is the helper running?), dropped\n", DEVSH_SLOTS);
+	} else if (queued) {
+		con("usb: sh: #%llu queued\n", devsh_n);
+	}
+}
+
+static int
+devsh_cmd_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	char *line;
+	int error;
+
+	if (!devsh_enabled()) {
+		return ENOENT;
+	}
+	if (req->newptr != USER_ADDR_NULL || !kauth_cred_issuser(kauth_cred_get())) {
+		return EPERM;
+	}
+	if (req->oldptr == USER_ADDR_NULL) {
+		return SYSCTL_OUT(req, NULL, DEVSH_MAX);
+	}
+	line = kalloc_data(DEVSH_MAX, Z_WAITOK | Z_ZERO);
+	if (line == NULL) {
+		return ENOMEM;
+	}
+	lck_spin_lock(&devsh_lock);
+	if (devsh_head != devsh_tail) {
+		strlcpy(line, devsh_q[devsh_tail % DEVSH_SLOTS], DEVSH_MAX);
+		devsh_tail++;
+	}
+	lck_spin_unlock(&devsh_lock);
+	error = SYSCTL_OUT(req, line, strlen(line) + 1);
+	kfree_data(line, DEVSH_MAX);
+	return error;
+}
+
+static int
+devsh_out_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	char buf[256];
+	size_t len;
+	int error;
+
+	if (!devsh_enabled()) {
+		return ENOENT;
+	}
+	if (req->newptr == USER_ADDR_NULL) {
+		return SYSCTL_OUT(req, "", 1);
+	}
+	if (!kauth_cred_issuser(kauth_cred_get())) {
+		return EPERM;
+	}
+	len = MIN(req->newlen, sizeof(buf) - 1);
+	if ((error = SYSCTL_IN(req, buf, len)) != 0) {
+		return error;
+	}
+	buf[len] = 0;
+	while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == 0)) {
+		buf[--len] = 0;
+	}
+	con("sh| %s\n", buf);
+	return 0;
+}
+
+SYSCTL_NODE(_kern_hakios, OID_AUTO, devsh, CTLFLAG_RW | CTLFLAG_LOCKED, 0, "devsh=1: the console's \"sh\" lines for a root helper");
+SYSCTL_PROC(_kern_hakios_devsh, OID_AUTO, cmd, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, NULL, 0, devsh_cmd_sysctl, "A",
+    "the next queued line (root; reading takes it)");
+SYSCTL_PROC(_kern_hakios_devsh, OID_AUTO, out, CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0, devsh_out_sysctl, "A",
+    "a line of the helper's output, to the console (root)");
+
+/*
  * swipe [l|r|u|d|lr|ud] [N] [MS] [GAP]: a finger drawn across the screen N times (default lr 6 250 1000: left, right,
  * left ..., each stroke 250 ms, a second apart), posted to the touch queue as the touch screen's driver posts its
  * events (hakios_touch_post(), one every 8 ms, the S6SY761's pace, with the governor's touch boost), so a run can be
@@ -1488,7 +1628,8 @@ console(char *line)
 		    "[PORT [PATH]] (a TCP connection and an HTTP GET, the bytes back), wifi stat (en0's frames by size and kind, IP, UDP "
 		    "and TCP counts), wifi names [off] (DNS questions and answers, TCP connections, as they come), touch X Y "
 		    "[X2 Y2 [MS]] (a tap or a swipe, in thousandths of the screen), button lock|home|up|down (a press), usb [restart | "
-		    "drop MS | unplug MS | muic MS | vbus MS | watch on|off] (the link and the cable), return (end the run)\n");
+		    "drop MS | unplug MS | muic MS | vbus MS | watch on|off] (the link and the cable), sh LINE (devsh=1: a line for the test "
+		    "root's helper; a trailing backslash continues it), return (end the run)\n");
 	} else if (strcmp(line, "stat") == 0) {
 		con("usb: %s, %s speed, %llu resets, %llu requests (%llu stalled), %llu bytes sent, %llu received, %u lost, %llu events, "
 		    "%llu shots, %llu restarts\n", usb_state, high_speed ? "high" : "full", n_resets, n_setups, n_stalls, n_in, n_out,
@@ -1551,6 +1692,8 @@ console(char *line)
 		hakios_bt_console(arg);
 	} else if (strcmp(line, "ufs") == 0) {
 		hakios_ufs_summary("asked on the USB console", 1);
+	} else if (strcmp(line, "sh") == 0) {
+		console_devsh(arg);
 	} else if (strcmp(line, "return") == 0) {
 		con("usb: ending the run: the loader will restart the phone\n");
 		want_return = true;     /* done by tick() once this event is handled and the controller let go */
