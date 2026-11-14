@@ -3713,3 +3713,25 @@ hakios_ufs_init(void)
 		}
 	}
 }
+
+/*
+ * The block device of the partition NAME (a GPT name, as /dev/ufs_NAME has it), for a kernel that roots on it directly:
+ * FRANKEL's IOFindBSDRoot with rd=ufsroot0 (sweet_ufs_rootdev, ufs_root=NAME). ENODEV before hakios_ufs_init() made the
+ * nodes, ENOENT when no such partition. Nothing else changes here: the device is the read-only one every partition has.
+ */
+int hakios_ufs_dev_by_name(const char *name, dev_t *dev);
+int
+hakios_ufs_dev_by_name(const char *name, dev_t *dev)
+{
+	if (ufs_page == NULL || ufs_bmajor < 0) {
+		return ENODEV;
+	}
+	for (uint32_t i = 0; i < ufs_parts; i++) {
+		if ((ufs_page->part[i].flags & BLOCK_PART_UNIT) == 0 &&
+		    strcmp((const char *)ufs_page->part[i].name, name) == 0) {
+			*dev = makedev(ufs_bmajor, i);
+			return 0;
+		}
+	}
+	return ENOENT;
+}

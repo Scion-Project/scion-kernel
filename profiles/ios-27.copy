@@ -29,3 +29,11 @@ drivers/wifi/hakios.wlan.cpp iokit/Kernel/hakios.wlan.cpp
 drivers/net/hakios.net.c bsd/dev/hakios.net.c
 drivers/modem/hakios.shannon.c bsd/dev/hakios.shannon.c
 drivers/modem/hakios.ext4ro.h bsd/sys/hakios.ext4ro.h
+# FRANKEL (the Pixel 10, Scion-Project/xnu p10/frankel-ios27): Scion's own UFS driver for Google's host (read only; the lga
+# and lga-qemu entries, ufs_native=, ufs_native_soc=, ufs_native_ro=1) and the generic PCI host bridge it needs under QEMU.
+# Built only by the FRANKEL board (bsd/conf/files: optional scion_frankel); copied for every ios-27 tree, compiled by none other.
+drivers/virtio/hakios.pci.c bsd/dev/hakios.pci.c
+drivers/storage/ufs/hakios.ufs.c bsd/dev/hakios.ufs.c
+drivers/storage/ufs/hakios.ufshc.c bsd/dev/hakios.ufshc.c
+drivers/storage/ufs/hakios.ufshc.h bsd/dev/hakios.ufshc.h
+drivers/storage/ufs/hakios.ufshc.lga.h bsd/dev/hakios.ufshc.lga.h
