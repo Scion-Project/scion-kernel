@@ -1092,7 +1092,25 @@ ufs_strategy(buf_t bp)
 	if (offset + len > size) {
 		len = size - offset;
 	}
-	error = ufs_read(part, offset, (uint8_t *)buf_dataptr(bp), len);
+	/*
+	 * A buffer of pages with no kernel mapping (cluster I/O: an exec's page-in on xnu-12377's HFS) has no data pointer:
+	 * map it for the copy, as a block driver must (buf_map); a mapped one is read into as before.
+	 */
+	caddr_t dst = (caddr_t)buf_dataptr(bp);
+	bool mapped = false;
+	if (dst == NULL) {
+		if (buf_map(bp, &dst) != 0 || dst == NULL) {
+			buf_seterror(bp, EIO);
+			buf_setresid(bp, buf_count(bp));
+			buf_biodone(bp);
+			return;
+		}
+		mapped = true;
+	}
+	error = ufs_read(part, offset, (uint8_t *)dst, len);
+	if (mapped) {
+		(void)buf_unmap(bp);
+	}
 	buf_setresid(bp, (uint32_t)(buf_count(bp) - (error ? 0 : len)));
 	if (error) {
 		buf_seterror(bp, error);
