@@ -182,6 +182,7 @@ CP_IF_KB	arg	cp_if_kb	User space	k	hakios.shannon.c	with cp_if=1: at most N KB t
 CP_NV	arg	cp_nv	User space	k	hakios.shannon.c	the phone's own NV data, a file nv_data.bin the image's builder put beside the kernel, is given to the modem (none: zeros, and no stage 4)
 CP_PING	arg	cp_ping	User space	k	hakios.shannon.c	the address stage 7 sends its one echo request to (none: the context's first DNS server)
 CP_REV	arg	cp_rev	User space	k	hakios.shannon.c	the board's revision told to the modem (26, this phone's)
+CP_RFS	arg	cp_rfs	User space	k	hakios.shannon.c	an OPEN FILE answered from RAM: the file is not there
 CP_ROUTE	arg	cp_route	User space	k	hakios.shannon.c	with cp_if=1: an IPv4 default route through pdp_ip0 (only when there is none yet: Wi-Fi's wins)
 CP_SIM	arg	cp_sim	User space	k	hakios.shannon.c	in low power mode, once the SIM is ready, one read of its administrative data file (EF_AD, 4 bytes: no identity) is asked, to see if the modem takes
 CP_VSS	arg	cp_vss	User space	k	hakios.shannon.c	the image's VSS part (the voice processor's) is not copied

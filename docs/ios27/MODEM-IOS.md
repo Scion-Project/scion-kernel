@@ -14,6 +14,17 @@ binary, offset or table is in this file.
 | `cp_if=1` | The active data context becomes `pdp_ip0`: IPv4, point to point, with the context's address on it. The context stays up until `sysctl kern.hakios.cp.go=2` |
 | `cp_route=1` | An IPv4 default route through `pdp_ip0`, if there is none yet |
 | `cp_if_kb=N` | A per-boot byte budget on `pdp_ip0`, 2048 KB by default |
+| `cp_rfs=1` | With `cp_nv=2`: the CP's file opens (RFS command 0x11, e.g. `CP_OMC_AUDIO_SLSI.bin`) are answered "not there" (handle -1, errno 2) from RAM. Nothing is read or opened |
+| (always) | `kern.hakios.cp.info`: one line for user space (stage, registration, technology, bars, dBm, operator code, SIM, data, bytes used, budget, a change counter). `kern.hakios.cp.addr` (root only): the context's address and DNS servers |
+| (with `cp_if=1`) | Idle polling in the steady state (1 ms while anything moves, 10 ms after 0.3 s quiet, 50 ms after 5 s); a lost registration gets 10 minutes to come back; the modem is put in low power and reset on an iOS shutdown or restart (xnu `PEHaltRestartInternal`) |
+
+User space (`tools/ios27/modem/`, built by `build.sh`, installed by `66-celld.sh`):
+
+| Piece | What it does |
+|---|---|
+| `scion-celld` | Root daemon (job `com.scion.celld`). While the context is up it publishes `State:/Network/Service/<id>` (`PrimaryRank` Last), `.../IPv4` (address, `InterfaceName` pdp_ip0, `Router` = the address) and `.../DNS` (the context's servers) to configd; withdraws them when it goes. Exits at once on a boot without the modem |
+| `scion-bars` (`c.dylib`) | Injected into SpringBoard (`sweetinject=...;/usr/lib/c.dylib,SpringBoard`), on only while `/private/var/local/scion-bars` exists: the status bar's cellular entry (bars, the network's name) from `kern.hakios.cp.info` |
+| `scion-fetch`, job `com.scion.celltest` | Test roots only: one https GET by name through iOS's own stack, logged with configd's view and the routes |
 
 Seen on phone 1 (SM-G960F, GoMo SIM on eir, 272-03), 13 Nov 2026:
 - SIM ready, registered HOME.
@@ -82,3 +93,29 @@ What stays out of every path:
    (step 1 above).
 3. Then the status-bar library (step 2).
 4. Then decide on step 3 with the owner.
+
+## The CommCenter shim (plan only; not started: needs the owner's go)
+
+What a real CoreTelephony baseband would take, written down so that the decision can be made on facts:
+
+1. **Find what CommCenter opens.** On the iPhone12,1 identity CommCenter expects an Intel baseband: IOKit services of
+   Apple's baseband drivers (the PCIe "ARI" transport and its user client), a boot/firmware path (BBUpdater), and the
+   ARI protocol once the modem is up. On this port none of these services exist, so CommCenter decides there is no
+   baseband. The first step is read-only: boot with CommCenter's own logging and list every IOKit service, XPC service
+   and file it looks for (no code).
+2. **Two shapes, both large:**
+   - *An ARI baseband in the kernel:* a fake transport service (our own IOService with the matching names and a user
+     client) that answers ARI messages for the few groups CommCenter needs to say "SIM ready, registered, signal N,
+     data context up", translating to and from Samsung IPC (`hakios.shannon.c` already speaks the SIM status,
+     registration, signal and the data context). ARI's message set for this firmware generation is public only in
+     part (ARIstoteles, WiSec 2021); every message would have to be learned from CommCenter's behaviour, never from
+     Apple binaries copied into the tree.
+   - *A replacement for CommCenter's XPC services:* our own daemon answering `CTServerConnection` clients. The
+     interface is large and private; Settings, SpringBoard and many daemons use it.
+3. **What it would give:** SIM in Settings, the operator from the carrier bundle, bars everywhere, data through iOS's own
+   path (CommCenter makes `pdp_ip` and the configd service itself, replacing `scion-celld`).
+4. **Limits that stay:** no IMEI or NV change, no unlock, no calls or SMS without the owner's say-so, EFS read-only,
+   no Apple binary patched.
+5. **Smallest useful first step if the owner says go:** step 1 (the list), then a kernel-only stub service that makes
+   CommCenter log "baseband found" and nothing more, behind a boot-arg.
+
