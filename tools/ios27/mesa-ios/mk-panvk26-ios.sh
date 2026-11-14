@@ -16,6 +16,7 @@ if [ ! -d mesa-$VERSION ]; then
 	[ -f mesa-$VERSION.tar.xz ] || curl -sL --fail -o mesa-$VERSION.tar.xz https://archive.mesa3d.org/mesa-$VERSION.tar.xz
 	tar xJf mesa-$VERSION.tar.xz
 	patch -s -p1 -d mesa-$VERSION < "$HERE/mesa26-panvk-ios.patch"
+	patch -s -p1 -d mesa-$VERSION < "$HERE/mesa26-panvk-null-vs.patch"   # a draw with no vertex shader is skipped, not a NULL read
 fi
 rm -rf mesa-$VERSION/src/starbite-drm
 cp -r "$HERE/starbite-drm" mesa-$VERSION/src/starbite-drm

@@ -1,0 +1,27 @@
+# PanVK: a draw with no vertex shader bound is skipped as the comment says, instead of reading vs->rsd through NULL (panvk_shader_hw_variant() returns NULL then). backboardd died there twice on 12 Nov 2026 (S9, Metal compositor replaying a pass: panvk_cmd_draw_indirect+32 <- vk_cmd_queue_execute <- metal2vulkan end_pass). SPDX-License-Identifier: MIT
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c	2026-11-14 00:39:56
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c	2026-11-14 00:39:56
+@@ -1440,8 +1440,9 @@
+    const struct panvk_shader_variant *vs = panvk_shader_hw_variant(cmdbuf->state.gfx.vs.shader);
+    VkResult result;
+ 
+-   /* If there's no vertex shader, we can skip the draw. */
+-   if (!panvk_priv_mem_check_alloc(vs->rsd))
++   /* If there's no vertex shader, we can skip the draw. (panvk_shader_hw_variant() is NULL when no vertex shader is
++    * bound: the S9's Metal compositor replayed such a draw and backboardd died here, 12 Nov 2026.) */
++   if (!vs || !panvk_priv_mem_check_alloc(vs->rsd))
+       return;
+ 
+    /* Needs to be done before get_fs() is called because it depends on
+@@ -1511,8 +1512,9 @@
+    const struct panvk_shader_variant *vs = panvk_shader_hw_variant(cmdbuf->state.gfx.vs.shader);
+    VkResult result;
+ 
+-   /* If there's no vertex shader, we can skip the draw. */
+-   if (!panvk_priv_mem_check_alloc(vs->rsd))
++   /* If there's no vertex shader, we can skip the draw. (panvk_shader_hw_variant() is NULL when no vertex shader is
++    * bound: the S9's Metal compositor replayed such a draw and backboardd died here, 12 Nov 2026.) */
++   if (!vs || !panvk_priv_mem_check_alloc(vs->rsd))
+       return;
+ 
+    /* Needs to be done before get_fs() is called because it depends on
