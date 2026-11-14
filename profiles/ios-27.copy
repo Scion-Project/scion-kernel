@@ -37,3 +37,4 @@ drivers/storage/ufs/hakios.ufs.c bsd/dev/hakios.ufs.c
 drivers/storage/ufs/hakios.ufshc.c bsd/dev/hakios.ufshc.c
 drivers/storage/ufs/hakios.ufshc.h bsd/dev/hakios.ufshc.h
 drivers/storage/ufs/hakios.ufshc.lga.h bsd/dev/hakios.ufshc.lga.h
+drivers/display/dpu/hakios.lga_dpu.c bsd/dev/hakios.lga_dpu.c
