@@ -1332,6 +1332,7 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	int camera_requested = 0;
 	/* (the loader stays for run after run: what the last run's arguments said must not hold for this one) */
 	gamut_p3 = 0;
+	adt_layer_s9 = 0;
 	/* a run that does not ask for writes does not get them, whatever an earlier run of this
 	 * loader asked for (the loader stays resident across runs) */
 	block_write_requested = 0;
@@ -1379,6 +1380,7 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 			ufs3 |= starts_with(c, "ufs=3") && (c[5] == 0 || c[5] == ' ');
 		}
 		gamut_p3 |= starts_with(c, "gamut=p3") && (c == pi.cmdline || c[-1] == ' ');
+		adt_layer_s9 |= starts_with(c, "adt_layer=s9") && (c == pi.cmdline || c[-1] == ' ') && (c[12] == 0 || c[12] == ' ');
 		/*
 		 * ufs=3: served as ufs=2. The kernel reads its references through this service, then its own driver takes
 		 * the controller (drivers/storage/ufs/hakios.ufs.c, ufs_nufs_start); while the page says its list is in, nothing
@@ -1651,9 +1653,10 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	uint64_t cntfrq = timer_hz();
 	uint64_t ranges[3] = { 0, plat->io_base, plat->io_size };
 	uint64_t reg2[2];
-	uint8_t seed[64];
+	uint8_t seed[256];      /* xnu-12377 asks for 256 bytes (prng_random.c); xnu-8796 kernels get 64, as before */
+	const uint32_t seed_len = adt_layer_s9 ? 256 : 64;
 
-	for (unsigned i = 0; i < sizeof(seed); i++) {
+	for (unsigned i = 0; i < seed_len; i++) {
 		seed[i] = (uint8_t)(READ_SYSREG(CNTVCT_EL0) >> (i & 7)) ^ (uint8_t)(i * 37);
 	}
 
@@ -1675,7 +1678,7 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	dt_prop_u32(&w, "#size-cells", 2);
 
 	dt_begin(&w, "chosen");
-	dt_prop(&w, "random-seed", seed, sizeof(seed));
+	dt_prop(&w, "random-seed", seed, seed_len);
 	dt_prop_u64(&w, "dram-base", phys_base);
 	dt_prop_u64(&w, "dram-size", win_size);
 	if (give_extra) {
@@ -1762,6 +1765,10 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	 */
 	dt_begin(&w, "defaults");
 	dt_prop_u32(&w, "kern.vm_compressor", 2);
+	if (adt_layer_s9 && (plat->uart != 0 || plat->dw_uart != 0)) {
+		/* xnu-12377's pe_serial.c takes its console through this phandle (the uart0 node below) */
+		dt_prop_u32(&w, "serial-device", ADT_UART_PHANDLE);
+	}
 	dt_end(&w);
 
 	/* the product: screen class, artwork scale, name ... as on the real phone */
@@ -1876,6 +1883,10 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 
 		dt_begin(&w, name);
 		dt_prop_str(&w, "device_type", "cpu");
+		if (adt_layer_s9) {
+			/* SweetCPU matches "arm,armv9" on FRANKEL (KernelConfigTables.cpp) */
+			dt_prop(&w, "compatible", "arm,armv9\0arm,armv8", 20);
+		}
 		dt_prop_str(&w, "state", i == 0 ? "running" : "waiting");
 		dt_prop_u32(&w, "reg", (uint32_t)cpu_mpidr[i]);
 		dt_prop_u32(&w, "cpu-id", (uint32_t)i);
@@ -1920,6 +1931,9 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		    plat->gic_redist_size != 0 ? plat->gic_redist_size : 0x100000 };
 		dt_prop(&w, "reg", gic_reg, sizeof(gic_reg));
 	}
+	if (adt_layer_s9) {
+		dt_prop_u32(&w, "virtual-timer-intid", 27);     /* the architected virtual timer, PPI 11 (lga and QEMU virt alike) */
+	}
 	dt_end(&w);
 	if (plat->uart != 0) {
 		dt_begin(&w, "uart0");
@@ -1929,9 +1943,43 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		reg2[1] = 0x1000;
 		dt_prop(&w, "reg", reg2, sizeof(reg2));
 		dt_prop_u32(&w, "boot-console", 1);
+		if (adt_layer_s9) {
+			dt_prop_u32(&w, "AAPL,phandle", ADT_UART_PHANDLE);
+		}
+		dt_end(&w);
+	} else if (adt_layer_s9 && plat->dw_uart != 0) {
+		/* a DesignWare 16550 (the Pixel 10's, 0x0DB62000): 32-bit registers four bytes apart (pe_serial.c, FRANKEL) */
+		dt_begin(&w, "uart0");
+		dt_prop_str(&w, "device_type", "uart");
+		dt_prop_str(&w, "compatible", "snps,dw-apb-uart");
+		reg2[0] = plat->dw_uart - plat->io_base;
+		reg2[1] = 0x100;
+		dt_prop(&w, "reg", reg2, sizeof(reg2));
+		dt_prop_u32(&w, "reg-shift", 2);
+		dt_prop_u32(&w, "reg-io-width", 4);
+		dt_prop_u32(&w, "AAPL,phandle", ADT_UART_PHANDLE);
+		dt_end(&w);
+	}
+	if (adt_layer_s9 && SCREEN.base != 0) {
+		/* AppleCLCD (SweetFramebuffer.cpp) matches "sweet,display" and takes the framebuffer of boot_args.Video */
+		dt_begin(&w, "disp0");
+		dt_prop_str(&w, "device_type", "display-subsystem");
+		dt_prop(&w, "compatible", "sweet,display", 14);
+		dt_prop_u32(&w, "canvas-width", (uint32_t)SCREEN.width);
+		dt_prop_u32(&w, "canvas-height", (uint32_t)SCREEN.height);
 		dt_end(&w);
 	}
 	dt_end(&w);
+	if (adt_layer_s9 && SCREEN.base != 0) {
+		/* the framebuffer console of the S9's layer (pe_serial.c fbcon_probe): the whole screen */
+		uint64_t fb_reg[2] = { SCREEN.base, (uint64_t)SCREEN.stride * SCREEN.height };
+		dt_begin(&w, "sweet-fbcon");
+		dt_prop(&w, "reg", fb_reg, sizeof(fb_reg));
+		dt_prop_u32(&w, "width", (uint32_t)SCREEN.width);
+		dt_prop_u32(&w, "height", (uint32_t)SCREEN.height);
+		dt_prop_u32(&w, "stride", (uint32_t)SCREEN.stride);
+		dt_end(&w);
+	}
 
 	dt_end(&w);
 

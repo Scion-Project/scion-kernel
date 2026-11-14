@@ -15,6 +15,8 @@ static const struct platform platform_frankel = {
 	.gic_dist = 0x05880000, .gic_redist = 0x05900000, .gic_redist_size = 0x200000,
 	/* the console UART (0x0DB62000) is a DesignWare 16550, not a PL011, and reaches the USB-C port only after `fastboot oem uart enable` */
 	.uart = 0,
+	/* ... which a kernel of the S9's layer (adt_layer=s9, FRANKEL) is given as its console: "snps,dw-apb-uart", reg-shift 2 */
+	.dw_uart = 0x0DB62000,
 	/* PSCI by HVC: to the shim at EL2, which makes the SMC and starts a core at EL1 where the firmware would start it at EL2 */
 	.psci_hvc = 1,
 	/*

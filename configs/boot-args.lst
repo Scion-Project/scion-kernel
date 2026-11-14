@@ -40,6 +40,7 @@ adsp_pause	k
 adsp_return	k
 adsp_step	k
 adsp_wait	k
+adt_layer	l
 apfs_cheap	k
 apfs_check	k
 apfs_chunk	k
