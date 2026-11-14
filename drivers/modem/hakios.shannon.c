@@ -364,6 +364,7 @@ static struct {
 	uint32_t gen;                   /* bumped on every change of the above */
 	uint32_t rfs_open, rfs_opens;   /* cp_rfs=1: the CP's file opens answered "not there" (from RAM: nothing is read) */
 	uint64_t busy_ms;               /* the last time something came from the CP or waited to go to it */
+	uint64_t lost_ms;               /* when a registration was lost (0: registered, or never was) */
 } cp;
 
 static int cp_go;
@@ -1301,6 +1302,9 @@ fmt_received(const uint8_t *m, uint32_t n)
 		    m[9] == 2 ? "HOME" : m[9] == 3 ? "SEARCHING" : m[9] == 4 ? "EMERGENCY ONLY" : m[9] == 6 ? "ROAMING" : "?");
 		if (m[9] != (uint8_t)cp.reg_state) {
 			cp.reg_changes++;
+		}
+		if ((m[9] == 2 || m[9] == 6) != (cp.reg_state == 2 || cp.reg_state == 6)) {
+			cp.lost_ms = (m[9] == 2 || m[9] == 6) ? 0 : now_ms();
 		}
 		cp.reg_state = m[9];
 		cp.tech = m[7];
@@ -2684,7 +2688,8 @@ cp_thread(__unused void *arg, __unused wait_result_t result)
 				back = "NOT registered 90 s after normal mode was asked for";
 				why5 = "not registered in time";
 			} else if (cp.registered_ms != 0 && cp.reg_state != 2 && cp.reg_state != 6 &&
-			    now_ms() - cp.registered_ms > 5000) {
+			    now_ms() - cp.registered_ms > 5000 && (!cp.if_on || now_ms() - cp.lost_ms > 600000)) {
+				/* (cp_if=1, the everyday mode: the CP looks for its network again by itself; given 10 minutes) */
 				back = "the registration was lost";
 				why5 = "registration lost";
 			} else if (cp.stop || go == 2) {
