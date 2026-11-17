@@ -181,7 +181,7 @@ CONFIG_HAKIOS_VIRTIO_SOUND=y
 # QEMU's virtio tablet and keyboard as the touch screen and the buttons (virtio_input=1). QEMU only [hakios.virtio_input.c]
 CONFIG_HAKIOS_VIRTIO_INPUT=y
 
-# QEMU's virtio network device as the link behind en0 (virtio_net=1). QEMU only [hakios.virtio_net.c; requires CONFIG_HAKIOS_WIFI_STA]
+# QEMU's virtio network device as the link behind en0 (virtio_net=1), or on AVF a stream to the Scion app on the virtio... [hakios.virtio_net.c; requires CONFIG_HAKIOS_WIFI_STA]
 CONFIG_HAKIOS_VIRTIO_NET=y
 
 # a disk image of the host as /dev/rvblk0 (virtio_blk=1). QEMU only [hakios.virtio_blk.c]
