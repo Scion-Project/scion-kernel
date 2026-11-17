@@ -11,9 +11,9 @@ PANVK=$W/build/mesa/build-vk26/src/panfrost/vulkan/libvulkan_panfrost.dylib
 B=$W/stage/StarbiteMetal.bundle
 rm -rf "$B" && mkdir -p "$B" $W/sym $W/stage
 # the frontend and HotMetal2 are built from a copy with patches/frontend-dexr.diff, hotmetal2-diag.diff, frontend-flush.diff and
-# frontend-turned.diff applied, in that order (NOPATCH=1: as they are in tools/ios27/metal2)
+# frontend-turned.diff, frontend-dexr-surfaces.diff and frontend-nocopy-diag.diff applied, in that order (NOPATCH=1: as they are in tools/ios27/metal2)
 rm -rf $W/src27 && mkdir -p $W/src27/tools/ios27 && cp -R tools/ios27/metal2 $W/src27/tools/ios27/
-[ -n "${NOPATCH:-}" ] || for p in frontend-dexr hotmetal2-diag frontend-flush frontend-turned; do patch -s -p1 -d $W/src27 < tools/ios27/metal/patches/$p.diff || exit 1; done
+[ -n "${NOPATCH:-}" ] || for p in frontend-dexr hotmetal2-diag frontend-flush frontend-turned frontend-dexr-surfaces frontend-nocopy-diag; do patch -s -p1 -d $W/src27 < tools/ios27/metal/patches/$p.diff || exit 1; done
 M2=$W/src27/tools/ios27/metal2
 # frontend-turned.diff includes TurnShaders.inc: tools/ios27/metal2/TurnShaders.metal (the pass that writes a turned texture into its
 # surface) compiled by the same Xcode's Metal compiler and held as bytes
@@ -28,6 +28,8 @@ $CC -x objective-c++ -std=c++17 -fobjc-arc -O2 -g -Wall -Wno-deprecated-declarat
 	-framework CoreFoundation 2>&1 | grep -v "was built for newer 'iOS' version" | grep -E "error|warning: unused" | head -20 || true
 [ -f "$B/StarbiteMetal" ] || exit 1
 cp "$B/StarbiteMetal" $W/sym/StarbiteMetal && cp "$PANVK" $W/sym/libvulkan_panfrost.dylib
+# clang leaves the debug symbols (about 200 MB) beside the binary, inside the bundle: they go to $W/sym, not to the phone
+rm -rf $W/sym/StarbiteMetal.dSYM && mv "$B/StarbiteMetal.dSYM" $W/sym/ 2>/dev/null || true
 xcrun strip -x "$B/StarbiteMetal"
 cp tools/ios27/metal2/Info.plist "$B/Info.plist"
 cp "$PANVK" "$B/libvulkan_panfrost.dylib"

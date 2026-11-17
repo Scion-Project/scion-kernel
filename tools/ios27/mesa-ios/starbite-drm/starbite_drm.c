@@ -15,6 +15,9 @@
  * nothing (/dev/null): there is one GPU and one connection to it in a
  * process.
  *
+ * Fences: STARBITE_DRM_SEQ=1 makes a fence wait a wait for the fence's own
+ * chain instead of for the whole queue (seq_wait() below; off by default).
+ *
  * After HakiOS tools/mesa/hakios-drm/hakios.drm.c (MIT, Copyright the HakiOS
  * authors), reworked for Panfrost and StarbiteMali.
  */
@@ -51,6 +54,7 @@ static uint32_t next_syncobj;
  * STARBITE_DRM_SYNC=1: synchronous submits as before.
  */
 static bool async_on;
+static void seq_probe(void);
 
 /*
  * The connection to StarbiteMali, opened at the first request whoever makes it: Panfrost GL comes
@@ -79,6 +83,7 @@ starbite_connect(void)
 			async_on = true;
 		}
 	}
+	seq_probe();
 	return true;
 }
 
@@ -289,6 +294,295 @@ call(uint32_t selector, void *data, size_t size)
 }
 
 /*
+ * Fences that stand for their own chains: STARBITE_DRM_SEQ=1 in the environment (for the window server, a line in
+ * /private/var/local/mtl2-env). Off by default; without it nothing below changes what any call does.
+ *
+ * Without it a fence (syncobj) wait is a wait for every chain queued at the moment of the wait (SBM_WAIT_IDLE). A thread
+ * that waits for frame N's command buffer then also waits for the chains of frame N+1 that the render thread queued in
+ * the meantime, and the window server's CPU work and the GPU's take turns instead of overlapping. On the S9 on 17 November
+ * 2026, swiping the home screen under the Metal compositor, the kernel counted 664 such waits in 10 s at 9.2 ms each.
+ *
+ * With it a submit asks the kernel for its chain's number (SBM_SUBMIT_SEQ, 0x107: the same submit, the number comes back
+ * in place of the chain's address), the syncobj it signals keeps that number, and a wait on syncobjs whose fences are all
+ * known is a wait for that number (SBM_WAIT_SEQ, 0x108). The kernel runs the chains of every client one at a time in the
+ * order they were queued (bsd/dev/starlte_gpu.c), so a chain's number being done means every chain queued before it is
+ * done as well: what a wait for that fence is owed, and no more.
+ *
+ * What a syncobj holds here, followed as the kernel's syncobj would hold a fence:
+ *   SEQ_NONE       no fence: made unsignalled, or reset. A wait falls back to SBM_WAIT_IDLE, as without the switch. (A real
+ *                  syncobj fails such a wait, or with WAIT_FOR_SUBMIT blocks until a fence is attached; PanVK submits on its
+ *                  queue's syncobj and only then moves that fence into the caller's fences and semaphores, so in between a
+ *                  waiter keeps today's answer, which covers the chain just queued.)
+ *   SEQ_SIGNALLED  a signalled fence: made signalled, signalled by the CPU, or imported from a sync file that was signalled
+ *   SEQ_CHAIN      the fence of chain `seq`: a submit's out_sync, or moved from one (transfer, or a sync file exported and
+ *                  imported, which is how PanVK's queue_transfer_sync moves it)
+ *   SEQ_UNKNOWN    anything not followed exactly (a timeline point moved or signalled, a handle that found no room, a sync
+ *                  file this process did not export): SBM_WAIT_IDLE, as without the switch
+ * Timeline waits and queries (drmSyncobjTimelineWait, drmSyncobjQuery2) are left as they are: telling a point not attached
+ * yet from one that is needs the points followed, which this does not do (drmGetCap says there are no timelines). So a
+ * wait never ends before the fence it was asked about has; it only stops waiting for chains queued after that fence.
+ *
+ * The sync-file requests (DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD with EXPORT_SYNC_FILE, FD_TO_HANDLE with IMPORT_SYNC_FILE) and
+ * DRM_IOCTL_SYNCOBJ_RESET, which PanVK sends through drmIoctl, are answered (ENOSYS without the switch, as before): the
+ * file is /dev/null as drmSyncobjExportSyncFile's always was, and what it stood for is remembered by its number until the
+ * import. The only sync files in a process are the ones made here.
+ *
+ * A line every 10 s on the kernel's console (StarbiteMali's LOG): "drm[pid] fences 10 s: waits by number N (already done
+ * D, timed out T), as before W (no fence F, not followed U); submits numbered S". Its kernel half is "STARLTE GPU CALLS"
+ * (wait count and time) and, with boot-arg sbm_prof=1, "STARLTE GPU WAITS" (whole queue against one chain, by thread).
+ * NOT run on a phone when this was written.
+ */
+#define SBM_SUBMIT_SEQ  0x107
+#define SBM_WAIT_SEQ    0x108
+#define SEQ_SLOTS       4096u
+#define SEQ_FDS         1024
+enum { SEQ_NONE = 1, SEQ_SIGNALLED, SEQ_CHAIN, SEQ_UNKNOWN };
+struct seq_fence {
+	uint32_t state;
+	uint64_t seq;
+};
+static struct {
+	uint32_t handle;
+	struct seq_fence fence;
+} seq_table[SEQ_SLOTS];
+static struct seq_fence seq_fds[SEQ_FDS];               /* exported sync files, by descriptor, until imported */
+static pthread_mutex_t seq_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool seq_on;
+static uint64_t seq_done_seen;                          /* the last chain number the kernel has said is done */
+enum { SEQ_ST_BY_NUMBER, SEQ_ST_ALREADY, SEQ_ST_TIMEOUT, SEQ_ST_AS_BEFORE, SEQ_ST_NO_FENCE, SEQ_ST_UNFOLLOWED,
+	SEQ_ST_SUBMITS, SEQ_ST_COUNT };
+static uint64_t seq_stat[SEQ_ST_COUNT], seq_stat_since;
+static int call(uint32_t selector, void *data, size_t size);
+struct sbm_wait_seq_req {
+	uint64_t seq;
+	int64_t timeout_ns;                             /* relative; 0: only look */
+	uint64_t done;                                  /* out: the last chain done */
+};
+
+/* Once the connection is open (starbite_connect): the switch read, and the kernel asked whether it has WAIT_SEQ. */
+static void
+seq_probe(void)
+{
+	const char *e = getenv("STARBITE_DRM_SEQ");
+	if (e == NULL || strcmp(e, "1") != 0) {
+		return;
+	}
+	struct sbm_wait_seq_req w = { 0, 0, 0 };
+	size_t returned = sizeof(w);
+	bool have = async_on && IOConnectCallStructMethod(connection, SBM_WAIT_SEQ, &w, sizeof(w), &w, &returned) == KERN_SUCCESS;
+	char text[160];
+	int n = snprintf(text, sizeof(text), "SBDRM[%d %s]: fences by chain number %s", getpid(), getprogname(),
+	    have ? "on (STARBITE_DRM_SEQ=1)" : async_on ? "NOT on: the kernel has no WAIT_SEQ; waits as before" :
+	    "NOT on: submits are synchronous; waits as before");
+	if (n > 0 && n < (int)sizeof(text)) {
+		size_t none = 0;
+		(void)IOConnectCallStructMethod(connection, 0x102, text, (size_t)n + 1, NULL, &none);
+	}
+	seq_on = have;
+}
+
+static void
+seq_count(unsigned what)
+{
+	__atomic_fetch_add(&seq_stat[what], 1, __ATOMIC_RELAXED);
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	uint64_t now = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+	uint64_t since = __atomic_load_n(&seq_stat_since, __ATOMIC_RELAXED);
+	if (since == 0) {
+		__atomic_store_n(&seq_stat_since, now, __ATOMIC_RELAXED);
+		return;
+	}
+	if (now - since < 10000000000ull || !__atomic_compare_exchange_n(&seq_stat_since, &since, now, false, __ATOMIC_RELAXED,
+	    __ATOMIC_RELAXED)) {
+		return;
+	}
+	uint64_t c[SEQ_ST_COUNT];
+	for (int i = 0; i < SEQ_ST_COUNT; i++) {
+		c[i] = __atomic_exchange_n(&seq_stat[i], 0, __ATOMIC_RELAXED);
+	}
+	char text[200];
+	int n = snprintf(text, sizeof(text), "drm[%d] fences %llu s: waits by number %llu (already done %llu, timed out %llu), "
+	    "as before %llu (no fence %llu, not followed %llu); submits numbered %llu", getpid(),
+	    (unsigned long long)((now - since) / 1000000000ull), (unsigned long long)c[SEQ_ST_BY_NUMBER],
+	    (unsigned long long)c[SEQ_ST_ALREADY], (unsigned long long)c[SEQ_ST_TIMEOUT], (unsigned long long)c[SEQ_ST_AS_BEFORE],
+	    (unsigned long long)c[SEQ_ST_NO_FENCE], (unsigned long long)c[SEQ_ST_UNFOLLOWED], (unsigned long long)c[SEQ_ST_SUBMITS]);
+	if (n > 0 && n < (int)sizeof(text)) {
+		size_t none = 0;
+		(void)IOConnectCallStructMethod(connection, 0x102, text, (size_t)n + 1, NULL, &none);
+	}
+}
+
+/* A handle's fence (SEQ_UNKNOWN for a handle not in the table); seq_lock held. */
+static struct seq_fence
+seq_get_locked(uint32_t handle)
+{
+	unsigned i = handle % SEQ_SLOTS;
+	if (handle != 0 && seq_table[i].handle == handle) {
+		return seq_table[i].fence;
+	}
+	return (struct seq_fence){ SEQ_UNKNOWN, 0 };
+}
+
+/* Set a handle's fence (nothing for a handle not in the table: it stays unknown); seq_lock held. */
+static void
+seq_set_locked(uint32_t handle, struct seq_fence fence)
+{
+	unsigned i = handle % SEQ_SLOTS;
+	if (handle != 0 && seq_table[i].handle == handle) {
+		seq_table[i].fence = fence;
+	}
+}
+
+static void
+seq_set(uint32_t handle, uint32_t state, uint64_t seq)
+{
+	if (!seq_on) {
+		return;
+	}
+	pthread_mutex_lock(&seq_lock);
+	seq_set_locked(handle, (struct seq_fence){ state, seq });
+	pthread_mutex_unlock(&seq_lock);
+}
+
+/* A new handle: into the table when its slot is free (else it stays unknown: waits on it are as before). */
+static void
+seq_new(uint32_t handle, uint32_t state)
+{
+	if (!seq_on && getenv("STARBITE_DRM_SEQ") != NULL) {
+		(void)starbite_connect();               /* (made before any other request: the switch is decided there) */
+	}
+	if (!seq_on || handle == 0) {
+		return;
+	}
+	pthread_mutex_lock(&seq_lock);
+	unsigned i = handle % SEQ_SLOTS;
+	if (seq_table[i].handle == 0) {
+		seq_table[i].handle = handle;
+		seq_table[i].fence = (struct seq_fence){ state, 0 };
+	}
+	pthread_mutex_unlock(&seq_lock);
+}
+
+static void
+seq_forget(uint32_t handle)
+{
+	if (!seq_on) {
+		return;
+	}
+	pthread_mutex_lock(&seq_lock);
+	unsigned i = handle % SEQ_SLOTS;
+	if (handle != 0 && seq_table[i].handle == handle) {
+		seq_table[i].handle = 0;
+	}
+	pthread_mutex_unlock(&seq_lock);
+}
+
+/* A submit's chain number for the syncobj it signals (0: no number, the chain is done: a signalled fence). */
+static void
+seq_submitted(uint32_t out_sync, uint64_t seq)
+{
+	seq_count(SEQ_ST_SUBMITS);
+	if (out_sync == 0) {
+		return;
+	}
+	pthread_mutex_lock(&seq_lock);
+	struct seq_fence was = seq_get_locked(out_sync);
+	if (seq == 0) {
+		seq_set_locked(out_sync, (struct seq_fence){ SEQ_SIGNALLED, 0 });
+	} else if (was.state != SEQ_CHAIN || was.seq < seq) {
+		/* (two threads on one syncobj: the later chain is the one it holds, as the kernel's would) */
+		seq_set_locked(out_sync, (struct seq_fence){ SEQ_CHAIN, seq });
+	}
+	pthread_mutex_unlock(&seq_lock);
+}
+
+/*
+ * A wait by chain number. *handled false: some fence is not known exactly, and the caller waits as before. Otherwise 0
+ * or ETIMEDOUT, and *first_signaled for a wait for any one of them.
+ */
+static int
+seq_wait(const uint32_t *handles, unsigned n, int64_t rel, unsigned flags, uint32_t *first_signaled, bool *handled)
+{
+	bool all = (flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) != 0 || n <= 1;
+	uint64_t target = 0;
+	uint32_t first = 0;
+	bool ready = false;
+
+	*handled = false;
+	pthread_mutex_lock(&seq_lock);
+	for (unsigned i = 0; i < n; i++) {
+		struct seq_fence f = seq_get_locked(handles[i]);
+		if (f.state == SEQ_NONE || f.state == SEQ_UNKNOWN) {
+			pthread_mutex_unlock(&seq_lock);
+			seq_count(f.state == SEQ_NONE ? SEQ_ST_NO_FENCE : SEQ_ST_UNFOLLOWED);
+			seq_count(SEQ_ST_AS_BEFORE);
+			return 0;
+		}
+		uint64_t s = f.state == SEQ_CHAIN ? f.seq : 0;
+		if (all) {
+			target = s > target ? s : target;
+		} else if (s == 0 || s <= seq_done_seen) {
+			ready = true;                   /* (one is signalled already: that one) */
+			first = i;
+			break;
+		} else if (target == 0 || s < target) {
+			target = s;                     /* (in order: the lowest number is done first) */
+			first = i;
+		}
+	}
+	bool done = ready || target == 0 || target <= seq_done_seen;
+	pthread_mutex_unlock(&seq_lock);
+	*handled = true;
+	if (first_signaled != NULL) {
+		*first_signaled = all ? 0 : first;
+	}
+	seq_count(SEQ_ST_BY_NUMBER);
+	if (done) {
+		seq_count(SEQ_ST_ALREADY);
+		return 0;
+	}
+	struct sbm_wait_seq_req w = { target, rel > 0 ? rel : 0, 0 };
+	int error = call(SBM_WAIT_SEQ, &w, sizeof(w));
+	if (error == 0 || error == ETIMEDOUT) {
+		pthread_mutex_lock(&seq_lock);
+		if (w.done > seq_done_seen) {
+			seq_done_seen = w.done;
+		}
+		pthread_mutex_unlock(&seq_lock);
+	}
+	if (error == ETIMEDOUT) {
+		seq_count(SEQ_ST_TIMEOUT);
+	}
+	return error;
+}
+
+/* drmIoctl's sync-file and reset requests (only with the switch on). -2: not one of them. */
+static int
+seq_ioctl(unsigned long request, void *arg)
+{
+	if (request == DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD) {
+		struct drm_syncobj_handle *h = arg;
+		if (!(h->flags & DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE)) {
+			return -2;                      /* (a syncobj as a file: not here, as before) */
+		}
+		return drmSyncobjExportSyncFile(-1, h->handle, &h->fd);
+	}
+	if (request == DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE) {
+		struct drm_syncobj_handle *h = arg;
+		if (!(h->flags & DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE)) {
+			return -2;
+		}
+		return drmSyncobjImportSyncFile(-1, h->handle, h->fd);
+	}
+	if (request == DRM_IOCTL_SYNCOBJ_RESET) {
+		struct drm_syncobj_array *a = arg;
+		return drmSyncobjReset(-1, (const uint32_t *)(uintptr_t)a->handles, a->count_handles);
+	}
+	return -2;
+}
+
+/*
  * Requests counted by selector (0-15; 16 = GEM_CLOSE, 17 = others), and every 10 s one line on the kernel's console through
  * StarbiteMali's LOG selector: "STARLTE GPU APP: drm[pid] 10 s: submit N wait N madvise N(local) ...". Only with
  * STARBITE_DRM_STATS=1 in the environment (a clock read and two atomics a request otherwise saved).
@@ -354,6 +648,12 @@ drmIoctl(int fd, unsigned long request, void *arg)
 	uint32_t selector;
 
 	(void)fd;
+	if (seq_on) {
+		int answered = seq_ioctl(request, arg);
+		if (answered != -2) {
+			return answered;
+		}
+	}
 	static int kmadvise = -1;
 	if (kmadvise < 0) {
 		kmadvise = getenv("STARBITE_DRM_KMADVISE") != NULL;
@@ -395,6 +695,22 @@ drmIoctl(int fd, unsigned long request, void *arg)
 		return -1;
 	}
 	count_and_report(selector);
+	if (seq_on && selector == 0 && IOCPARM_LEN(request) >= 40 && IOCPARM_LEN(request) <= 64) {
+		/* SUBMIT as SUBMIT_SEQ: the same submit; the chain's number comes back where its address was (a copy: Mesa's stays) */
+		uint8_t copy[64];
+		uint64_t seq;
+		uint32_t out_sync;
+		memcpy(copy, arg, IOCPARM_LEN(request));
+		int error = call(SBM_SUBMIT_SEQ, copy, IOCPARM_LEN(request));
+		if (error != 0) {
+			errno = error;
+			return -1;
+		}
+		memcpy(&seq, copy, sizeof(seq));
+		memcpy(&out_sync, (const uint8_t *)arg + 20, sizeof(out_sync));  /* struct drm_panfrost_submit's out_sync */
+		seq_submitted(out_sync, seq);
+		return 0;
+	}
 	int error = call(selector, arg, IOCPARM_LEN(request));
 	if (error != 0) {
 		errno = error;
@@ -521,6 +837,7 @@ drmSyncobjCreate(int fd, uint32_t flags, uint32_t *handle)
 	(void)fd;
 	(void)flags;
 	*handle = __atomic_add_fetch(&next_syncobj, 1, __ATOMIC_RELAXED);
+	seq_new(*handle, (flags & DRM_SYNCOBJ_CREATE_SIGNALED) ? SEQ_SIGNALLED : SEQ_NONE);
 	return 0;
 }
 
@@ -528,7 +845,7 @@ int
 drmSyncobjDestroy(int fd, uint32_t handle)
 {
 	(void)fd;
-	(void)handle;
+	seq_forget(handle);
 	return 0;
 }
 
@@ -536,8 +853,9 @@ int
 drmSyncobjReset(int fd, const uint32_t *handles, uint32_t count)
 {
 	(void)fd;
-	(void)handles;
-	(void)count;
+	for (uint32_t i = 0; seq_on && i < count; i++) {
+		seq_set(handles[i], SEQ_NONE, 0);
+	}
 	return 0;
 }
 
@@ -545,28 +863,31 @@ int
 drmSyncobjSignal(int fd, const uint32_t *handles, uint32_t count)
 {
 	(void)fd;
-	(void)handles;
-	(void)count;
+	for (uint32_t i = 0; seq_on && i < count; i++) {
+		seq_set(handles[i], SEQ_SIGNALLED, 0);
+	}
 	return 0;
 }
 
-int
-drmSyncobjWait(int fd, uint32_t *handles, unsigned num_handles, int64_t timeout_nsec,
-    unsigned flags, uint32_t *first_signaled)
+/* timeout_nsec is an absolute CLOCK_MONOTONIC time: 0 (or past) = just look; the time left, relative */
+static int64_t
+relative_timeout(int64_t timeout_nsec)
 {
-	(void)fd;
-	(void)handles;
-	(void)num_handles;
-	(void)flags;
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	int64_t now = (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
+	return timeout_nsec < 0 ? INT64_MAX : timeout_nsec > now ? timeout_nsec - now : 0;
+}
+
+/* The wait without STARBITE_DRM_SEQ (and with it for what it does not follow): every chain queued so far. */
+static int
+wait_whole_queue(int64_t timeout_nsec, uint32_t *first_signaled)
+{
 	if (first_signaled != NULL) {
 		*first_signaled = 0;
 	}
 	if (async_on) {
-		/* timeout_nsec is an absolute CLOCK_MONOTONIC time: 0 (or past) = just look */
-		struct timespec ts;
-		clock_gettime(CLOCK_MONOTONIC, &ts);
-		int64_t now = (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
-		int64_t rel = timeout_nsec < 0 ? INT64_MAX : timeout_nsec > now ? timeout_nsec - now : 0;
+		int64_t rel = relative_timeout(timeout_nsec);
 		int error = call(SBM_WAIT_IDLE, &rel, sizeof(rel));
 		if (error == ETIMEDOUT) {
 			errno = ETIME;
@@ -577,11 +898,36 @@ drmSyncobjWait(int fd, uint32_t *handles, unsigned num_handles, int64_t timeout_
 }
 
 int
+drmSyncobjWait(int fd, uint32_t *handles, unsigned num_handles, int64_t timeout_nsec,
+    unsigned flags, uint32_t *first_signaled)
+{
+	(void)fd;
+	if (async_on && seq_on) {
+		bool handled = false;
+		int error = seq_wait(handles, num_handles, relative_timeout(timeout_nsec), flags, first_signaled, &handled);
+		if (handled && error == ETIMEDOUT) {
+			errno = ETIME;
+			return -ETIME;
+		}
+		if (handled && error == 0) {
+			return 0;
+		}
+		/* (not followed, or the kernel refused the request: as before) */
+	}
+	return wait_whole_queue(timeout_nsec, first_signaled);
+}
+
+int
 drmSyncobjTimelineWait(int fd, uint32_t *handles, uint64_t *points, unsigned num_handles,
     int64_t timeout_nsec, unsigned flags, uint32_t *first_signaled)
 {
+	(void)fd;
+	(void)handles;
 	(void)points;
-	return drmSyncobjWait(fd, handles, num_handles, timeout_nsec, flags, first_signaled);
+	(void)num_handles;
+	(void)flags;
+	/* (points are not followed: a point's fence may not be attached yet; the whole queue, with or without the switch) */
+	return wait_whole_queue(timeout_nsec, first_signaled);
 }
 
 int
@@ -589,11 +935,16 @@ drmSyncobjTransfer(int fd, uint32_t dst_handle, uint64_t dst_point, uint32_t src
     uint64_t src_point, uint32_t flags)
 {
 	(void)fd;
-	(void)dst_handle;
-	(void)dst_point;
-	(void)src_handle;
-	(void)src_point;
 	(void)flags;
+	if (seq_on) {
+		pthread_mutex_lock(&seq_lock);
+		struct seq_fence moved = seq_get_locked(src_handle);
+		if (dst_point != 0 || src_point != 0) {
+			moved = (struct seq_fence){ SEQ_UNKNOWN, 0 };   /* (timeline points: not followed) */
+		}
+		seq_set_locked(dst_handle, moved);
+		pthread_mutex_unlock(&seq_lock);
+	}
 	return 0;
 }
 
@@ -602,9 +953,17 @@ int
 drmSyncobjExportSyncFile(int fd, uint32_t handle, int *sync_file_fd)
 {
 	(void)fd;
-	(void)handle;
 	*sync_file_fd = open("/dev/null", O_RDWR | O_CLOEXEC);
-	return *sync_file_fd < 0 ? -1 : 0;
+	if (*sync_file_fd < 0) {
+		return -1;
+	}
+	if (seq_on && *sync_file_fd < SEQ_FDS) {
+		/* what it stands for, until it is imported (a later export that gets the same number replaces it) */
+		pthread_mutex_lock(&seq_lock);
+		seq_fds[*sync_file_fd] = seq_get_locked(handle);
+		pthread_mutex_unlock(&seq_lock);
+	}
+	return 0;
 }
 
 int
@@ -617,8 +976,16 @@ int
 drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd)
 {
 	(void)fd;
-	(void)handle;
-	(void)sync_file_fd;
+	if (seq_on) {
+		struct seq_fence f = { SEQ_UNKNOWN, 0 };
+		pthread_mutex_lock(&seq_lock);
+		if (sync_file_fd >= 0 && sync_file_fd < SEQ_FDS && seq_fds[sync_file_fd].state != 0) {
+			f = seq_fds[sync_file_fd];
+			seq_fds[sync_file_fd].state = 0;        /* (once: a second import of it is not followed) */
+		}
+		seq_set_locked(handle, f);
+		pthread_mutex_unlock(&seq_lock);
+	}
 	return 0;
 }
 
@@ -626,7 +993,9 @@ int
 drmSyncobjFDToHandle(int fd, int obj_fd, uint32_t *handle)
 {
 	(void)obj_fd;
-	return drmSyncobjCreate(fd, 0, handle);
+	int ret = drmSyncobjCreate(fd, 0, handle);
+	seq_set(*handle, SEQ_UNKNOWN, 0);       /* (a syncobj from a file: not followed) */
+	return ret;
 }
 
 /* ---- devices (PanVK) ---------------------------------------------------------------------------- */
@@ -699,9 +1068,10 @@ int
 drmSyncobjTimelineSignal(int fd, const uint32_t *handles, uint64_t *points, uint32_t count)
 {
 	(void)fd;
-	(void)handles;
 	(void)points;
-	(void)count;
+	for (uint32_t i = 0; seq_on && i < count; i++) {
+		seq_set(handles[i], SEQ_UNKNOWN, 0);    /* (timeline points: not followed) */
+	}
 	return 0;
 }
 
