@@ -190,9 +190,21 @@ hold (the switcher), take a screenshot; then a screenshot of the lock screen and
 |---|---|---|
 | E1 | the OpenGL ES compositor, nothing else changed | background drawn: the black is the Metal path's; white cards under OpenGL ES too: the cards are not the Metal path's (E5) |
 | E2 | the bundle with `frontend-dexr-surfaces.diff` (Metal compositor) | `made again with colors 0x1`, no `AttachmentFormat`, the blurred home screen and wallpaper behind the cards: fixed; still black with no refusal: the background is the missing wallpaper (E4) |
-| E3 | the old bundle, `SWEET_MTL2_DEXR=0` (control) | cards drawn, `variable_blur` refusals, blur black, clock box empty: both what the variable is for and its flaw confirmed |
+| E3 | the old bundle, `SWEET_MTL2_DEXR=0` (control; that bundle takes it as the boot argument `m2e_SWEET_MTL2_DEXR=0`) | cards drawn, `variable_blur` refusals, blur black, clock box empty: both what the variable is for and its flaw confirmed |
 | E4 | only if E2's background stays black with no refusal: `sbwallpaper-windows` with `MainSwitcher:bottom` | image behind the cards: the cause is the missing poster; icons vanishing while an app opens or closes: that fallback is not acceptable |
 | E5 | no boot: on a root pulled after the switcher showed white cards, the decmpfs header (`com.apple.decmpfs`: magic, type) of the files in the apps' snapshot folders (SplashBoard) | type 16 there: the white cards are these files; then the type's algorithm decides the kernel work |
+
+## Plug-in work on the build machine that is not in this repository
+
+The bundle the first phone runs was built from a working tree of 12 November whose frontend has, beside what
+`tools/ios27/metal2` and its patches hold: boot arguments `m2e_NAME=VALUE` that set `NAME` in the plug-in's environment after
+`mtl2-env` (one boot image can try `m2e_SWEET_MTL2_DEXR=0`, E3, with no change to the root; the repository's frontend does
+not read them, so a bundle built from it ignores such arguments); the telemetry rows as console lines
+(`SWEET_MTL2_TELEMETRY=1`), a per-commit list of passes (`SWEET_MTL2_PASSES=1`), and the runtime's own first messages and
+work counts (`nmb_take_message`, `nmb_device_work_counts_text` in the bridge, and counters of why a draw began a new render
+pass instance in metal2vulkan's `render.rs`). PanVK's half of `sgu_pipe` (`STARBITE_PANVK_PIPE=1`) is in no repository
+either ([LIQUID-GLASS.md](LIQUID-GLASS.md) says so). The bridge library of that tree is otherwise the repository's patches
+0001-0016 and 0100-0102 over metal2vulkan 720ef1ce, checked file by file; the bundle built for E2 links it.
 
 ## Not done
 
