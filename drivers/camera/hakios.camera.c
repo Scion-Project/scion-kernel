@@ -84,6 +84,7 @@
 #include <sys/hakios.audio.h>
 #include <sys/hakios.camera.h>
 #include <sys/hakios.input.h>
+#include "hakios.dev_strict.h"
 
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 extern kern_return_t thread_terminate(thread_t thread);
@@ -4437,8 +4438,23 @@ camdev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	return EINVAL;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-camera is opened only by root and by
+ * mediaserverd, the capture stack's host (libhakios.media.dylib)
+ */
+static const char *const camdev_open_programs[] = { "/usr/sbin/mediaserverd", NULL };
+
+static int
+camdev_open_strict(dev_t dev, int flags, int type, struct proc *p)
+{
+	if (hakios_dev_open_check("/dev/hakios-camera", camdev_open_programs) != 0) {
+		return EPERM;
+	}
+	return camdev_open(dev, flags, type, p);
+}
+
 static const struct cdevsw camdev_cdevsw = {
-	.d_open = camdev_open, .d_close = camdev_close, .d_read = camdev_read, .d_write = camdev_write,
+	.d_open = camdev_open_strict, .d_close = camdev_close, .d_read = camdev_read, .d_write = camdev_write,
 	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };

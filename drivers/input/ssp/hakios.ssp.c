@@ -93,6 +93,7 @@
 #include "hakios.bcm_shub.h"
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
+#include "hakios.dev_strict.h"
 
 /*
  * The phone this kernel is configured for: the generated configuration's (tools/hakios-config.py, the 16.5 line). The ios-27
@@ -1734,8 +1735,23 @@ sensors_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	return 0;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-sensors is opened only by root and by
+ * backboardd (the screen's rotation: o.dylib)
+ */
+static const char *const sensors_open_programs[] = { "/usr/libexec/backboardd", NULL };
+
+static int
+sensors_open_strict(dev_t dev, int flags, int type, proc_t p)
+{
+	if (hakios_dev_open_check("/dev/hakios-sensors", sensors_open_programs) != 0) {
+		return EPERM;
+	}
+	return sensors_open(dev, flags, type, p);
+}
+
 static const struct cdevsw sensors_cdevsw = {
-	.d_open = sensors_open,
+	.d_open = sensors_open_strict,
 	.d_close = sensors_close,
 	.d_read = sensors_read,
 	.d_write = sensors_write,

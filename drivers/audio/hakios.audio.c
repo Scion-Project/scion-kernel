@@ -49,6 +49,7 @@
 #include <sys/systm.h>
 #include <sys/uio.h>
 #include <vm/vm_kern.h>
+#include "hakios.dev_strict.h"
 
 extern uint64_t kvtophys(vm_offset_t va);       /* pmap_paddr_t */
 
@@ -358,8 +359,23 @@ hakios_audio_volume_held(uint32_t *below, bool *muted, uint32_t *generation)
 	return *generation != 0;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-audio is opened only by root and by the audio
+ * server that hosts CoreAudio's HAL and HakiosAudio.driver (mediaserverd on 16.5, audiomxd on 27)
+ */
+static const char *const audio_open_programs[] = { "/usr/sbin/mediaserverd", "/usr/libexec/audiomxd", NULL };
+
+static int
+audio_open_strict(dev_t dev, int flags, int type, struct proc *p)
+{
+	if (hakios_dev_open_check("/dev/hakios-audio", audio_open_programs) != 0) {
+		return EPERM;
+	}
+	return audio_open(dev, flags, type, p);
+}
+
 static const struct cdevsw audio_cdevsw = {
-	.d_open = audio_open, .d_close = audio_close, .d_read = eno_rdwrt, .d_write = audio_write,
+	.d_open = audio_open_strict, .d_close = audio_close, .d_read = eno_rdwrt, .d_write = audio_write,
 	.d_ioctl = audio_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };
@@ -471,8 +487,23 @@ input_close(__unused dev_t dev, __unused int flags, __unused int type, __unused 
 	return 0;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-mic is opened only by root and by the audio
+ * server that hosts CoreAudio's HAL and HakiosAudio.driver (mediaserverd on 16.5, audiomxd on 27)
+ */
+static const char *const input_open_programs[] = { "/usr/sbin/mediaserverd", "/usr/libexec/audiomxd", NULL };
+
+static int
+input_open_strict(dev_t dev, int flags, int type, struct proc *p)
+{
+	if (hakios_dev_open_check("/dev/hakios-mic", input_open_programs) != 0) {
+		return EPERM;
+	}
+	return input_open(dev, flags, type, p);
+}
+
 static const struct cdevsw input_cdevsw = {
-	.d_open = input_open, .d_close = input_close, .d_read = input_read, .d_write = eno_rdwrt,
+	.d_open = input_open_strict, .d_close = input_close, .d_read = input_read, .d_write = eno_rdwrt,
 	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };

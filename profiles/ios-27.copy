@@ -46,3 +46,4 @@ drivers/audio/hakios.guard.c bsd/dev/hakios.guard.c
 drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c bsd/dev/hakios.bcm4361_bt.c
 drivers/bluetooth/bcm4361/hakios.bcm_hci.h bsd/dev/hakios.bcm_hci.h
 drivers/bluetooth/bcm4361/hakios.bt_node.cpp iokit/Kernel/hakios.bt_node.cpp
+drivers/core/hakios.dev_strict.h bsd/dev/hakios.dev_strict.h

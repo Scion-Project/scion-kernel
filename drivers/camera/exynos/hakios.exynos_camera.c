@@ -254,6 +254,7 @@
 #include <vm/vm_kern.h>
 #include <sys/hakios.exynos_soc.h>
 #include <sys/hakios.xnu.h>
+#include "hakios.dev_strict.h"
 
 /*
  * Two camera drivers share the configuration symbol EXYNOS_CAMERA and the kernel's three entry points: this one (with
@@ -3115,8 +3116,23 @@ s9dev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	return 0;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-camera is opened only by root and by
+ * mediaserverd, the capture stack's host (libhakios.media.dylib)
+ */
+static const char *const s9dev_open_programs[] = { "/usr/sbin/mediaserverd", NULL };
+
+static int
+s9dev_open_strict(dev_t dev, int flags, int type, struct proc *p)
+{
+	if (hakios_dev_open_check("/dev/hakios-camera", s9dev_open_programs) != 0) {
+		return EPERM;
+	}
+	return s9dev_open(dev, flags, type, p);
+}
+
 static const struct cdevsw s9dev_cdevsw = {
-	.d_open = s9dev_open, .d_close = s9dev_close, .d_read = s9dev_read, .d_write = s9dev_write,
+	.d_open = s9dev_open_strict, .d_close = s9dev_close, .d_read = s9dev_read, .d_write = s9dev_write,
 	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };
