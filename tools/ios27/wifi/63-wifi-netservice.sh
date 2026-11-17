@@ -19,6 +19,20 @@ d = plistlib.load(open(path, 'rb')) if os.path.exists(path) else {'__VERSION__':
 svcs = d.setdefault('NetworkServices', {})
 if how == 'undo':
     svcs.pop(SVC, None)
+    # the service's link and place in the order, when it was added to a set iOS had made
+    for st in d.get('Sets', {}).values():
+        net = st.get('Network', {})
+        net.get('Service', {}).pop(SVC, None)
+        order = net.get('Global', {}).get('IPv4', {}).get('ServiceOrder')
+        if isinstance(order, list) and SVC in order:
+            order.remove(SVC)
+        # en0's interface entry as this step writes it, when no service for en0 is left to use it
+        ifs = net.get('Interface', {})
+        if ifs.get('en0') == {'AirPort': {'JoinMode': 'Automatic'}} and not any(
+                v.get('Interface', {}).get('DeviceName') == 'en0' for v in svcs.values()):
+            ifs.pop('en0')
+            if not ifs:
+                net.pop('Interface')
     if d.get('Sets', {}).pop(SET, None) is not None and d.get('CurrentSet') == '/Sets/' + SET:
         d.pop('CurrentSet')
     if not svcs:

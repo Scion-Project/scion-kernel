@@ -18,12 +18,14 @@ binary, offset or table is in this file.
 | (always) | `kern.hakios.cp.info`: one line for user space (stage, registration, technology, bars, dBm, operator code, SIM, data, bytes used, budget, a change counter). `kern.hakios.cp.addr` (root only): the context's address and DNS servers |
 | (with `cp_if=1`) | Idle polling in the steady state (1 ms while anything moves, 10 ms after 0.3 s quiet, 50 ms after 5 s); a lost registration gets 10 minutes to come back; the modem is put in low power and reset on an iOS shutdown or restart (xnu `PEHaltRestartInternal`) |
 
-User space (`tools/ios27/modem/`, built by `build.sh`, installed by `66-celld.sh`):
+User space (`tools/ios27/modem/`, built by `build.sh`, installed by `66-celld.sh`; the root build does both, step
+`tools/ios27/fullroot/steps.d/93-modem.sh`, on by default, `ENABLE_MODEM=0` leaves it out, never the test job; it records
+`c.dylib` beside the image and `make-boot-image.sh` adds it to `sweetinject=`):
 
 | Piece | What it does |
 |---|---|
 | `scion-celld` | Root daemon (job `com.scion.celld`). While the context is up it publishes `State:/Network/Service/<id>` (`PrimaryRank` Last), `.../IPv4` (address, `InterfaceName` pdp_ip0, `Router` = the address) and `.../DNS` (the context's servers) to configd; withdraws them when it goes. Exits at once on a boot without the modem |
-| `scion-bars` (`c.dylib`) | Injected into SpringBoard (`sweetinject=...;/usr/lib/c.dylib,SpringBoard`), on only while `/private/var/local/scion-bars` exists: the status bar's cellular entry (bars, the network's name) from `kern.hakios.cp.info` |
+| `scion-bars` (`c.dylib`) | Injected into SpringBoard (`sweetinject=...;/usr/lib/c.dylib,SpringBoard`, written by `make-boot-image.sh` from the root build's record: never name it on a root without the file, SpringBoard would not start), on only while `/private/var/local/scion-bars` exists: the status bar's cellular entry (bars, the network's name) from `kern.hakios.cp.info` |
 | `scion-fetch`, job `com.scion.celltest` | Test roots only: one https GET by name through iOS's own stack, logged with configd's view and the routes |
 
 Seen on phone 1 (SM-G960F, GoMo SIM on eir, 272-03), 13 Nov 2026:

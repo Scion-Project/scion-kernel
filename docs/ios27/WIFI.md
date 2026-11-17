@@ -13,7 +13,7 @@ and answered pings (scion-starlte `WIFI.md`, stages a-e). The iOS 27 kernel uses
 | the drivers | `drivers/wifi/brcmfmac/hakios.exynos_pcie.c`, `hakios.brcmfmac.c`, `drivers/wifi/lx/hakios.lx.c`, `drivers/wifi/hakios.sta.c`, `hakios.apple80211.c`, `hakios.wlan.cpp`, `drivers/net/hakios.net.c`: copied into the fork's tree at build time (`profiles/ios-27.copy`) |
 | brcmfmac itself | `tools/mk-brcmfmac.sh` (Linux 7.0.14's brcmfmac, ISC, on `wifi/lx`) makes `xnu-deps/build/brcmfmac/out/brcmfmac.o`; `tools/ios27/build-xnu-ios.sh` links it in (`HAKIOS_OBJECTS`) when it is there, its debug map stripped |
 | what this tree lacks | the fork's `bsd/dev/starlte_wifi.c`: the radio's files from the root filesystem, polling instead of INTx, the late start |
-| the files | `tools/ios27/wifi/60-wifi-firmware.sh ROOT` (a step of the root build): the phone's own `bcmdhd_sta.bin_b2`, `bcmdhd_clm.blob` and `nvram.txt_*` (from the phone's VENDOR, or fetched by scion-starlte `tools/fetch-firmware.sh`), checked against scion-starlte `firmware/wifi/SHA256SUMS`, into `/private/var/hakios/wifi/`. None of them is in any repository |
+| the files | `tools/ios27/wifi/60-wifi-firmware.sh ROOT` (run by the root build's step `tools/ios27/fullroot/steps.d/91-wifi.sh` when `WIFI_FW_DIR` is given; INSTALL-S9.md, "The S9's features in the root"): the phone's own `bcmdhd_sta.bin_b2`, `bcmdhd_clm.blob` and `nvram.txt_*` (from the phone's VENDOR, or fetched by scion-starlte `tools/fetch-firmware.sh`), checked against scion-starlte `firmware/wifi/SHA256SUMS`, into `/private/var/hakios/wifi/`. None of them is in any repository |
 
 ## How it differs from 16.5
 
@@ -21,7 +21,7 @@ and answered pings (scion-starlte `WIFI.md`, stages a-e). The iOS 27 kernel uses
   `/private/var/hakios/wifi/` (`wifi_dir=` for another directory) once the root filesystem is mounted. A request waits
   at most `wifi_root_wait=` seconds (120 by default) for it. `mac.info` (the phone's `/efs/wifi/.mac.info`) and `network`
   (two lines: name, passphrase) are read there too, if present. The root build copies them only on request
-  (`WIFI_EXTRAS=1`), so a release root never carries a passphrase.
+  (`WIFI_EXTRAS=1`, with `WIFI_FW_DIR`), so a release root never carries a passphrase.
 - **Interrupt.** This tree has no GIC SPI attach yet. `brcmfmac_poll` defaults to 1, so a thread runs brcmfmac's handler
   every `brcmfmac_poll_ms` (2 ms by default) instead of taking INTx (16.5's `brcmfmac=5`).
 - **Start.** `starlte_wifi_init()` (from IOKitBSDInit) starts a thread. The thread waits for the root filesystem, then
@@ -65,7 +65,11 @@ built-in boot-args (fork commit c1cfa83) keep `sweetreboot`, so a panic resets i
 | `wifi_pcie=1` on a phone (phone 1, bp root) | 9 Nov 22:02Z: clean. S-Boot leaves every PCIe gate open, the PHY isolated, WLAN_REG_ON and PERST# low |
 | stage 1 to the chip's ID (phone 2, RC1 line) | 10 Nov 00:39Z: PLL locked, `LINK UP after 10 us: Gen1 x1`, `1:00.0 is 14e4:441f ... rev 05`, BARs placed; then `lx: no 46137344 bytes of memory in one piece` (the pool asked a minute after boot) |
 | firmware, scan, join, DHCP, ping, HTTP (phone 2, one boot, `wifi_pcie=6 brcmfmac=8`, the pool taken at boot) | 10 Nov 00:46Z: NVRAM from the OTP (SEMCO 91 33: `nvram.txt_r02a_b2`), `Firmware: BCM4361/5 wl0: ... 13.50.37`, CLM; scan; WPA2 on 5 GHz, the handshake by `lx_wpa.c`, joined 225 ms after connect; configd's DHCP on en0; console `wifi ping` gateway 4/4 (about 5 ms), 1.1.1.1 4/4 (about 15 ms); `wifi tcp example.com`: `HTTP/1.1 200 OK` |
-| Settings | wifid is not started: its launchd job has `_LimitLoadToDeviceTree` = `wlan` and the S9's ADT has no such node, so Settings shows Wi-Fi off. Two ways, both opt-in, for the next run: an image whose ADT has `/arm-io/wlan` (`tools/ios27/wifi/adt-wlan-node.py`), or the root step `tools/ios27/wifi/62-wifid-loadable.sh` (`WIFI_WIFID=1`), which drops the key from the job as Scion's 16.5 `userland/mkjobs.py` does. With wifid absent, opening Settings > Wi-Fi made Preferences and launchd spin (95% and 58% CPU) until the app was left |
+| Settings | wifid is not started on a stock root: its launchd job has `_LimitLoadToDeviceTree` = `wlan` and the S9's ADT has no such node, so Settings shows Wi-Fi off. Two ways: an image whose ADT has `/arm-io/wlan` (`tools/ios27/wifi/adt-wlan-node.py`), the way wifid was seen started and Settings joining (13 Nov), or the root step `tools/ios27/wifi/62-wifid-loadable.sh`, which drops the key from the job as Scion's 16.5 `userland/mkjobs.py` does. Since 17 November the root build's Wi-Fi step runs it by default (`WIFI_WIFID=0` leaves wifid out); that way has NOT been run on a phone. The job is Apple's, unchanged but for that key (`KeepAlive` and `RunAtLoad` true, no `ThrottleInterval`: launchd's own interval of 10 seconds between starts holds if wifid keeps failing). With wifid absent, opening Settings > Wi-Fi made Preferences and launchd spin (95% and 58% CPU) until the app was left |
+
+`tools/ios27/wifi/63-wifi-netservice.sh` writes configd's Wi-Fi service when the root has configd's preferences; a root
+that has never booted has none (the root build's output), so the first Wi-Fi boot of a fresh root has DHCP wait some
+minutes once, as on 13 November. `64-wifi-nettest.sh` is a test root's job and is never run by the root build.
 
 Test images that join a network take it from the ADT (`tools/ios27/wifi/adt-wifi-network.py`; the kernel removes it from the
 registry and never logs it); such images are private.

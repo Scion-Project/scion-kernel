@@ -13,7 +13,7 @@ a phone on 12 November 2026, and what is still open.
 | its place in the tree | the fork (`Scion-Project/xnu`): `bsd/conf/files`, `bsd/sys/hakios.sensors.h`, `bsd/sys/hakios.exynos_spi.h`, the call in `IOKitBSDInit.cpp`, the PMIC's registers through `starlte_pmic_read/write` | |
 | the hub's firmware | not in any repository (below); the fork's `bsd/dev/starlte_fw.c` hands it to the driver from the device tree | `tools/ios27/adt-firmware.py` when the image is packed |
 | the accelerometer and the gyroscope for iOS | the fork's `iokit/Kernel/arm/hid/SweetHIDSensors.cpp`: two HID event services of Apple's vendor page (0xFF00, usages 3 and 9), fed by the driver's `hakios_ssp_tap()` | `shub_hid=3` |
-| the device's orientation | `tools/ios27/sensors/orientation.c`, a library in backboardd (`/usr/lib/o.dylib`) | `;/usr/lib/o.dylib,backboardd` added to `sweetinject=` |
+| the device's orientation | `tools/ios27/sensors/orientation.c`, a library in backboardd (`/usr/lib/o.dylib`), put on the root by the root build's step `90-sensors` | `;/usr/lib/o.dylib,backboardd` in `sweetinject=`, which `make-boot-image.sh` adds from the root build's record |
 
 Nothing of this runs without its argument: no `shub=`, nothing mapped or powered; no `shub_hid=`, no HID services; the
 library does nothing when `/dev/hakios-sensors` is not there, and is not loaded at all unless `sweetinject=` names it.
@@ -77,10 +77,14 @@ the accelerometer's sign turned (lying face up: Android +1 g on z, iOS -1 g).
    - With the OpenGL ES compositor (no `sbgl=0`, backboardd not among the root's Metal clients) Notes is drawn in
      landscape on the panel, goes back to portrait and to landscape again. The way back was driven by the console's
      `sensors fake 0 4096 0 14` (nobody was at the phone to turn it); the landscape was the phone's real position.
-   - With the Metal compositor the turned interface is not drawn: the Metal plug-in refuses the texture CoreAnimation
+   - With the Metal compositor, before the Metal bundle's turned textures, the turned interface was not drawn: the Metal plug-in refused the texture CoreAnimation
      asks for over the panel's surface (`BufferTexture(RowPitch { bytes_per_row: 3328, row_bytes: 7168 })`: a
      1792-pixel-wide target over the 832-pixel-wide portrait surface), sixty times a turn, and the panel keeps its last
-     portrait picture until the interface is portrait again. That is the compositor's work, not the sensors'.
+     portrait picture until the interface is portrait again. That is the compositor's work, not the sensors'. The same
+     day the bundle learnt to give CoreAnimation a turned texture (`tools/ios27/metal/patches/frontend-turned.diff`,
+     applied by `tools/ios27/metal/mk-bundle27.sh` unless `NOPATCH=1`), and Notes turned to landscape and back under the
+     Metal compositor too ([METAL-ROTATION.md](METAL-ROTATION.md), "Seen"; the turns there were driven from the console's
+     `sensors fake`).
 
 ## Why the library is needed
 
@@ -91,18 +95,23 @@ The library replaces `CMDeviceOrientationManager`'s `startDeviceOrientationUpdat
 `stopDeviceOrientationUpdates`, `deviceOrientationBlocking` and `isDeviceOrientationAvailable` in backboardd, and works
 the orientation out from the accelerometer (the axis with more than 0.75 g, held for 300 ms), as `inject.c` does on 16.5.
 
-Build and install:
+Build and install: the root build does both (`tools/ios27/fullroot/steps.d/90-sensors.sh`, on by default,
+`ENABLE_SENSORS=0` leaves it out; docs/ios27/INSTALL-S9.md, "The S9's features in the root"). It builds the library with
+`tools/ios27/sensors/build.sh` (arm64, signed ad hoc), puts it at `/usr/lib/o.dylib` (mode 755) and records it in
+`root-full.img.inject` beside the image, from which `tools/ios27/s9/make-boot-image.sh` writes the kernel's line:
 
-    tools/ios27/sensors/build.sh o.dylib        # arm64, signed ad hoc
-    # copy it to /usr/lib/o.dylib of the root (mode 755); on the kernel's line:
-    sweetinject=<the line's other libraries>;/usr/lib/o.dylib,backboardd
+    sweetinject=<the kernel's built-in three>;/usr/lib/o.dylib,backboardd
 
-To remove it, take `;/usr/lib/o.dylib,backboardd` off the line (the file is then never loaded) and delete the file.
+On a root that is already built: `sudo tools/ios27/fullroot/apply-step.sh IMG tools/ios27/fullroot/steps.d/90-sensors.sh`
+(it makes `IMG.inject` again), then the boot image again with `--inject-record IMG.inject`. To remove it: the same with
+`undo` at the end, and the boot image again (a line that names `o.dylib` on a root without it would stop backboardd).
+The step has not been run on a phone; the library it installs is the one seen on the phone above.
 
 ## Open
 
-- A turned interface with the Metal compositor (above); a turn by hand with an application in front (the turns by hand
-  were on the home screen and in Settings, which do not turn on a phone of this size).
+- A turn by hand under the Metal compositor (the turns seen with turned textures were driven from the console); a turn
+  by hand with an application in front (the turns by hand were on the home screen and in Settings, which do not turn on
+  a phone of this size).
 - An application reading raw values through CoreMotion: nothing on the test root asked for them (`ReportInterval` was
   never set on the services), so the events' units are checked only against the hub's own figures.
 - The magnetometer, barometer, light and proximity sensors reach `/dev/hakios-sensors` but have no HID service here.

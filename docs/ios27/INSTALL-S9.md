@@ -10,8 +10,8 @@ Nothing of Apple's and nothing of Samsung's is in this repository, and nothing m
 and everything else from **your own** restore image on **your own** Mac. Do not upload or share what you build: the boot image, the
 root image and the device tree carry your restore image's identity and Apple's files.
 
-Written 12 November 2026. Each step below says whether it was run from a fresh clone of the public repositories ("clean run") or
-is written down from how the project's own test phones were made.
+Written 12 November 2026, the S9's features in the root build added on 17 November. Each step below says whether it was run
+from a fresh clone of the public repositories ("clean run") or is written down from how the project's own test phones were made.
 
 ## What you need
 
@@ -61,6 +61,16 @@ decryption of the two archives was not repeated (no room for a second copy of th
     tools/ios27/s9/make-boot-image.sh --kernel hakios-kernel --donor-adt inputs/n104ap.adt \
         --template inputs/recovery.img                                 # -> out/xnu-boot-ios27.img
 
+**Make the boot image again after the root (section 5).** The root build leaves beside the root image a record of the
+libraries it installed for the kernel to insert into programs (`tools/ios27/fullroot/out/root-full.img.inject`: the
+rotation's `o.dylib` for backboardd, the status bar's `c.dylib` for SpringBoard). `make-boot-image.sh` reads that record
+when it is there (or the one `--inject-record FILE` names; `--inject-record none` ignores it) and writes `sweetinject=`
+as the kernel's own three libraries plus exactly the recorded ones (`tools/ios27/s9/cmdline-inject.py`). It refuses a line
+that would not fit the image's 607 bytes, a `--cmdline` that names `sweetinject=` itself, and a kernel whose built-in
+libraries are not the ones it knows. The record and the boot image must agree: a library named on the line that is not on
+the root stops backboardd or SpringBoard from starting at all, and the phone shows nothing. Without a record the image is
+made exactly as before.
+
 The boot image is an Android boot image whose "kernel" is the loader; the loader carries the XNU kernel, the S9's device tree in
 Apple's format (made from your iPhone 11 tree and the S9's own memory map) and a short command line (`sbgl=0
 sweetspeed=408782847` and the time the image was made, `sweetepoch=`; everything else is built into the kernel). The copy of your recovery partition is only a template: its
@@ -105,7 +115,8 @@ but nothing is drawn after the boot console.
     hdiutil attach -readonly -nobrowse -imagekey diskimage-class=CRawDiskImage -mountpoint /tmp/sysos inputs/systemos.dmg
     tools/ios27/s9/prepare-root-inputs.sh /tmp/sysos/System/Library/Caches/com.apple.dyld overlay
     hdiutil detach /tmp/sysos
-    sudo PY=$PY tools/ios27/s9/build-root.sh inputs        # -> tools/ios27/fullroot/out/root-full.img
+    sudo PY=$PY DEVELOPER_DIR=$DEVELOPER_DIR WIFI_FW_DIR=$PWD/inputs/wifi HCD=$PWD/inputs/bcm4361B2_semco.hcd \
+        tools/ios27/s9/build-root.sh inputs        # -> tools/ios27/fullroot/out/root-full.img and root-full.img.inject
 
 iPhone software since iOS 17 is built for processors the S9 does not have (pointer authentication, and instructions newer than
 its ARMv8.0 big cores). The kernel emulates what traps; to make the phone usable the build rewrites those instructions ahead of
@@ -113,6 +124,37 @@ time in a copy of your system's shared library cache and in every program of the
 `docs/ios27/TEXT-DATA.md`). It also applies five one-word changes to that cache (`tools/ios27/s9/patches-24A446.txt`, each
 checked against your cache first), removes the launchd jobs for hardware the port does not drive, marks Setup as done, and
 installs `overlay/`. The result is a raw HFS+ volume image, 32 GiB sparse with about 20 GiB used.
+
+`sudo` passes on only the variables named on its own command line: give it every one the build is to see.
+
+### The S9's features in the root
+
+The kernel turns the S9's hardware on by default (below, "The S9's hardware is on by default"); iOS sees a feature only
+when its piece is on the root. The root build's last four steps (`tools/ios27/fullroot/steps.d/9N-*.sh`) put them there.
+Each is on by default, builds what it needs from this checkout with your Xcode, says in one line what it did, and when
+something only you can supply is missing it says which variable to set and the root is built without that feature.
+`ENABLE_<NAME>=0` leaves one out. A feature that fails is undone (the root holds all of it or none of it) and the build
+goes on; `STRICT=1` makes it stop instead.
+
+| Step | Feature | Needs from you | Puts on the root |
+|---|---|---|---|
+| `90-sensors` (`ENABLE_SENSORS`) | turning the screen with the phone ([SENSORS.md](SENSORS.md)) | Xcode | `/usr/lib/o.dylib`, recorded for backboardd |
+| `91-wifi` (`ENABLE_WIFI`) | Wi-Fi in iOS ([WIFI.md](WIFI.md)) | `WIFI_FW_DIR`: your phone's own Wi-Fi files (scion-starlte `tools/fetch-firmware.sh` fills one from your copy), checked against `devices/starlte/firmware/wifi/SHA256SUMS` (after `python3 tools/hakios-device.py sync`; `WIFI_FW_SUMS` for another list); and a kernel built with brcmfmac (`tools/mk-brcmfmac.sh` before section 1) | the files in `/private/var/hakios/wifi`; wifid made loadable on the S9 (`WIFI_WIFID=0`: not); configd's Wi-Fi service when the root has configd's preferences (a root that has never booted has none: DHCP then waits some minutes at the first Wi-Fi boot) |
+| `92-audio-bt` (`ENABLE_AUDIO_BT`) | speakers, microphone, Bluetooth ([audio-bt/README.md](../../tools/ios27/audio-bt/README.md)) | `HCD`: your phone's own Bluetooth patch (`bcm4361B2_semco.hcd` or `_murata`, from its VENDOR partition), checked against `devices/starlte/firmware/bt/SHA256SUMS`; `PY` with numpy | Scion's audio plug-in, the Bluetooth libraries and BlueTool's scripts, the patch in `/private/var/hakios/bt`, the jobs audiomxd, bluetoothd and BlueTool |
+| `93-modem` (`ENABLE_MODEM`) | the modem's network in iOS: bars, the operator's name, data ([MODEM-IOS.md](MODEM-IOS.md)) | Xcode; for data, your operator's `cp_apn=` on the boot image's line (`--cmdline 'sbgl=0 sweetspeed=408782847 cp_apn=...'`) | `scion-celld` and its job, `/usr/lib/c.dylib` recorded for SpringBoard |
+
+None of them installs a test job (`64-wifi-nettest.sh`, `66-celld.sh ... test`, the USB root shell of `tools/ios27/devsh/`), and
+the Wi-Fi step copies a network's name and passphrase only with `WIFI_EXTRAS=1` (a private test root). After the root,
+make the boot image again (section 3).
+
+**What has been run.** Each feature's pieces were run on a phone on their own branch (the table at the end says how far).
+The four steps were applied, as the builder's own user and without `sudo`, to a copy of one of the project's earlier full
+roots, mounted without owners, with made-up firmware and patch files in place of a phone's: each step twice (the second
+run changed nothing) and then undone (the root was as before, file by file and launchd job by job); a failure half way
+through the audio step was undone the same way; the record was made from that root and composed into a command line with
+the S9 kernel this page builds. Not run: the steps inside `build-full-root.sh build` under `sudo` (owners on), a boot
+image made with a record, and **any of it on a phone: the root with all four features and the kernel with all of it on
+have not been booted together.**
 
 `prepare-root-inputs.sh` makes the build's private directory (`tools/ios27/fullroot/private/`, never in git): instruction tables
 from your cache, the checked patch list, and one script of wardevsa's fetched from his public repository at a fixed commit.
@@ -168,9 +210,9 @@ by the same `fastflash-root.py` from the project's private layout.
 |---|---|
 | Works | Boot to the home screen; the display at 60 Hz; touch; the Mali-G72 GPU (OpenGL ES compositor, or CoreAnimation's Metal renderer with Liquid Glass through PanVK); storage (the system on the phone's UFS, read-write); all eight cores; about 3.6 GB of RAM; the panel's brightness (with the brightness library of section 4); the USB console; Settings and the stock apps start (those that want a network have none). |
 | In the kernel only | The front and rear cameras: sensor, lens, focus, stabiliser and iris are driven and frames can be read from `/dev/hakios-camera` (boot-arguments, off by default). No iOS app sees a camera, and **the Camera app does not appear on the home screen yet**. |
-| Works with extra steps | **The accelerometer and the gyroscope, and screen rotation** ([SENSORS.md](SENSORS.md)): the sensor hub's driver and two HID services in the kernel (`shub=6 shub_hid=3`, on by default since 17 November) and a small library in backboardd (`tools/ios27/sensors/`, added to the root and to `sweetinject=` by hand). Seen on a phone on 12 November: the orientation followed the hand, and Notes turned to landscape and back. **Rotation works with the OpenGL ES compositor; with the Metal compositor a turn freezes the screen** until that is fixed, so do not use the two together. The magnetometer, barometer, light and proximity sensors are read by the kernel only (`/dev/hakios-sensors`); iOS does not get them. |
-| Built in, on by default, needs steps this page's build does not do | **Wi-Fi** ([WIFI.md](WIFI.md)): the kernel has the S9's Wi-Fi since 12 November (`wifi_pcie=6 brcmfmac=8`, a default since 17 November), but the radio driver itself (Linux's brcmfmac, fetched and built by `tools/mk-brcmfmac.sh`) is linked in only if you build it before the kernel, and the phone's own firmware files must be put into the root (`tools/ios27/wifi/60-wifi-firmware.sh`). What a phone has done: in one boot on 10 November, on the work's own branch, the radio loaded its firmware, joined a WPA2 network, got an address by DHCP and answered `ping` and an HTTP request from the kernel's console. iOS itself did not use it: Settings showed Wi-Fi off (wifid is not started). The kernel as merged has been built, with and without the driver, and not booted with Wi-Fi on. |
-| Built in, on by default, needs steps this page's build does not do | **Cellular** ([MODEM-IOS.md](MODEM-IOS.md)): the S9's modem is started by the kernel (`cp=7 cp_nv=2 cp_if=1`, defaults since 17 November; its NV data is read from EFS read-only into RAM and nothing is written to the phone), and registers on the network with a SIM in. iOS shows it only with the root step `tools/ios27/modem/66-celld.sh`, and there is no data without your operator's `cp_apn=` on the command line. The phone-call services are removed: no calls, no SMS. **Audio and Bluetooth**: the speakers, the codec, the microphone and the Bluetooth chip are started by the kernel (`abox=8 max98512=3 cs47l93=6 abox_mic=1 abox_rmem=1 bt=7`, defaults since 17 November); iOS uses them only with the root step `tools/ios27/audio-bt/` (`AUDIO_BT=1`). Merged on 17 November; the kernel with all of it on has been built and **not yet run on a phone in this combination**. |
+| In the root build, on by default | **The accelerometer and the gyroscope, and screen rotation** ([SENSORS.md](SENSORS.md)): the sensor hub's driver and two HID services in the kernel (`shub=6 shub_hid=3`, on by default since 17 November) and a small library in backboardd (step `90-sensors`, recorded for `sweetinject=`). Seen on a phone on 12 November: the orientation followed the hand, and Notes turned to landscape and back, under the OpenGL ES compositor and, with the Metal bundle's turned textures (`frontend-turned.diff`, which `mk-bundle27.sh` applies), under the Metal compositor ([METAL-ROTATION.md](METAL-ROTATION.md)); the turn under Metal was driven from the console, not by turning the phone. The magnetometer, barometer, light and proximity sensors are read by the kernel only (`/dev/hakios-sensors`); iOS does not get them. |
+| In the root build with your files, on by default | **Wi-Fi** ([WIFI.md](WIFI.md)): the kernel has the S9's Wi-Fi since 12 November (`wifi_pcie=6 brcmfmac=8`, a default since 17 November), but the radio driver itself (Linux's brcmfmac, fetched and built by `tools/mk-brcmfmac.sh`) is linked in only if you build it before the kernel; the root build's step `91-wifi` puts the phone's own firmware files (`WIFI_FW_DIR`) on the root and lets launchd start wifid. What a phone has done: in one boot on 10 November, on the work's own branch, the radio loaded its firmware, joined a WPA2 network, got an address by DHCP and answered `ping` and an HTTP request from the kernel's console; on 13 November, with wifid started through a device-tree node of a test image (not through the step's way, which has not been run on a phone), Settings showed Wi-Fi on and joined. The kernel as merged has been built, with and without the driver, and not booted with Wi-Fi on. |
+| In the root build, on by default (audio and Bluetooth with your patch) | **Cellular** ([MODEM-IOS.md](MODEM-IOS.md)): the S9's modem is started by the kernel (`cp=7 cp_nv=2 cp_if=1`, defaults since 17 November; its NV data is read from EFS read-only into RAM and nothing is written to the phone), and registers on the network with a SIM in. iOS shows it through the root build's step `93-modem` (`scion-celld`, and the status bar's `c.dylib` in SpringBoard), and there is no data without your operator's `cp_apn=` on the command line. The phone-call services are removed: no calls, no SMS. **Audio and Bluetooth**: the speakers, the codec, the microphone and the Bluetooth chip are started by the kernel (`abox=8 max98512=3 cs47l93=6 abox_mic=1 abox_rmem=1 bt=7`, defaults since 17 November); iOS uses them through the step `92-audio-bt`, which needs your phone's Bluetooth patch (`HCD`). Merged on 17 November; the kernel with all of it on has been built and **not yet run on a phone in this combination**, nor has a root made with the four steps. |
 | Not in this build | A passcode (there is no Secure Enclave; the key store answers as a phone without a passcode). With no network there is no activation, no iCloud and no App Store; Setup is marked done by the build. Anything not named under "Works" should be taken as not working. |
 
 ## The S9's hardware is on by default (since 17 November 2026)
@@ -183,9 +225,10 @@ only (`sweetfg=1 rtc_pmic=1`), Sileo's installs (`persona_lax=1`), Wi-Fi (`wifi_
 (`abox=8 max98512=3 cs47l93=6 abox_mic=1 abox_rmem=1 bt=7`) and the modem (`cp=7 cp_nv=2 cp_delay=40 cp_rfs=1 cp_if=1`).
 
 - To turn one off for a run, name it on the command line with 0: `--cmdline 'sbgl=0 sweetspeed=408782847 cp=0 bt=0'`.
-- The kernel side is on; what iOS needs on top of it (the sensors' library, the Wi-Fi firmware and its service, the audio
-  and Bluetooth step, the cellular daemon) are separate root steps under `tools/ios27/` that the one-command root build
-  of section 5 does not run yet. Without its step a feature is driven by the kernel and not seen by iOS.
+- The kernel side is on; what iOS needs on top of it (the sensors' library, the Wi-Fi firmware and wifid, the audio and
+  Bluetooth pieces, the cellular daemon and the status bar's library) the root build of section 5 puts on the root
+  ("The S9's features in the root"), each feature when you give what it needs. Without its step a feature is driven by
+  the kernel and not seen by iOS.
 - Nothing here writes to the phone's storage outside USERDATA. The modem's NV data comes from EFS read-only.
 - Each feature was seen on a phone on its own branch (the table above says how far). **All of them on at once has been
   built and not yet run on a phone.**
