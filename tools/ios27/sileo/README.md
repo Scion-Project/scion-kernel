@@ -4,7 +4,10 @@ What it is and why: [docs/ios27/SILEO.md](../../../docs/ios27/SILEO.md). The fil
 
 | File | What |
 |---|---|
-| `prepare.sh` | Fetch and check the Procursus bootstrap and Sileo (`tools/mk-jb.sh`, pinned), build `jb_seed` and `var_sync` for iOS. No root. Output in `jb/` of the checkout |
+| `prepare.sh` | Fetch and check the Procursus bootstrap and the package manager(s) (`tools/mk-jb.sh`, pinned; `PACKAGE_MANAGER=zebra` (default), `sileo` or `both`), build `jb_seed` and `var_sync` for iOS. No root. Output in `jb/` of the checkout. `SILEO_FROM=fork`: Sileo built from the project's fork (`build-sileo.sh`) |
+| `build-sileo.sh` | Sileo.app from github.com/Scion-Project/Sileo at a pinned commit, with Xcode (27.2 tested); the fork falls back to `giveMeRoot` when the kernel refuses its persona spawn. Not reproducible byte for byte: `SOURCE` and `SHA256SUMS` next to it say what it is |
+| `pm-app.sh` | Sourced by the two steps: a package manager's app as a marked real copy in `/Applications` |
+| `../fullroot/steps.d/61-zebra.sh ROOT [undo]` | Zebra's copy in `/Applications`, when the prefix has Zebra |
 | `build-tools.sh` | The second half of that: `userland/src/jb_seed.c` and `var_sync.c` with Xcode's iPhoneOS SDK, arm64, ad-hoc signed |
 | `../fullroot/steps.d/60-sileo.sh ROOT [undo]` | The root step. Part of every full-root build; also run by hand on an attached root |
 | `jobs.py ROOT add [--selftest]\|remove\|list` | The launchd jobs, as entries of `/System/Library/xpc/launchd.plist` |

@@ -270,7 +270,8 @@ The kernel's built-in command line now turns on the S9's own hardware, so that o
 temperatures (`tmu=3`: read, the cores and the GPU's clock slowed by them, the GPU from 85 C, and the phone shut down and
 powered off if any zone reads 110 C three times in a row; until 17 November this kernel read none and nothing stopped a
 hot run), the sensor hub (`shub=6 shub_hid=3`), restart and power off from iOS (`sweethalt=1`), the battery's gauge and the PMIC's clock, both read
-only (`sweetfg=1 rtc_pmic=1`), Sileo's installs (`persona_lax=1`), Wi-Fi (`wifi_pcie=6 brcmfmac=8`), audio and Bluetooth
+only (`sweetfg=1 rtc_pmic=1`), the package managers' installs (`persona_lax=1`: Zebra and Sileo become root by a spawn into a
+persona; see [SILEO.md](SILEO.md), "Stuck at Queued"), Wi-Fi (`wifi_pcie=6 brcmfmac=8`), audio and Bluetooth
 (`abox=8 max98512=3 cs47l93=6 abox_mic=1 abox_rmem=1 bt=7`) and the modem (`cp=7 cp_nv=2 cp_delay=40 cp_rfs=1 cp_if=1`).
 
 Since 18 November 2026 the line also has the cameras (`cam_s9=7 cam_switch=1`: front and rear in one boot), the GPU's

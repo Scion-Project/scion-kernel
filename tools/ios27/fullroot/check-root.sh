@@ -86,15 +86,23 @@ r=$("$PY" -I "${IOS27_PIPELINE:-$H/pipeline}/root/macho-rewrite.py" "${IOS27_PIP
 case $r in *"'ret': 0, 'br': 0, 'blr': 0, 'pac': 0,"*"errors 0") ok "Mach-O a64e rewrite is complete (0 sites left, 0 errors)";; *) bad "Mach-O a64e rewrite incomplete";; esac
 # the package manager (steps.d/60-sileo.sh): all of it or none of it, and nothing it must not bring
 if [[ -d $R/jb ]]; then
-    for f in jb/Applications/Sileo.app/Sileo jb/usr/bin/dpkg jb/usr/bin/apt-get jb/prep.sh jb/.scion-stamp usr/local/bin/jb_seed usr/local/bin/var_sync; do
+    for f in jb/usr/bin/dpkg jb/usr/bin/apt-get jb/prep.sh jb/.scion-stamp usr/local/bin/jb_seed usr/local/bin/var_sync; do
         [[ -e $R/$f ]] && ok "present $f" || bad "missing $f"; done
+    # Sileo, Zebra or both (PACKAGE_MANAGER of tools/ios27/sileo/prepare.sh), each with its copy in /Applications (60-sileo.sh, 61-zebra.sh)
+    pms=0
+    for a in Sileo Zebra; do
+        [[ -d $R/jb/Applications/$a.app ]] || continue
+        pms=$((pms+1))
+        [[ -x $R/jb/Applications/$a.app/$a && -e $R/Applications/$a.app/.scion-prefix-app ]] && ok "package manager $a, with its /Applications copy" || bad "$a is in the prefix without its /Applications copy"
+    done
+    [[ $pms -ge 1 ]] && ok "$pms package manager(s) in the prefix" || bad "no package manager (Sileo or Zebra) in the prefix"
     for c in chmod cp mkdir mv rm; do [[ $(readlink "$R/bin/$c" 2>/dev/null) == /var/jb/usr/bin/$c ]] && ok "/bin/$c -> the prefix" || bad "/bin/$c is not the prefix's link"; done
     [[ $(/usr/bin/python3 "$H/../sileo/jobs.py" "$R" list | grep -c ' present$') -ge 2 ]] && ok "launchd jobs com.scion.jbseed, com.scion.varsync" || bad "the prefix's launchd jobs are not in launchd.plist"
     /usr/bin/python3 "$H/../sileo/jobs.py" "$R" list | grep -q 'sileotest.plist present' && info "com.scion.sileotest is on this root: a TEST root (SILEO_SELFTEST=1), not a release"
     [[ ! -e $R/jb/usr/sbin/sshd && ! -e $R/jb/usr/lib/TweakLoader.dylib ]] && ok "no OpenSSH, no tweak injection in the prefix" || bad "OpenSSH or tweak injection is in the prefix"
     [[ -z $(awk -F: '!/^#/ && NF >= 10 && $2 != "*" && $2 != "!"' "$R/jb/etc/master.passwd") ]] && ok "no account with a password in the prefix" || bad "an account with a password is in the prefix"
     [[ -z $(find "$R/jb" ! -type l -perm -0002 | head -1) ]] && ok "nothing writable by everybody in the prefix" || bad "files writable by everybody in the prefix"
-    [[ $(stat -f %u "$R/jb/Applications/Sileo.app/giveMeRoot") == 0 ]] && ok "the prefix is root's" || info "the prefix is not root's on this mount (no owners, or made without root): jb_seed makes it so on the phone"
+    [[ $(stat -f %u "$R/jb/usr/bin/dpkg") == 0 ]] && ok "the prefix is root's" || info "the prefix is not root's on this mount (no owners, or made without root): jb_seed makes it so on the phone"
 else
     info "no package manager on this root (ENABLE_SILEO=0)"
 fi

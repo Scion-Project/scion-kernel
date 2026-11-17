@@ -89,7 +89,8 @@ else
 	echo "NOTE: no StarbiteMetal.bundle in the overlay: build-root.sh will use the OpenGL ES compositor (ENABLE_METAL_CA=0)"
 fi
 echo "overlay: $(grep -c . "$P/overlay/MANIFEST.sha256" || true) files"
-# 6. the package manager's prefix (steps.d/60-sileo.sh): the Procursus bootstrap and Sileo, pinned, and the two programs
+# 6. the package manager's prefix (steps.d/60-sileo.sh, 61-zebra.sh): the Procursus bootstrap and Zebra, Sileo or both
+# (PACKAGE_MANAGER=zebra|sileo|both, default zebra; tools/ios27/sileo/prepare.sh), pinned, and the two programs
 # that seed and keep it, into jb/ of this checkout. ENABLE_SILEO=0 here and at the build leaves the root without it.
 if [ "${ENABLE_SILEO:-1}" = 1 ]; then
 	"$HERE/../sileo/prepare.sh"

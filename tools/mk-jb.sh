@@ -17,12 +17,27 @@
 # PREINSTALL= ELLEKIT= tools/mk-jb.sh is the installer's (scion-installer, build-installer.sh): the bootstrap and Sileo
 # alone, both pinned below, with no tweak injection and no OpenSSH. Without them: ElleKit and PREINSTALL's list as well,
 # whatever the repository has as newest.
+# MANAGERS: which package managers go into the prefix, any of "sileo" and "zebra" (default "sileo", as before). Both are
+# Procursus's own rootless builds, pinned below, and both drive the same apt and dpkg. Zebra (github.com/zbrateam/Zebra,
+# GPL-3.0; its source is in the package's Depiction and in github.com/Scion-Project/Zebra) is a separate program in the
+# prefix: nothing of this repository links with it.
 set -e
 SUITE=1800                                              # the rootless distribution of Procursus
 SILEO=org.coolstar.sileo_2.5.1_iphoneos-arm64.deb
 # What the two are, as published: a change upstream stops the build here rather than reach a phone unnoticed.
 BOOTSTRAP_SHA256=a99b39bb0344ee3b42bb961325038dceae7daaec500976f3b822cf36cccf020a
 SILEO_SHA256=8e3c90e5a7d32f4ca207a0ac30d3cfa8a13dca86a2b4e11cb3f9e5c68d7bc97a
+ZEBRA=xyz.willy.zebra_1.1.36_iphoneos-arm64.deb
+ZEBRA_SHA256=91900ce44684a2b163b0f887609fff95e3296f58d35b82a83ebb351d46b01052
+MANAGERS=${MANAGERS-sileo}
+WANT_SILEO=; WANT_ZEBRA=
+for m in $MANAGERS; do
+	case $m in
+	sileo) WANT_SILEO=1 ;;
+	zebra) WANT_ZEBRA=1 ;;
+	*) echo "mk-jb.sh: MANAGERS names sileo and zebra, not '$m'" >&2; exit 1 ;;
+	esac
+done
 MIRROR=https://apt.procurs.us
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 OUT=$ROOT/jb
@@ -38,11 +53,19 @@ pinned() {                                              # the file in debs/, or 
 	exit 1
 }
 get "$MIRROR/bootstraps/$SUITE/bootstrap-iphoneos-arm64.tar.zst" bootstrap.tar.zst
-get "$MIRROR/pool/main/iphoneos-arm64-rootless/$SUITE/sileo/$SILEO" sileo.deb
 pinned bootstrap.tar.zst "$BOOTSTRAP_SHA256"
-pinned sileo.deb "$SILEO_SHA256"
-# made already, from this script with these settings: left as it is, so that the system image is not made again for it
-STAMP=$(sum "$0")-${PREINSTALL-default}-${ELLEKIT-default}
+if [ -n "$WANT_SILEO" ]; then
+	get "$MIRROR/pool/main/iphoneos-arm64-rootless/$SUITE/sileo/$SILEO" sileo.deb
+	pinned sileo.deb "$SILEO_SHA256"
+fi
+if [ -n "$WANT_ZEBRA" ]; then
+	get "$MIRROR/pool/main/iphoneos-arm64-rootless/$SUITE/zebra/$ZEBRA" zebra.deb
+	pinned zebra.deb "$ZEBRA_SHA256"
+fi
+# made already, from this script with these settings: left as it is, so that the system image is not made again for it.
+# The package managers come first and PREINSTALL and ELLEKIT last (60-sileo.sh reads the end).
+MSTAMP=$(echo $MANAGERS | tr ' ' '+')
+STAMP=$(sum "$0")-${MSTAMP:-none}-${PREINSTALL-default}-${ELLEKIT-default}
 [ "$(cat "$OUT/.stamp" 2>/dev/null)" = "$STAMP" ] && [ -d "$OUT/root/var/jb" ] && { echo "mk-jb.sh: $OUT/root/var/jb is up to date"; exit 0; }
 
 rm -rf "$OUT/root"
@@ -61,9 +84,10 @@ zstd -dc "$OUT/debs/bootstrap.tar.zst" | tar -tvf - | awk '$1 ~ /^-/ && ($1 ~ /^
 	echo "mk-jb.sh: set-ID bits back on ${path#./}"
 done
 
-# Sileo on top of it: a .deb is an ar archive of control and data, and the data is the tree itself
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+# Sileo on top of it: a .deb is an ar archive of control and data, and the data is the tree itself
+if [ -n "$WANT_SILEO" ]; then
 (cd "$TMP" && ar x "$OUT/debs/sileo.deb")
 tar -C "$OUT/root" -xf "$TMP"/data.tar.* 2>/dev/null ||
 	zstd -dc "$TMP/data.tar.zst" | tar -C "$OUT/root" -xf -
@@ -88,6 +112,25 @@ mkdir -p "$TMP/control" && tar -C "$TMP/control" -xf "$TMP"/control.tar.* 2>/dev
 # package 'org.coolstar.sileo' missing" at every run, "dpkg --audit" calls it broken, and an upgrade or removal of Sileo
 # cannot know its files (tools/ios27/sileo/dpkg-info.py)
 python3 "$(dirname "$0")/ios27/sileo/dpkg-info.py" "$OUT/debs/sileo.deb" "$OUT/root/var/jb/Library/dpkg" --prefix-root "$OUT/root"
+fi
+
+# Zebra the same way. Its package has no set-ID file (on iOS 13 and later it becomes root by a spawn into a persona, as
+# Sileo does) and one script, extrainst_ (uicache of its app), which an unpack by hand does not run: the root step and
+# scion-apps-sync put the app where LaunchServices finds it.
+if [ -n "$WANT_ZEBRA" ]; then
+ZTMP=$TMP/zebra
+mkdir -p "$ZTMP/control"
+(cd "$ZTMP" && ar x "$OUT/debs/zebra.deb")
+tar -C "$OUT/root" -xf "$ZTMP"/data.tar.*
+[ -d "$OUT/root/var/jb/Applications/Zebra.app" ] || { echo "mk-jb.sh: no Zebra.app in the package" >&2; exit 1; }
+tar -C "$ZTMP/control" -xf "$ZTMP"/control.tar.*
+{
+	sed '/^$/d' "$ZTMP/control/control"
+	echo "Status: install ok installed"
+	echo
+} >> "$OUT/root/var/jb/Library/dpkg/status"
+python3 "$(dirname "$0")/ios27/sileo/dpkg-info.py" "$OUT/debs/zebra.deb" "$OUT/root/var/jb/Library/dpkg" --prefix-root "$OUT/root"
+fi
 
 # ElleKit: the tweak-injection framework (Cydia Substrate's modern replacement). It is what loads a
 # tweak's .dylib into a process and does the function and method hooking; on a rootless jailbreak the
@@ -275,4 +318,8 @@ rm -f "$OUT/root/var/jb/prep_bootstrap.sh"
 
 echo "$STAMP" > "$OUT/.stamp"
 echo "mk-jb.sh: $OUT/root/var/jb ($(du -sh "$OUT/root/var/jb" | cut -f1), $(find "$OUT/root/var/jb" | wc -l) entries)"
-echo "          Sileo $(grep -m1 '^Version:' "$TMP/control/control" | cut -d' ' -f2), $(grep -c '^Package:' "$OUT/root/var/jb/Library/dpkg/status") packages in dpkg's database"
+for m in $MANAGERS; do
+	case $m in sileo) id=org.coolstar.sileo ;; zebra) id=xyz.willy.zebra ;; esac
+	echo "          $m $(awk -v p="$id" '$1 == "Package:" { x = ($2 == p) } x && $1 == "Version:" { print $2; exit }' "$OUT/root/var/jb/Library/dpkg/status")"
+done
+echo "          $(grep -c '^Package:' "$OUT/root/var/jb/Library/dpkg/status") packages in dpkg's database"
