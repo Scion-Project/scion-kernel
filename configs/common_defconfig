@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 759 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 761 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
