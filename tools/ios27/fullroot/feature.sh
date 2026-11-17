@@ -4,7 +4,8 @@
 # feature step the same rules (docs/ios27/INSTALL-S9.md, "The S9's features in the root"):
 #   - ENABLE_<VAR>=0 leaves the feature out; it is on by default (a step may say "auto" and decide from the root).
 #   - An input only the builder can supply is missing: one line naming the variable to set, and the root is built
-#     without the feature (feature_skip).
+#     without the feature (feature_skip). Firmware is not such an input: the device's firmware is fetched and checked by
+#     firmware.sh (feature_firmware), and when it cannot be had the build stops instead (feature_die).
 #   - The feature's programs are built from this checkout with the builder's Xcode (DEVELOPER_DIR), as the builder's own
 #     user when the root build runs under sudo (feature_build), into build/ios27-features/<name>/ (not in git).
 #   - The step's work runs in a child process; if it fails, the step's own undo runs, so the root holds either the whole
@@ -30,14 +31,18 @@ feature_setup() {
 	FEATURE_OUT=${FEATURE_BUILD_DIR:-$FEATURE_SK/build/ios27-features}/${FEATURE#[0-9][0-9]-}
 }
 
+# the device's vendor firmware (fw_prepare, FIRMWARE_DIR, fw_check_kind): firmware.sh, shared with the root build and the boot image
+. "$(dirname "${BASH_SOURCE[0]}")/firmware.sh"
+
 # feature_as_builder CMD... : CMD as the builder's own user when the build runs under sudo (no root-owned files in the
-# checkout), with DEVELOPER_DIR and PY passed through; as the caller otherwise
-feature_as_builder() {
-	if [[ $EUID == 0 && -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
-		sudo -u "$SUDO_USER" -H env PATH="$PATH" ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} ${PY:+PY="$PY"} "$@"
-	else
-		"$@"
-	fi
+# checkout), with DEVELOPER_DIR and PY passed through; as the caller otherwise (firmware.sh's fw_as_builder)
+feature_as_builder() { fw_as_builder "$@"; }
+
+# feature_firmware KIND WHAT : the device's firmware made complete and checked (firmware.sh), or the build stopped: a feature
+# that is on is never built without its firmware (ENABLE_<VAR>=0 leaves it out on purpose)
+feature_firmware() {
+	fw_prepare || feature_die "the $2 is not complete (above): the build stops ($FEATURE_VAR=0 builds the root without it)"
+	[[ -f $FIRMWARE_DIR/$1/SHA256SUMS ]] || feature_die "$FIRMWARE_DIR has no $1/SHA256SUMS"
 }
 
 # feature_have_sdk : is there an Xcode with the iPhoneOS SDK for the builder?

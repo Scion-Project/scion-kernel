@@ -12,8 +12,11 @@
 # The S9's features, each on by default and built here with your Xcode (pass DEVELOPER_DIR through sudo), each skipped with one
 # line when what only you can supply is missing, ENABLE_<NAME>=0 to leave one out (tools/ios27/fullroot/steps.d/9N-*.sh):
 #   ENABLE_SENSORS    rotation (o.dylib in backboardd)
-#   ENABLE_WIFI       Wi-Fi: needs WIFI_FW_DIR=<your phone's own Wi-Fi files>; WIFI_WIFID=0 leaves wifid out
-#   ENABLE_AUDIO_BT   speakers, microphone, Bluetooth: needs HCD=<your phone's own bcm4361B2_*.hcd> and PY with numpy
+#   ENABLE_WIFI       Wi-Fi: the firmware from devices/starlte (below); WIFI_WIFID=0 leaves wifid out
+#   ENABLE_AUDIO_BT   speakers, microphone, Bluetooth: both Bluetooth patches from devices/starlte (below); PY with numpy
+# The S9's firmware (tools/ios27/fullroot/firmware.sh): fetched by devices/starlte/tools/fetch-firmware.sh (python3
+#   tools/hakios-device.py sync starlte, once) and checked against its sums before anything is copied; a file missing or
+#   wrong stops the build. FIRMWARE_FROM=<your own copy> FIRMWARE_OFFLINE=1 FIRMWARE_DIR=<a firmware/ of your own>.
 #   ENABLE_MODEM      the modem's network, bars and data (c.dylib in SpringBoard); data needs cp_apn= on the boot image's line
 #   ENABLE_CAMERA     the camera (cam.dylib in cameracaptured; docs/ios27/CAMERA.md, NOT run on a phone); needs cam_s9=7 on the
 #                     boot image's line, and then make-boot-image.sh shows the Camera app

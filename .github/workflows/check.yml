@@ -54,6 +54,8 @@ jobs:
         run: python3 tools/ios27/s9/cmdline-inject-test.py
       - name: "iOS builds: the manifests of tools/ios27/builds, and the tools refusing an unknown build or a mixture of builds"
         run: python3 tools/ios27/builds/builds-test.py
+      - name: The S9's firmware in the iOS 27 root build is complete and checked or the build stops, and the root says what it has (made-up files)
+        run: bash tools/ios27/fullroot/firmware-test.sh
       - name: The backup tool only reads, copies exactly, and proves every copy
         run: python3 tools/backup-partitions-test.py
       - name: Saved var archives use the newest intact slot

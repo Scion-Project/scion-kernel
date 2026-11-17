@@ -3,17 +3,22 @@
 The kernel side is in the fork (Scion-Project/xnu, branch `wip/ios27-s9-audio-bt`): ABOX + MAX98512 (`abox=N`,
 `max98512=N`, `abox_rmem=1`) and the BCM4361's Bluetooth (`bt=N`). This directory is what iOS 27's root needs on top,
 as one idempotent root step. The root build runs both of the commands below by default since 17 November
-(`tools/ios27/fullroot/steps.d/92-audio-bt.sh`: with `HCD` given, else it skips with one line; `ENABLE_AUDIO_BT=0` leaves
-it out; docs/ios27/INSTALL-S9.md, "The S9's features in the root"). By hand, `60-audio-bt.sh` does nothing unless
+(`tools/ios27/fullroot/steps.d/92-audio-bt.sh`: both modules' patches from scion-starlte's `firmware/bt/`, fetched and
+checked by `tools/ios27/fullroot/firmware.sh`, and a patch missing or wrong stops the build; until 17 November it skipped
+without `HCD`, and the root then had neither audio nor Bluetooth; `ENABLE_AUDIO_BT=0` leaves it out; docs/ios27/INSTALL-S9.md,
+"The S9's firmware"). By hand, `60-audio-bt.sh` does nothing unless
 `AUDIO_BT=1`:
 
     tools/ios27/audio-bt/build.sh                       # -> build/ios27-audio-bt/files (needs Xcode + iPhoneOS SDK)
-    AUDIO_BT=1 OS_MNT=<IPSW OS image mounted> HCD=<the phone's own bcm4361B2_semco.hcd> \
+    AUDIO_BT=1 OS_MNT=<IPSW OS image mounted> HCD=devices/starlte/firmware/bt \
         tools/ios27/audio-bt/60-audio-bt.sh <mounted iOS 27 root>
     tools/ios27/audio-bt/60-audio-bt.sh <mounted iOS 27 root> undo     # all of it off again, the jobs back where they were
 
-The patch is checked against `devices/starlte/firmware/bt/SHA256SUMS` (`HCD_SUMS` for another list) when the checkout has
-it. Where the three jobs were before the first run is kept in `/usr/local/share/scion/audio-bt-jobs.plist` for `undo`.
+`HCD` is one patch (`bcm4361B2_semco.hcd` or `_murata`) or a directory, of which every patch `HCD_SUMS` names is put on the
+root. Each is checked against `devices/starlte/firmware/bt/SHA256SUMS` (`HCD_SUMS` for another list) when the checkout has
+it. With both on the root, the kernel (`hakios.bcm4361_bt.c`, xnu-12377) waits up to `bt_otp_wait=` seconds (120) for the
+Wi-Fi to read the module from the chip's OTP and takes that module's patch; `bt_module=` names it outright. Written on 17
+November and not yet run on a phone. Where the three jobs were before the first run is kept in `/usr/local/share/scion/audio-bt-jobs.plist` for `undo`.
 
 What the step does:
 - `/System/Library/Audio` from the user's own IPSW if the root lacks it (stage-ios-root.sh leaves it out; it has the

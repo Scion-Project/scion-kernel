@@ -5,9 +5,11 @@
 # them the plug-in finds no /dev/hakios-audio and bluetoothd no UART.
 #   AUDIO_BT=1            do it
 #   OS_MNT=<dir>          the IPSW's OS image mounted (System/Library/Audio and the jobs, if the root lacks them)
-#   HCD=<file>            the phone's own Broadcom patch, bcm4361B2_semco.hcd (or _murata) from its VENDOR partition
-#                         (both test phones: semco); installed as /private/var/hakios/bt/<its name> for bt=6; checked against
-#                         HCD_SUMS (default devices/starlte/firmware/bt/SHA256SUMS, when this checkout has it) by name and sha256
+#   HCD=<file or dir>     Broadcom's patch for the BCM4361's Bluetooth, bcm4361B2_semco.hcd or _murata (both test phones:
+#                         semco), installed as /private/var/hakios/bt/<its name> for bt=6; or a directory: every patch HCD_SUMS
+#                         names, all of them required (the root build gives devices/starlte/firmware/bt: both, and the kernel
+#                         takes the module's, read from the chip's OTP). Checked against HCD_SUMS (default
+#                         devices/starlte/firmware/bt/SHA256SUMS, when this checkout has it) by name and sha256
 #   FILES=<dir>           what build.sh made (default build/ios27-audio-bt/files of this checkout)
 #   undo                  everything this step put on the root taken off, the three launchd jobs back where they were
 #                         (edit-launchd-audio-bt.py keeps that in /usr/local/share/scion/audio-bt-jobs.plist), BlueTool's
@@ -41,12 +43,21 @@ fi
 for f in HakiosAudio.driver/HakiosAudio hakios-inject hakios.bluetool.dylib hakios.bluetoothd.dylib; do
 	[[ -f $F/$f ]] || { echo "60-audio-bt: no $F/$f (tools/ios27/audio-bt/build.sh)" >&2; exit 1; }
 done
+HCDS=()
 if [[ -n ${HCD:-} ]]; then
 	SUMS=${HCD_SUMS:-$SK/devices/starlte/firmware/bt/SHA256SUMS}
-	if [[ -f $SUMS ]]; then
-		grep -q "^$(shasum -a 256 "$HCD" | cut -c1-64)  $(basename "$HCD")\$" "$SUMS" ||
-			{ echo "60-audio-bt: $HCD is not one of the patches $SUMS names (by name and sha256)" >&2; exit 1; }
+	if [[ -d $HCD ]]; then
+		[[ -f $SUMS ]] || { echo "60-audio-bt: HCD=$HCD is a directory: HCD_SUMS must name its patches" >&2; exit 1; }
+		for n in $(awk '$1 !~ /^#/ && NF >= 2 { sub(/^\*/, "", $2); print $2 }' "$SUMS"); do HCDS+=("$HCD/$n"); done
+		[[ ${#HCDS[@]} -gt 0 ]] || { echo "60-audio-bt: $SUMS names no patch" >&2; exit 1; }
+	else
+		HCDS=("$HCD")
 	fi
+	for h in "${HCDS[@]}"; do
+		[[ -f $h ]] || { echo "60-audio-bt: no $h" >&2; exit 1; }
+		[[ ! -f $SUMS ]] || grep -q "^$(shasum -a 256 "$h" | cut -c1-64)  \*\{0,1\}$(basename "$h")\$" "$SUMS" ||
+			{ echo "60-audio-bt: $h is not one of the patches $SUMS names (by name and sha256)" >&2; exit 1; }
+	done
 fi
 if [[ ! -d $A/Plug-Ins/HAL/BTAudioHALPlugin.driver ]]; then
 	[[ -n ${OS_MNT:-} && -d $OS_MNT/System/Library/Audio ]] || { echo "60-audio-bt: $A missing and no OS_MNT" >&2; exit 1; }
@@ -68,15 +79,19 @@ for s in "$F"/bluetool/*.script; do
 	fi
 	install -m 644 "$s" "$E/$n"
 done
-if [[ -n ${HCD:-} ]]; then
-	h=$(basename "$HCD"); mkdir -p "$B"; touch "$B/.scion-files"
-	if ! grep -qx "$h" "$B/.scion-files"; then
-		# the root's own patch of that name: left alone when it is the same, else kept for undo
-		if [[ -f $B/$h ]] && ! cmp -s "$HCD" "$B/$h"; then mkdir -p "$B/.scion-orig"; cp -p "$B/$h" "$B/.scion-orig/$h"; fi
-		[[ -f $B/$h ]] || echo "$h" >> "$B/.scion-files"
-		[[ ! -f $B/.scion-orig/$h ]] || echo "$h" >> "$B/.scion-files"
-	fi
-	cmp -s "$HCD" "$B/$h" || install -m 644 "$HCD" "$B/$h"
+if [[ ${#HCDS[@]} -gt 0 ]]; then
+	mkdir -p "$B"; touch "$B/.scion-files"
+	for src in "${HCDS[@]}"; do
+		h=$(basename "$src")
+		if ! grep -qx "$h" "$B/.scion-files"; then
+			# the root's own patch of that name: left alone when it is the same, else kept for undo
+			if [[ -f $B/$h ]] && ! cmp -s "$src" "$B/$h"; then mkdir -p "$B/.scion-orig"; cp -p "$B/$h" "$B/.scion-orig/$h"; fi
+			[[ -f $B/$h ]] || echo "$h" >> "$B/.scion-files"
+			[[ ! -f $B/.scion-orig/$h ]] || echo "$h" >> "$B/.scion-files"
+		fi
+		cmp -s "$src" "$B/$h" || install -m 644 "$src" "$B/$h"
+	done
+	echo "60-audio-bt: $(for src in "${HCDS[@]}"; do basename "$src"; done | tr '\n' ' ')in /private/var/hakios/bt"
 else
 	echo "60-audio-bt: no HCD given: bt=6 will find no patch (put the phone's own .hcd in /private/var/hakios/bt/)"
 fi
