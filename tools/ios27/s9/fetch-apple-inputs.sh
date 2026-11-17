@@ -62,5 +62,10 @@ if [ ! -f n104ap.adt ]; then
 	rm -rf "$(echo "$dt" | cut -d/ -f1)"
 fi
 echo "n104ap.adt: $(stat -f %z n104ap.adt) bytes"
+# Files unzipped from a downloaded IPSW can carry the download's quarantine flag (com.apple.quarantine). macOS then mounts a
+# quarantined image with the quarantine option, and macOS 27's /usr/bin/rsync (openrsync) fails on the extended attributes
+# of every file in it when the root build copies it (17 November 2026: 341 errors in the AppOS cryptex, the build stopped).
+# These are your own download: the flag is taken off what this script wrote.
+for f in os.dmg systemos.dmg appos.dmg n104ap.adt BuildManifest.plist; do xattr -d com.apple.quarantine "$f" 2>/dev/null || true; done
 { echo "made by tools/ios27/s9/fetch-apple-inputs.sh from $(basename "$IPSW"), build $WANT_BUILD"; shasum -a 256 os.dmg systemos.dmg appos.dmg n104ap.adt; } > SOURCE.txt
 echo "inputs ready in $OUT (Apple's files: keep them on this disk)"
