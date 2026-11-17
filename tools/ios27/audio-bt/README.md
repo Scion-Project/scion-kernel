@@ -52,4 +52,10 @@ Status (9 November 2026, phone 1, silent runs at night):
   `bt_vsc=1` (drivers/bluetooth/bcm4361/hakios.bt_vsc.h) answers from a table instead, each answer a whole reply that is
   true of this chip (0xFDDA: no Apple features; 0xFDFD off: done), and passes the rest as the chip answers them; `bt_vsc=log`
   only reports the rejections. `bt_addr_efs=1` gives the chip the phone's own address from EFS (read only); without it
-  every S9 on this kernel has Broadcom's default address. Neither has been run on a phone yet.
+  every S9 on this kernel has Broadcom's default address.
+- Later on 17 November (`bt_vsc=1`, phone 1): the abort is gone; bluetoothd goes through its start and the chip takes
+  Apple's 0xFCE2 sub-commands, but bluetoothd takes the chip for one with Apple's scan core and LP core and sends their
+  commands (0xFE37 scan parameters, 0xFE3B LP-core statistics). `bt_vsc=1` sends 0xFE37 and 0xFE29 as the standard LE
+  scan commands (the chip took them and LE advertising reports came); bluetoothd still restarted. `BT_NO_SCAN_CORE=1`
+  (60-audio-bt.sh, `bt-prefs.py`) sets bluetoothd's own overrides EnableScanCore=NO and DisableLowPowerCoreScan=YES so
+  that it does not use them at all; not yet run on a phone.
