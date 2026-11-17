@@ -1,0 +1,121 @@
+PanVK (Mesa 26.2.6, MIT; Mesa's notices are kept as they are): two switches of the tiler heap, both off by default.
+
+STARBITE_PANVK_PIPE=1: the batches take the two halves of the tiler heap in turn and name theirs in the submit's
+requirements (bit 8 a half is named, bit 9 the second), so a kernel that knows the bits (bsd/dev/starlte_gpu.c sgu_pipe,
+sgu_slots=2) may run a vertex/tiler chain beside the fragment chain of the batch before it.
+STARBITE_PANVK_BINS=<hex mask>: only these levels of the tiler's bin hierarchy (and always the coarsest one Mesa chose).
+Written on 12 November 2026 in a local tree (s9-night-ui); recorded here on 17 November from that tree, unchanged.
+
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -60,6 +60,8 @@
+    struct pan_tls_info tlsinfo;
+    unsigned wls_total_size;
+    bool issued;
++   /* Starbite (iOS): the half of the tiler heap this batch's polygon lists are in (1 or 2), 0: the whole heap. */
++   uint8_t sb_heap_half;
+ };
+ 
+ enum panvk_cmd_event_op_type {
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -92,7 +92,6 @@
+ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
+ {
+    struct panvk_batch *batch = cmdbuf->cur_batch;
+-
+    if (!batch)
+       return;
+ 
+@@ -305,16 +304,55 @@
+    tiler_desc =
+       batch->tiler.ctx_descs.gpu + (pan_size(TILER_CONTEXT) * layer_idx);
+ 
++   uint64_t sb_heap_size = pan_kmod_bo_size(dev->tiler_heap->bo);
++   uint64_t sb_heap_base = dev->tiler_heap->addr.dev;
++#ifdef __APPLE__
++   /* Starbite (iOS), STARBITE_PANVK_PIPE=1 (off by default). Every batch's lists start at the heap's base, so a batch's
++    * vertex/tiler chain may only run once the batch before it has been drawn: the kernel runs one chain at a time. With
++    * this the batches take the two halves of the heap in turn and say which (panvk_queue_submit_batch), and a kernel
++    * that knows the two bits runs a vertex/tiler chain beside the fragment chain of the batch before it when their
++    * halves differ: the two job slots at once. The hierarchy below is chosen for the half. */
++   {
++      static int sb_pipe = -1;
++      static uint32_t sb_turn;
++      if (sb_pipe < 0) {
++         const char *e = getenv("STARBITE_PANVK_PIPE");
++         sb_pipe = e != NULL && e[0] == '1';
++      }
++      if (sb_pipe) {
++         batch->sb_heap_half = 1 + (p_atomic_inc_return(&sb_turn) & 1);
++         sb_heap_size /= 2;
++         sb_heap_base += (batch->sb_heap_half - 1) * sb_heap_size;
++      }
++   }
++#endif
+    pan_pack(&batch->tiler.heap_templ, TILER_HEAP, cfg) {
+-      cfg.size = pan_kmod_bo_size(dev->tiler_heap->bo);
+-      cfg.base = dev->tiler_heap->addr.dev;
+-      cfg.bottom = dev->tiler_heap->addr.dev;
++      cfg.size = sb_heap_size;
++      cfg.base = sb_heap_base;
++      cfg.bottom = sb_heap_base;
+       cfg.top = cfg.base + cfg.size;
+    }
+ 
+    pan_pack(&batch->tiler.ctx_templ, TILER_CONTEXT, cfg) {
+       cfg.hierarchy_mask = panvk_select_tiler_hierarchy_mask(
+-         phys_dev, &cmdbuf->state.gfx, pan_kmod_bo_size(dev->tiler_heap->bo));
++         phys_dev, &cmdbuf->state.gfx, sb_heap_size);
++#ifdef __APPLE__
++      /* Starbite (iOS), STARBITE_PANVK_BINS=<mask in hexadecimal> (unset by default): only these levels of the bin
++       * hierarchy (bit 0: 16-pixel bins, bit 1: 32, ...), and always the coarsest one chosen above. The tiler job
++       * prepares every bin of every level it may use, whatever is drawn: with all eight levels a pass over the whole
++       * panel is about 7,800 bins for a handful of rectangles. What is drawn does not change, only where the lists go. */
++      {
++         static int sb_bins = -1;
++         if (sb_bins < 0) {
++            const char *e = getenv("STARBITE_PANVK_BINS");
++            sb_bins = e != NULL ? (int)(strtoul(e, NULL, 16) & 0xff) : 0;
++         }
++         if (sb_bins != 0 && cfg.hierarchy_mask != 0) {
++            const uint32_t coarsest = 1u << (util_last_bit(cfg.hierarchy_mask) - 1);
++            cfg.hierarchy_mask = (cfg.hierarchy_mask & (uint32_t)sb_bins) | coarsest;
++         }
++      }
++#endif
+       cfg.fb_width = fb->width_px;
+       cfg.fb_height = fb->height_px;
+       cfg.heap = batch->tiler.heap_desc.gpu;
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -66,6 +66,12 @@
+     * make sure things are GPU-visible. */
+    pan_kmod_flush_bo_map_syncs(dev->kmod.dev);
+ 
++   /* Starbite (iOS): the tiler heap half of a batch that renders (see cmd_prepare_tiler_context), for the kernel's queue:
++    * bit 8 "a half is named", bit 9 "the second half". Only a batch with both chains and a tiler job names one. */
++   const uint32_t sb_half_bits =
++      (batch->sb_heap_half != 0 && batch->vtc_jc.first_tiler && batch->vtc_jc.first_job && batch->frag_jc.first_job)
++         ? ((1u << 8) | (batch->sb_heap_half == 2 ? (1u << 9) : 0)) : 0;
++
+    if (batch->vtc_jc.first_job) {
+       struct drm_panfrost_submit submit = {
+          .bo_handles = (uintptr_t)bos,
+@@ -74,6 +80,7 @@
+          .in_sync_count = nr_in_fences,
+          .out_sync = queue->sync,
+          .jc = batch->vtc_jc.first_job,
++         .requirements = sb_half_bits,
+       };
+ 
+       ret = pan_kmod_ioctl(dev->drm_fd, DRM_IOCTL_PANFROST_SUBMIT, &submit);
+@@ -109,7 +116,7 @@
+          .bo_handle_count = nr_bos,
+          .out_sync = queue->sync,
+          .jc = batch->frag_jc.first_job,
+-         .requirements = PANFROST_JD_REQ_FS,
++         .requirements = PANFROST_JD_REQ_FS | sb_half_bits,
+       };
+ 
+       if (batch->vtc_jc.first_job) {

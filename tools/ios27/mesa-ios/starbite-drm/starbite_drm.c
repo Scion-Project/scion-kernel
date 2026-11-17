@@ -17,6 +17,8 @@
  *
  * Fences: STARBITE_DRM_SEQ=1 makes a fence wait a wait for the fence's own
  * chain instead of for the whole queue (seq_wait() below; off by default).
+ * STARBITE_DRM_FENCES=1 is the same switch under the name the 12 November
+ * shim (built into the PanVK of phone 1's c2 bundle) gave its own version.
  *
  * After HakiOS tools/mesa/hakios-drm/hakios.drm.c (MIT, Copyright the HakiOS
  * authors), reworked for Panfrost and StarbiteMali.
@@ -32,6 +34,8 @@
 #include <sys/ioccom.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <stdarg.h>
 
 #include <IOKit/IOKitLib.h>
 
@@ -54,12 +58,32 @@ static uint32_t next_syncobj;
  * STARBITE_DRM_SYNC=1: synchronous submits as before.
  */
 static bool async_on;
+static bool seq_on;
 static void seq_probe(void);
 
 /*
  * The connection to StarbiteMali, opened at the first request whoever makes it: Panfrost GL comes
  * through drmOpenWithType(), PanVK opens the device node of drmGetDevices2() itself.
  */
+/* One line on the console (/dev/console, not the kernel's LOG call: it is said before or without a connection). */
+static void
+console_say(const char *format, ...)
+{
+	int fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_NONBLOCK);
+	if (fd < 0) {
+		return;
+	}
+	char text[200];
+	va_list ap;
+	va_start(ap, format);
+	int n = vsnprintf(text, sizeof(text), format, ap);
+	va_end(ap);
+	if (n > 0) {
+		dprintf(fd, "SBDRM[%d %s]: %s\n", getpid(), getprogname(), text);
+	}
+	close(fd);
+}
+
 static bool
 starbite_connect(void)
 {
@@ -67,11 +91,17 @@ starbite_connect(void)
 		return true;
 	}
 	io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching(SBM_SERVICE));
-	if (service == IO_OBJECT_NULL) {
-		return false;
+	kern_return_t kr = KERN_FAILURE;
+	if (service != IO_OBJECT_NULL) {
+		kr = IOServiceOpen(service, mach_task_self(), 0, &connection);
+		IOObjectRelease(service);
 	}
-	kern_return_t kr = IOServiceOpen(service, mach_task_self(), 0, &connection);
-	IOObjectRelease(service);
+	/* once a process, and at every failure: whether the GPU was reached (a process that never draws says why here) */
+	static int said;
+	if (!said || kr != KERN_SUCCESS) {
+		said = 1;
+		console_say("StarbiteMali %s, IOServiceOpen -> %#x", service != IO_OBJECT_NULL ? "found" : "NOT FOUND", kr);
+	}
 	if (kr != KERN_SUCCESS) {
 		return false;
 	}
@@ -84,6 +114,8 @@ starbite_connect(void)
 		}
 	}
 	seq_probe();
+	console_say("async submits %s, fences by chain number %s", async_on ? "on" : "off",
+	    seq_on ? "on (STARBITE_DRM_SEQ=1 or STARBITE_DRM_FENCES=1)" : "off");
 	return true;
 }
 
@@ -132,7 +164,8 @@ trace_call(uint32_t selector, const void *data, size_t size, kern_return_t kr)
  * every buffer this process creates or imports is kept with the call stack that made it, and
  * every 15 s the call sites holding the most live memory are appended to /var/local/mtl2.log as
  * "SBDRM <proc> live N MiB in M buffers; site: K MiB in J (made T) <- lib+off ...".
- * STARBITE_DRM_LEAKS=0: off.
+ * STARBITE_DRM_LEAKS=0: off. STARBITE_DRM_LEAKS=2: the lines go to the kernel's console as well (StarbiteMali's LOG call,
+ * cut to its 250 characters), for a phone whose files cannot be read while it runs.
  */
 #define LEAK_FRAMES 10
 #define LEAK_SITES  512
@@ -162,6 +195,13 @@ leak_dump_locked(void)
 	}
 	fprintf(f, "SBDRM %s[%d] live %llu MiB in %llu buffers\n", getprogname(), getpid(),
 	    (unsigned long long)(all >> 20), (unsigned long long)count);
+	char con[251];
+	size_t returned = 0;
+	if (leaks_on == 2) {
+		int n = snprintf(con, sizeof(con), "SBDRM %s[%d] live %llu MiB in %llu buffers", getprogname(), getpid(),
+		        (unsigned long long)(all >> 20), (unsigned long long)count);
+		(void)IOConnectCallStructMethod(connection, 0x102, con, (size_t)n + 1, NULL, &returned);
+	}
 	bool shown[LEAK_SITES] = { false };
 	for (unsigned k = 0; k < 8; k++) {
 		int best = -1;
@@ -179,17 +219,27 @@ leak_dump_locked(void)
 		fprintf(f, "SBDRM %s  %llu KiB in %llu (made %llu) <-", getprogname(),
 		    (unsigned long long)(s->live_bytes >> 10), (unsigned long long)s->live,
 		    (unsigned long long)s->made);
+		int cn = snprintf(con, sizeof(con), "SBDRM  %llu KiB in %llu (made %llu) <-", (unsigned long long)(s->live_bytes >> 10),
+		         (unsigned long long)s->live, (unsigned long long)s->made);
 		for (unsigned j = 0; j < LEAK_FRAMES && s->pcs[j] != NULL; j++) {
 			Dl_info info;
 			if (dladdr(s->pcs[j], &info) && info.dli_fname != NULL) {
 				const char *base = strrchr(info.dli_fname, '/');
 				fprintf(f, " %s+%#lx", base ? base + 1 : info.dli_fname,
 				    (unsigned long)((uintptr_t)s->pcs[j] - (uintptr_t)info.dli_fbase));
+				if (cn < (int)sizeof(con) - 1) {
+					cn += snprintf(con + cn, sizeof(con) - (size_t)cn, " %.9s+%#lx", base ? base + 1 : info.dli_fname,
+					          (unsigned long)((uintptr_t)s->pcs[j] - (uintptr_t)info.dli_fbase));
+				}
 			} else {
 				fprintf(f, " %p", s->pcs[j]);
 			}
 		}
 		fprintf(f, "\n");
+		if (leaks_on == 2) {
+			con[sizeof(con) - 1] = 0;
+			(void)IOConnectCallStructMethod(connection, 0x102, con, strlen(con) + 1, NULL, &returned);
+		}
 	}
 	fclose(f);
 }
@@ -199,7 +249,7 @@ leak_note(uint32_t handle, uint64_t bytes, bool made)
 {
 	if (leaks_on < 0) {
 		const char *e = getenv("STARBITE_DRM_LEAKS");
-		leaks_on = e == NULL || *e != '0';
+		leaks_on = e == NULL ? 1 : *e == '0' ? 0 : *e == '2' ? 2 : 1;
 	}
 	if (!leaks_on || handle >= LEAK_HANDLES) {
 		return;
@@ -347,7 +397,6 @@ static struct {
 } seq_table[SEQ_SLOTS];
 static struct seq_fence seq_fds[SEQ_FDS];               /* exported sync files, by descriptor, until imported */
 static pthread_mutex_t seq_lock = PTHREAD_MUTEX_INITIALIZER;
-static bool seq_on;
 static uint64_t seq_done_seen;                          /* the last chain number the kernel has said is done */
 enum { SEQ_ST_BY_NUMBER, SEQ_ST_ALREADY, SEQ_ST_TIMEOUT, SEQ_ST_AS_BEFORE, SEQ_ST_NO_FENCE, SEQ_ST_UNFOLLOWED,
 	SEQ_ST_SUBMITS, SEQ_ST_COUNT };
@@ -359,12 +408,19 @@ struct sbm_wait_seq_req {
 	uint64_t done;                                  /* out: the last chain done */
 };
 
+/* The switch: STARBITE_DRM_SEQ=1, or STARBITE_DRM_FENCES=1 (the 12 November shim's name for its version of it). */
+static bool
+seq_wanted(void)
+{
+	const char *e = getenv("STARBITE_DRM_SEQ"), *f = getenv("STARBITE_DRM_FENCES");
+	return (e != NULL && strcmp(e, "1") == 0) || (f != NULL && strcmp(f, "1") == 0);
+}
+
 /* Once the connection is open (starbite_connect): the switch read, and the kernel asked whether it has WAIT_SEQ. */
 static void
 seq_probe(void)
 {
-	const char *e = getenv("STARBITE_DRM_SEQ");
-	if (e == NULL || strcmp(e, "1") != 0) {
+	if (!seq_wanted()) {
 		return;
 	}
 	struct sbm_wait_seq_req w = { 0, 0, 0 };
@@ -449,7 +505,7 @@ seq_set(uint32_t handle, uint32_t state, uint64_t seq)
 static void
 seq_new(uint32_t handle, uint32_t state)
 {
-	if (!seq_on && getenv("STARBITE_DRM_SEQ") != NULL) {
+	if (!seq_on && seq_wanted()) {
 		(void)starbite_connect();               /* (made before any other request: the switch is decided there) */
 	}
 	if (!seq_on || handle == 0) {
@@ -591,6 +647,10 @@ seq_ioctl(unsigned long request, void *arg)
  */
 static uint64_t sel_count[18], sel_last_ns, mmap_local;
 uint64_t sbdrm_flush_reason[10];                         /* pan_job.c: batches submitted, by why */
+/* PanVK (mesa26-panvk-batch-stats.patch): batches with work by what closed them, their vertex/tiler/compute jobs, and those
+ * with no fragment job. Plain counters, bumped without atomics by PanVK's recording threads: a statistic, not an account. */
+unsigned sbdrm_vk_why;
+unsigned long long sbdrm_vk_batches[10], sbdrm_vk_jobs, sbdrm_vk_fragless;
 #define MMAP_CACHE 8193u                                /* StarbiteMali's handles are 1..8192 */
 static uint64_t mmap_cache[MMAP_CACHE];
 static void
@@ -620,7 +680,7 @@ count_and_report(uint32_t selector)
 	for (int i = 0; i < 18; i++) {
 		c[i] = __atomic_exchange_n(&sel_count[i], 0, __ATOMIC_RELAXED);
 	}
-	char text[200];
+	char text[250];
 	int n = snprintf(text, sizeof(text), "drm[%d] %llu s: submit %llu wait %llu create %llu mmap %llu param %llu "
 	    "offset %llu madvise %llu(local) close %llu other %llu; mmap local %llu", getpid(), (unsigned long long)((now - last) / 1000000000ull),
 	    c[0], c[1], c[2], c[3], c[4], c[5], c[8], c[16], c[6] + c[7] + c[9] + c[10] + c[11] + c[12] + c[13] + c[14] + c[15] + c[17],
@@ -628,6 +688,22 @@ count_and_report(uint32_t selector)
 	if (n > 0 && n < (int)sizeof(text)) {
 		size_t returned = 0;
 		(void)IOConnectCallStructMethod(connection, 0x102, text, (size_t)n + 1, NULL, &returned);
+	}
+	unsigned long long vb[10], vall = 0;
+	for (int i = 0; i < 10; i++) {
+		vb[i] = __atomic_exchange_n(&sbdrm_vk_batches[i], 0, __ATOMIC_RELAXED);
+		vall += vb[i];
+	}
+	if (vall != 0) {
+		n = snprintf(text, sizeof(text), "drm[%d] vk batches %llu: end-rendering %llu barrier %llu before-dispatch %llu dispatch %llu "
+		    "begin-rendering %llu job-limit %llu end-cmdbuf %llu event %llu query %llu other %llu; jobs %llu; no fragment job %llu",
+		    getpid(), vall, vb[1], vb[2], vb[3], vb[4], vb[5], vb[6], vb[7], vb[8], vb[9], vb[0],
+		    __atomic_exchange_n(&sbdrm_vk_jobs, 0, __ATOMIC_RELAXED), __atomic_exchange_n(&sbdrm_vk_fragless, 0, __ATOMIC_RELAXED));
+		if (n > 0) {
+			size_t returned = 0;
+			text[sizeof(text) - 1] = 0;
+			(void)IOConnectCallStructMethod(connection, 0x102, text, strlen(text) + 1, NULL, &returned);
+		}
 	}
 	uint64_t f[10];
 	for (int i = 0; i < 10; i++) {

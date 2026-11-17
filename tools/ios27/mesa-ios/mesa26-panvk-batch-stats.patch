@@ -1,0 +1,203 @@
+PanVK (Mesa 26.2.6, MIT; Mesa's notices are kept as they are): what closed each batch, for the DRM shim's statistics.
+
+Every cmd_close_batch caller names why (end of rendering, barrier, before a dispatch, the dispatch, begin rendering, job
+limit, end of the command buffer, event, query); the shim (tools/ios27/mesa-ios/starbite-drm, which defines the counters)
+prints "drm[pid] vk batches N: ..." every 10 s with STARBITE_DRM_STATS=1. Counters only: nothing else changes.
+Recorded on 17 November 2026 from the local tree (s9-night-ui) the 14 November PanVK was built from, with one correction:
+there, two `if` statements of panvk_vX_cmd_query.c without braces got the counter's assignment as their whole body, so
+cmd_close_batch ran unconditionally after them; here they close only where Mesa closes.
+
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -88,10 +88,20 @@
+ }
+ #endif
+ 
++
++/* Starbite (iOS): what closed each batch that had work, counted for the kernel shim's statistics line (starbite_drm.c). */
++extern unsigned sbdrm_vk_why;           /* set by the caller of cmd_close_batch: 1 end of rendering, 2 barrier, 3 before a
++                                         * dispatch, 4 the dispatch, 5 begin rendering, 6 job limit, 7 end of the command
++                                         * buffer, 8 event, 9 query; 0 anything else */
++extern unsigned long long sbdrm_vk_batches[10], sbdrm_vk_jobs, sbdrm_vk_fragless;
++
+ void
+ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
+ {
+    struct panvk_batch *batch = cmdbuf->cur_batch;
++   unsigned why = sbdrm_vk_why;
++
++   sbdrm_vk_why = 0;
+    if (!batch)
+       return;
+ 
+@@ -124,6 +134,11 @@
+    struct panvk_physical_device *phys_dev =
+       to_panvk_physical_device(dev->vk.physical);
+ 
++   sbdrm_vk_batches[why < 10 ? why : 0]++;
++   sbdrm_vk_jobs += batch->vtc_jc.job_index;
++   if (!batch->fb.desc.gpu)
++      sbdrm_vk_fragless++;
++
+    list_addtail(&batch->node, &cmdbuf->batches);
+ 
+    if (batch->tlsinfo.tls.size) {
+@@ -399,6 +414,7 @@
+ {
+    VK_FROM_HANDLE(panvk_cmd_buffer, cmdbuf, commandBuffer);
+ 
++   sbdrm_vk_why = 7;
+    panvk_per_arch(cmd_close_batch)(cmdbuf);
+ 
+    panvk_pool_flush_maps(&cmdbuf->desc_pool);
+@@ -419,6 +435,7 @@
+     * barrier flag set to true.
+     */
+    if (cmdbuf->cur_batch) {
++      sbdrm_vk_why = 2;
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       panvk_per_arch(cmd_open_batch)(cmdbuf);
+    }
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c
+@@ -60,6 +60,8 @@
+    return batch->tls.gpu;
+ }
+ 
++extern unsigned sbdrm_vk_why;   /* Starbite (iOS): see panvk_vX_cmd_buffer.c */
++
+ static void
+ cmd_dispatch(struct panvk_cmd_buffer *cmdbuf, struct panvk_dispatch_info *info)
+ {
+@@ -71,6 +73,7 @@
+    if (!panvk_priv_mem_check_alloc(cs->rsd))
+       return;
+ 
++   sbdrm_vk_why = 3;
+    panvk_per_arch(cmd_close_batch)(cmdbuf);
+    struct panvk_batch *batch = panvk_per_arch(cmd_open_batch)(cmdbuf);
+ 
+@@ -213,6 +216,7 @@
+                   indirect ? MALI_JOB_TYPE_NOT_STARTED : MALI_JOB_TYPE_COMPUTE,
+                   false, false, 0, copy_desc_dep, &job, false);
+ 
++   sbdrm_vk_why = 4;
+    panvk_per_arch(cmd_close_batch)(cmdbuf);
+    clear_dirty_after_dispatch(cmdbuf);
+ }
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -1206,6 +1206,8 @@
+    return VK_SUCCESS;
+ }
+ 
++extern unsigned sbdrm_vk_why;   /* Starbite (iOS): see panvk_vX_cmd_buffer.c */
++
+ static VkResult
+ prepare_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_data *draw)
+ {
+@@ -1227,6 +1229,7 @@
+     */
+    if (batch->vtc_jc.job_index + (4 * cmdbuf->state.gfx.render.layer_count) >=
+        UINT16_MAX) {
++      sbdrm_vk_why = 6;
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       batch = panvk_per_arch(cmd_open_batch)(cmdbuf);
+    }
+@@ -1724,6 +1727,7 @@
+     * much as this will cause the TLS budget to go crazy.
+     */
+    if (batch->vtc_jc.job_index > (5 * 1024)) {
++      sbdrm_vk_why = 6;
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       batch = panvk_per_arch(cmd_open_batch)(cmdbuf);
+       cmdbuf->state.gfx.vs.indirect_varying_bufs_infos = 0;
+@@ -1901,8 +1905,10 @@
+        *
+        * XXX: Rewrite events to not close and open batch and add an assert here.
+        */
+-      if (cmdbuf->cur_batch)
++      if (cmdbuf->cur_batch) {
++         sbdrm_vk_why = 5;
+          panvk_per_arch(cmd_close_batch)(cmdbuf);
++      }
+ 
+       panvk_per_arch(cmd_init_render_state)(cmdbuf, pRenderingInfo);
+       cmdbuf->state.gfx.render.fb.needs_load = !resuming;
+@@ -1930,6 +1936,7 @@
+ 
+       cmdbuf->state.gfx.render.fb.needs_store = true;
+ 
++      sbdrm_vk_why = 1;
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       cmdbuf->cur_batch = NULL;
+       panvk_per_arch(cmd_meta_resolve_attachments)(cmdbuf);
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_event.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_event.c
+@@ -16,6 +16,8 @@
+ 
+ #include "util/u_dynarray.h"
+ 
++extern unsigned sbdrm_vk_why;   /* Starbite (iOS): see panvk_vX_cmd_buffer.c */
++
+ static void
+ panvk_add_set_event_operation(struct panvk_cmd_buffer *cmdbuf,
+                               struct panvk_event *event,
+@@ -32,12 +34,14 @@
+        */
+       panvk_per_arch(cmd_open_batch)(cmdbuf);
+       util_dynarray_append(&cmdbuf->cur_batch->event_ops, op);
++      sbdrm_vk_why = 8;
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+    } else {
+       /* Let's close the current batch so the operation executes before any
+        * future commands.
+        */
+       util_dynarray_append(&cmdbuf->cur_batch->event_ops, op);
++      sbdrm_vk_why = 8;
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       panvk_per_arch(cmd_open_batch)(cmdbuf);
+    }
+@@ -62,6 +66,7 @@
+        */
+       if (cmdbuf->cur_batch->frag_jc.first_job ||
+           cmdbuf->cur_batch->vtc_jc.first_job) {
++         sbdrm_vk_why = 8;
+          panvk_per_arch(cmd_close_batch)(cmdbuf);
+          panvk_per_arch(cmd_open_batch)(cmdbuf);
+       }
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+@@ -25,6 +25,8 @@
+ 
+ #include "libpan.h"
+ 
++extern unsigned sbdrm_vk_why;   /* Starbite (iOS): see panvk_vX_cmd_buffer.c */
++
+ static nir_def *
+ panvk_nir_query_report_dev_addr(nir_builder *b, nir_def *pool_addr,
+                                 nir_def *query_stride, nir_def *query)
+@@ -75,8 +77,10 @@
+ static void
+ close_batch(struct panvk_cmd_buffer *cmd, bool had_batch)
+ {
+-   if (!had_batch)
++   if (!had_batch) {
++      sbdrm_vk_why = 9;
+       panvk_per_arch(cmd_close_batch)(cmd);
++   }
+ }
+ 
+ static void
+@@ -185,8 +189,10 @@
+    bool end_sync = cmd->cur_batch != NULL;
+ 
+    /* Close to ensure we are sync and flush caches */
+-   if (end_sync)
++   if (end_sync) {
++      sbdrm_vk_why = 9;
+       panvk_per_arch(cmd_close_batch)(cmd);
++   }
+ 
+    bool had_batch;
+    struct panvk_batch *batch = open_batch(cmd, &had_batch);

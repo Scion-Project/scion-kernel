@@ -1,0 +1,48 @@
+PanVK (Mesa 26.2.6, MIT; Mesa's notices are kept as they are): VK_EXT_external_memory_host for 2D linear images.
+
+The memory of a host allocation is imported as it is for a buffer (the kernel wires the pages and maps them for the GPU),
+and a 2D image whose rows the caller can know (linear, or DRM_FORMAT_MOD_LINEAR with the caller's pitch) lies over it.
+Without this answer metal2vulkan keeps every texture over an IOSurface as a second image and copies between the two with
+compute jobs around every pass that draws into one or samples one. STARBITE_PANVK_HOST_IMAGES=0 gives the old answer.
+Written on 12 November 2026 in a local tree (s9-night-ui); recorded here on 17 November from that tree, unchanged.
+
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -1403,6 +1403,37 @@
+       VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT |
+       VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+ 
++#ifdef __APPLE__
++   /* Starbite: VK_EXT_external_memory_host for images too. The memory of a host
++    * allocation is imported as it is for a buffer (panvk_AllocateMemory,
++    * pan_kmod_bo_import_host: the kernel wires the pages and maps them for the
++    * GPU), and a 2D image whose rows the caller can know lies over it like any
++    * other memory: a linear image (its rows are the texels' bytes rounded up to
++    * 64) or one with an explicit layout (DRM_FORMAT_MOD_LINEAR and the
++    * caller's row pitch). Without this answer a Metal layer above keeps every
++    * texture over an IOSurface as a second image and copies between the two
++    * with compute jobs, around every pass that draws into one or samples one.
++    * STARBITE_PANVK_HOST_IMAGES=0 in the environment gives the old answer. */
++   if (handleType == VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT) {
++      static int host_images = -1;
++      if (host_images < 0) {
++         const char *e = getenv("STARBITE_PANVK_HOST_IMAGES");
++         host_images = !(e && *e == '0');
++      }
++      if (host_images && pImageFormatInfo->type == VK_IMAGE_TYPE_2D &&
++          (pImageFormatInfo->tiling == VK_IMAGE_TILING_LINEAR ||
++           pImageFormatInfo->tiling == VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT)) {
++         *external_properties = (VkExternalMemoryProperties){
++            .externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
++            .exportFromImportedHandleTypes = 0,
++            .compatibleHandleTypes =
++               VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
++         };
++         return VK_SUCCESS;
++      }
++   }
++#endif
++
+    if (!(handleType & supported_handle_types)) {
+       return panvk_errorf(physical_device, VK_ERROR_FORMAT_NOT_SUPPORTED,
+                           "VkExternalMemoryTypeFlagBits(0x%x) unsupported",
