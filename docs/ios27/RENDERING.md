@@ -19,7 +19,7 @@ point are at the end.
 | What is seen | Compositor | Cause | How sure | Changed |
 |---|---|---|---|---|
 | App switcher: the background is black | Metal (OpenGL ES: no picture yet) | the reduced picture the switcher puts behind its cards is drawn into an extended-range IOSurface, and the plug-in refuses that command buffer | refusal: certain; that it is the background: likely | `frontend-dexr-surfaces.diff` |
-| App switcher: the cards of apps opened earlier are blank white (icon and name only); the app just left is drawn | not Metal (a file read) | their saved snapshots are compressed files of decmpfs type 16, which this kernel cannot read | likely | nothing (a kernel decompressor) |
+| App switcher: the cards of apps opened earlier are blank white (icon and name only); the app just left is drawn | not Metal (a file read) | their saved snapshots are compressed files of decmpfs type 16, which this kernel cannot read | files and type: certain; that this blanks the cards: likely | the fork: a type 16 decompressor (`decmpfs_lz4=1`) |
 | Home screen and lock screen wallpaper black | both | no poster ([METAL.md](METAL.md), [GPU-PATH.md](GPU-PATH.md)); with the stop-gap image installed both are drawn | certain | nothing new |
 | Blur black (Control Centre, dock, folders) | Metal, without `SWEET_MTL2_DEXR=1` | metal2vulkan refuses CoreAnimation's variable-blur downsample, which samples an extended-range texture through a mip-filtered sampler | certain | none new: `SWEET_MTL2_DEXR=1` (on in the root build) is the answer and is drawn on 17 November |
 | Lock screen clock an empty box | Metal, earlier configurations | the clock's glass goes through the same blur | guess | not reproduced on 17 November: the clock is drawn |
@@ -102,9 +102,30 @@ unregistered type 16` (the path is redacted) 67 to 185 times a boot. They cluste
 white cards, and 4 when only the fresh Settings card was shown. iOS keeps an app's snapshots as files; files that were
 compressed in place (the decmpfs header in an extended attribute) can be read on this kernel only if it has a decompressor
 of their type, and the iOS 27 kernel registers type 1 alone ([METAL.md](METAL.md) saw the same for nine SplashBoard images of
-the restore image). The card of the app just left comes from the snapshot in memory, not from the file. Not Metal, and
-nothing is changed here: the fix is a decompressor of type 16 in the kernel, or snapshots written uncompressed, after E5
-names the files and the type.
+the restore image). The card of the app just left comes from the snapshot in memory, not from the file.
+
+**The files (certain).** A copy of the first phone's root pulled on 17 November, mounted read-only on the build machine:
+the run-time-written areas that could be read (`/private/var`, without two system container folders that need root to
+read) hold 16 compressed files, all of decmpfs type 16, all `.ktx` snapshots (4 under SpringBoard's
+`Library/SplashBoard/Snapshots`, 12 in apps' data containers); the system part of the root holds none (the root build copies
+the restore image's files through macOS, which reads them decompressed, onto an HFS volume that keeps them so). On this
+kernel `bsd/kern/decmpfs.c` registers type 1 alone (`decmpfs_init()`); on Apple's systems a closed kernel extension
+registers every other type.
+
+**Type 16 (inferred from the files, checked by decoding them).** The decmpfs attribute is the 16-byte header only; the data
+is in the resource fork: a table of n + 1 little-endian 32-bit offsets (n = the size in 64 KiB chunks, rounded up; the first
+entry is the table's own length, the last the fork's length), then the chunks, each a stream of Apple's LZ4 framing (`bv41`
+blocks: decoded size, encoded size, an LZ4 block; `bv4-`: stored bytes; `bv4$`: the end), decoding to 64 KiB, the last chunk
+to what remains. Decoded so, each of the 16 files equals the file as macOS reads it, byte for byte.
+
+**Changed (the xnu fork).** `bsd/kern/decmpfs_lz4.c` registers a decompressor for type 16 with the boot argument
+`decmpfs_lz4=1` (off by default): it checks the table against the file's size and its fork's length, decodes only the
+chunks a read needs, and refuses (with a console line, `decmpfs lz4: ... refused`) anything that does not fit exactly; the
+LZ4 block decoder is written from the public block format, every length and offset checked. Its host test
+(`bsd/kern/decmpfs_lz4_test.c`, address and undefined-behaviour sanitizers) decodes libcompression's own LZ4 streams of
+known content exactly, refuses every truncation and corrupted table, keeps 20,000 corrupted chunks in bounds, and matches
+macOS on the 16 real files. `decmpfs_path=1` (also off by default) prints the path of each of the first 64 reads of a type no
+decompressor reads, to find any other such file. Not run on a phone: E6 below.
 
 
 
@@ -192,7 +213,8 @@ hold (the switcher), take a screenshot; then a screenshot of the lock screen and
 | E2 | the bundle with `frontend-dexr-surfaces.diff` (Metal compositor) | `made again with colors 0x1`, no `AttachmentFormat`, the blurred home screen and wallpaper behind the cards: fixed; still black with no refusal: the background is the missing wallpaper (E4) |
 | E3 | the old bundle, `SWEET_MTL2_DEXR=0` (control; that bundle takes it as the boot argument `m2e_SWEET_MTL2_DEXR=0`) | cards drawn, `variable_blur` refusals, blur black, clock box empty: both what the variable is for and its flaw confirmed |
 | E4 | only if E2's background stays black with no refusal: `sbwallpaper-windows` with `MainSwitcher:bottom` | image behind the cards: the cause is the missing poster; icons vanishing while an app opens or closes: that fallback is not acceptable |
-| E5 | no boot: on a root pulled after the switcher showed white cards, the decmpfs header (`com.apple.decmpfs`: magic, type) of the files in the apps' snapshot folders (SplashBoard) | type 16 there: the white cards are these files; then the type's algorithm decides the kernel work |
+| E5 | done on the build machine, no boot: the census above | type 16, all snapshots |
+| E6 | the kernel with `decmpfs_lz4=1 decmpfs_path=1`: open three apps, then the switcher | `decmpfs: type 16 ... registered`, no `unregistered type 16` and no `decmpfs lz4: ... refused` line, every card with its app's picture: fixed; any `decmpfs: a compressed file of type N` line names a file of another type still unread |
 
 ## Plug-in work on the build machine that is not in this repository
 
@@ -208,7 +230,7 @@ either ([LIQUID-GLASS.md](LIQUID-GLASS.md) says so). The bridge library of that 
 
 ## Not done
 
-- The switcher's white cards: a decmpfs type 16 decompressor (or uncompressed snapshots), after E5.
+- The switcher's white cards: the type 16 decompressor is built and tested on a Mac, not yet on a phone (E6).
 - A real wallpaper needs a poster: the wallpaper picker ([UI-NIGHT-1114.md](UI-NIGHT-1114.md)) is the way to one.
 - What the no-copy refusals cost (the diagnostic line, then a picture).
 - Mipmap generation in the plug-in (none needed so far).
