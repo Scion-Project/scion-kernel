@@ -5,15 +5,10 @@
 
 Every device with a repository, and how far each part of it works. A device of yours: [Port a device](../porting/index.md).
 
-| Device | SoC | display | touch | buttons | cpu | gpu | storage | audio | battery | haptic | camera | torch | wifi | bluetooth | cellular | network | thermal | usb | sensors |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| [Pixel 10 Pro](blazer.md) | `lga` | no | no | no | no | no | no | no | no | no |  |  | no | no | no |  | no | no | no |
-| [Galaxy Note9](crownlte.md) | `exynos9810` | no | no | no | no | no | no | no | no | no | no | no | no | no | no |  | no | no |  |
-| [Pixel 10](frankel.md) | `lga` | partly | no | no | partly | no | partly | no | no |  |  |  | no | no | no |  | no | no |  |
-| [QEMU virt (aarch64)](qemu.md) | `none` | yes | yes | yes |  | no | yes | yes |  |  |  |  |  |  |  | yes |  |  |  |
-| [POCO X5 Pro 5G](redwood.md) | `sc7280` | yes | yes | yes | yes | yes | yes | yes | partly | yes | yes | partly | yes | no | partly |  | partly |  |  |
-| [Galaxy S9+](star2lte.md) | `exynos9810` | yes | yes | partly | yes | partly | yes | partly | yes | partly | partly | partly | yes | partly | no |  | yes | yes | partly |
-| [Galaxy S9](starlte.md) | `exynos9810` | yes | yes | partly | partly | partly | yes | partly | yes | yes | partly | partly | yes | partly | partly | yes | partly | yes | partly |
+| Device | SoC | display | touch | buttons | cpu | gpu | storage | audio | battery | haptic | wifi | bluetooth | cellular | network | thermal | usb | sensors |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| [Pixel 10 Pro](blazer.md) | `lga` | no | no | no | no | no | no | no | no | no | no | no | no |  | no | no | no |
+| [QEMU virt (aarch64)](qemu.md) | `none` | yes | yes | yes |  | no | yes | yes |  |  |  |  |  | yes |  |  |  |
 
 An empty cell is a part nobody has looked at on that device yet.
 
@@ -29,7 +24,5 @@ An empty cell is a part nobody has looked at on that device yet.
 | `exynos990` | Samsung Exynos 990 (S5E9830) | `socs/exynos990/` |
 | `gs101` | Google Tensor G1 (gs101) | `socs/gs101/` |
 | `gs201` | Google Tensor G2 (gs201) | `socs/gs201/` |
-| `lga` | Google Tensor G5 (laguna, "lga") | `socs/lga/` |
-| `sc7280` | Qualcomm SC7280 family (SM7325 "Snapdragon 778G", QCM6490; "yupik", "kodiak") | carried by redwood (`devices/redwood/soc/`) |
 | `zuma` | Google Tensor G3 (zuma) | `socs/zuma/` |
 | `zumapro` | Google Tensor G4 (zumapro) | `socs/zumapro/` |

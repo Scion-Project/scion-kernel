@@ -259,3 +259,58 @@ is today's path exactly.
 - The vsync timer still free-runs; under Stage A it could follow the DECON's FRAME_COUNT (a tick per refresh) so that a
   frame never waits for a flip it just missed. Not built: the counters will say if the waits matter.
 - A panic under Stage A draws into the boot framebuffer, which is not shown: the panic is in the log, not on the screen.
+
+## 6. The tick that does not sleep (`sweetfb_nowait=1`, built; NOT run on a phone in this form)
+
+**Why.** While swiping the home screen (phone 1, 17 Nov, `sweetfb_prof=1`) the vsync tick of the framebuffer stand-in
+(fork `iokit/Kernel/arm/SweetFramebuffer.cpp`, `vsyncFired`) took the newest frame and, its GPU chains still running, slept
+until they were done before presenting it, holding the timer meanwhile: "tick slept for the GPU avg 11-12 ms", "ticks avg
+20.0-20.3 ms" instead of 16.7. The tick is the display's cadence; it must not wait for the GPU.
+
+**The states of a frame** (one SwapEnd). The state machine is `drivers/display/sweetfb/hakios.sweetfb_present.h` (plain C,
+copied into the kernel tree by `profiles/ios-27.copy`), host-tested by `tools/sweetfb-present-test.sh`.
+
+| state | entered by | who | under |
+|---|---|---|---|
+| queued | the window server queues the frame's chains (`starlte_gpu_user_submit2`, async) | backboardd's render thread | `sgu_q_lock` |
+| recorded | `swap()` (SwapEnd): the record and the number of the last chain queued (`starlte_gpu_user_seq`) | the same thread, after the hold below | `fLock` (`sfp_swap`) |
+| done | the queue's worker retires the frame's last chain and stores `sgu_q_done` | `sgu_q_worker`, woken by the job interrupt with `sgu_irq=1`, else by its naps | `sgu_q_lock` (an atomic store; read without a lock by `starlte_gpu_user_done`) |
+| shown | the first vsync tick that finds `done >= seq` takes it (`sfp_tick` = SHOW), then presents it outside the lock | the timer (the framebuffer's work loop) | `fLock` to take, none to present |
+| released | after the present (relbuf, when on), or at once when a newer swap replaces it while recorded | the tick, or `swap()` | none |
+
+- A tick sends the vsync callback first, on every tick, whatever is recorded (unchanged), and never sleeps when the frame is
+  not done: it leaves it recorded (`deferred`). Only a finished frame is shown.
+- At most one frame is recorded: a newer swap replaces the older (`replaced`), which is released then; so a frame is released
+  exactly once, by the swap that replaces it or after the tick that shows it.
+- The SwapEnd hold (at most two frames in flight: `swap()` returns once the chains of the swap before it are done) depends on
+  GPU completion only, not on the present, so a present that is later or never cannot keep it: nothing to leak.
+- Display off: the tick fades and takes nothing; the recorded frame stays. Display on: `sfp_redraw` records the newest frame
+  again (already released: nothing to release), as `fDirty = true` did before.
+- **Self-check.** A frame that has waited `SFP_IDLE_TICKS` (4) ticks while nothing is queued or running on the GPU cannot be
+  unfinished: that is a logic error (a done number not seen). The tick then takes it for the old path (sleeps for its chains,
+  bounded at 3 s, then presents), counts it and logs `A5XELTE FB nowait: SELF-CHECK: ...` once. A frame that has waited
+  `SFP_MAX_TICKS` (30, half a second) with the GPU busy is taken the same way ("GPU slow"). A wrong state machine is a log
+  line and a late frame, never a black screen.
+- Without `sweetfb_nowait=1` the tick is the old sleeping path, unchanged.
+
+**What the host test proves** (random schedules of swaps with 1-12 chains, the two-in-flight hold, in-order GPU completions
+at random rates, GPU stalls, ticks, display off/on; 300 seeds x 3 modes under ASan/UBSan): SHOW only ever takes a frame whose
+chains are done; frames are shown in order; every swap is released exactly once; a recorded frame is taken within 31 lit
+ticks; with the GPU drained nothing is left recorded (no lost wake-up); the self-check never fires when the done number is
+honest and does fire, with the display going on, when it is stuck. Mutations (no tick counting; showing without the done
+check) make it fail.
+
+**The first attempt** (xnu PR 43, 17 Nov) cleared `fDirty`, copied the record, looked at the GPU outside the lock and put
+the frame back. Its log on phone 1 (`nwt1`) shows the mechanism working: in both five-second windows with a frame left for a
+later tick ("ticks that left a frame ... 1"), that frame was presented by a later tick (`frames=2`), nothing on the GPU
+afterwards. The boot then stopped producing swaps at the Apple logo after swap 6 (backboardd not blocked in the
+framebuffer: no thread in `swap()` or the tick), the same picture as the `a-g455` boot of the same evening WITHOUT
+`sweetfb_nowait` (GPU at 455 MHz: last swap 3, two frames). So the black screen is not shown to be the nowait logic; it may
+be a boot-timing stall that a different GPU or present timing exposes. The rewrite removes the window in which a frame was
+neither recorded nor being presented, and adds the self-check, so if the stall comes back with this build the console says
+whether the framebuffer is holding a frame (the self-check line, the nowait counters) or simply never given one.
+
+**Phone test** (phone 1, the current owner line plus `sweetspeed` with 16384, `sweetfb_prof=1`, `sweetfb_nowait=1`), look
+for, while swiping: `A5XELTE FB prof2: ticks avg ~16667 us`; `tick slept for the GPU avg` near 0; the `nowait:` line with
+`frames shown done` = the frames, `SELF-CHECK 0`, `GPU slow 0`. Black screen or no swaps after the logo: note whether a
+`SELF-CHECK` line came; the same boot line without `sweetfb_nowait=1` is the fallback.
