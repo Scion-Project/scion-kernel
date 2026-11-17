@@ -50,6 +50,7 @@
 
 #define BT_VSC_ANY        (-1)
 #define BT_VSC_RET_MAX    8       /* return parameters after the status, at most */
+#define BT_VSC_ZEROS_MAX  240     /* zero bytes after those: 4 + 8 + 240 is within an event's 255 */
 #define BT_VSC_OUT_MAX    260     /* the most bt_vsc_chip_byte() or _host_byte() writes at once: one whole packet */
 #define BT_VSC_PENDING    8       /* vendor commands of the table in flight at once */
 #define BT_VSC_LIST_MAX   16      /* bt_vsc_ok's list */
@@ -61,6 +62,7 @@ struct bt_vsc_rule {
 	uint8_t status;            /* ANSWER: the status bluetoothd is given */
 	uint8_t ret_len;           /* ANSWER: return parameters after the status, at most BT_VSC_RET_MAX */
 	uint8_t ret[BT_VSC_RET_MAX];
+	uint8_t zeros;             /* ANSWER: zero bytes after them (counters that are zero), at most BT_VSC_ZEROS_MAX */
 	uint16_t to;               /* TRANSLATE: the standard command sent instead (0: an ANSWER entry) */
 	uint8_t (*xlate)(const uint8_t *p, uint8_t n, uint8_t *out);   /* its parameters, or 0: not understood */
 	const char *what;          /* for the console: what the command is and what is done with it */
@@ -123,6 +125,7 @@ bt_vsc_x_scan_enable(const uint8_t *p, uint8_t n, uint8_t *out)
  * why that is true. Add an entry only from a trace of bluetoothd on this chip (bt_trace=N) and the reply's shape as
  * bluetoothd reads it. Seen on phone 1 (17 November) and left as the chip answers, because bluetoothd goes on after them:
  * 0xFDFD with 01 (HDR on), 0xFFF2 01 14 00 01, 0xFCE9 (status 11), 0xFE2C (Apple's advertising-buffer filters).
+ * Every ANSWER reply fits an event: 4 + BT_VSC_RET_MAX + BT_VSC_ZEROS_MAX <= 255.
  */
 static const struct bt_vsc_rule bt_vsc_table[] = {
 	/*
@@ -131,20 +134,29 @@ static const struct bt_vsc_rule bt_vsc_table[] = {
 	 * BCM4361 with Samsung's patch has none of those features (it does not even know the command), so: status 00 and
 	 * the mask 0.
 	 */
-	{ 0xFDDA, BT_VSC_ANY, BT_VSC_ANY, 0x00, 4, { 0, 0, 0, 0 }, 0, NULL,
+	{ 0xFDDA, BT_VSC_ANY, BT_VSC_ANY, 0x00, 4, { 0, 0, 0, 0 }, 0, 0, NULL,
 	  "Read Proprietary Local Features: none (mask 0), as this chip has none of Apple's" },
 	/*
 	 * 0xFDFD, HDR Control (one byte: 1 on, 0 off): Apple's High Data Rate BR/EDR mode of its own controllers. Its reply
 	 * is the status alone. Off (0) is answered done: HDR is off on this chip, as it has none. On (1) is left rejected:
 	 * the chip cannot do it (and bluetoothd goes on after that rejection).
 	 */
-	{ 0xFDFD, 0x00, BT_VSC_ANY, 0x00, 0, { 0 }, 0, NULL,
+	{ 0xFDFD, 0x00, BT_VSC_ANY, 0x00, 0, { 0 }, 0, 0, NULL,
 	  "HDR Control off: done (this chip has no HDR, so it is off); HDR on stays refused" },
+	/*
+	 * 0xFE3B, LE Meta Get LP-Core Statistics (one byte; phone 1 sent 01): the counters of Apple's low-power scan core.
+	 * bluetoothd's parser reads them as 32- and 16-bit words, 48 and 8 of them at most (208 bytes), each asserting that
+	 * it is there; it was the last command refused before each restart on phone 1 (17 November). This chip has no LP
+	 * core, so every counter of it is zero: status 00 and 208 zero bytes. (BT_NO_SCAN_CORE=1 on the root should stop
+	 * bluetoothd asking.)
+	 */
+	{ 0xFE3B, BT_VSC_ANY, BT_VSC_ANY, 0x00, 0, { 0 }, 208, 0, NULL,
+	  "LP-core statistics: all zero (this chip has no LP core)" },
 	/* bluetoothd restarts when this one is refused (phone 1, 17 November): above */
-	{ 0xFE37, BT_VSC_ANY, BT_VSC_ANY, 0, 0, { 0 }, 0x200B, bt_vsc_x_scan_params,
+	{ 0xFE37, BT_VSC_ANY, BT_VSC_ANY, 0, 0, { 0 }, 0, 0x200B, bt_vsc_x_scan_params,
 	  "LE scan parameters (Apple's multi-core form) sent as LE Set Scan Parameters (0x200B), its LE 1M entry; this chip "
 	  "has no scan core" },
-	{ 0xFE29, BT_VSC_ANY, BT_VSC_ANY, 0, 0, { 0 }, 0x200C, bt_vsc_x_scan_enable,
+	{ 0xFE29, BT_VSC_ANY, BT_VSC_ANY, 0, 0, { 0 }, 0, 0x200C, bt_vsc_x_scan_enable,
 	  "LE scan enable (Apple's form) sent as LE Set Scan Enable (0x200C)" },
 };
 
@@ -449,11 +461,13 @@ bt_vsc_event(struct bt_vsc *v, uint8_t *out)
 	if (rule >= 0) {
 		const struct bt_vsc_rule *r = &bt_vsc_table[rule];
 		uint8_t n = r->ret_len > BT_VSC_RET_MAX ? BT_VSC_RET_MAX : r->ret_len;
+		uint8_t z = r->zeros > BT_VSC_ZEROS_MAX ? BT_VSC_ZEROS_MAX : r->zeros;
 
-		out[2] = (uint8_t)(4 + n);      /* Num_HCI_Command_Packets, the opcode, the status, the return parameters */
+		out[2] = (uint8_t)(4 + n + z);  /* Num_HCI_Command_Packets, the opcode, the status, the return parameters */
 		out[6] = r->status;
 		memcpy(out + 7, r->ret, n);
-		len = 7u + n;
+		memset(out + 7 + n, 0, z);
+		len = 7u + n + z;
 		v->answered++;
 	} else {
 		bool ok = v->ok_all;

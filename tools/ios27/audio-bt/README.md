@@ -56,6 +56,9 @@ Status (9 November 2026, phone 1, silent runs at night):
 - Later on 17 November (`bt_vsc=1`, phone 1): the abort is gone; bluetoothd goes through its start and the chip takes
   Apple's 0xFCE2 sub-commands, but bluetoothd takes the chip for one with Apple's scan core and LP core and sends their
   commands (0xFE37 scan parameters, 0xFE3B LP-core statistics). `bt_vsc=1` sends 0xFE37 and 0xFE29 as the standard LE
-  scan commands (the chip took them and LE advertising reports came); bluetoothd still restarted. `BT_NO_SCAN_CORE=1`
-  (60-audio-bt.sh, `bt-prefs.py`) sets bluetoothd's own overrides EnableScanCore=NO and DisableLowPowerCoreScan=YES so
-  that it does not use them at all; not yet run on a phone.
+  scan commands (the chip took them and LE advertising reports came); bluetoothd still restarted. Its own log (stderr with
+  `OS_ACTIVITY_DT_MODE=YES`) says why: "BT chip support for LowPowerCore Scan : enabled", then at the scan's start the
+  LP-core statistics command (0xFE3B) refused, "Could not start LE scan callback: STATUS 701", "Bluetooth error -
+  restarting { reason=701 }". `BT_NO_SCAN_CORE=1` (60-audio-bt.sh, `bt-prefs.py`) sets bluetoothd's own overrides
+  (com.apple.MobileBluetooth.debug: ScanCore/EnableScanCore NO, LowPowerCoreScan/DisableLowPowerCoreScan YES) so that it
+  does not use them; `bt_vsc=1` answers 0xFE3B with all-zero counters if it still asks. Not yet run on a phone.

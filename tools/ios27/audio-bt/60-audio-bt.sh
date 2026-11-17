@@ -11,7 +11,7 @@
 #                         takes the module's, read from the chip's OTP). Checked against HCD_SUMS (default
 #                         devices/starlte/firmware/bt/SHA256SUMS, when this checkout has it) by name and sha256
 #   FILES=<dir>           what build.sh made (default build/ios27-audio-bt/files of this checkout)
-#   BT_NO_SCAN_CORE=1     bluetoothd's own overrides EnableScanCore=NO and DisableLowPowerCoreScan=YES, in
+#   BT_NO_SCAN_CORE=1     bluetoothd's own overrides ScanCore/EnableScanCore=NO, LowPowerCoreScan/DisableLowPowerCoreScan=YES in
 #                         com.apple.MobileBluetooth.debug of /Library/Preferences and of mobile's preferences: it takes the
 #                         S9's BCM4361 for a controller with Apple's scan core and LP core and sends their vendor commands
 #                         (0xFE37, 0xFE3B), which this chip lacks (README.md). Off by default; NOT yet run on a phone

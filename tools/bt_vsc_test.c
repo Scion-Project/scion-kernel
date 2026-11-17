@@ -113,6 +113,7 @@ table_itself(void)
 		CHECK(bt_vsc_is_vendor(r->opcode), "entry %zu (%04x) is not a vendor command", i, r->opcode);
 		CHECK(r->ret_len <= BT_VSC_RET_MAX, "entry %zu: %u return bytes", i, r->ret_len);
 		CHECK(r->what != NULL && strlen(r->what) > 10, "entry %zu has no text", i);
+		CHECK(4u + r->ret_len + r->zeros <= 255 && r->zeros <= BT_VSC_ZEROS_MAX, "entry %zu's reply is too long", i);
 	}
 }
 
@@ -163,6 +164,20 @@ answers(void)
 	sent(&v, other_cmd, sizeof(other_cmd));
 	n = chip(&v, other_rej, sizeof(other_rej), out, sizeof(out));
 	CHECK(n == sizeof(other_rej) && memcmp(out, other_rej, n) == 0, "a vendor command not in the table: as it is");
+
+	{
+		/* 0xFE3B: 208 zero bytes after the status */
+		static const uint8_t fe3b_cmd[] = { 0x01, 0x3b, 0xfe, 0x01, 0x01 };
+		static const uint8_t fe3b_rej[] = { 0x04, 0x0e, 0x04, 0x01, 0x3b, 0xfe, 0x01 };
+		bool zero = true;
+
+		sent(&v, fe3b_cmd, sizeof(fe3b_cmd));
+		n = chip(&v, fe3b_rej, sizeof(fe3b_rej), out, sizeof(out));
+		for (size_t i = 7; i < n; i++) {
+			zero &= out[i] == 0;
+		}
+		CHECK(n == 7 + 208 && out[2] == 212 && out[6] == 0 && zero, "0xFE3B: status 00 and 208 zero bytes (%zu)", n);
+	}
 
 	/* commands split anywhere, replies a byte at a time: the same */
 	fresh(&v, true);
