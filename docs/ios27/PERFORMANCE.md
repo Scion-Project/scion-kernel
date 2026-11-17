@@ -8,7 +8,7 @@ compositor, which draws Liquid Glass. A swipe frame has 16.7 ms. This page is in
 - the experiments for a phone, one boot each.
 
 Nothing new here has run on a phone. Two changes come with this page, both off by default: the honest fences of the shim
-(scion-kernel #327) and `perfmap=1` / `sgu_pri=` in the fork (`agent/scion-perf/perfmap`).
+(scion-kernel #327) and `perfmap=1` / `sgu_pri=` in the fork (xnu #33, branch `agent/scion-perf/perfmap`).
 
 **How sure.** Each number carries one of four tags: **M** measured (where), **I** inferred from measurements (how),
 **G** a guess (why), **N** nobody has measured it. The sources:
@@ -34,6 +34,17 @@ There are two measured snapshots, and they do not agree. The difference is itsel
 - the present 1.93 to 2.10 ms (M);
 - backboardd 47 to 53 % of a core, SpringBoard 37 to 45 %, kernel_task 9 to 10 %, the widget renderer 6 % (M: `STARLTE TOP`);
 - the GPU user client counted **664 waits per 10 s at 9.2 ms** each, 6.1 s of waiting per 10 s, summed over threads (M: `STARLTE GPU CALLS`).
+
+**(c) The 13 November kernel on the same phone, root and load** (phone 1's boot "e0-old", 17 November):
+- 13.6 to 14.6 frames a second (M);
+- 4,580 to 5,140 chains per 10 s, averaging 1.31 to 1.37 ms, the longest **32.1 to 32.6 ms** in every window (M);
+- chains queued 63 to 69 ms on average, up to 135 deep (M);
+- 338 to 350 waits per 10 s at 18.9 to 19.5 ms (M).
+
+So today's kernel is the better of the two on this content (25 against 14 a second, chains queued 21 against 66 ms). The
+13 November figures of (a) were on a lighter load: a scripted 300 ms drag every 2 s, where these runs swipe back to back.
+The longest chain is about 32 ms on one kernel and about 16 ms on the other: two refresh periods, then one. Something tied
+to the display's cadence, not a pass's drawing, is a candidate for it (§2.4).
 
 What (b) says, step by step:
 - 15 chains × 1.6 ms is 24 ms of GPU work a frame, plus 2.1 ms of present: 26 ms (I).
@@ -97,8 +108,13 @@ Every 10 s window of s3a has a longest chain of 15.6 to 16.2 ms, and the average
   - a texture sampled through a slow path;
   - the widget renderer's or SpringBoard's own Metal work (SBRendererService is a Metal client on phone 1);
   - a memory bus slower than the boot loader left it on 13 November.
+- The 13 November kernel's longest is about 32 ms on the same content (§1 c): exactly two refreshes, against one today.
+  So the longest "chain" may not be GPU work at all. A chain's time is from its start to the worker seeing its end, and the
+  worker sees it only once it holds the GPU's lock, which the present also takes. Anything that holds that lock, or keeps the
+  worker off a core, for a refresh would show the same way (I).
 - `sgu_prof=1` (by pid, by kind, a histogram) and `sgu_dump=S` (208 chains in order with their microseconds; it needs the
-  scripted input, `sweetspeed&4096`) will say which pass it is. This is experiment E1 and the first thing to do.
+  scripted input, `sweetspeed&4096`) will say which pass it is, or show that it is not a pass. This is experiment E1 and the
+  first thing to do.
 
 ### 2.5 A second of the system, start-up and idle
 
