@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT-0
-"""bt-prefs.py ROOT [--undo] : bluetoothd's overrides for the Galaxy S9's BCM4361 on an iOS 27 root (60-audio-bt.sh,
-BT_NO_SCAN_CORE=1). bluetoothd reads its defaults overrides from com.apple.MobileBluetooth.debug, each as a key of a
+"""bt-prefs.py ROOT [--undo] : bluetoothd's overrides for the Galaxy S9's BCM4361 on an iOS 27 root (60-audio-bt.sh, by
+default; BT_NO_SCAN_CORE=0 leaves them out). bluetoothd reads its defaults overrides from com.apple.MobileBluetooth.debug, each as a key of a
 dictionary named after its group; two of them say whether to use Apple's scan core and LP core: ScanCore/EnableScanCore
 and LowPowerCoreScan/DisableLowPowerCoreScan. This chip has neither (bluetoothd on phone 1, 17 November: "BT chip
 support for LowPowerCore Scan : enabled", then its LP-core statistics command refused, "Could not start LE scan",
 "Bluetooth error - restarting { reason=701 }"), so EnableScanCore is NO and DisableLowPowerCoreScan YES, in
 /Library/Preferences (any user) and in mobile's preferences. Only these keys are added to what a file already has;
 --undo takes them out again (and a group or file left empty). Which user bluetoothd reads them as was not checked,
-hence both places. NOT yet run on a phone in this form."""
+hence both places. Run on phone 1 on 17 November (boot "hands3"): bluetoothd uses neither core and stays up."""
 import os, plistlib, sys
 
 KEYS = {'ScanCore': {'EnableScanCore': False}, 'LowPowerCoreScan': {'DisableLowPowerCoreScan': True}}

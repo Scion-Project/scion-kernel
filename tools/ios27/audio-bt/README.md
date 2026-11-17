@@ -61,4 +61,7 @@ Status (9 November 2026, phone 1, silent runs at night):
   LP-core statistics command (0xFE3B) refused, "Could not start LE scan callback: STATUS 701", "Bluetooth error -
   restarting { reason=701 }". `BT_NO_SCAN_CORE=1` (60-audio-bt.sh, `bt-prefs.py`) sets bluetoothd's own overrides
   (com.apple.MobileBluetooth.debug: ScanCore/EnableScanCore NO, LowPowerCoreScan/DisableLowPowerCoreScan YES) so that it
-  does not use them; `bt_vsc=1` answers 0xFE3B with all-zero counters if it still asks. Not yet run on a phone.
+  does not use them; `bt_vsc=1` answers 0xFE3B with all-zero counters if it still asks. Phone 1 ("hands3", kernel with
+  `bt_vsc=1`, the overrides on the root): bluetoothd stays up (no restart in minutes), Settings > Bluetooth shows "This
+  iPhone is discoverable as "iPhone"" and the Devices spinner, no device listed yet. The overrides are part of this step
+  by default since then (`BT_NO_SCAN_CORE=0` leaves them out).

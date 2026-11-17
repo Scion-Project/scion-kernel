@@ -15,6 +15,8 @@
 #                   with one line saying so).
 #   OS_MNT          the IPSW's OS image mounted: the root build gives it; by hand, needed only if the root lacks
 #                   /System/Library/Audio or the jobs.
+#   BT_NO_SCAN_CORE=0  leave out bluetoothd's scan-core and LP-core overrides (../../audio-bt/bt-prefs.py; default: set,
+#                   without them bluetoothd restarts every 30 s on this chip)
 #   ENABLE_AUDIO_BT=0 off.   undo: everything taken off again, the jobs back where they were.
 # Idempotent. The pieces were run on a phone together on 9 November 2026 (README.md, "Status"); this step and the kernel with
 # all of it on by default have NOT been run on a phone.
