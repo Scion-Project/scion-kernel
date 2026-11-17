@@ -98,6 +98,7 @@ bt_hcd	k
 bt_hcd_wait	k
 bt_keep	k
 bt_module	k
+bt_otp_wait	k
 bt_scan	k
 bt_trace	k
 bt_tty	k
@@ -167,6 +168,7 @@ cam_s9_rear_turn	k
 cam_s9_sat	k
 cam_s9_selfread	k
 cam_s9_selfread_focus	k
+cam_s9_selfread_switch	k
 cam_s9_selfread_x	k
 cam_s9_selfread_y	k
 cam_s9_stride	k
@@ -179,6 +181,7 @@ cam_s9_tele_turn	k
 cam_sensor	k
 cam_settle	k
 cam_shutter	k
+cam_switch	k
 cam_vblank	k
 camtl	u
 cc_fade	u
@@ -450,6 +453,8 @@ modem_wait	k
 modem_wda_off	k
 net_names	k
 net_trace	k
+ocp_guard	k
+ocp_guard_flags	k
 pan	k
 panel	k
 panel_brightness	k

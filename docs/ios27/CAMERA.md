@@ -9,7 +9,9 @@ test at the end is what is left.
 
 What it gives when it works: the Camera app on the home screen, its preview from the S9's camera, and a photograph. One
 camera per boot: the front one (`cam_s9=7`), or the rear one (`cam_s9=7 cam_rear=1`). The app's back and front cameras
-both show the camera of that boot (below, "One camera per boot").
+both show the camera of that boot (below, "One camera per boot"). With `cam_switch=1` as well, both cameras in one boot,
+the app's button switching between them (below, "Both cameras in one boot"; written and checked on the build machine,
+**not run on a phone**).
 
 ## Turning it on
 
@@ -59,17 +61,45 @@ MobileGestalt cache on a phone that has been booted many times says otherwise is
 
 ## One camera per boot
 
-The S9's driver drives one sensor per boot: the front S5K3H1 unless `cam_rear=1`, then the rear S5K2L3. The node's frames
-carry the sensor number last asked for (`HAKIOS_CAMERA_SENSOR` only relabels them on the S9: `asked_sensor` in
-`hakios.exynos_camera.c`), so the device's back stream (sensor 1) and front stream (sensor 2) both get the boot's camera.
-Switching between the two in one boot (the app's button) needs the driver to power one sensor down and the other up and to
-move between CSIS1 and CSIS0 on that command, as the S9+'s driver does; that is not written. With it, nothing on the iOS
-side changes: `camera_device.c` already asks for its stream's sensor when a stream starts.
+Without `cam_switch=1` the S9's driver drives one sensor per boot: the front S5K3H1 unless `cam_rear=1`, then the rear
+S5K2L3. The node's frames carry the sensor number last asked for (`HAKIOS_CAMERA_SENSOR` only relabels them: `asked_sensor`
+in `hakios.exynos_camera.c`), so the device's back stream (sensor 1) and front stream (sensor 2) both get the boot's camera.
+This is the default, and `cam_switch` changes nothing of it when absent or 0.
+
+## Both cameras in one boot (`cam_switch=1`)
+
+**Not run on a phone.** With `cam_s9=7 cam_switch=1` the driver has both cameras in the run, one streaming at a time,
+starting with the one `cam_rear` names (the front without it). The node's `HAKIOS_CAMERA_SENSOR` (1 the rear camera, 2 the
+front), which `camera_device.c` already sends when its stream's frames are another camera's, changes the camera: the
+running one is stopped and powered down exactly as a stream that nobody reads any more is, the other one's numbers are put
+in (its CSIS, D-PHY, WDMA, lanes, mode, sensor bus, lens), and it is brought up exactly as the first read of a boot brings a
+camera up. The S9+'s driver (`hakios.exynos_camera_star2.c`) switches the same way: one stream ends, the next begins with
+the camera asked for. The protocol is unchanged: the frames' header says which camera took each frame and its size
+(1632 x 1224 for the front, 2016 x 1512 for the rear), and `camera_device.c` makes its buffer again when the size changes,
+as it does for the S9+'s cameras; nothing on the iOS side changes, and PR 328's `cam.dylib` needs nothing more.
+
+What the driver guarantees (`drivers/camera/exynos/hakios.exynos_camera_switch.h`, checked on the build machine by
+`tools/exynos-camera-switch-test.sh` under the sanitizers, in CI):
+- never two cameras powered: the other camera is brought up only after the running one is down and no reader holds one of
+  its frames;
+- no frame of the old camera is given after the ask (the ring's newest frame is dropped at once), and a frame being copied
+  out when the ask comes is refused (`EAGAIN`, counted as `dropped`): a reader gets the new camera's frames or an error,
+  never one camera's frame labelled as the other's;
+- a change whose new camera does not come up (no answer on its bus, the domain not coming on, no frame) ends with
+  everything down, **both cameras off**, and readers get `EIO`; the next open tries the camera asked for again;
+- two changes in quick succession are taken in turn; one asked back before the stream saw the first is no change.
+
+The rear camera's stabiliser and iris are put in their safe state when it powers down, as at the end of any rear stream
+(the iris back at F1.5, the servo off and the gyro asleep, before its supplies go). Nothing writes the lens's EEPROM; the
+iris camera and its IR LED are never touched. With `cam_af=N` each camera's own lens is driven while that camera streams
+(the two lenses' state is kept apart, `hakios.ak737x.c`). `cam_s9_exp`, `cam_s9_ispdiv` and `cam_s9_addr` apply to the
+boot's first camera only; the other one starts from its own defaults (the rear camera's 466 MHz ISPPRE bus clock, without
+which CSIS0 overflows, among them).
 
 ## Not done
 
 - Run on a phone: everything on this page.
-- Switching cameras within a boot (above).
+- Switching cameras within a boot: written (`cam_switch=1`, above), not run on a phone: the phone test below.
 - The front camera's focus motor from iOS (16.5's `inject_media.c` gives the iPhone X plist's front camera the back camera's
   autofocus keys; N104's plist has the same layout, not done here).
 - Photographs in HEIC need the software encoder registration to work in cameracaptured as it did in mediaserverd; if it
@@ -205,3 +235,42 @@ Without the switch the library does what it did before, and `camera_device.c` on
 The rear camera: the same test with `cam_s9=7 cam_rear=1 cam_trace=1`. With the run-time switch (`cam_switch=1`, scion-kernel
 PR 341) the same lines are expected, and the flip button's tap gives `trace: vendor: copy streams positions (...)` with the
 other position, then `stream: the Back Camera's frames stop for the Front Camera's` (or the other way round).
+
+## The phone test of the switch (`cam_switch=1`)
+
+Prove the one-camera boots first (the table above, front and then rear). Then, first without iOS's camera, the kernel's own
+reader (`cam_s9_selfread`, which opens and reads the node through the file system as a program does):
+
+    --cmdline 'sbgl=0 sweetspeed=408782847 cam_s9=7 cam_switch=1 cam_s9_cached=1 cam_s9_selfread=900 cam_s9_selfread_switch=150'
+
+thirty seconds after the boot it reads 900 frames and asks for the other camera after every 150 (front, rear, front ...).
+From the USB console, `sysctl kern.hakios.camera_switch.sensor=1` (or `=2`) asks for the rear (front) camera of a stream
+being read; `sysctl kern.hakios.camera_switch` gives the counters (`asked`, `done`, `failed`, `superseded`, `refused`,
+`dropped`, `step`, `ms`). Then with the Camera app: the same boot without `cam_s9_selfread*`, the app opened, its button
+pressed a few times each way.
+
+Expected lines in the console log, in order, for a good change from the front to the rear camera:
+
+| Step | Look for | What it means if it is the last line |
+|---|---|---|
+| start | `exynos_camera: cam_switch=1: both cameras in this run, the front camera first`; step 1's lines for BOTH cameras (`1: S2MPB02 ID`, the four front LDOs, `rear: 1: S2MPB03 ID ...`) | `switch: the rear camera's supplies could not be read: the front camera only in this run`: the S2MPB03 or its bus; SENSOR 1 is refused (`... is not offered in this run`) |
+| 1 asked | `switch: 1: the reader asks for the rear camera (sensor 1): no more frames of the stream that runs are given ...` (selfread: `selfread: HAKIOS_CAMERA_SENSOR written ... taken`) | no line: the write did not reach the node, or `cam_switch=1` is not on the line |
+| 2 stopped | `switch: 2: the front camera's stream stops ...`, `5: the sensor's frame count 0xff after the stop`, `7: the stream ends (the other camera is asked for)` | the thread is stuck in a frame wait: `no frame end in 300 ms` lines |
+| 3 down | `switch: 3: the front camera powered down ...`, `powered down: MCLK and reset low, the bus pins inputs, BUCK2 and the LDOs off as found`, `the ISPPRE domain off again ...` | `NOT ALL OFF (a write failed)`: a supply's write did not read back; nothing more is written in the run |
+| 4 readers out | `switch: 4: the front camera is off and no reader holds a frame of it (powered down, the ISPPRE domain off, every write read back)` | `NOT POWERED DOWN` or `the ISPPRE domain left on`: stop and look at the lines above |
+| 5 the side | `switch: 5: the rear camera's way in: CSIS0, 4 lanes, 2016 x 1512`; the first time, `switch: 5: CSIS0, its D-PHY and its WDMA mapped` | |
+| 6 up | `switch: 6: ...`, `rear: 2: THE SENSOR ANSWERS at 0x10: model ID 0x20c3`, `3: ISPPRE on`, `the D-PHY of CSIS0` | `rear: 2: the sensor does not answer` then `switch: FAILED at step 6 (the rear camera): ... BOTH cameras are off; readers get EIO until the next open` |
+| 7 streaming | `switch: 7: ...`, `5: STREAM ON: 0x0100 = 0x0103`, `the sensor's frame count` not 0xff | `switch: FAILED at step 7`: the mode or the link (the rear camera's own run, scion-starlte `CAMERA.md`) |
+| 8 done | `switch: 8: THE REAR CAMERA'S FIRST FRAME (2016 x 1512, frame N) M ms after the ask: the change is done (1 done, 0 failed)`; selfread: `the first frame of sensor 1 (2016 x 1512 ...) M ms after the ask` | `switch: FAILED at step 8`: no frame came (`no frame end in 300 ms` five times) |
+| the reader | selfread's summary: `the switch: K change(s) asked, K gave the other camera's frames, 0 frame(s) WRONG` | any `selfread: WRONG: frame ... is sensor S's ...`: a frame of the other camera after the ask; the switch is broken, report the log |
+
+From the rear camera back to the front: the same steps with the cameras' names swapped (step 3: `rear: OIS: the servo
+switched off` if `cam_rear_ois=2`, the iris back at F1.5 if `cam_rear_ap` moved it, `rear: powered down: ... off as found`;
+step 6: `2: THE SENSOR ANSWERS: model ID ...` (the S5K3H1's); step 8: `THE FRONT CAMERA'S FIRST FRAME (1632 x 1224 ...)`). In the
+Camera app: the preview turns to the other camera within a second or so of the button (cameracaptured's log:
+`hakios: camera: the frames changed (sensor 2, 1632x1224, now 1, 2016x1512): the buffer made again`), and the photograph
+is of the camera shown.
+
+A change that fails leaves both cameras off and the node giving `EIO` (the Camera app's preview stops: `the kernel's
+camera has had a fault`); reopening the app opens the node again and tries the camera asked for. A boot without
+`cam_switch=1` gives the phone back as it was.

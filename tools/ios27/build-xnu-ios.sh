@@ -13,7 +13,8 @@
 # no minimal UBSan, the firehose library from build/firehose-ios/) and runs it, with a hook the patch has: after dxb has built
 # libfirehose_kernel.a against the macOS SDK, tools/ios27/firehose-ios.py makes the iOS one from it (LC_BUILD_VERSION: ld refuses a
 # macOS object in an iOS link). Every step is incremental: the second run builds what changed.
-# The S9's Wi-Fi driver object is linked in when tools/mk-brcmfmac.sh made one (xnu-deps/build/brcmfmac/out/brcmfmac.o).
+# The S9's Wi-Fi driver object (xnu-deps/build/brcmfmac/out/brcmfmac.o) is linked in; for STARLTE it is made by tools/mk-brcmfmac.sh
+# when missing, and the build stops when it cannot be (NOWIFI=1: a kernel without Wi-Fi, on purpose).
 # Needs: a Mac, Xcode (DEVELOPER_DIR), the Kernel Debug Kit (KDKROOT: Apple's, not in this repository), and jq, gum, xcodes, cmake and
 # ninja on PATH (TOOLS_BIN=<directory> adds one). A full build takes about 25 minutes at -j4.
 # The exit status is dxb's. The kernel is removed first, so one that is there afterwards was linked by this run; the kernel's symbol-set
@@ -53,7 +54,18 @@ export XNU_FIREHOSE_IOS=$ROOT/tools/ios27/firehose-ios.py XNU_JOBS=$jobs
 # (HAKIOS_OBJECTS, which the fork's makedefs/MakeInc.def adds to the link), else hakios.lx.c says the driver is not built in.
 # Its debug map is stripped first: the kernel's CTF step cannot read Linux's types. make does not see the object change, so
 # the kernel is linked again when it has (a stamp, as xnu-build.sh keeps for the other profiles).
+# A kernel for the S9 (STARLTE) without it has no Wi-Fi at all, and says so only in its boot log: so here, as xnu-build.sh does for
+# the 16.5 profile, the object is made when it is missing (tools/mk-brcmfmac.sh: Linux's brcmfmac sources and FreeBSD's
+# LinuxKPI, fetched at pinned sums) and the build stops when it cannot be. NOWIFI=1 builds a kernel without it on purpose.
 LX=$ROOT/xnu-deps/build/brcmfmac/out/brcmfmac.o
+if [ "${NOWIFI:-0}" = 1 ]; then
+	echo "build-xnu-ios: NOWIFI=1: brcmfmac is NOT linked: this kernel has no Wi-Fi"
+	LX=/nonexistent
+elif [ ! -f "$LX" ] && [ "${MACHINE_CONFIG:-}" = STARLTE ]; then
+	echo "build-xnu-ios: no $LX: making it (tools/mk-brcmfmac.sh)"
+	"$ROOT/tools/mk-brcmfmac.sh" || dxb_die "tools/mk-brcmfmac.sh failed: a STARLTE kernel without brcmfmac has no Wi-Fi (NOWIFI=1 builds one on purpose)"
+	[ -f "$LX" ] || dxb_die "tools/mk-brcmfmac.sh made no $LX (NOWIFI=1 builds a kernel without Wi-Fi on purpose)"
+fi
 lx_now=none
 if [ -f "$LX" ]; then
 	xcrun strip -S -o "$DXB/brcmfmac.o" "$LX" || dxb_die "cannot strip $LX"
