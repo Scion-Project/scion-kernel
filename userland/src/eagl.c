@@ -4135,6 +4135,13 @@ my_glPopGroupMarkerEXT(void *context)
  * version 3.00 it can. So every shader is handed on as a 3.00 one: the words of the first
  * version that 3.00 dropped are defined back, and texture2DRect() divides by textureSize().
  * (All of a program's shaders must be of one version, so all are treated alike.)
+ *
+ * The extensions of the first version whose words 3.00 has of its own are not 3.00 extensions:
+ * a compiler may refuse a shader that asks for one. CoreAnimation's rounded corners ask for
+ * GL_OES_standard_derivatives (fwidth()), and the Mali-G710's compiler (Pixel 7) says "Extension
+ * 'GL_OES_standard_derivatives' not supported": the program did not link, and every draw of it
+ * was left out (Control Center's modules). Those lines are dropped, and what the extension
+ * named differently is defined to its 3.00 name (core_in_300).
  */
 /*
  * CoreAnimation's shaders say "lowp" and "mediump" for nearly everything, as shaders written for
@@ -4192,6 +4199,36 @@ static const char vertex_start[] =
     "#define texture2DLod textureLod\n"
     "#line 1\n";
 
+/* Extensions of the first version that are part of 3.00: their line goes, these definitions come instead */
+static const struct {
+	const char *name, *defines;
+} core_in_300[] = {
+	{ "GL_OES_standard_derivatives", "" },
+	{ "GL_EXT_shader_texture_lod",
+	  "#define texture2DLodEXT textureLod\n#define texture2DProjLodEXT textureProjLod\n"
+	  "#define textureCubeLodEXT textureLod\n#define texture2DGradEXT textureGrad\n"
+	  "#define texture2DProjGradEXT textureProjGrad\n#define textureCubeGradEXT textureGrad\n" },
+	{ "GL_EXT_frag_depth", "#define gl_FragDepthEXT gl_FragDepth\n" },
+	{ "GL_EXT_draw_buffers", "" },
+};
+#define CORE_IN_300_DEFINES 400         /* (room for all of their definitions at once) */
+
+/* The entry of core_in_300 the "#extension" line at `line` names, or -1. */
+static int
+core_in_300_of(const char *line)
+{
+	line += strlen("#extension");
+	line += strspn(line, " \t");
+	for (int i = 0; i < (int)(sizeof(core_in_300) / sizeof(core_in_300[0])); i++) {
+		size_t n = strlen(core_in_300[i].name);
+
+		if (strncmp(line, core_in_300[i].name, n) == 0 && strchr(" \t:", line[n]) != NULL) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 static GLuint
 my_glCreateShader(void *context, GLenum type)
 {
@@ -4216,30 +4253,39 @@ my_glShaderSource(void *context, GLuint shader, GLsizei count, const GLchar *con
 	bool fragment = e->fragment[shader % 256], fetch;
 	const GLchar *parts[6] = { "#version 300 es\n", fragment ? fragment_start : vertex_start, "", NULL, "",
 		                   full_precision ? all_highp : "" };
-	size_t size = 1, extensions = 0;
+	size_t size = 1;
+	unsigned core_defined = 0;
 	char *text, *line, *head;
 
 	EAGL_ENTER(e, 0x12a0);
 	for (GLsizei i = 0; i < count; i++) {
 		size += lengths != NULL && lengths[i] >= 0 ? (size_t)lengths[i] : strlen(strings[i]);
 	}
-	if ((text = calloc(1, 2 * size + 64)) == NULL) {
+	if ((text = calloc(1, 2 * size + 64 + CORE_IN_300_DEFINES)) == NULL) {
 		glShaderSource(shader, count, strings, lengths);
 		return;
 	}
 	for (GLsizei i = 0; i < count; i++) {
 		strncat(text, strings[i], lengths != NULL && lengths[i] >= 0 ? (size_t)lengths[i] : strlen(strings[i]));
 	}
-	/* "#extension" lines must stay ahead of everything that is not the preprocessor's: they move to the top */
+	/*
+	 * "#extension" lines must stay ahead of everything that is not the preprocessor's: they move to
+	 * the top (those of core_in_300 become their definitions)
+	 */
 	head = text + size;
 	strcpy(head, parts[0]);
 	for (line = text; (line = strstr(line, "#extension")) != NULL; line += 2) {
 		size_t length = strcspn(line, "\n");
+		int core = core_in_300_of(line);
 
-		strncat(head, line, length);
-		strcat(head, "\n");
+		if (core < 0) {
+			strncat(head, line, length);
+			strcat(head, "\n");
+		} else if (!(core_defined & (1u << core))) {
+			core_defined |= 1u << core;
+			strcat(head, core_in_300[core].defines);
+		}
 		line[0] = line[1] = '/';
-		extensions++;
 	}
 	parts[0] = head;
 	parts[3] = text;
