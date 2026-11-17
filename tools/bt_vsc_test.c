@@ -10,6 +10,10 @@
  *     with 00 (off) is answered 00 and with 01 (on) left rejected; a vendor command the chip accepts, one rejected with
  *     another status than 01, one whose command was never seen going out, and one not in the table pass as the chip
  *     gave them; Num_HCI_Command_Packets is the chip's;
+ *   - with bt_vsc=1, 0xFE37 as phone 1's bluetoothd sent it goes as LE Set Scan Parameters (0x200B) with its LE 1M entry,
+ *     and the chip's reply (status kept) comes back as 0xFE37's; parameters out of range or of another shape go as
+ *     they are; 0xFE29 goes as LE Set Scan Enable and a Command Status is renamed too; a 0x200B of bluetoothd's own and
+ *     a reply to none made here pass as they are;
  *   - nothing that is not a vendor command is changed, with the table on and bt_vsc_ok=all both: a standard command's
  *     rejection, other events, ACL and SCO data that carry bytes looking like a vendor command's rejection;
  *   - bt_vsc=log: rejections reported once each, nothing changed; bt_vsc_ok's list (with junk in it) and "all,-OP";
@@ -59,6 +63,38 @@ chip(struct bt_vsc *v, const uint8_t *in, size_t n, uint8_t *out, size_t room)
 	return got;
 }
 
+/* the host's bytes through the filter, one at a time; returns the output's length */
+static size_t
+host(struct bt_vsc *v, const uint8_t *in, size_t n, uint8_t *out, size_t room)
+{
+	size_t got = 0;
+
+	for (size_t i = 0; i < n; i++) {
+		uint8_t buf[BT_VSC_OUT_MAX];
+		size_t k = bt_vsc_host_byte(v, in[i], buf);
+
+		if (k > BT_VSC_OUT_MAX) {
+			CHECK(false, "%zu bytes at once", k);
+			return got;
+		}
+		if (got + k <= room) {
+			memcpy(out + got, buf, k);
+		}
+		got += k;
+	}
+	return got;
+}
+
+/* a command the host sends, which must go to the chip as it is */
+static void
+sent(struct bt_vsc *v, const uint8_t *in, size_t n)
+{
+	uint8_t out[600];
+	size_t got = host(v, in, n, out, sizeof(out));
+
+	CHECK(got == n && memcmp(out, in, n) == 0, "a command changed on its way (%zu of %zu bytes)", got, n);
+}
+
 static void
 fresh(struct bt_vsc *v, bool table)
 {
@@ -99,47 +135,111 @@ answers(void)
 	size_t n;
 
 	fresh(&v, true);
-	bt_vsc_host_bytes(&v, fdda_cmd, sizeof(fdda_cmd));
+	sent(&v, fdda_cmd, sizeof(fdda_cmd));
 	n = chip(&v, fdda_rej, sizeof(fdda_rej), out, sizeof(out));
 	CHECK(n == sizeof(fdda_made) && memcmp(out, fdda_made, n) == 0, "0xFDDA rejected: a whole reply (%zu bytes)", n);
 	CHECK(v.note && v.note_opcode == 0xfdda && v.note_status == 1 && v.note_rule == 0 && v.answered == 1,
 	    "0xFDDA's first rejection reported, answered by entry 0");
 	v.note = false;
-	bt_vsc_host_bytes(&v, fdda_cmd, sizeof(fdda_cmd));
+	sent(&v, fdda_cmd, sizeof(fdda_cmd));
 	n = chip(&v, fdda_rej, sizeof(fdda_rej), out, sizeof(out));
 	CHECK(n == sizeof(fdda_made) && memcmp(out, fdda_made, n) == 0 && !v.note, "again: answered, not reported again");
-	bt_vsc_host_bytes(&v, fdda_cmd, sizeof(fdda_cmd));
+	sent(&v, fdda_cmd, sizeof(fdda_cmd));
 	n = chip(&v, fdda_real, sizeof(fdda_real), out, sizeof(out));
 	CHECK(n == sizeof(fdda_real) && memcmp(out, fdda_real, n) == 0, "a chip that knows 0xFDDA: its reply as it is");
-	bt_vsc_host_bytes(&v, fdda_cmd, sizeof(fdda_cmd));
+	sent(&v, fdda_cmd, sizeof(fdda_cmd));
 	n = chip(&v, fdda_rej12, sizeof(fdda_rej12), out, sizeof(out));
 	CHECK(n == sizeof(fdda_rej12) && memcmp(out, fdda_rej12, n) == 0, "rejected with 12, not 01: as it is");
 	n = chip(&v, fdda_rej, sizeof(fdda_rej), out, sizeof(out));
 	CHECK(n == sizeof(fdda_rej) && memcmp(out, fdda_rej, n) == 0, "a reply to a command never seen: as it is");
 
-	bt_vsc_host_bytes(&v, fdfd_off, sizeof(fdfd_off));
+	sent(&v, fdfd_off, sizeof(fdfd_off));
 	n = chip(&v, fdfd_rej, sizeof(fdfd_rej), out, sizeof(out));
 	CHECK(n == sizeof(fdfd_made) && memcmp(out, fdfd_made, n) == 0, "HDR off: done, with the chip's 3 command packets");
-	bt_vsc_host_bytes(&v, fdfd_on, sizeof(fdfd_on));
+	sent(&v, fdfd_on, sizeof(fdfd_on));
 	n = chip(&v, fdfd_rej, sizeof(fdfd_rej), out, sizeof(out));
 	CHECK(n == sizeof(fdfd_rej) && memcmp(out, fdfd_rej, n) == 0, "HDR on: stays refused");
 
-	bt_vsc_host_bytes(&v, other_cmd, sizeof(other_cmd));
+	sent(&v, other_cmd, sizeof(other_cmd));
 	n = chip(&v, other_rej, sizeof(other_rej), out, sizeof(out));
 	CHECK(n == sizeof(other_rej) && memcmp(out, other_rej, n) == 0, "a vendor command not in the table: as it is");
 
 	/* commands split anywhere, replies a byte at a time: the same */
 	fresh(&v, true);
-	bt_vsc_host_bytes(&v, fdfd_off, 2);
-	bt_vsc_host_bytes(&v, fdfd_off + 2, 3);
+	CHECK(host(&v, fdfd_off, 2, out, sizeof(out)) == 0, "a command is held until it is whole");
+	CHECK(host(&v, fdfd_off + 2, 3, out, sizeof(out)) == 5 && memcmp(out, fdfd_off, 5) == 0, "then sent as it is");
 	n = chip(&v, fdfd_rej, sizeof(fdfd_rej), out, sizeof(out));
 	CHECK(n == sizeof(fdfd_made) && memcmp(out, fdfd_made, n) == 0, "a command in two pieces");
 
 	/* bt_vsc=log: reported, nothing changed */
 	fresh(&v, false);
-	bt_vsc_host_bytes(&v, fdda_cmd, sizeof(fdda_cmd));
+	sent(&v, fdda_cmd, sizeof(fdda_cmd));
 	n = chip(&v, fdda_rej, sizeof(fdda_rej), out, sizeof(out));
 	CHECK(n == sizeof(fdda_rej) && memcmp(out, fdda_rej, n) == 0 && v.note && v.note_rule == -1, "log only: as it is");
+}
+
+static void
+translations(void)
+{
+	static const uint8_t fe37[] = { 0x01, 0x37, 0xfe, 0x0c, 0x01, 0x00, 0x01, 0x02, 0x01, 0x01, 0x40, 0x00, 0x30, 0x00,
+		0x1e, 0x00 };
+	static const uint8_t to_200b[] = { 0x01, 0x0b, 0x20, 0x07, 0x01, 0x40, 0x00, 0x30, 0x00, 0x01, 0x00 };
+	static const uint8_t cc_200b[] = { 0x04, 0x0e, 0x04, 0x01, 0x0b, 0x20, 0x00 };
+	static const uint8_t cc_fe37[] = { 0x04, 0x0e, 0x04, 0x01, 0x37, 0xfe, 0x00 };
+	static const uint8_t cc_200b_12[] = { 0x04, 0x0e, 0x04, 0x01, 0x0b, 0x20, 0x12 };
+	static const uint8_t fe37_bad[] = { 0x01, 0x37, 0xfe, 0x0c, 0x01, 0x00, 0x01, 0x02, 0x01, 0x01, 0x40, 0x00, 0x50, 0x00,
+		0x1e, 0x00 };   /* a window longer than the interval */
+	static const uint8_t fe37_short[] = { 0x01, 0x37, 0xfe, 0x05, 0x01, 0x00, 0x01, 0x02, 0x01 };
+	static const uint8_t own_200b[] = { 0x01, 0x0b, 0x20, 0x07, 0x00, 0x10, 0x00, 0x10, 0x00, 0x00, 0x00 };
+	static const uint8_t fe29[] = { 0x01, 0x29, 0xfe, 0x09, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+	static const uint8_t to_200c[] = { 0x01, 0x0c, 0x20, 0x02, 0x01, 0x01 };
+	static const uint8_t cs_200c[] = { 0x04, 0x0f, 0x04, 0x0c, 0x01, 0x0c, 0x20 };
+	static const uint8_t cs_fe29[] = { 0x04, 0x0f, 0x04, 0x0c, 0x01, 0x29, 0xfe };
+	struct bt_vsc v;
+	uint8_t out[600];
+	size_t n;
+
+	fresh(&v, true);
+	n = host(&v, fe37, sizeof(fe37), out, sizeof(out));
+	CHECK(n == sizeof(to_200b) && memcmp(out, to_200b, n) == 0, "0xFE37 sent as LE Set Scan Parameters (%zu bytes)", n);
+	CHECK(v.xnote && v.xnote_rule >= 0 && bt_vsc_table[v.xnote_rule].opcode == 0xfe37 && v.translated == 1,
+	    "its first translation reported");
+	n = chip(&v, cc_200b, sizeof(cc_200b), out, sizeof(out));
+	CHECK(n == sizeof(cc_fe37) && memcmp(out, cc_fe37, n) == 0, "its reply given as 0xFE37's");
+	n = chip(&v, cc_200b, sizeof(cc_200b), out, sizeof(out));
+	CHECK(n == sizeof(cc_200b) && memcmp(out, cc_200b, n) == 0, "a second 0x200B reply (none made here): as it is");
+	(void)host(&v, fe37, sizeof(fe37), out, sizeof(out));
+	n = chip(&v, cc_200b_12, sizeof(cc_200b_12), out, sizeof(out));
+	CHECK(n == sizeof(cc_200b_12) && out[4] == 0x37 && out[5] == 0xfe && out[6] == 0x12, "the chip's status kept");
+	{
+		/* the second form phone 1's bluetoothd sent: Apple's second byte 02, a passive entry */
+		static const uint8_t fe37_b[] = { 0x01, 0x37, 0xfe, 0x0c, 0x01, 0x00, 0x01, 0x02, 0x02, 0x00, 0xe0, 0x01, 0x2b,
+			0x00, 0x1e, 0x00 };
+		static const uint8_t to_b[] = { 0x01, 0x0b, 0x20, 0x07, 0x00, 0xe0, 0x01, 0x2b, 0x00, 0x01, 0x00 };
+		static const uint8_t two_phys[] = { 0x01, 0x37, 0xfe, 0x13, 0x01, 0x00, 0x05, 0x02, 0x01, 0x01, 0x40, 0x00, 0x30,
+			0x00, 0x1e, 0x00, 0x01, 0x40, 0x00, 0x30, 0x00, 0x1e, 0x00 };
+
+		n = host(&v, fe37_b, sizeof(fe37_b), out, sizeof(out));
+		CHECK(n == sizeof(to_b) && memcmp(out, to_b, n) == 0, "0xFE37's second form sent as 0x200B");
+		(void)chip(&v, cc_200b, sizeof(cc_200b), out, sizeof(out));
+		n = host(&v, two_phys, sizeof(two_phys), out, sizeof(out));
+		CHECK(n == 11 && out[1] == 0x0b && out[2] == 0x20, "two PHYs (1M and coded): the 1M entry sent");
+		(void)chip(&v, cc_200b, sizeof(cc_200b), out, sizeof(out));
+	}
+	sent(&v, fe37_bad, sizeof(fe37_bad));
+	sent(&v, fe37_short, sizeof(fe37_short));
+	sent(&v, own_200b, sizeof(own_200b));
+	n = chip(&v, cc_200b, sizeof(cc_200b), out, sizeof(out));
+	CHECK(n == sizeof(cc_200b) && memcmp(out, cc_200b, n) == 0, "bluetoothd's own 0x200B and its reply: as they are");
+	n = host(&v, fe29, sizeof(fe29), out, sizeof(out));
+	CHECK(n == sizeof(to_200c) && memcmp(out, to_200c, n) == 0, "0xFE29 sent as LE Set Scan Enable");
+	n = chip(&v, cs_200c, sizeof(cs_200c), out, sizeof(out));
+	CHECK(n == sizeof(cs_fe29) && memcmp(out, cs_fe29, n) == 0, "a Command Status renamed too");
+	/* the table off: nothing translated */
+	fresh(&v, false);
+	sent(&v, fe37, sizeof(fe37));
+	n = chip(&v, cc_200b, sizeof(cc_200b), out, sizeof(out));
+	CHECK(n == sizeof(cc_200b) && memcmp(out, cc_200b, n) == 0, "table off: 0x200B's reply as it is");
 }
 
 static void
@@ -161,8 +261,8 @@ untouched(void)
 	fresh(&v, true);
 	bt_vsc_parse_ok(&v, "all");
 	for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
-		bt_vsc_host_bytes(&v, std_cmd, sizeof(std_cmd));
-		bt_vsc_host_bytes(&v, fdda_cmd, sizeof(fdda_cmd));
+		sent(&v, std_cmd, sizeof(std_cmd));
+		sent(&v, fdda_cmd, sizeof(fdda_cmd));
 		n = chip(&v, all[i], len[i], out, sizeof(out));
 		CHECK(n == len[i] && memcmp(out, all[i], n) == 0, "packet %zu changed", i);
 	}
@@ -176,7 +276,7 @@ untouched(void)
 		n += bt_vsc_chip_byte(&v, b, o);
 	}
 	CHECK(n == 5 + 65535 && v.c_at == 0 && v.c_total == 0, "a 65535-byte ACL packet ends where it says");
-	bt_vsc_host_bytes(&v, fdda_cmd, sizeof(fdda_cmd));
+	sent(&v, fdda_cmd, sizeof(fdda_cmd));
 	{
 		static const uint8_t rej[] = { 0x04, 0x0e, 0x04, 0x01, 0xda, 0xfd, 0x01 };
 
@@ -258,7 +358,12 @@ mutated(void)
 			default: n = at + 1; break;
 			}
 		}
-		bt_vsc_host_bytes(&v, s, n);
+		got = host(&v, s, n, out, sizeof(out));
+		if (!table && got > n) {
+			CHECK(false, "round %d: the host's stream grew with the table off", round);
+		} else if (!table && memcmp(out, s, got) != 0) {
+			CHECK(false, "round %d: the host's stream changed with the table off", round);
+		}
 		got = chip(&v, s, n, out, sizeof(out));
 		if (v.c_at > BT_VSC_OUT_MAX + 0u && v.c_buf[0] == 0x04) {
 			CHECK(false, "an event held past the buffer: %u", v.c_at);
@@ -277,6 +382,7 @@ main(void)
 {
 	table_itself();
 	answers();
+	translations();
 	untouched();
 	legacy();
 	mutated();

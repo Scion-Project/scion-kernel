@@ -11,6 +11,10 @@
 #                         takes the module's, read from the chip's OTP). Checked against HCD_SUMS (default
 #                         devices/starlte/firmware/bt/SHA256SUMS, when this checkout has it) by name and sha256
 #   FILES=<dir>           what build.sh made (default build/ios27-audio-bt/files of this checkout)
+#   BT_NO_SCAN_CORE=1     bluetoothd's own overrides EnableScanCore=NO and DisableLowPowerCoreScan=YES, in
+#                         com.apple.MobileBluetooth.debug of /Library/Preferences and of mobile's preferences: it takes the
+#                         S9's BCM4361 for a controller with Apple's scan core and LP core and sends their vendor commands
+#                         (0xFE37, 0xFE3B), which this chip lacks (README.md). Off by default; NOT yet run on a phone
 #   undo                  everything this step put on the root taken off, the three launchd jobs back where they were
 #                         (edit-launchd-audio-bt.py keeps that in /usr/local/share/scion/audio-bt-jobs.plist), BlueTool's
 #                         scripts the root had before put back (kept as NAME.scion-orig)
@@ -35,6 +39,7 @@ if [[ ${2:-} == undo ]]; then
 		rm -f "$B/.scion-files"; rmdir "$B/.scion-orig" 2>/dev/null || true
 	fi
 	rmdir "$B" 2>/dev/null && { rmdir "$R/private/var/hakios" 2>/dev/null || true; }
+	/usr/bin/python3 "$H/bt-prefs.py" "$R" --undo
 	[[ ! -f $A/.scion-from-ipsw ]] || rm -rf "$A"
 	echo "60-audio-bt: undone"
 	exit 0
@@ -95,6 +100,7 @@ if [[ ${#HCDS[@]} -gt 0 ]]; then
 else
 	echo "60-audio-bt: no HCD given: bt=6 will find no patch (put the phone's own .hcd in /private/var/hakios/bt/)"
 fi
+[[ ${BT_NO_SCAN_CORE:-0} != 1 ]] || /usr/bin/python3 "$H/bt-prefs.py" "$R"
 [[ ${AUDIO_BT_LOG:-0} == 1 ]] && { mkdir -p "$R/private/var/local/oslog"; chmod 777 "$R/private/var/local/oslog"; }
 /usr/bin/python3 "$H/edit-launchd-audio-bt.py" "$R" ${OS_MNT:+"$OS_MNT/System/Library/xpc/launchd.plist"}
 echo "60-audio-bt: done"

@@ -73,7 +73,7 @@ HakiosBTNodeStart(const uint8_t * hci_address, uint32_t speed)
 		}
 		node->registerService();
 	}
-	IOLog("HakiosBluetooth: %s \"bluetooth\": local-mac-address %02x:%02x:%02x:%02x:%02x:%02x, transport-speed %u\n",
-	    ours ? "our" : "the device tree's", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], speed);
+	IOLog("HakiosBluetooth: %s \"bluetooth\": local-mac-address ..:..:..:..:%02x:%02x (its last two bytes), transport-speed %u\n",
+	    ours ? "our" : "the device tree's", mac[4], mac[5], speed);
 	node->release();
 }

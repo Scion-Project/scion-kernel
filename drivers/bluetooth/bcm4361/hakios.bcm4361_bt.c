@@ -1074,10 +1074,11 @@ raise_baud(uint32_t baud)
 	return true;
 }
 
+/* an address for the console: its last two bytes only (the phone's own and its neighbours' stay off the logs) */
 static void
 addr_text(const uint8_t *a, char *out, size_t cap)
 {
-	snprintf(out, cap, "%02x:%02x:%02x:%02x:%02x:%02x", a[5], a[4], a[3], a[2], a[1], a[0]);
+	snprintf(out, cap, "..:..:..:..:%02x:%02x", a[1], a[0]);
 }
 
 /* a name from EIR or advertising data: 0x09 complete name, else 0x08 shortened */
@@ -1607,7 +1608,15 @@ trace_line(struct h4_trace *t)
 	}
 	at += snprintf(line + at, sizeof(line) - at, " len %u:", t->plen);
 	for (uint32_t i = 0; i < keep && at < (int)sizeof(line) - 8; i++) {
-		at += snprintf(line + at, sizeof(line) - at, " %02x", t->first[i]);
+		/* the address's first four bytes left out of Write_BD_ADDR (FC01) and of Read_BD_ADDR's (1009) reply */
+		bool hide = (t->type == 1 && (t->hdr[0] | t->hdr[1] << 8) == 0xFC01 && i >= 2 && i < 6) || (t->type == 4 &&
+		    t->hdr[0] == 0x0E && keep > 3 && (t->first[1] | t->first[2] << 8) == 0x1009 && i >= 6 && i < 10) ||
+		    /* and a neighbour's, in an LE advertising report (legacy 02 or extended 0D) */
+		    (t->type == 4 && t->hdr[0] == 0x3E && ((t->first[0] == 0x02 && i >= 6 && i < 10) || (t->first[0] == 0x0D &&
+		    i >= 7 && i < 11)));
+
+		at += hide ? snprintf(line + at, sizeof(line) - at, " ..") : snprintf(line + at, sizeof(line) - at, " %02x",
+		    t->first[i]);
 	}
 	if (trace_skipped != 0 && at < (int)sizeof(line) - 40) {
 		at += snprintf(line + at, sizeof(line) - at, " (%u not shown before)", trace_skipped);
@@ -1723,11 +1732,13 @@ kctl_disconnect(__unused kern_ctl_ref ref, u_int32_t unit, __unused void *unitin
 	return 0;
 }
 
+static void vsc_xnote(void);
+
 static errno_t
 kctl_send(__unused kern_ctl_ref ref, u_int32_t unit, __unused void *unitinfo, mbuf_t m, __unused int flags)
 {
-	uint8_t buf[256];
-	size_t len = mbuf_pkthdr_len(m), off = 0;
+	uint8_t buf[256], out[2 * BT_VSC_OUT_MAX];
+	size_t len = mbuf_pkthdr_len(m), off = 0, olen = 0;
 	errno_t error = 0;
 
 	if (!kctl_owns || unit != kctl_unit) {
@@ -1740,13 +1751,23 @@ kctl_send(__unused kern_ctl_ref ref, u_int32_t unit, __unused void *unitinfo, mb
 			error = EINVAL;
 			continue;
 		}
-		if (vsc_on) {
-			bt_vsc_host_bytes(&vsc, buf, n);        /* the commands' parameters kept before the chip can answer */
+		/* bt_vsc: a command is held until it is whole, and may go as another (hakios.bt_vsc.h) */
+		for (size_t k = 0; vsc_on && k < n && error == 0; k++) {
+			olen += bt_vsc_host_byte(&vsc, buf[k], out + olen);
+			if (olen > sizeof(out) - BT_VSC_OUT_MAX || k == n - 1) {
+				error = olen == 0 || bt_write(out, olen, 2000) ? 0 : EIO;
+				trace_bytes(&trace_out, out, error == 0 ? olen : 0);
+				olen = 0;
+			}
 		}
-		if (!bt_write(buf, n, 2000)) {
+		if (vsc_on) {
+			vsc_xnote();
+		} else if (!bt_write(buf, n, 2000)) {
 			error = EIO;
 		} else {
 			trace_bytes(&trace_out, buf, n);
+		}
+		if (error == 0) {
 			off += n;
 			kctl_bytes_out += (uint32_t)n;
 		}
@@ -1831,6 +1852,18 @@ vsc_init(void)
 	}
 }
 
+/* the client's side (kctl_send): a vendor command's first translation */
+static void
+vsc_xnote(void)
+{
+	if (vsc.xnote) {
+		vsc.xnote = false;
+		say("bt: vendor command %#06x: sent as %#06x for this chip: %s\n", bt_vsc_table[vsc.xnote_rule].opcode,
+		    bt_vsc_table[vsc.xnote_rule].to, bt_vsc_table[vsc.xnote_rule].what);
+	}
+}
+
+/* the chip's side (the pump): a vendor command's first rejection */
 static void
 vsc_note(void)
 {

@@ -14,7 +14,8 @@
  *     a buffer of exactly 2 + length bytes, so the sanitizer stops any read past it; the list stops at SCAN_MAX
  *     devices; a name is at most 32 characters and ends;
  *   - 300000 events made from the good ones by a fixed-seed mutator, the same way;
- *   - trace_bytes() and trace_line() (bt_trace): mutated streams with the longest numbers the line can carry.
+ *   - trace_bytes() and trace_line() (bt_trace): mutated streams with the longest numbers the line can carry; the phone's
+ *     address in Read_BD_ADDR's reply and Write_BD_ADDR shown by its last two bytes only.
  */
 #include <stdarg.h>
 #include <stdbool.h>
@@ -337,6 +338,24 @@ trace(void)
 		trace_bytes(&trace_in, evt + i, 1);
 	}
 	CHECK(strstr(said, "<C evt 0e len 4: 01 03 0c 00") != NULL, "an event's line, a byte at a time: %s", said);
+	{
+		/* the phone's address: Read_BD_ADDR's reply and Write_BD_ADDR show its last two bytes only */
+		static const uint8_t rd[] = { 0x04, 0x0e, 0x0a, 0x01, 0x09, 0x10, 0x00, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6 };
+		static const uint8_t wr[] = { 0x01, 0x01, 0xfc, 0x06, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6 };
+
+		trace_bytes(&trace_in, rd, sizeof(rd));
+		CHECK(strstr(said, "01 09 10 00 a1 a2 .. .. .. ..") != NULL && strstr(said, "a6") == NULL, "Read_BD_ADDR: %s", said);
+		trace_bytes(&trace_out, wr, sizeof(wr));
+		CHECK(strstr(said, "b1 b2 .. .. .. ..") != NULL && strstr(said, "b6") == NULL, "Write_BD_ADDR: %s", said);
+		{
+			static const uint8_t adv[] = { 0x04, 0x3e, 0x0c, 0x02, 0x01, 0x00, 0x00, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6,
+				0x00, 0xb0 };
+
+			trace_bytes(&trace_in, adv, sizeof(adv));
+			CHECK(strstr(said, "c1 c2 .. .. .. ..") != NULL && strstr(said, "c6") == NULL, "an advertising report: %s",
+			    said);
+		}
+	}
 	for (int round = 0; round < 300000; round++) {
 		uint8_t s[96];
 		size_t n = 0;

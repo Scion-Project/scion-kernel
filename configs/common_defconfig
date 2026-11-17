@@ -1777,7 +1777,7 @@ CONFIG_MODEM_AGAIN=y
 # the partition the patch is read from (default VENDOR)
 # CONFIG_BT_VENDOR_PART is not set
 
-# read by hakios.bcm4361_bt.c (kernel)
+# a command is held until it is whole, and may go as another (hakios.bt_vsc.h)
 # CONFIG_BT_VSC is not set
 
 # read by hakios.bcm4361_bt.c (kernel)
