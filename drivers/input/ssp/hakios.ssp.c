@@ -1725,36 +1725,29 @@ rates_to_boot_locked(void)
 }
 
 /*
- * write(): struct hakios_sensor_rate records, each the period a sensor is to be read at from now on. A record of an
- * unknown type or of a period outside 5-1000 ms (other than off and the boot's) fails the write with EINVAL; the
- * records before it stand.
+ * One struct hakios_sensor_rate record of a write() (sensors_write() below): the period a sensor is to be read at from
+ * now on. A record of an unknown type or of a period outside 5-1000 ms (other than off and the boot's) fails the write
+ * with EINVAL; the records before it stand.
  */
 static int
-sensors_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+sensors_rate(const struct hakios_sensor_rate *r)
 {
-	while (uio_resid(uio) >= (user_ssize_t)sizeof(struct hakios_sensor_rate)) {
-		struct hakios_sensor_rate r;
-		int id, error = uiomove((caddr_t)&r, sizeof(r), uio);
+	int id = ssp_id_of(r->type);
 
-		if (error != 0) {
-			return error;
-		}
-		id = ssp_id_of(r.type);
-		if (id < 0 || (r.period_ms != HAKIOS_SENSOR_RATE_OFF && r.period_ms != HAKIOS_SENSOR_RATE_BOOT &&
-		    (r.period_ms < RATE_MS_LEAST || r.period_ms > RATE_MS_MOST))) {
-			return EINVAL;
-		}
-		lck_mtx_lock(&shub_lock);
-		if (!rates_made) {
-			rates_to_boot_locked();
-		}
-		if (rate_ms[id] != r.period_ms) {
-			rate_ms[id] = r.period_ms;
-			rate_pending |= 1ull << id;
-		}
-		lck_mtx_unlock(&shub_lock);
+	if (id < 0 || (r->period_ms != HAKIOS_SENSOR_RATE_OFF && r->period_ms != HAKIOS_SENSOR_RATE_BOOT &&
+	    (r->period_ms < RATE_MS_LEAST || r->period_ms > RATE_MS_MOST))) {
+		return EINVAL;
 	}
-	return uio_resid(uio) == 0 ? 0 : EINVAL;
+	lck_mtx_lock(&shub_lock);
+	if (!rates_made) {
+		rates_to_boot_locked();
+	}
+	if (rate_ms[id] != r->period_ms) {
+		rate_ms[id] = r->period_ms;
+		rate_pending |= 1ull << id;
+	}
+	lck_mtx_unlock(&shub_lock);
+	return 0;
 }
 
 static int
@@ -1810,9 +1803,14 @@ sensors_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 }
 
 /*
- * A line of text written to the device goes to the kernel's log with the writer's name: what the reader in user space
- * has to say (it found the device, which orientation it worked out) is then on the USB console beside the hub's own
- * lines, on systems whose user space has no other way there. At most 200 characters a write.
+ * write() takes two things, told apart by their first bytes:
+ *  - struct hakios_sensor_rate records (userland/src/inject.c on iOS 16.5): a whole number of them, the first one's
+ *    type a HAKIOS_SENSOR_* (1-6) as a little-endian word, so its second to fourth bytes are zero. Each is carried out
+ *    by sensors_rate();
+ *  - a line of text (tools/ios27/sensors/orientation.c on iOS 27), which goes to the kernel's log with the writer's
+ *    name: what the reader in user space has to say (it found the device, which orientation it worked out) is then
+ *    on the USB console beside the hub's own lines, on systems whose user space has no other way there. At most 200
+ *    characters a write. Text has no zero byte, so no line is taken for a record.
  */
 static int
 sensors_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
@@ -1821,10 +1819,39 @@ sensors_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	size_t n = (size_t)uio_resid(uio);
 	int error;
 
-	if (n > sizeof(text) - 1) {
-		n = sizeof(text) - 1;
+	if (n >= sizeof(struct hakios_sensor_rate) && n % sizeof(struct hakios_sensor_rate) == 0) {
+		struct hakios_sensor_rate r;
+
+		error = uiomove((caddr_t)&r, sizeof(r), uio);
+		if (error != 0) {
+			return error;
+		}
+		if (ssp_id_of(r.type) >= 0) {
+			for (;;) {
+				error = sensors_rate(&r);
+				if (error != 0 || uio_resid(uio) < (user_ssize_t)sizeof(r)) {
+					return error;
+				}
+				error = uiomove((caddr_t)&r, sizeof(r), uio);
+				if (error != 0) {
+					return error;
+				}
+			}
+		}
+		/* not a record: the first bytes are a line of text's */
+		memcpy(text, &r, sizeof(r));
+		n -= sizeof(r);
+		if (n > sizeof(text) - 1 - sizeof(r)) {
+			n = sizeof(text) - 1 - sizeof(r);
+		}
+		error = uiomove(text + sizeof(r), (int)n, uio);
+		n += sizeof(r);
+	} else {
+		if (n > sizeof(text) - 1) {
+			n = sizeof(text) - 1;
+		}
+		error = uiomove(text, (int)n, uio);
 	}
-	error = uiomove(text, (int)n, uio);
 	if (error != 0) {
 		return error;
 	}
