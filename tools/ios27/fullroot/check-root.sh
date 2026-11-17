@@ -52,6 +52,23 @@ for gone in ('com.apple.CommCenter', 'com.apple.bluetoothd', 'com.apple.imagent'
 print('info  launchctl overrides:', len(ov))
 sys.exit(1 if bad else 0)
 PY
+# the build: the root's own SystemVersion.plist and the build its first-boot record names (com.apple.migration.plist's
+# LastSystemVersion, written by the herolte tune from BUILD_VERSION): when they differ backboardd migrates data at first boot
+/usr/bin/python3 - "$R" <<'PY' || fail=1
+import plistlib, sys
+r = sys.argv[1]
+def get(path, key):
+    try:
+        with open(r + path, 'rb') as f:
+            return plistlib.load(f).get(key)
+    except Exception:
+        return None
+sv = get('/System/Library/CoreServices/SystemVersion.plist', 'ProductBuildVersion')
+mg = get('/private/var/mobile/Library/Preferences/com.apple.migration.plist', 'LastSystemVersion')
+if sv and mg and sv != mg:
+    print('FAIL  build: the root is %s, its LastSystemVersion says %s (BUILD_VERSION of the build)' % (sv, mg)); sys.exit(1)
+print(('ok    build %s (SystemVersion = LastSystemVersion)' % sv) if sv and mg else 'info  build: SystemVersion %s, LastSystemVersion %s' % (sv, mg))
+PY
 # prefs
 /usr/bin/python3 - "$R" <<'PY' || fail=1
 import plistlib, sys

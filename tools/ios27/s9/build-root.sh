@@ -18,6 +18,8 @@
 #   ENABLE_CAMERA     the camera (cam.dylib in cameracaptured; docs/ios27/CAMERA.md, NOT run on a phone); needs cam_s9=7 on the
 #                     boot image's line, and then make-boot-image.sh shows the Camera app
 #   STRICT=1          a feature that fails stops the build (otherwise it is undone and the build goes on without it)
+# The build: the one fetch-apple-inputs.sh recorded in INPUTS_DIR/SOURCE.txt (else IOS27_BUILD, else tools/ios27/builds/DEFAULT);
+# a private directory prepare-root-inputs.sh made for another build is refused (docs/ios27/UPDATING-IOS.md).
 # Next to the image: root-full.img.inject, the libraries to insert, which make-boot-image.sh reads: make the boot image again
 # after the root. About 40 minutes.
 set -euo pipefail
@@ -28,6 +30,13 @@ export IOS27_PRIVATE=${IOS27_PRIVATE:-$FR/private}
 for f in herolte-tune-ios-root.sh patches.txt undef.txt overlay/MANIFEST.sha256; do
 	[ -f "$IOS27_PRIVATE/$f" ] || { echo "build-root: no $IOS27_PRIVATE/$f (tools/ios27/s9/prepare-root-inputs.sh)" >&2; exit 1; }
 done
+. "$HERE/../builds/build-conf.sh"
+B_IN=$(ios27_build_of_inputs "$IN"); B_PRIV=; [ ! -f "$IOS27_PRIVATE/BUILD" ] || read -r B_PRIV < "$IOS27_PRIVATE/BUILD" || true
+BUILD=${IOS27_BUILD:-${B_IN:-${B_PRIV:-$(ios27_build_default)}}}
+ios27_build_check "$BUILD" || exit 1
+ios27_build_same "the inputs ($IN/SOURCE.txt)" "$B_IN" "the build asked for (IOS27_BUILD)" "$BUILD" || exit 1
+ios27_build_same "the private directory ($IOS27_PRIVATE/BUILD)" "$B_PRIV" "the inputs" "$BUILD" || exit 1
+export BUILD_VERSION=$BUILD
 export OS_DMG=$IN/os.dmg SYS_DMG=$IN/systemos.dmg APP_DMG=$IN/appos.dmg
 export METAL_CA_CLIENTS=${METAL_CA_CLIENTS:-backboardd SBRendererService}
 if [ -f "$IOS27_PRIVATE/metal-ca-files/MANIFEST.sha256" ]; then

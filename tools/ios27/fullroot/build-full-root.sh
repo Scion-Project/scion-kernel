@@ -26,6 +26,9 @@
 # After the steps, OUT.inject: the libraries the root has for the kernel to insert (inject-record.sh), which
 # tools/ios27/s9/make-boot-image.sh puts into the boot image's sweetinject= (docs/ios27/INSTALL-S9.md).
 # NOT applied (owner wants the real iOS 27): the 86 "speed" daemon trims, Spotlight/Siri/photos/ML/intelligence off-switches.
+# The iOS build: BUILD_VERSION (build-root.sh sets it from the inputs), else IOS27_BUILD, else tools/ios27/builds/DEFAULT; the OS
+#   image's own SystemVersion.plist, the private directory's BUILD (prepare-root-inputs.sh) and a reused cache's DONE must all
+#   name that build, or the build stops before the cache (docs/ios27/UPDATING-IOS.md). The three images' default names: its .conf.
 # Env: SIZE_GB=32  OUT=out/root-full.img  STRICT=1 (a feature step that fails stops the build)  REUSE_CACHE=1 (use work/cache if its DONE marker exists)  DISABLE_HOGS=1  KEEP_MOUNTED=1
 # DEVICE=frankel (the Pixel 10, Tensor G5; docs/ios27/PIXEL10.md; NOT TESTED: no root has been built or booted for it): its cores
 #   run arm64e and every ARMv8.x instruction the cache uses (Cortex-A520/A725/X4 TRMs: APA3 5, GPA3 1, LSE, FP16, LRCPC2 ...),
@@ -43,8 +46,11 @@ IPSW=${IPSW:-$HERE/ipsw}
 DEVICE=${DEVICE:-starlte}
 case $DEVICE in starlte|frankel) ;; *) echo "DEVICE=starlte or frankel" >&2; exit 2;; esac
 [[ $DEVICE == frankel ]] && export OVERLAY=${OVERLAY:-$IOS27_PRIVATE/overlay-frankel}
-OS_DMG=${OS_DMG:-$IPSW/043-70213-665.dmg}; SYS_DMG=${SYS_DMG:-$IPSW/043-69708-712.dmg}; APP_DMG=${APP_DMG:-$IPSW/043-69297-793.dmg}
-BUILD_VERSION=${BUILD_VERSION:-24A446}
+. "$HERE/../builds/build-conf.sh"
+BUILD_VERSION=${BUILD_VERSION:-${IOS27_BUILD:-$(ios27_build_default)}}
+OS_DMG=${OS_DMG:-$IPSW/$(ios27_build_get "$BUILD_VERSION" OS_DMG || true)}
+SYS_DMG=${SYS_DMG:-$IPSW/$(ios27_build_get "$BUILD_VERSION" SYSTEMOS_DMG || true)}
+APP_DMG=${APP_DMG:-$IPSW/$(ios27_build_get "$BUILD_VERSION" APPOS_DMG || true)}
 SIZE_GB=${SIZE_GB:-32}; OUT=${OUT:-$HERE/out/root-full.img}; W=$HERE/work
 log() { echo "[$(date -u +%T)] $*"; }
 
@@ -57,6 +63,9 @@ case $cmd in
 build)
     [[ ${EUID} == 0 ]] || { echo "run as root: sudo $0 build" >&2; exit 2; }
     OWNER=${SUDO_USER:?run via sudo}
+    ios27_build_check "$BUILD_VERSION" || exit 1
+    B_PRIV=; [[ ! -f $IOS27_PRIVATE/BUILD ]] || read -r B_PRIV < "$IOS27_PRIVATE/BUILD" || true
+    ios27_build_same "the private directory ($IOS27_PRIVATE/BUILD)" "$B_PRIV" "this build (BUILD_VERSION)" "$BUILD_VERSION" || exit 1
     for f in "$OS_DMG" "$SYS_DMG" "$APP_DMG"; do [[ -f $f ]] || { echo "missing $f" >&2; exit 1; }; done
     free_gb=$(df -g "$HERE" | awk 'NR==2 {print $4}'); need=${MIN_FREE_GB:-62}
     (( free_gb >= need )) || { echo "only $free_gb GB free, need >= $need (keeps 40 GB free after the ~22 GB root + 6 GB cache)" >&2; exit 1; }
@@ -69,12 +78,16 @@ build)
     attach_src "$OS_DMG" "$OSMNT"; attach_src "$SYS_DMG" "$SYSMNT"; attach_src "$APP_DMG" "$APPMNT"
     cleanup() { detach_if "${ROOTMNT:-}"; [[ -n ${RDEV:-} ]] && hdiutil detach "$RDEV" >/dev/null 2>&1 || true; detach_if "$OSMNT"; detach_if "$SYSMNT"; detach_if "$APPMNT"; }
     trap cleanup EXIT
+    ios27_build_same "the OS image ($OS_DMG)" "$(ios27_build_of_root "$OSMNT")" "this build (BUILD_VERSION)" "$BUILD_VERSION" || exit 1
     if [[ $DEVICE == frankel ]]; then log "frankel: the stock cache, not rewritten"; else
-    if [[ ${REUSE_CACHE:-0} == 1 && -f $W/cache/DONE ]]; then log "reusing $W/cache"; else
+    B_CACHE=; [[ ! -f $W/cache/DONE ]] || read -r B_CACHE < "$W/cache/DONE" || true
+    if [[ ${REUSE_CACHE:-0} == 1 && -f $W/cache/DONE ]]; then
+        ios27_build_same "the cache to reuse ($W/cache/DONE)" "$B_CACHE" "this build (BUILD_VERSION)" "$BUILD_VERSION" || exit 1
+        log "reusing $W/cache${B_CACHE:+ (build $B_CACHE)}"; else
         log "cache pipeline (a64e, LSE, corecrypto, PACGA, patches, full AOT rewrite)"
         sudo -u "$OWNER" -H env PY="$PY" IOS27_PRIVATE="$IOS27_PRIVATE" "$PIPE/cache-pipeline.sh" "$SYSMNT/System/Library/Caches/com.apple.dyld" "$W/cache" 2>&1 | tee "$W/cache-pipeline.log"
         grep -q CACHE-PIPELINE-DONE "$W/cache-pipeline.log" || { echo "cache pipeline failed" >&2; exit 1; }
-        sudo -u "$OWNER" touch "$W/cache/DONE"
+        sudo -u "$OWNER" sh -c 'echo "$1" > "$2"' _ "$BUILD_VERSION" "$W/cache/DONE"   # the build it was made from (REUSE_CACHE checks it)
     fi
     fi
     # ---- 2. blank HFSX volume, byte 0 of USERDATA ----
