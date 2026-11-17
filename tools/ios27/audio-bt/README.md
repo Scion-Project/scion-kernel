@@ -45,3 +45,11 @@ Status (9 November 2026, phone 1, silent runs at night):
   BlueTool runs `N104AP.boot/init.script` (result 0); bluetoothd reaches STACK_READY, and Apple's BTAudioHALPlugin in
   audiomxd connects to it; bluetoothd then restarts (reason 701) when the chip rejects one of Apple's LE-scan vendor
   commands: kernel boot-arg `bt_vsc_ok=` (scion-kernel `fork/ios27-audio-bt`) answers those.
+- 17 November, phone 1 (the full root of that day): bluetoothd restarts every 30 s (exit 1, "Bluetooth error - restarting")
+  without `bt_vsc_ok`, and aborts every 30 s with `bt_vsc_ok=all`. The abort is bluetoothd's own assertion: the reply to
+  0xFDDA (Read Proprietary Local Features) is read as a status and a 32-bit mask, and `bt_vsc_ok` gave a status of 00 with
+  no mask. Rejected on this chip, in that order: 0xFDFD (HDR Control), 0xFFF2 (a vendor command of sub-commands), 0xFDDA.
+  `bt_vsc=1` (drivers/bluetooth/bcm4361/hakios.bt_vsc.h) answers from a table instead, each answer a whole reply that is
+  true of this chip (0xFDDA: no Apple features; 0xFDFD off: done), and passes the rest as the chip answers them; `bt_vsc=log`
+  only reports the rejections. `bt_addr_efs=1` gives the chip the phone's own address from EFS (read only); without it
+  every S9 on this kernel has Broadcom's default address. Neither has been run on a phone yet.
