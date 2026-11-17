@@ -9,7 +9,10 @@
 # What it writes:
 #   herolte-tune-ios-root.sh   wardevsa's root tuning script (setup done, CommCenter out, containers skeleton), fetched from the
 #                              author's public repository at a fixed commit and checked against a SHA-256; it is not copied into this one
-#   patches.txt                tools/ios27/s9/patches-24A446.txt, after every expected word was found in your cache
+#   patches.txt                the build's patch list (PATCHES in tools/ios27/builds/<build>.conf; for 24A446
+#                              tools/ios27/s9/patches-24A446.txt), after every expected word was found in your cache
+#   BUILD                      the build this directory was made for (tools/ios27/builds/DEFAULT, or IOS27_BUILD=<build>):
+#                              build-root.sh and build-full-root.sh refuse inputs or a cache of another build with it
 #   undef.txt + the oracle     pipeline/cache/aot/make-oracle.sh over your cache (tables in pipeline/cache/aot/oracle/, not in git)
 #   overlay/ + MANIFEST.sha256 a copy of OVERLAY_DIR with the manifest steps.d/30-overlay.sh checks
 #   jb/ (of the checkout)      the package manager's prefix for steps.d/60-sileo.sh (tools/ios27/sileo/prepare.sh; needs the
@@ -22,6 +25,12 @@ TUNE_REPO=https://raw.githubusercontent.com/wardevsa/ios-a5xelte
 TUNE_COMMIT=a43e3e512a2d8841678f4d4fc8dd28f513d8fbf7
 TUNE_SHA256=6915152432af67affe8369ae7c79d1c3f1c2ef49f72ac1b56da7ac6eb2c7ab51
 die() { echo "prepare-root-inputs: $*" >&2; exit 1; }
+. "$T27/builds/build-conf.sh"
+BUILD=${IOS27_BUILD:-$(ios27_build_default)}
+ios27_build_check "$BUILD" || exit 1
+PATCHES=$(ios27_build_patches "$BUILD") || exit 1
+# the image the cache came from says its build, when the mount has it (the OS image does; a cryptex may not)
+ios27_build_same "$SRC/../../CoreServices/SystemVersion.plist" "$(ios27_build_of_root "$SRC/../../../..")" "the build asked for" "$BUILD" || exit 1
 M=$SRC/dyld_shared_cache_arm64e
 [ -f "$M" ] || die "no dyld_shared_cache_arm64e in $SRC"
 "$PY" -c 'import numpy' 2>/dev/null || die "$PY has no numpy: $PY -m pip install numpy (PY=<python>)"
@@ -53,9 +62,10 @@ print('none')
 PY
 )
 	if [ "$got" = "$exp" ]; then echo "patch $va: $exp found ($rest)"; else echo "patch $va: expected $exp, the cache has $got ($rest)" >&2; bad=1; fi
-done < "$HERE/patches-24A446.txt"
-[ $bad = 0 ] || die "this cache is not the build the patches were made for (iOS 27.0.1, 24A446, iPhone12,1)"
-cp "$HERE/patches-24A446.txt" "$P/patches.txt"
+done < "$PATCHES"
+[ $bad = 0 ] || die "this cache is not the build the patches were made for (iOS $(ios27_build_get "$BUILD" VERSION), $BUILD, $(ios27_build_get "$BUILD" PRODUCT))"
+cp "$PATCHES" "$P/patches.txt"
+echo "$BUILD" > "$P/BUILD"
 # 3. the oracle tables
 PY=$PY "$FR/pipeline/cache/aot/make-oracle.sh" "$M"
 cp "$FR/pipeline/cache/aot/oracle/cache/undef.txt" "$P/undef.txt"

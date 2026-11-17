@@ -253,7 +253,9 @@ only (`sweetfg=1 rtc_pmic=1`), Sileo's installs (`persona_lax=1`), Wi-Fi (`wifi_
   "Wed Dec 31"), and the **wallpaper picker** does not work.
 - `chronod` aborts once about 20 seconds after boot and comes back; four widget extensions (Calculator, World Clock, the code
   scanner, the launcher control) crash three times each at start and stay off.
-- The command line and the patches are for build 24A446 only. Another restore image is refused.
+- The command line and the patches are for build 24A446 only. Another restore image is refused. The build the tools use is
+  set in `tools/ios27/builds/` (`DEFAULT` and one `.conf` per build); what moving to a newer iOS involves, and why it has not
+  been done yet, is in [UPDATING-IOS.md](UPDATING-IOS.md).
 
 ## Who made what
 

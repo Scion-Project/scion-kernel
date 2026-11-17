@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT-0
 # fetch-apple-inputs.sh IPSW [OUT_DIR] : take from YOUR OWN iPhone 11 restore image (iPhone12,1, iOS 27.0.1, build 24A446, downloaded
-# from Apple) the four things the S9 build reads, into OUT_DIR (default ./inputs, which must stay on your disk: these are Apple's
+# from Apple; the build is tools/ios27/builds/DEFAULT, IOS27_BUILD=<build> for another with a tools/ios27/builds/<build>.conf) the four things the S9 build reads, into OUT_DIR (default ./inputs, which must stay on your disk: these are Apple's
 # files and carry the image's identity; never upload or share them):
 #   os.dmg, systemos.dmg, appos.dmg   the OS image and the two cryptexes (APFS images)
 #   n104ap.adt                        the iPhone 11's device tree (the donor of the S9's: tools/ios27/s9/make-boot-image.sh)
@@ -13,18 +13,22 @@
 # (it reads Apple's catalogue and downloads from Apple), or the file Finder/Apple Configurator saved.
 set -euo pipefail
 IPSW=${1:?usage: fetch-apple-inputs.sh IPSW [OUT_DIR]}; OUT=${2:-$PWD/inputs}
-TOOL=${IPSW_TOOL:-ipsw}; WANT_BUILD=${WANT_BUILD:-24A446}; CLASS=${DEVICE_CLASS:-n104ap}
 die() { echo "fetch-apple-inputs: $*" >&2; exit 1; }
+. "$(cd "$(dirname "$0")/../builds" && pwd)/build-conf.sh"
+WANT_BUILD=${WANT_BUILD:-${IOS27_BUILD:-$(ios27_build_default)}}
+ios27_build_check "$WANT_BUILD" || exit 1
+TOOL=${IPSW_TOOL:-ipsw}; CLASS=${DEVICE_CLASS:-$(ios27_build_get "$WANT_BUILD" DEVICE_CLASS)}
 [ -f "$IPSW" ] || die "no file $IPSW"
 command -v "$TOOL" >/dev/null || die "no ipsw tool ($TOOL): https://github.com/blacktop/ipsw/releases, or IPSW_TOOL=<path>"
 command -v aea >/dev/null || die "no aea (macOS 14 or later has /usr/bin/aea)"
 mkdir -p "$OUT"; cd "$OUT"
 unzip -o -q "$IPSW" BuildManifest.plist -d . || die "$IPSW has no BuildManifest.plist: not an IPSW"
-names=$(/usr/bin/python3 - BuildManifest.plist "$WANT_BUILD" "$CLASS" <<'PY'
+names=$(/usr/bin/python3 - BuildManifest.plist "$WANT_BUILD" "$CLASS" "$(ios27_build_list)" <<'PY'
 import plistlib, sys
 m = plistlib.load(open(sys.argv[1], 'rb'))
 if m['ProductBuildVersion'] != sys.argv[2]:
-    sys.exit('this IPSW is build %s (%s); the S9 tools are made for %s' % (m['ProductBuildVersion'], m.get('ProductVersion'), sys.argv[2]))
+    sys.exit('this IPSW is build %s (%s); the S9 tools are made for %s (builds with a tools/ios27/builds/*.conf: %s; IOS27_BUILD=<build> picks one)'
+             % (m['ProductBuildVersion'], m.get('ProductVersion'), sys.argv[2], sys.argv[4]))
 for i in m['BuildIdentities']:
     info = i['Info']
     if info.get('DeviceClass') == sys.argv[3] and info.get('RestoreBehavior') == 'Erase':
