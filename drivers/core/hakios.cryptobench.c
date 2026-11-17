@@ -7,19 +7,25 @@
 #include <sys/param.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
+#include "hakios.dev_strict.h"
 
 extern void mc_ce_bench(char *text, size_t size);
 
 SYSCTL_DECL(_kern_hakios);
+
 
 static int
 crypto_bench SYSCTL_HANDLER_ARGS
 {
 #pragma unused(oidp, arg1, arg2)
 	char text[160];
+	int error;
 
 	if (req->oldptr == USER_ADDR_NULL) {
 		return SYSCTL_OUT(req, NULL, sizeof(text));
+	}
+	if ((error = hakios_dev_strict_root("kern.hakios.crypto_bench")) != 0) {
+		return error;                   /* hakios_dev_strict=1: a measurement only root starts */
 	}
 	mc_ce_bench(text, sizeof(text));
 	return SYSCTL_OUT(req, text, strlen(text) + 1);

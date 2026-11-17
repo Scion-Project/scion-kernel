@@ -96,6 +96,7 @@ virtio   bsd/dev/hakios.virtio_net.c
 
 core     bsd/dev/hakios.version.c
 core     bsd/dev/hakios.platform.c
+core     bsd/dev/hakios.dev_strict.h
 core     bsd/dev/hakios.stubs.c
 core     bsd/dev/hakios.systrace.c
 core     bsd/dev/hakios.exec.c

@@ -61,6 +61,7 @@
 #include <sys/systm.h>
 #include <sys/uio.h>
 #include <sys/hakios.xnu.h>
+#include "hakios.dev_strict.h"
 
 
 static uint32_t level;
@@ -557,8 +558,23 @@ torch_open(__unused dev_t dev, __unused int flags, __unused int type, __unused s
 	return 0;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-torch is opened only by root and by
+ * mediaserverd (FigFlashlight, libhakios.media.dylib)
+ */
+static const char *const torch_open_programs[] = { "/usr/sbin/mediaserverd", NULL };
+
+static int
+torch_open_strict(dev_t dev, int flags, int type, struct proc *p)
+{
+	if (hakios_dev_open_check("/dev/hakios-torch", torch_open_programs) != 0) {
+		return EPERM;
+	}
+	return torch_open(dev, flags, type, p);
+}
+
 static const struct cdevsw torch_cdevsw = {
-	.d_open = torch_open, .d_close = torch_open, .d_read = torch_read, .d_write = torch_write,
+	.d_open = torch_open_strict, .d_close = torch_open, .d_read = torch_read, .d_write = torch_write,
 	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };

@@ -78,6 +78,7 @@
 #include <sys/hakios.exynos_soc.h>
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
+#include "hakios.dev_strict.h"
 
 /* (every line to the loader's log as well, as the other drivers do: see hakios.buttons.c) */
 
@@ -741,8 +742,23 @@ haptic_open(__unused dev_t dev, __unused int flags, __unused int type, __unused 
 	return 0;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-haptic is opened only by root and by
+ * HakiosAudio.driver in the audio server (audio_plugin.c)
+ */
+static const char *const haptic_open_programs[] = { "/usr/sbin/mediaserverd", "/usr/libexec/audiomxd", NULL };
+
+static int
+haptic_open_strict(dev_t dev, int flags, int type, struct proc *p)
+{
+	if (hakios_dev_open_check("/dev/hakios-haptic", haptic_open_programs) != 0) {
+		return EPERM;
+	}
+	return haptic_open(dev, flags, type, p);
+}
+
 static const struct cdevsw haptic_cdevsw = {
-	.d_open = haptic_open, .d_close = haptic_open, .d_read = eno_rdwrt, .d_write = haptic_write,
+	.d_open = haptic_open_strict, .d_close = haptic_open, .d_read = eno_rdwrt, .d_write = haptic_write,
 	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };

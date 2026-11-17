@@ -308,6 +308,7 @@ GPU_KEEP	arg	gpu_keep	GPU and display	k	hakios.gpu.cpp
 GPU_LOG	arg	gpu_log	GPU and display	k	hakios.adreno.c	
 GPU_RECOVER	arg	gpu_recover	GPU and display	k	hakios.adreno.c	a submission the core never finishes does not cost the rest of the run
 GPU_VA	arg	gpu_va	GPU and display	k	hakios.adreno.c	
+HAKIOS_DEV_STRICT	arg	hakios_dev_strict	User space	k	hakios.dev_strict.h	
 HALT_OFF	arg	halt_off	Chip, thermal and PMIC	k	hakios.exynos_poweroff.c	
 HAPTIC_EFFECT	arg	haptic_effect	Haptics and torch	k	hakios.haptic.c	
 IOAES	arg	ioaes	User space	k	MiniIOAESAccelerator.cpp	no IOAESAccelerator at all, as the kernel was before this driver

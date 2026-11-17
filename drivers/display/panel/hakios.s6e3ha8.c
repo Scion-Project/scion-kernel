@@ -118,6 +118,7 @@
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
 #include <dev/hakios.drivers.h>
+#include "hakios.dev_strict.h"
 
 extern int hakios_panel_register(const char *name, int (*set)(int level));     /* hakios.backlight.cpp */
 
@@ -532,6 +533,13 @@ panel_set(int level)
 	return ok ? 0 : EIO;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): the brightness is set only by root and by SpringBoard and
+ * backboardd (inject_sb.c's slider), panel_write only by root. Read by anybody, as before.
+ */
+static const char *const brightness_programs[] = { "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+	                                           "/usr/libexec/backboardd", NULL };
+
 static int
 panel_sysctl_brightness(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
@@ -541,14 +549,33 @@ panel_sysctl_brightness(__unused struct sysctl_oid *oidp, __unused void *arg1, _
 	if (error != 0 || req->newptr == 0) {
 		return error;
 	}
+	if ((error = hakios_dev_open_check("kern.hakios.brightness", brightness_programs)) != 0) {
+		return error;
+	}
 	return panel_set(value);
+}
+
+static int
+panel_sysctl_write(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	int value = panel_write, error;
+
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	if ((error = hakios_dev_strict_root("kern.hakios.panel_write")) != 0) {
+		return error;
+	}
+	panel_write = value;
+	return 0;
 }
 
 SYSCTL_PROC(_kern_hakios, OID_AUTO, brightness, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY | CTLFLAG_KERN,
     NULL, 0,
     panel_sysctl_brightness, "I", "the panel's brightness, 0-255 (-1: never set); writing sets it (Galaxy S9, panel=1)");
-SYSCTL_INT(_kern_hakios, OID_AUTO, panel_write, CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY | CTLFLAG_KERN,
-    &panel_write, 0, "allow S6E3HA8 brightness packets (defaults on; set 0 for read-only diagnostics)");
+SYSCTL_PROC(_kern_hakios, OID_AUTO, panel_write, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY | CTLFLAG_KERN,
+    NULL, 0, panel_sysctl_write, "I", "allow S6E3HA8 brightness packets (defaults on; set 0 for read-only diagnostics)");
 SYSCTL_UINT(_kern_hakios, OID_AUTO, panel_id, CTLFLAG_RD | CTLFLAG_LOCKED | CTLFLAG_KERN, &panel_id, 0,
     "S6E3HA8 panel ID read at startup");
 SYSCTL_UINT(_kern_hakios, OID_AUTO, panel_failures, CTLFLAG_RD | CTLFLAG_LOCKED | CTLFLAG_KERN, &panel_failures, 0,

@@ -16,6 +16,7 @@
 #include <sys/systm.h>
 #include <sys/uio.h>
 #include <pexpert/pexpert.h>
+#include "hakios.dev_strict.h"
 
 #define TOUCH_QUEUE     512             /* records; a power of two */
 
@@ -285,8 +286,23 @@ touch_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	return error;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-touch is opened only by root and by backboardd,
+ * the HID event server (libhakios.dylib on 16.5)
+ */
+static const char *const touch_open_programs[] = { "/usr/libexec/backboardd", NULL };
+
+static int
+touch_open_strict(dev_t dev, int flags, int type, struct proc *p)
+{
+	if (hakios_dev_open_check("/dev/hakios-touch", touch_open_programs) != 0) {
+		return EPERM;
+	}
+	return touch_open(dev, flags, type, p);
+}
+
 static const struct cdevsw touch_cdevsw = {
-	.d_open = touch_open, .d_close = touch_close, .d_read = touch_read, .d_write = touch_write,
+	.d_open = touch_open_strict, .d_close = touch_close, .d_read = touch_read, .d_write = touch_write,
 	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };

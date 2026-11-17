@@ -149,6 +149,7 @@
 #endif
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
+#include "hakios.dev_strict.h"
 
 extern void HakiosBTNodeStart(const uint8_t *hci_address, uint32_t speed);
 #if !__has_include(<vm/vm_kern_xnu.h>)   /* xnu-8796 only: image/partition helpers */
@@ -1455,8 +1456,23 @@ bt_cu_stop(__unused struct tty *tp, __unused int rw)
 	return 0;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/cu.bluetooth, uart.bluetooth and tty.bluetooth are
+ * opened only by root and by bluetoothd and BlueTool (both run as mobile here), and so is the control below
+ */
+static const char *const bt_cu_open_programs[] = { "/usr/sbin/bluetoothd", "/usr/sbin/BlueTool", NULL };
+
+static int
+bt_cu_open_strict(dev_t dev, int flags, int type, proc_t p)
+{
+	if (hakios_dev_open_check("/dev/*.bluetooth", bt_cu_open_programs) != 0) {
+		return EPERM;
+	}
+	return bt_cu_open(dev, flags, type, p);
+}
+
 static const struct cdevsw bt_cdevsw = {
-	.d_open = bt_cu_open, .d_close = bt_cu_close, .d_read = bt_cu_read, .d_write = bt_cu_write,
+	.d_open = bt_cu_open_strict, .d_close = bt_cu_close, .d_read = bt_cu_read, .d_write = bt_cu_write,
 	.d_ioctl = bt_cu_ioctl, .d_stop = bt_cu_stop, .d_reset = eno_reset, .d_ttys = NULL, .d_select = bt_cu_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = D_TTY
 };
@@ -1629,6 +1645,17 @@ kctl_connect(__unused kern_ctl_ref ref, struct sockaddr_ctl *sac, void **unitinf
 	say("bt: com.apple.uart.bluetooth: connected (unit %u) by pid %d, the chip at %u baud\n", sac->sc_unit,
 	    proc_pid(current_proc()), link_baud);
 	return 0;
+}
+
+/* hakios_dev_strict=1: the control too only for root, bluetoothd and BlueTool (as /dev/cu.bluetooth) */
+static errno_t
+kctl_connect_strict(kern_ctl_ref ref, struct sockaddr_ctl *sac, void **unitinfo)
+{
+	*unitinfo = NULL;
+	if (hakios_dev_open_check("the kernel control com.apple.uart.bluetooth", bt_cu_open_programs) != 0) {
+		return EPERM;
+	}
+	return kctl_connect(ref, sac, unitinfo);
 }
 
 static errno_t
@@ -1865,7 +1892,7 @@ kctl_publish(void)
 	strlcpy(reg.ctl_name, "com.apple.uart.bluetooth", sizeof(reg.ctl_name));
 	reg.ctl_flags = CTL_FLAG_REG_SOCK_STREAM;      /* a stream, as BlueTool's socket; not privileged: it runs as mobile */
 	reg.ctl_recvsize = 64 * 1024;
-	reg.ctl_connect = kctl_connect;
+	reg.ctl_connect = kctl_connect_strict;
 	reg.ctl_disconnect = kctl_disconnect;
 	reg.ctl_send = kctl_send;
 	reg.ctl_getopt = kctl_getopt;

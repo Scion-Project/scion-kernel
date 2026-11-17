@@ -49,6 +49,7 @@
 #include <string.h>
 #include <mach/vm_param.h>
 #include <sys/hakios.exynos_soc.h>
+#include "hakios.dev_strict.h"
 #include <sys/hakios.exynos9810_mem.h>
 #include <sys/hakios.exynos_acpm.h>
 #include <sys/hakios.input.h>
@@ -1252,8 +1253,23 @@ mfc_ioctl(dev_t dev __unused, u_long cmd, caddr_t data, int flag __unused, proc_
 	return error;
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-mfc is opened only by root and by mediaserverd,
+ * where VideoToolbox decodes for everybody (libhakios.media.dylib)
+ */
+static const char *const mfc_open_programs[] = { "/usr/sbin/mediaserverd", NULL };
+
+static int
+mfc_open_strict(dev_t dev, int flags, int type, proc_t p)
+{
+	if (hakios_dev_open_check("/dev/hakios-mfc", mfc_open_programs) != 0) {
+		return EPERM;
+	}
+	return mfc_open(dev, flags, type, p);
+}
+
 static const struct cdevsw mfc_cdevsw = {
-	.d_open = mfc_open, .d_close = mfc_close, .d_read = eno_rdwrt, .d_write = eno_rdwrt, .d_ioctl = mfc_ioctl, .d_stop = eno_stop,
+	.d_open = mfc_open_strict, .d_close = mfc_close, .d_read = eno_rdwrt, .d_write = eno_rdwrt, .d_ioctl = mfc_ioctl, .d_stop = eno_stop,
 	.d_reset = eno_reset, .d_ttys = NULL, .d_select = eno_select, .d_mmap = eno_mmap, .d_strategy = eno_strat,
 	.d_reserved_1 = eno_getc, .d_reserved_2 = eno_putc, .d_type = 0,
 };

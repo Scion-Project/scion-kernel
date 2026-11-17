@@ -40,6 +40,8 @@
 #include <kern/locks.h>
 #include <kern/thread.h>
 #include <libkern/libkern.h>
+#include <mach/mach_time.h>
+#include <sys/kauth.h>
 #include <mach/mach_types.h>
 #include <pexpert/pexpert.h>
 #include <sys/hakios.exynos_acpm.h>
@@ -52,6 +54,7 @@
 #include "hakios.mali_va.h"
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
+#include "hakios.dev_strict.h"
 
 extern vm_offset_t phystokv(uint64_t pa);
 extern boolean_t pmap_valid_address(uint64_t addr);             /* memory the kernel manages */
@@ -196,6 +199,28 @@ hakios_keep(const char *format, ...)
 	lck_mtx_unlock(&kept_lock);
 }
 
+/*
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): lines from processes other than root's, 20 a second at most
+ * between them; more are refused (EBUSY), so that no program can fill the log the others' lines are kept in.
+ */
+
+static bool
+say_allowed(void)
+{
+	static uint64_t window, said;
+	uint64_t now = mach_absolute_time(), second;
+
+	if (!hakios_dev_strict_enabled() || kauth_cred_getuid(kauth_cred_get()) == 0) {
+		return true;
+	}
+	nanoseconds_to_absolutetime(NSEC_PER_SEC, &second);
+	if (now - window >= second) {
+		window = now;
+		said = 0;
+	}
+	return ++said <= 20;
+}
+
 static int
 say_line(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
@@ -204,6 +229,9 @@ say_line(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg
 
 	if (req->newptr == USER_ADDR_NULL) {
 		return 0;
+	}
+	if (!say_allowed()) {
+		return EBUSY;
 	}
 	if (length > sizeof(line) - 1) {
 		length = sizeof(line) - 1;
