@@ -9,13 +9,64 @@ it there, what it leaves on the phone, how it is kept, and what "secure user dat
 [Procursus](https://github.com/ProcursusTeam/Procursus) bootstrap (dpkg, apt, a shell and the usual tools) and
 [Sileo](https://github.com/Sileo/Sileo) on a system whose kernel is ours. Nothing is broken into.
 
+## Stuck at "Queued" (17 Nov 2026), and the package managers
+
+**What the owner saw:** in Sileo, a package got as far as "Queued" and stayed there: no progress, no install.
+
+**What it was.** The downloads were fine: the two `.deb`s of the install were in Sileo's cache
+(`/var/jb/var/mobile/Containers/Data/Application/<id>/Library/Caches/Sileo/Downloads/`). Nothing Sileo does as root had
+ever run on the phone: `/var/jb/var/cache/apt/archives` was empty since the seed and `sileolists/` had never been made
+again. With the kernel tracing Sileo's failing system calls (`sweettracename=Sileo`), every `posix_spawn` of its root
+path returned EPERM, and the kernel's `persona_lax` said nothing.
+
+- Sileo 2.5.1 (and Zebra 1.1.x) become root on iOS 13 and later only by a spawn into **persona 99** with uid and gid 0,
+  as the mobile user. `persona_lax=1` was made when this port had no personas at all, for that case.
+- `usermanagerd`'s boot task now makes them: the phone's `/private/var/keybags/persona.kb` lists 99 "System", 100, 199,
+  200 and 1000. So persona 99 exists, `persona_lax`'s case never comes, and the stock rule "a caller that is not root may
+  not ask for uid or gid 0" refuses the spawn silently.
+- Sileo then returns from its install without a callback. Its queue had already set the cells to "Queued", and nothing
+  changes them again.
+
+**The fixes**, each enough on its own; none has run on a phone yet:
+
+| Where | What |
+|---|---|
+| The kernel (xnu fork, `kern_exec.c`, PR 45) | With `persona_lax=1` a caller that holds `com.apple.private.persona-mgmt` may ask for uid/gid 0 of an existing persona too. Prints `persona_lax: ... spawns into persona 99 as uid 0 gid 0: allowed`. Fixes Sileo and Zebra as they are |
+| Sileo (github.com/Scion-Project/Sileo, PR 1) | When the kernel refuses the persona spawn, the program is started through the bundle's set-user-ID `giveMeRoot`; a root spawn that still fails ends the install with an error in its log. Built by `tools/ios27/sileo/build-sileo.sh` and used with `SILEO_FROM=fork` |
+
+**Which package manager.** `PACKAGE_MANAGER` of `prepare.sh` (and of `prepare-root-inputs.sh`, which calls it):
+
+| Value | The prefix has |
+|---|---|
+| `zebra` (default since 17 Nov 2026, the owner's choice) | Zebra 1.1.36 (Procursus's rootless build, `xyz.willy.zebra`, pinned by SHA-256 in `tools/mk-jb.sh`) |
+| `sileo` | Sileo 2.5.1, as before |
+| `both` | both, sharing the same apt and dpkg |
+
+`ENABLE_SILEO=0` still means no prefix and no package manager. The root steps take whatever the prefix has:
+`60-sileo.sh` puts the prefix on the root (and Sileo's copy in `/Applications` when it is there), `61-zebra.sh` Zebra's.
+A phone already seeded gets the new prefix at its next root build only if the stamp changes, and a changed stamp moves
+its own copy, with what was installed into it, aside to `/private/var/jb.old-<time>`; switching managers is such a change.
+
+What Zebra needs on this port, checked on its package: no set-user-ID helper (it becomes root as Sileo does, by the
+persona spawn, so it needs the kernel fix above; without it Zebra says "Zebra doesn't have permission to install
+packages"); `com.apple.private.persona-mgmt` among its entitlements (it has it); a copy in `/Applications` for its icon
+(`61-zebra.sh` and `scion-apps-sync`, as for Sileo); its binary is plain arm64 and built with the iOS 16.2 SDK, so iOS 27's
+rule that apps of SDK 27 need scenes does not apply. Its package script (`uicache` of its app) is not run by an unpack by
+hand and is not needed here. At its first start Zebra adds its own repository (getzbra.com), as Sileo adds Havoc and
+Chariz. Zebra is the Zebra Team's, GPL-3.0, a separate program in the prefix: nothing of this repository links with it.
+Its source: github.com/zbrateam/Zebra, and the project's fork github.com/Scion-Project/Zebra.
+
+The 16.5 line's prefix is made by the same `tools/mk-jb.sh`, whose default stays `MANAGERS=sileo`; `MANAGERS=zebra` (or
+`"sileo zebra"`) gives it Zebra the same way. Its kernel's persona stand-in (`drivers/core/hakios.exec.c`) has not been
+checked against existing personas.
+
 ## What the build does
 
     tools/ios27/sileo/prepare.sh                  # no root; once; also run by tools/ios27/s9/prepare-root-inputs.sh
     sudo tools/ios27/s9/build-root.sh inputs      # steps.d/60-sileo.sh is one of its steps; ENABLE_SILEO=0 leaves it out
 
-`prepare.sh` fetches two files from `apt.procurs.us`, each pinned by SHA-256 in `tools/mk-jb.sh` (the bootstrap for
-`iphoneos-arm64-rootless/1800`, and `org.coolstar.sileo` 2.5.1), unpacks them into `jb/` of the checkout (never in git) and
+`prepare.sh` fetches its files from `apt.procurs.us`, each pinned by SHA-256 in `tools/mk-jb.sh` (the bootstrap for
+`iphoneos-arm64-rootless/1800`, and `xyz.willy.zebra` 1.1.36 and/or `org.coolstar.sileo` 2.5.1, by `PACKAGE_MANAGER`), unpacks them into `jb/` of the checkout (never in git) and
 builds two small programs of ours for iOS. A changed file upstream stops the build. It is the installer's flavour of
 `mk-jb.sh` (`PREINSTALL= ELLEKIT=`): the bootstrap and Sileo and nothing else.
 

@@ -1,8 +1,10 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT-0
 # 60-sileo.sh ROOT [undo] : the package manager on an iOS 27 root, as the 16.5 line has it by default: the Procursus
-# bootstrap with Sileo in it (tools/mk-jb.sh: both fetched from apt.procurs.us, both pinned by SHA-256), rootless, all of
-# it under /var/jb. Default ON (ENABLE_SILEO=0 leaves the root without it). Idempotent. What it puts on the root:
+# bootstrap with Sileo, Zebra or both in it (tools/mk-jb.sh: all fetched from apt.procurs.us, all pinned by SHA-256;
+# which ones is tools/ios27/sileo/prepare.sh's PACKAGE_MANAGER=zebra|sileo|both, default zebra), rootless, all of it under
+# /var/jb. Default ON (ENABLE_SILEO=0 leaves the root without a package manager). Idempotent. This step is the prefix's and
+# Sileo's; Zebra's copy in /Applications is 61-zebra.sh's (both through tools/ios27/sileo/pm-app.sh). What it puts on the root:
 #   /jb                          the prefix as the image carries it (read, never run from): jb_seed copies it to
 #                                /private/var/jb at the first boot and leaves that copy alone afterwards -- what dpkg and
 #                                apt install there is the phone's own. A different stamp (/jb/.scion-stamp: REV below and
@@ -12,7 +14,7 @@
 #                                shut down; without it what was installed in the last seconds is gone)
 #   /bin/{chmod,cp,mkdir,mv,rm}  links into the prefix: Sileo runs them by these names and iOS's /bin has df and ps only
 #   two launchd jobs             com.scion.jbseed (once a boot), com.scion.varsync (stays), in /System/Library/xpc/launchd.plist
-#   /Applications/Sileo.app      a real copy of the prefix's (marked .scion-prefix-app): on this port uicache -p answers
+#   /Applications/Sileo.app      (when the prefix has Sileo) a real copy of the prefix's (marked .scion-prefix-app): on this port uicache -p answers
 #                                "Unable to register" for every path (also /Applications/*.app; seen on phone 1, 13 Nov 2026),
 #                                while lsd's own rebuild at boot registers what is in /Applications. The LaunchServices
 #                                databases are dropped so that lsd rebuilds them at the next boot (as 70-lsd-extkit does).
@@ -21,7 +23,7 @@
 # What it does NOT put there, checked here so that a prefix made with other settings stops the build: no OpenSSH, no
 # tweak injection (ElleKit), no repository but Procursus (and the project's own, if SCION_REPO_URL names where it is
 # hosted), no account with a password, no file that everybody may write, no set-user-ID program beyond the bootstrap's
-# own and Sileo's helper.
+# own and Sileo's helper (when Sileo is there).
 # Owners: run as root on a mount with owners (the full build), everything is root:wheel here. Run without root (an
 # edit of a pulled root, owners off), the files carry the builder's user ID and jb_seed makes them root's on the phone
 # before anything else (claim() there); the copy in /private/var/jb is root:wheel either way.
@@ -33,6 +35,7 @@
 set -euo pipefail
 R=${1:?usage: 60-sileo.sh ROOT [undo]}; DO=${2:-apply}
 H=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$H/../../../.." && pwd)
+. "$H/../../sileo/pm-app.sh"
 JB=${JB_ROOT:-$REPO/jb}
 REV=2                                   # of what this step makes of the prefix: raise it and phones seed again
                                         # 2: apt's methods stay root; prep.sh owns the /Applications copies
@@ -49,7 +52,7 @@ if [[ $DO == undo ]]; then
 	rm -f "$R/usr/local/bin/jb_seed" "$R/usr/local/bin/var_sync" "$R/usr/local/libexec/scion-sileo-selftest.sh"
 	rmdir "$R/usr/local/libexec" 2>/dev/null || true
 	rm -rf "$R/jb" "$R/jb.new"
-	[[ -e $R/Applications/Sileo.app/.scion-prefix-app ]] && rm -rf "$R/Applications/Sileo.app"
+	pm_app_take "$R" Sileo.app
 	[[ ${PURGE_PREFIX:-0} == 1 ]] && rm -rf "$R/private/var/jb" "$R/private/var/.jb-seeding" "$R/private/var/log/scion-jbseed.log" "$R/private/var/log/scion-varsync.log" "$R/private/var/scion-test"
 	echo "60-sileo: taken off the root$([[ ${PURGE_PREFIX:-0} == 1 ]] && echo ', the phone'"'"'s copy too' || echo '; /private/var/jb, if the phone has made one, stays')"
 	exit 0
@@ -59,7 +62,11 @@ fi
 
 # the inputs, made before the build by tools/ios27/sileo/prepare.sh (no root, network for the two downloads)
 P=$JB/root/var/jb
-[[ -x $P/Applications/Sileo.app/Sileo && -s $JB/.stamp ]] || die "no prefix at $P: run tools/ios27/sileo/prepare.sh"
+[[ -x $P/usr/bin/dpkg && -s $JB/.stamp ]] || die "no prefix at $P: run tools/ios27/sileo/prepare.sh"
+[[ -x $P/Applications/Sileo.app/Sileo || -x $P/Applications/Zebra.app/Zebra ]] || die "the prefix at $P has no package manager (Sileo or Zebra): run tools/ios27/sileo/prepare.sh"
+HAS_SILEO=0; [[ -x $P/Applications/Sileo.app/Sileo ]] && HAS_SILEO=1
+# Sileo's helper is one of the set-ID files only when Sileo is there
+[[ $HAS_SILEO == 1 ]] || SETID=${SETID/Applications\/Sileo.app\/giveMeRoot /}
 [[ $(cat "$JB/.stamp") == *-- ]] || die "the prefix at $P was made with PREINSTALL or ElleKit: run tools/ios27/sileo/prepare.sh (it makes the plain one)"
 (cd "$JB/ios27" 2>/dev/null && shasum -a 256 -c SHA256SUMS >/dev/null 2>&1) || die "no jb_seed and var_sync at $JB/ios27: run tools/ios27/sileo/prepare.sh"
 for c in $BIN_NAMES; do
@@ -156,17 +163,13 @@ fi
 rm -rf "$R/jb"
 mv "$N" "$R/jb"
 
-# Sileo where LaunchServices registers it (see the head of this file)
-if [[ -e $R/Applications/Sileo.app && ! -e $R/Applications/Sileo.app/.scion-prefix-app ]]; then
-	die "a Sileo.app that is not this step's is in /Applications"
+# Sileo where LaunchServices registers it (see the head of this file); a copy of an earlier build is taken off when the
+# prefix has no Sileo now
+if [[ $HAS_SILEO == 1 ]]; then
+	pm_app_put "$R" Sileo.app || die "could not copy Sileo.app to /Applications"
+else
+	pm_app_take "$R" Sileo.app
 fi
-rm -rf "$R/Applications/Sileo.app"
-cp -a "$R/jb/Applications/Sileo.app" "$R/Applications/Sileo.app"
-: > "$R/Applications/Sileo.app/.scion-prefix-app"
-[[ $EUID != 0 ]] || { chown -R 0:0 "$R/Applications/Sileo.app"; chmod 4755 "$R/Applications/Sileo.app/giveMeRoot"; }
-for c in "$R"/private/var/mobile/Containers/Data/InternalDaemon/*/Library/Caches/*com.apple.LaunchServices-*.csstore; do
-	[[ -f $c ]] && rm -f "$c" && echo "60-sileo: LaunchServices database dropped (lsd rebuilds it at the next boot): ${c##*/}"
-done
 
 install -d -m 0755 "$R/usr/local/bin"
 for t in jb_seed var_sync; do
@@ -195,4 +198,4 @@ else
 	rm -f "$R/usr/local/libexec/scion-sileo-selftest.sh"
 	/usr/bin/python3 "$H/../../sileo/jobs.py" "$R" add
 fi
-echo "60-sileo: /jb ($(du -sh "$R/jb" | cut -f1), stamp $(cut -c1-24 "$R/jb/.scion-stamp")), jb_seed, var_sync, /bin links, 2 launchd jobs$([[ $EUID == 0 ]] || echo '; no root here: jb_seed makes the owners right on the phone')"
+echo "60-sileo: /jb ($(du -sh "$R/jb" | cut -f1), stamp $(cut -c1-24 "$R/jb/.scion-stamp")), jb_seed, var_sync, /bin links, 2 launchd jobs, $(ls -d "$R"/jb/Applications/{Sileo,Zebra}.app 2>/dev/null | sed 's|.*/||; s|\.app||' | tr '\n' ' ')in the prefix$([[ $EUID == 0 ]] || echo '; no root here: jb_seed makes the owners right on the phone')"
