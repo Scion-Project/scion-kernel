@@ -14,11 +14,15 @@
 #                   line gets sweetinject= = the kernel's built-in three and exactly those (tools/ios27/s9/cmdline-inject.py, which
 #                   refuses a line that would not fit or names sweetinject= itself); without one, or with none, the line is
 #                   packed as given. Make the boot image again after every root build: the two must agree.
+#   [--camera-node auto|yes|no]   the device tree's /arm-io/isp, by which iOS shows the Camera app (tools/ios27/camera/
+#                   adt-isp-node.py). auto (the default): only when the line, with the kernel's built-in arguments, has cam_s9=7
+#                   and the record names the root's /usr/lib/cam.dylib for cameracaptured (step 94-camera); without both the
+#                   tree is as before and the app hidden. yes: always; no: never.
 #   [--loader I]    default xnuloader/sboot/out/xnu_boot.Image (tools/ios27/s9/build-loader.sh)
 #   [--out O]       default out/xnu-boot-ios27.img (out/ is not in git; the image holds your IPSW's device identity: never share it)
 # What it does (the steps the project's test images are made with): strip -x copy of the kernel; the S9's Apple device tree
 # (mkadt_starlte.py --big --bank2 --bank2-mb 1536 --iphone11, then adt-extra-ram.py: 8 cores, the 1.5 GiB window of the second DRAM
-# bank, seven extra RAM ranges of the first); mkpayload.py (kernel + ADT + command line -> SWEETXNU payload, padded to 4 KiB);
+# bank, seven extra RAM ranges of the first; camera/adt-isp-node.py, see --camera-node); mkpayload.py (kernel + ADT + command line -> SWEETXNU payload, padded to 4 KiB);
 # starlte-pack-boot.py (the loader as the image's kernel, the payload appended, a one-page empty ramdisk).
 # Nothing here touches a phone.
 set -euo pipefail
@@ -26,13 +30,14 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd); T27=$ROOT/tools/ios27
 PY=${PY:-python3}
 KERNEL= DONOR= TEMPLATE= LINE= OUT=$ROOT/out/xnu-boot-ios27.img LOADER=$ROOT/xnuloader/sboot/out/xnu_boot.Image
 LINEFILE=$T27/cmdline/starlte-rc.txt
-RECORD=default
+RECORD=default CAMERA_NODE=auto
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--kernel) KERNEL=$2; shift ;; --donor-adt) DONOR=$2; shift ;; --template) TEMPLATE=$2; shift ;;
 	--cmdline) LINE=$2; LINEFILE=; shift ;; --cmdline-file) LINEFILE=$2; shift ;;
 	--loader) LOADER=$2; shift ;; --out) OUT=$2; shift ;; --inject-record) RECORD=$2; shift ;;
-	-h | --help) sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--camera-node) CAMERA_NODE=$2; shift ;;
+	-h | --help) sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "make-boot-image: unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -62,7 +67,11 @@ mkdir -p "$(dirname "$OUT")"
 W=$(mktemp -d "${TMPDIR:-/tmp}/bootimg.XXXXXX"); trap 'rm -rf "$W"' EXIT
 cp "$KERNEL" "$W/kernel.x"; xcrun strip -x "$W/kernel.x"
 "$PY" "$T27/mkadt_starlte.py" --big --bank2 --bank2-mb 1536 --iphone11 "$DONOR" "$W/base.adt" >/dev/null
-"$PY" "$T27/adt-extra-ram.py" "$W/base.adt" "$W/starlte.adt"
+"$PY" "$T27/adt-extra-ram.py" "$W/base.adt" "$W/ram.adt"
+# the camera's /arm-io/isp (the Camera app shown) only when this line asks the kernel for the stream (cam_s9=7) and the
+# root's record has the capture device (step 94-camera): tools/ios27/camera/adt-isp-node.py, docs/ios27/CAMERA.md
+"$PY" "$T27/camera/adt-isp-node.py" "$W/ram.adt" "$W/starlte.adt" --when "$CAMERA_NODE" --line "$LINE" --kernel "$KERNEL" \
+	$([ "$RECORD" = none ] || printf -- '--record %s' "$RECORD")
 "$PY" "$T27/herolte/mkpayload.py" "$W/kernel.x" "$W/starlte.adt" "$W/payload.bin" --cmdline "$LINE" | grep -E "^(size|fixups|entry)" || true
 "$PY" - "$W/payload.bin" "$LINE" <<'PY'
 import sys
