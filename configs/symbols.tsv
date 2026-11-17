@@ -170,7 +170,7 @@ CAM_SENSOR	arg	cam_sensor	Cameras	k	hakios.camera.c
 CAM_SETTLE	arg	cam_settle	Cameras	k	hakios.camera.c	
 CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c	
 CAM_VBLANK	arg	cam_vblank	Cameras	k	hakios.camera.c	
-CAMTL	arg	camtl	User space	u	inject.c	
+CAMTL	arg	camtl	User space	u	hakios_metal_shown.c,inject.c	
 CC_FADE	arg	cc_fade	User space	u	inject_sb.c	
 COHTEST	arg	cohtest	User space	k	hakios.exynos_m3.c	is the big cluster in the same coherency domain as the A55s once it is started? (off by default)
 COHTEST_DELAY	arg	cohtest_delay	User space	k	hakios.exynos_m3.c	
@@ -360,7 +360,7 @@ MAX98512_GAIN	arg	max98512_gain	Audio and battery	k	hakios.max98512.c	the bottom
 MC_CE	arg	mc_ce	User space	k	mc_ce.c	
 MD0	arg	md0	User space	k	1101-virtio-disk-as-md0.patch	
 MEMBENCH	arg	membench	CPU, memory and boot	k	hakios.cpufreq.c	
-METAL	arg	metal	GPU and display	ku	MiniIOMobileFramebuffer.cpp,hakios_metal_shown.c,inject_sb.c	say where Metal's device is (docs/metal-plan.md, step 1)
+METAL	arg	metal	GPU and display	ku	MiniIOMobileFramebuffer.cpp,inject_sb.c	say where Metal's device is (docs/metal-plan.md, step 1)
 METAL_ALL	arg	metal_all	User space	u	HakiosMetalCA.m	
 METAL_DEFER	arg	metal_defer	User space	u	HakiosMetalCA.m	this queue's command buffers recorded by a thread of hakios-metal's own (deferred recording), so that the window server's render thread does not wait
 METAL_DUMP	arg	metal_dump	User space	u	HakiosMetalCA.m	
@@ -481,12 +481,15 @@ SERIAL	arg	serial	Loader	l	loader.c
 SHUB	arg	shub	Sensors	k	hakios.ssp.c	
 SHUB_ACC_CAL	arg	shub_acc_cal	Sensors	k	hakios.ssp.c	the accelerometer's factory offsets, sent to the hub before the sensors go on, as Samsung does
 SHUB_ACC_POS	arg	shub_acc_pos	Sensors	k	hakios.ssp.c	the accelerometer's (and gyroscope's) position in the formation of step 5
+SHUB_AP_AWAKE	arg	shub_ap_awake	Sensors	k	hakios.ssp.c	
 SHUB_CHUB_ON	arg	shub_chub_on	Sensors	k	hakios.ssp.c	at step 2, power the CHUB domain on if step 1 found it off, using the PMU's chub_on sequence
+SHUB_COLD	arg	shub_cold	Sensors	k	hakios.ssp.c	
 SHUB_DIV	arg	shub_div	Sensors	k	hakios.ssp.c	
 SHUB_GYRO_CAL	arg	shub_gyro_cal	Sensors	k	hakios.ssp.c	the same for the gyroscope (gyro_lsm6dsl.c set_gyro_cal(): SSP 0xCD, s32 x, y, z), the three
 SHUB_HELLO	arg	shub_hello	Sensors	k	hakios.ssp.c	wait for MCU_RESP before every exchange, as Samsung's driver does
 SHUB_KEEP	arg	shub_keep	Sensors	k	hakios.ssp.c	power the hub off again (NSTDBY low) when the steps end or one fails
 SHUB_LOG	arg	shub_log	Sensors	k	hakios.ssp.c	log the first bytes of every SPI frame (very loud)
+SHUB_MAG	arg	shub_mag	Sensors	k	hakios.ssp.c	the magnetometer's PDC matrix of the S9+'s board (Samsung's ssp-mag-array): 1 the SM-G965F
 SHUB_MS	arg	shub_ms	Sensors	k	hakios.ssp.c	sample period in ms (default 20; light, proximity and pressure use 200)
 SHUB_PEEK	arg	shub_peek	Sensors	k	hakios.ssp.c	a memory reader added to the hub's firmware as it is sent, for the GNSS bring-up (docs/gnss.md), which
 SHUB_REQ_LEN	arg	shub_req_len	Sensors	k	hakios.ssp.c	
