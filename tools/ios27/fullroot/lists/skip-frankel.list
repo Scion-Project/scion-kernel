@@ -1,3 +1,7 @@
 10-macho-a64e.sh
 80-metal-ca.sh
 85-textdata-restore.sh
+90-sensors.sh
+91-wifi.sh
+92-audio-bt.sh
+93-modem.sh

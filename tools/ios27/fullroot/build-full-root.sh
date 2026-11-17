@@ -17,8 +17,15 @@
 #   30 overlay      sbca/m/b/s dylibs (brightness shim = b.dylib), libOSMesa/libsbgl, StarbiteMetal, cc_fips_test stand-in, wallpaper layers
 #   40 prefs        Reduce Motion / Transparency OFF, CA compression off, watchdogs off
 #   50 xpc-disable  MessagesBlastDoorService
+#   60 sileo        the package manager (ENABLE_SILEO=0: out)
+#   90 sensors  91 wifi  92 audio-bt  93 modem   what iOS needs to see the S9's hardware the kernel turns on by default, each
+#                   built from this checkout with the builder's Xcode (DEVELOPER_DIR), each skipped with one line when an input
+#                   only the builder has is missing (WIFI_FW_DIR, HCD), ENABLE_SENSORS/WIFI/AUDIO_BT/MODEM=0 to leave one out;
+#                   a feature that fails is undone and the build goes on (STRICT=1: it stops). feature.sh has the rules.
+# After the steps, OUT.inject: the libraries the root has for the kernel to insert (inject-record.sh), which
+# tools/ios27/s9/make-boot-image.sh puts into the boot image's sweetinject= (docs/ios27/INSTALL-S9.md).
 # NOT applied (owner wants the real iOS 27): the 86 "speed" daemon trims, Spotlight/Siri/photos/ML/intelligence off-switches.
-# Env: SIZE_GB=32  OUT=out/root-full.img  REUSE_CACHE=1 (use work/cache if its DONE marker exists)  DISABLE_HOGS=1  KEEP_MOUNTED=1
+# Env: SIZE_GB=32  OUT=out/root-full.img  STRICT=1 (a feature step that fails stops the build)  REUSE_CACHE=1 (use work/cache if its DONE marker exists)  DISABLE_HOGS=1  KEEP_MOUNTED=1
 # DEVICE=frankel (the Pixel 10, Tensor G5; docs/ios27/PIXEL10.md; NOT TESTED: no root has been built or booted for it): its cores
 #   run arm64e and every ARMv8.x instruction the cache uses (Cortex-A520/A725/X4 TRMs: APA3 5, GPA3 1, LSE, FP16, LRCPC2 ...),
 #   so the stock cache is staged unrewritten (no cache pipeline) and the steps that only undo or repair the rewrite
@@ -53,6 +60,7 @@ build)
     free_gb=$(df -g "$HERE" | awk 'NR==2 {print $4}'); need=${MIN_FREE_GB:-62}
     (( free_gb >= need )) || { echo "only $free_gb GB free, need >= $need (keeps 40 GB free after the ~22 GB root + 6 GB cache)" >&2; exit 1; }
     mkdir -p "$W" "$(dirname "$OUT")"; chown "$OWNER" "$W" "$(dirname "$OUT")"
+    rm -f "$OUT.inject" "$W/inject.record"   # a record is only ever next to the image it was made from
     # ---- 1. cache (unprivileged) ----
     SYSMNT=$W/mnt-sys; OSMNT=$W/mnt-os; APPMNT=$W/mnt-app; ROOTMNT=$W/mnt-root
     mkdir -p "$SYSMNT" "$OSMNT" "$APPMNT" "$ROOTMNT"
@@ -84,14 +92,17 @@ build)
     # ---- 4. steps ----
     for s in "$HERE"/steps.d/[0-9][0-9]-*.sh; do
         if [[ $DEVICE == frankel ]] && grep -qx "$(basename "$s")" "$HERE/lists/skip-frankel.list"; then log "step $(basename "$s"): skipped on frankel"; continue; fi
-        log "step $(basename "$s")"; bash "$s" "$ROOTMNT"
+        log "step $(basename "$s")"; OS_MNT=$OSMNT bash "$s" "$ROOTMNT"
     done
+    bash "$HERE/inject-record.sh" "$ROOTMNT" "$W/inject.record"
     sync
     log "offline checks"; chk=0; bash "$HERE/check-root.sh" "$ROOTMNT" | tee "$W/check-root.log" || true; grep -q "ALL HARD CHECKS PASSED" "$W/check-root.log" || chk=1
     df -h "$ROOTMNT"; sync
     umount "$ROOTMNT"; log "fsck_hfs"; fsck_hfs -n -f "/dev/r${RDEV#/dev/}" 2>&1 | tail -4 | tee -a "$W/check-root.log"
     hdiutil detach "$RDEV" >/dev/null; RDEV=
     chown "$OWNER" "$OUT"; chmod 644 "$OUT"; ls -ls "$OUT"; shasum -a 256 "$OUT" | tee "$OUT.sha256"
+    mv -f "$W/inject.record" "$OUT.inject"; chown "$OWNER" "$OUT.inject"; chmod 644 "$OUT.inject"
+    log "sweetinject record $OUT.inject (make-boot-image.sh reads it): $(grep -v '^#' "$OUT.inject" | tr '\n' ';')"
     log "BUILD-DONE $OUT (offline checks: $([[ $chk == 0 ]] && echo passed || echo FAILED))"; exit $chk
     ;;
 verify)

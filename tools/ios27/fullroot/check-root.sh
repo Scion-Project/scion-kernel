@@ -81,5 +81,10 @@ if [[ -d $R/jb ]]; then
 else
     info "no package manager on this root (ENABLE_SILEO=0)"
 fi
+# the libraries the feature steps installed for sweetinject= (inject-record.sh): each one on the root
+for e in "$R"/usr/local/share/scion/sweetinject.d/*; do
+    [[ -f $e ]] || continue; read -r lib progs < "$e" || true
+    [[ -f $R$lib ]] && ok "for sweetinject: $lib ($progs)" || bad "recorded for sweetinject but not on the root: $lib"
+done
 df -h "$R" | tail -1 | sed 's/^/info  /'; echo "info  inodes/files: $(find "$R" -xdev 2>/dev/null | wc -l | tr -d ' ') entries"
 [[ $fail == 0 ]] && echo "CHECK-ROOT: ALL HARD CHECKS PASSED" || echo "CHECK-ROOT: FAILURES"; exit $fail

@@ -8,6 +8,12 @@
 #                   Its header, DTBH (Samsung's device tree for S-Boot) and nothing else are kept.
 #   [--cmdline S | --cmdline-file F]   default tools/ios27/cmdline/starlte-rc.txt (the rest is built into the kernel)
 #                   sweetepoch=<now> is added to it unless it names one (the clock's floor)
+#   [--inject-record R | --inject-record none]   the record of the libraries the root build installed for the kernel to
+#                   insert into programs (tools/ios27/fullroot/inject-record.sh). Default: tools/ios27/fullroot/out/root-full.img.inject
+#                   when the root build of docs/ios27/INSTALL-S9.md left one, else none. With a record that lists libraries the
+#                   line gets sweetinject= = the kernel's built-in three and exactly those (tools/ios27/s9/cmdline-inject.py, which
+#                   refuses a line that would not fit or names sweetinject= itself); without one, or with none, the line is
+#                   packed as given. Make the boot image again after every root build: the two must agree.
 #   [--loader I]    default xnuloader/sboot/out/xnu_boot.Image (tools/ios27/s9/build-loader.sh)
 #   [--out O]       default out/xnu-boot-ios27.img (out/ is not in git; the image holds your IPSW's device identity: never share it)
 # What it does (the steps the project's test images are made with): strip -x copy of the kernel; the S9's Apple device tree
@@ -20,12 +26,13 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd); T27=$ROOT/tools/ios27
 PY=${PY:-python3}
 KERNEL= DONOR= TEMPLATE= LINE= OUT=$ROOT/out/xnu-boot-ios27.img LOADER=$ROOT/xnuloader/sboot/out/xnu_boot.Image
 LINEFILE=$T27/cmdline/starlte-rc.txt
+RECORD=default
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--kernel) KERNEL=$2; shift ;; --donor-adt) DONOR=$2; shift ;; --template) TEMPLATE=$2; shift ;;
 	--cmdline) LINE=$2; LINEFILE=; shift ;; --cmdline-file) LINEFILE=$2; shift ;;
-	--loader) LOADER=$2; shift ;; --out) OUT=$2; shift ;;
-	-h | --help) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--loader) LOADER=$2; shift ;; --out) OUT=$2; shift ;; --inject-record) RECORD=$2; shift ;;
+	-h | --help) sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "make-boot-image: unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -40,6 +47,15 @@ case "$LINE" in *$'\n'*) die "the command line has more than one line" ;; esac
 # the calendar's floor: the time this image was made, unless the line has its own (the kernel's clock starts there until the
 # PMIC's clock or the network says better; without it every boot starts in 1970)
 case " $LINE " in *" sweetepoch="*) ;; *) LINE="$LINE sweetepoch=$(date +%s)" ;; esac
+# the libraries the root has for insertion (sweetinject=), from the root build's record
+if [ "$RECORD" = default ]; then
+	RECORD=none; DEF=$ROOT/tools/ios27/fullroot/out/root-full.img.inject
+	[ ! -f "$DEF" ] || { RECORD=$DEF; echo "make-boot-image: the root build's record $DEF (--inject-record none: without it)"; }
+fi
+if [ "$RECORD" != none ]; then
+	[ -f "$RECORD" ] || die "--inject-record: no record at '$RECORD' (tools/ios27/fullroot/inject-record.sh)"
+	LINE=$("$PY" "$T27/s9/cmdline-inject.py" compose --line "$LINE" --record "$RECORD" --kernel "$KERNEL") || die "the record $RECORD cannot go on this command line (above)"
+fi
 n=$(printf '%s' "$LINE" | wc -c | tr -d ' ')
 [ "$n" -le 607 ] || die "the command line is $n bytes; the payload holds 607 (it would be cut)"
 mkdir -p "$(dirname "$OUT")"

@@ -16,7 +16,7 @@ J=$R/System/Library/xpc/launchd.plist
 T=$R/usr/local/libexec/scion-celltest.sh
 case $how in
 add|test)
-	install -d "$R/usr/local/bin" "$R/usr/local/libexec"
+	install -d "$R/usr/local/bin"
 	install -m 0755 "$B/scion-celld" "$R/usr/local/bin/scion-celld"
 	# the status bar's library (c.dylib, scion-bars.m): loaded only through the boot-arg sweetinject (/usr/lib/c.dylib,SpringBoard)
 	# and on only while /private/var/local/scion-bars exists
@@ -28,6 +28,7 @@ add|test)
 	fi
 	if [[ $how == test ]]; then
 		install -m 0755 "$B/scion-fetch" "$R/usr/local/bin/scion-fetch"
+		install -d "$R/usr/local/libexec"
 		mkdir -p "$R/private/var/scion-test"
 		cat > "$T" <<'SH'
 #!/var/jb/bin/bash
@@ -63,7 +64,8 @@ untest)
 	rm -f "$T" "$R/usr/local/bin/scion-fetch";;
 undo)
 	rm -f "$T" "$R/usr/local/bin/scion-fetch" "$R/usr/local/bin/scion-celld" "$R/usr/lib/c.dylib" "$R/private/var/local/scion-bars" \
-		"$R/private/var/local/scion-bars.boots";;
+		"$R/private/var/local/scion-bars.boots"
+	rmdir "$R/usr/local/libexec" 2>/dev/null || true;;
 *) echo "66-celld: add, test, untest or undo" >&2; exit 2;;
 esac
 /usr/bin/python3 - "$J" "$how" <<'PY'
