@@ -235,6 +235,32 @@ screen is still in the background. Said once a client: `hakios: camera: layout: 
 layout: com.apple.camera is taken as its foreground application`. With `cam_trace`, `camera_statetrace.c` also says the
 layouts that do arrive and the monitor's states (`hakios: camera: trace: state: ...`). **Not run on a phone yet.**
 
+### What phone 1 showed after that (17 November, 22:42 to 23:31), and the next test
+
+- FrontBoard does publish a main-display layout, but the layout has no elements, `backlightLevel = 0` and `backlightState = 0`,
+  while the screen is on. CMCapture finds no foreground app in it. `camera_layout.c` takes a client as the foreground app
+  when the main display's layout is nil, or when FrontBoard's own layout names no application at all. With it,
+  cameracaptured said `state: Foregrounded (bksAppState: ForegroundRunning, layout: Fullscreen)`, registered Camera.app,
+  copied the device and asked for its streams, and the kernel's frames flowed. Why SpringBoard publishes an empty layout
+  is open, and it is not the camera's problem: SpringBoard turns the backlight on at boot (`Off->ActiveOn`), yet the layout
+  it hands out never carries it.
+- cameracaptured then aborted three times in turn while building the session's graph (the text comes from `sweetscan=…,cameracaptured`):
+  1. `Unknown pixel format ()`: iOS 27's camera source node weighs the scalers against an `IntermediateTap` output, which
+     our formats did not list. `camera_formats.c` lists one, BGRA only, so the node keeps the scalers.
+  2. `Output can't be nil` in the video thumbnail sink (Camera.app's live filter previews). `camera_refuse.c` builds
+     sessions without video thumbnails.
+  3. `Output can't be nil` in the movie file sink's scaler (Photo mode's Live Photo movie). `camera_refuse.c` answers NO to
+     the Iris sink's movie capture, as iOS 16.5 had Live Photo off.
+- The formats behind a front-end scaler (1080p30, 720p30, 1920 x 1440) are not offered for now. The first abort happened with them,
+  but it was abort 1 above, so they may come back once the preview works.
+
+The next test (dylib `-9` of this branch's `build.sh`, the boot line with `sweetspeed=442337279 cam_s9=7 cam_trace=1
+sweetscan=backboardd,SpringBoard,cameracaptured`): tap Camera, wait 30 s, screenshot; tap the flip button, wait 15 s, screenshot;
+press the shutter, wait 15 s, screenshot; open Photos. Expected lines: `thumbnails: ... replaced`, `live photo: ... replaced (NO)`,
+`layout: FrontBoard gave the main display no layout: com.apple.camera ...`, `state: Foregrounded`, no `CRASH cameracaptured`,
+`trace: stream: set (Back Camera) VideoOutputConfigurations`, `stream: the graph starts the stream`, `PrimaryScaler: the first
+picture given`. If it aborts again, look for the `STR *** Terminating app due to uncaught exception` line.
+
 ### The trace
 
 `cam.dylib` has a trace, off by default. It is on with `cam_trace=1` on the boot image's command line, or with the file

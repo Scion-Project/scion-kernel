@@ -18,7 +18,7 @@ void scioncam_trace_state(void);
    (camera_layout.c) */
 void scioncam_layout_fallback(void);
 
-/* cameracaptured, always (not the trace): sessions built without video thumbnails (camera_thumbs.c) */
+/* cameracaptured, always (not the trace): sessions built without video thumbnails and the Live Photo movie (camera_refuse.c) */
 void scioncam_no_thumbnails(void);
 
 /* Camera.app: wrap -[AVCaptureFigVideoDevice supportsAVCaptureSessionPreset:] to say the cameras' formats (camera_apptrace.c) */
