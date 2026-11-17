@@ -28,6 +28,10 @@
  * (the time machine's TimeMachineSuspendNow/ResumeNow are taken and ignored). Focus, where there is
  * a lens motor (the wide camera's): by contrast, continuous, and on the window a tap gives (af_frame()).
  *
+ * On iOS 27 the same device is made in cameracaptured, which has the capture stack there (iOS 27 has no mediaserverd):
+ * tools/ios27/camera/camera27.c and build.sh (cam.dylib), with the iPhone 11's formats (HAKIOS_CAMERA_N104) and its lines
+ * to the console (HAKIOS_CAMERA_CONSOLE); docs/ios27/CAMERA.md.
+ *
  * Everything asked of the device and the streams that is not answered here is said in mediaserverd's
  * log ("hakios: camera: ..."), once per property.
  */
@@ -66,6 +70,21 @@ hakios_camera_say(const char *format, ...)
 		n = sizeof(line) - 2;
 	}
 	line[n++] = '\n';
+#ifdef HAKIOS_CAMERA_CONSOLE
+	/*
+	 * iOS 27 (tools/ios27/camera): cameracaptured's standard error goes nowhere, so the lines go to the console, which
+	 * the kernel keeps in its log (as the status bar's c.dylib does in SpringBoard)
+	 */
+	static int console = -1;
+
+	if (console < 0) {
+		console = open("/dev/console", O_WRONLY | O_NOCTTY | O_NONBLOCK);
+	}
+	if (console >= 0) {
+		(void)write(console, line, (size_t)n);
+		return;
+	}
+#endif
 	write(2, line, (size_t)n);
 }
 #define say hakios_camera_say
@@ -438,10 +457,23 @@ static const struct camera {
 	uint32_t        fallback;       /* the sensor whose frames stand in when the kernel's is gone (0: none) ... */
 	float           fallback_zoom;  /* ... zoomed this much more, so that the picture is the same part of the scene */
 } cameras[3] = {
+#ifdef HAKIOS_CAMERA_N104
+	/*
+	 * iOS 27, whose root is the iPhone 11's (N104): CMCapture there has only N104/AVCaptureSession.plist, and its
+	 * FigCaptureStreamFormats "Photo" and "Video-60" (back) and "Photo" and "Video-30" (front) have these sensor sizes and
+	 * frame rates (read from iOS 27.0.1's plist, 17 November 2026; the front "Photo" names no frame rate, 30 is ours).
+	 * The lenses' numbers are the iPhone X's as below: nothing on iOS 27 has been seen to read them.
+	 */
+	{ 1, "Back Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:0", false, 4.0, 1.8, 1.22, 65.0,
+	  { { 4224, 3168, 60 }, { 4224, 2384, 60 } }, 0, 1 },  /* "Photo", "Video-60" */
+	{ 2, "Front Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:1", false, 2.87, 2.2, 1.0, 70.0,
+	  { { 4032, 3024, 30 }, { 4032, 2272, 30 } }, 0, 1 },  /* "Photo", "Video-30" */
+#else
 	{ 1, "Back Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:0", false, 4.0, 1.8, 1.22, 65.0,
 	  { { 4032, 3024, 30 }, { 4224, 2376, 60 } }, 0, 1 },  /* "Photo", "Video-60" */
 	{ 2, "Front Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:1", false, 2.87, 2.2, 1.0, 70.0,
 	  { { 3088, 2320, 30 }, { 3840, 2160, 30 } }, 0, 1 },  /* "Photo", "Video-30" */
+#endif
 	/*
 	 * Star2's telephoto (the kernel's sensor 4, S5K3M3 on CSIS2) as D22's "Back Telephoto Camera" (built-in_video:2,
 	 * whose baseCaptureDeviceUniqueID is the back camera's: its formats are named from the back camera's
@@ -1350,7 +1382,13 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 	}
 }
 
-/* the sensor's colour tuning, when the image has one (fw/camera-<sensor>.isp, tools/camtuning.py) */
+/*
+ * the sensor's colour tuning, when the image has one (fw/camera-<sensor>.isp, tools/camtuning.py): /redwood/fw on iOS 16.5,
+ * HAKIOS_CAMERA_FW where the build says (iOS 27: tools/ios27/camera/build.sh)
+ */
+#ifndef HAKIOS_CAMERA_FW
+#define HAKIOS_CAMERA_FW "/redwood/fw"
+#endif
 static void
 load_tuning(struct isp *isp, uint32_t sensor)
 {
@@ -1366,11 +1404,11 @@ load_tuning(struct isp *isp, uint32_t sensor)
 	if (sensor >= sizeof(names) / sizeof(names[0])) {
 		return;
 	}
-	snprintf(path, sizeof(path), "/redwood/fw/camera-%s.isp", names[sensor]);
+	snprintf(path, sizeof(path), HAKIOS_CAMERA_FW "/camera-%s.isp", names[sensor]);
 	if (access(path, R_OK) != 0 && s9_names[sensor] != NULL) {
 		char s9[96];
 
-		snprintf(s9, sizeof(s9), "/redwood/fw/camera-%s.isp", s9_names[sensor]);
+		snprintf(s9, sizeof(s9), HAKIOS_CAMERA_FW "/camera-%s.isp", s9_names[sensor]);
 		if (access(s9, R_OK) == 0) {
 			memcpy(path, s9, sizeof(path));
 		}
