@@ -40,8 +40,9 @@
  *            by 4 again in the SPI, about 5.5 MHz; Samsung runs it up to 25 MHz). 255 leaves it as found.
  *   shub_chub_on=1       at step 2, power the CHUB domain on if step 1 found it off, using the PMU's chub_on sequence
  *            from Samsung's flexpmu tables. Default: stop.
- *   shub_ap_awake=0      do not tell the hub that the AP is awake (default 1: WAKEUP and RESUME after the setup, as
- *                        Samsung's sensor HAL and resume path do; a hub that thinks the AP asleep keeps parts down)
+ *   shub_ap_awake=0      do not tell the hub that the AP is awake (default 1 on the S9+: WAKEUP and RESUME after the
+ *                        setup, as Samsung's sensor HAL and resume path do; a hub that thinks the AP asleep keeps parts
+ *                        down). On another phone the default is 0 (the S9 has not run it); shub_ap_awake=1 asks for it
  *   shub_mag=N           the magnetometer's PDC matrix of the S9+'s board (Samsung's ssp-mag-array): 1 the SM-G965F
  *                        (eur_open_26), 2 the Korean SM-G965N (kor_26); 0 (default): none sent
  *   shub_cold=0          leave LDO37 on at a warm start (default 1 on the S9+: off for 100 ms, so a hub that stopped
@@ -232,7 +233,7 @@ static vm_offset_t pmu, cmu_top, cmu_chub, gpio_chub, alive, peric0;
 static uint32_t steps, keep = 1, log_frames, div_ratio = 15, chub_on_ok;
 static uint32_t cold_start;                     /* shub_cold: LDO37 off and on at a warm start (hakios_ssp_init(): 1 on
                                                  * the S9+, where it was run; 0 elsewhere unless asked) */
-static uint32_t ap_awake = 1;                   /* shub_ap_awake: WAKEUP and RESUME after the setup */
+static uint32_t ap_awake;                       /* shub_ap_awake: WAKEUP and RESUME after the setup (hakios_ssp_init(): 1 on the S9+) */
 static uint32_t mag_board;                      /* shub_mag: 1 G965F, 2 G965N: which PDC matrix */
 static uint32_t want_sensors = 0x2b3, period_ms = 20, req_rpc = SHUB_RPC_SENSOR_REQ, req_len = 1;
 static uint32_t acc_position = ACC_POSITION_S9; /* hakios_ssp_init(): by HAKIOS_DEVICE, or shub_acc_pos= */
@@ -2639,6 +2640,7 @@ hakios_ssp_init(void)
 	PE_parse_boot_argn("shub_keep", &keep, sizeof(keep));
 	cold_start = strcmp(HAKIOS_DEVICE, "star2lte") == 0;
 	PE_parse_boot_argn("shub_cold", &cold_start, sizeof(cold_start));
+	ap_awake = strcmp(HAKIOS_DEVICE, "star2lte") == 0;
 	PE_parse_boot_argn("shub_ap_awake", &ap_awake, sizeof(ap_awake));
 	PE_parse_boot_argn("shub_mag", &mag_board, sizeof(mag_board));
 	PE_parse_boot_argn("shub_log", &log_frames, sizeof(log_frames));
