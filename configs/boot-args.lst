@@ -12,6 +12,7 @@ abox_rdma_ctrl0	k
 abox_rdma_ctrl1	k
 abox_rdma_fmt	k
 abox_ring_pa	k
+abox_rmem	k
 abox_route	k
 abox_sbank	k
 abox_secs	k
@@ -94,6 +95,7 @@ bt_again	k
 bt_baud	k
 bt_expander_reset	k
 bt_hcd	k
+bt_hcd_wait	k
 bt_keep	k
 bt_module	k
 bt_scan	k
@@ -102,6 +104,7 @@ bt_tty	k
 bt_uart_mhz	k
 bt_vendor	k
 bt_vendor_part	k
+bt_vsc_ok	k
 bus_log	k
 bus_mask	k
 bus_max	k

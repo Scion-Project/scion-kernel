@@ -12,6 +12,7 @@ ABOX_RDMA_CTRL0	arg	abox_rdma_ctrl0	Audio and battery	k	hakios.exynos_abox.c	bit
 ABOX_RDMA_CTRL1	arg	abox_rdma_ctrl1	Audio and battery	k	hakios.exynos_abox.c	RDMA0's CTRL1 (none: as it reads after reset)
 ABOX_RDMA_FMT	arg	abox_rdma_fmt	Audio and battery	k	hakios.exynos_abox.c	leave RDMA0 CTRL0's FORMAT/FUNC/BUF_UPDATE and SBANK_LIMIT as they read (1: calliope's values)
 ABOX_RING_PA	hex	abox_ring_pa	Audio and battery	k	hakios.exynos_abox.c	the ring at this physical address of abox_rmem (0xFB200000 + 40 MB) instead of the kernel's memory
+ABOX_RMEM	arg	abox_rmem	Audio and battery	k	hakios.exynos_abox.c	
 ABOX_ROUTE	arg	abox_route	Audio and battery	k	hakios.exynos_abox.c	UAIF1 from SIFS0, the mixer (SPUS_CTRL0 OUT 1, MIXP_FORMAT, ROUTE_CTRL0 [7:4] = 1), instead of SIFS1
 ABOX_SBANK	arg	abox_sbank	Audio and battery	k	hakios.exynos_abox.c	
 ABOX_SECS	arg	abox_secs	Audio and battery	k	hakios.exynos_abox.c	how long step 7 plays its tone, 1 to 10 seconds (3)
@@ -89,6 +90,7 @@ BT_AGAIN	arg	bt_again	User space	k	hakios.bt.c	the second look this many seconds
 BT_BAUD	arg	bt_baud	User space	k	hakios.bcm4361_bt.c	
 BT_EXPANDER_RESET	arg	bt_expander_reset	User space	k	hakios.bcm4361_bt.c	at bt=2 and up, take the expander out of reset if it is held there
 BT_HCD	arg	bt_hcd	User space	k	hakios.bcm4361_bt.c	the patch file's name in fw/ (default bcm4361B2.hcd); without it, the phone's own from VENDOR
+BT_HCD_WAIT	arg	bt_hcd_wait	User space	k	hakios.bcm4361_bt.c	
 BT_KEEP	arg	bt_keep	User space	k	hakios.bcm4361_bt.c	leave the chip powered at the end (default: BT_EN and BT_WAKE low once the steps are done or one fails)
 BT_MODULE	arg	bt_module	User space	k	hakios.bcm4361_bt.c	murata or semco: which patch (bcm4361B2_<m>.hcd; default: the module Wi-Fi read in OTP, else a guess)
 BT_SCAN	arg	bt_scan	User space	k	hakios.bcm4361_bt.c	
@@ -97,6 +99,7 @@ BT_TTY	arg	bt_tty	User space	k	hakios.bcm4361_bt.c
 BT_UART_MHZ	arg	bt_uart_mhz	User space	k	hakios.bcm4361_bt.c	UART_BT's clock in MHz, if bt=1 shows the divider or mux not as Android leaves them (default 200)
 BT_VENDOR	arg	bt_vendor	User space	k	hakios.bcm4361_bt.c	never read the patch from the phone's VENDOR partition (default: read it there with ufs=2)
 BT_VENDOR_PART	arg	bt_vendor_part	User space	k	hakios.bcm4361_bt.c	the partition the patch is read from (default VENDOR)
+BT_VSC_OK	arg	bt_vsc_ok	User space	k	hakios.bcm4361_bt.c	
 BUS_LOG	arg	bus_log	User space	k	hakios.exynos_acpm.c	do not log the APM's tables at boot (default: one line per domain, read only)
 BUS_MASK	arg	bus_mask	User space	k	hakios.exynos_acpm.c	
 BUS_MAX	arg	bus_max	User space	k	hakios.exynos_acpm.c	MIF, INT and DISP to their top at boot, kept there (re-asked every 10 s, cheap)

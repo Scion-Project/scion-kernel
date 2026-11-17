@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 749 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 752 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -855,7 +855,7 @@ CONFIG_GPU=y
 # CONFIG_VBLUR is not set
 
 #
-# Audio and battery (66)
+# Audio and battery (67)
 #
 
 # the audio DSP; the battery level in the UI and charging state come through it [needs fw-audio/ from the phone]
@@ -911,6 +911,9 @@ CONFIG_SOUND=4
 
 # the ring at this physical address of abox_rmem (0xFB200000 + 40 MB) instead of the kernel's memory
 # CONFIG_ABOX_RING_PA is not set
+
+# read by hakios.exynos_abox.c (kernel)
+# CONFIG_ABOX_RMEM is not set
 
 # UAIF1 from SIFS0, the mixer (SPUS_CTRL0 OUT 1, MIXP_FORMAT, ROUTE_CTRL0 [7:4] = 1), instead of SIFS1
 # CONFIG_ABOX_ROUTE is not set
@@ -1681,7 +1684,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (184)
+# User space (186)
 #
 
 # Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
@@ -1732,6 +1735,9 @@ CONFIG_MODEM_AGAIN=y
 # the patch file's name in fw/ (default bcm4361B2.hcd); without it, the phone's own from VENDOR
 # CONFIG_BT_HCD is not set
 
+# read by hakios.bcm4361_bt.c (kernel)
+# CONFIG_BT_HCD_WAIT is not set
+
 # leave the chip powered at the end (default: BT_EN and BT_WAKE low once the steps are done or one fails)
 # CONFIG_BT_KEEP is not set
 
@@ -1755,6 +1761,9 @@ CONFIG_MODEM_AGAIN=y
 
 # the partition the patch is read from (default VENDOR)
 # CONFIG_BT_VENDOR_PART is not set
+
+# read by hakios.bcm4361_bt.c (kernel)
+# CONFIG_BT_VSC_OK is not set
 
 # do not log the APM's tables at boot (default: one line per domain, read only)
 # CONFIG_BUS_LOG is not set
