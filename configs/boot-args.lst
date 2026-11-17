@@ -168,6 +168,7 @@ cam_s9_rear_turn	k
 cam_s9_sat	k
 cam_s9_selfread	k
 cam_s9_selfread_focus	k
+cam_s9_selfread_switch	k
 cam_s9_selfread_x	k
 cam_s9_selfread_y	k
 cam_s9_stride	k
@@ -180,6 +181,7 @@ cam_s9_tele_turn	k
 cam_sensor	k
 cam_settle	k
 cam_shutter	k
+cam_switch	k
 cam_vblank	k
 camtl	u
 cc_fade	u

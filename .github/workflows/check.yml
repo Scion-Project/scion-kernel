@@ -94,6 +94,8 @@ jobs:
         run: sh tools/bcm-bt-parsers-test.sh
       - name: The Galaxy S9's sensor hub's SPI frames, packets, CRC-8, RPCs, firmware records and SSP hold together (sanitizers)
         run: sh tools/bcm-shub-test.sh
+      - name: The Galaxy S9's camera switch (front and rear in one boot) keeps its rules over hostile timings (sanitizers)
+        run: sh tools/exynos-camera-switch-test.sh
       - name: The Galaxy S9's modem driver against what the CP and RADIO give it - frames, file requests, NV writes, packets, the table of contents - whole, bent and mutated (sanitizers)
         run: sh tools/modem/shannon-test.sh
       - name: The Galaxy S9 Mali's GPU addresses for panfrost's buffers (hakios.mali_va.h) hold together (sanitizers)

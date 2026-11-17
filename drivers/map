@@ -50,6 +50,7 @@ camera/exynos bsd/dev/hakios.s2mpb02_torch.c
 camera/exynos bsd/dev/hakios.exynos_camera.c
 camera/exynos bsd/dev/hakios.ak737x.c
 camera/exynos bsd/dev/hakios.exynos_camera_rear.c
+camera/exynos bsd/dev/hakios.exynos_camera_switch.h
 camera/exynos bsd/dev/hakios.exynos_camera_star2.c
 camera/exynos bsd/dev/hakios.exynos_iris.c
 

@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 760 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 762 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1380,7 +1380,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_SOC_SMEM is not set
 
 #
-# Cameras (39)
+# Cameras (41)
 #
 
 # the cameras (5 is what the README uses) [needs fw-camera/ from the phone]
@@ -1464,6 +1464,9 @@ CONFIG_MODEM_AGAIN=y
 # the reader also writes HAKIOS_CAMERA_FOCUS, as a capture device would (cam_af=4): after its
 # CONFIG_CAM_S9_SELFREAD_FOCUS is not set
 
+# with cam_switch=1: the reader writes HAKIOS_CAMERA_SENSOR for the other camera after every
+# CONFIG_CAM_S9_SELFREAD_SWITCH is not set
+
 # read by hakios.exynos_camera.c (kernel)
 # CONFIG_CAM_S9_SELFREAD_X is not set
 
@@ -1481,6 +1484,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.camera.c (kernel)
 # CONFIG_CAM_SHUTTER is not set
+
+# with 7: both cameras in one run, one streaming at a time, switched by the reader's SENSOR command
+# CONFIG_CAM_SWITCH is not set
 
 # read by hakios.camera.c (kernel)
 # CONFIG_CAM_VBLANK is not set

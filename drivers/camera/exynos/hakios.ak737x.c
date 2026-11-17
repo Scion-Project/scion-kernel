@@ -127,6 +127,8 @@ void hakios_ak737x_ask(uint32_t a, uint32_t b, uint32_t c, uint32_t d);
 void hakios_ak737x_closed(void);
 bool hakios_ak737x_searching(void);
 void hakios_ak737x_rear(struct hakios_hsi2c *bus);
+void hakios_ak737x_two(struct hakios_hsi2c *rear_bus, bool rear_first);
+void hakios_ak737x_side(bool rear);
 
 #define LENS                    0x0C
 #define REG_POS_HIGH            0x00
@@ -393,6 +395,94 @@ hakios_ak737x_rear(struct hakios_hsi2c *bus)
 {
 	lbus = bus;
 	lens_rear = true;
+}
+
+/*
+ * cam_switch=1 (hakios.exynos_camera.c): both cameras in the run, so both lenses, one in use at a time: the front camera's
+ * on its own bus (lens_bus above), the rear camera's on the rear module's (hakios_ak737x_rear()'s). What this file keeps
+ * of a lens (its bus, whether it answered, where it was left, the EEPROM's two positions) is kept for each, and swapped
+ * by hakios_ak737x_side() between two streams, when neither lens is active (both asleep: hakios_ak737x_down()). The run's
+ * failure flag (lens_broken) stays one for both: a write one lens did not take stops the writing to either. Without
+ * cam_switch neither function is called.
+ */
+struct lens_kept {
+	struct hakios_hsi2c *bus;
+	bool rear, mapped, answers, looked, eeprom_looked, refused_said;
+	uint8_t product;
+	uint32_t at, resume, far, near;
+};
+static struct lens_kept lens_kept[2];
+static int lens_kept_now = -1;
+
+static void
+lens_keep(struct lens_kept *k)
+{
+	k->bus = lbus;
+	k->rear = lens_rear;
+	k->mapped = lens_mapped;
+	k->answers = lens_answers;
+	k->looked = lens_looked;
+	k->eeprom_looked = eeprom_looked;
+	k->refused_said = refused_said;
+	k->product = lens_product;
+	k->at = lens_at;
+	k->resume = lens_resume;
+	k->far = cal_far;
+	k->near = cal_near;
+}
+
+static void
+lens_take(const struct lens_kept *k)
+{
+	lbus = k->bus;
+	lens_rear = k->rear;
+	lens_mapped = k->mapped;
+	lens_answers = k->answers;
+	lens_looked = k->looked;
+	eeprom_looked = k->eeprom_looked;
+	refused_said = k->refused_said;
+	lens_product = k->product;
+	lens_at = k->at;
+	lens_resume = k->resume;
+	cal_far = k->far;
+	cal_near = k->near;
+	lens_position = -1;
+}
+
+/* after hakios_ak737x_setup(): the two lenses as a run begins, the first camera's in use */
+void
+hakios_ak737x_two(struct hakios_hsi2c *rear_bus, bool rear_first)
+{
+	lens_keep(&lens_kept[0]);
+	lens_kept[0].bus = &lens_bus;
+	lens_kept[0].rear = false;
+	lens_keep(&lens_kept[1]);
+	lens_kept[1].bus = rear_bus;
+	lens_kept[1].rear = true;
+	lens_kept_now = rear_first ? 1 : 0;
+	lens_take(&lens_kept[lens_kept_now]);
+}
+
+/* the lens of the camera of the next stream (side_set()); never while a lens is active */
+void
+hakios_ak737x_side(bool rear)
+{
+	int to = rear ? 1 : 0;
+
+	if (lens_kept_now < 0 || lens_kept_now == to) {
+		return;
+	}
+	if (lens_active) {
+		if (say != NULL) {
+			say("ak737x: the %s lens is still active: the lens is not changed (no focus in this stream)\n",
+			    lens_rear ? "rear" : "front");
+		}
+		lens_answers = false;   /* (nothing is written to the lens of the wrong camera) */
+		return;
+	}
+	lens_keep(&lens_kept[lens_kept_now]);
+	lens_kept_now = to;
+	lens_take(&lens_kept[to]);
 }
 
 /* the stage and its numbers; the camera's own `say' for the log. 0: nothing asked, nothing done. */
