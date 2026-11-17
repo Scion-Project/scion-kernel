@@ -1,53 +1,109 @@
-# tools/arch-size.allow: the files of drivers/ and socs/ allowed over the ceiling of 800 lines (tools/arch-check.py,
-# docs/architecture.md). "path allowance [# note]". This list only shrinks: when a file is split or shortened, lower its
-# number or delete its line in the same pull request. A file not listed here may not pass the ceiling.
+# tools/arch-size.allow: the files of drivers/, socs/, userland/src/ and tools/ allowed over the ceiling of 800 lines
+# (tools/arch-check.py, docs/architecture.md). "path allowance [# note]". This list only shrinks: when a file is split or
+# shortened, lower its number or delete its line in the same pull request. A file not listed here may not pass the
+# ceiling.
 #
-# Taken on 17 November 2026 from main at 131697c; where an open pull request grows the file, the allowance includes its
+# Taken on 17 November 2026 from main at a6816d1; where an open pull request grows the file, the allowance includes its
 # growth (its net added lines) so that it stays green, and the note names it: lower the number once it has merged.
 # hakios.focaltech_fw.h is made by a tool from the touch firmware (generated data, not code).
-drivers/audio/abox/hakios.exynos_abox.c              2362
-drivers/audio/codec/hakios.cs47l93.c                 1070
-drivers/audio/codec/hakios.max98512.c                 906
-drivers/audio/hakios.adsp.c                          3295
-drivers/audio/hakios.mic.c                           1734
-drivers/audio/hakios.sound.c                         1532
-drivers/audio/hakios.speaker.c                       1237
-drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c        2158
-drivers/camera/exynos/hakios.ak737x.c                 901
-drivers/camera/exynos/hakios.exynos_camera.c         3692
-drivers/camera/exynos/hakios.exynos_camera_rear.c    1395
-drivers/camera/exynos/hakios.exynos_camera_star2.c   4482
-drivers/camera/exynos/hakios.exynos_iris.c           1721
-drivers/camera/hakios.camera.c                       4754
-drivers/display/dpu/hakios.exynos_dpu.c              1043  # 749 today, and the growth of open pull request #329
-drivers/display/panel/hakios.s6e3ha8_gamma.h          913
-drivers/gpu/adreno/hakios.adreno.c                   4114
-drivers/gpu/hakios.gpu.cpp                           1412
-drivers/gpu/mali/hakios.mali.c                       2395  # 2216 today, and the growth of open pull request #329
-drivers/gpu/mali/hakios.mali.cpp                     1086  # 755 today, and the growth of open pull request #329
-drivers/gpu/vgpu/hakios.vgpu3d.c                     1173
-drivers/gpu/vgpu/hakios.vgpu3d_xnu.c                 1311
-drivers/haptic/hakios.haptic.c                       1024
-drivers/input/ssp/hakios.ssp.c                       2831  # 2594 today, and the growth of open pull request #329
-drivers/input/touch/hakios.focaltech_fw.h            7288
-drivers/input/touch/hakios.goodix.c                  1562
-drivers/media/mfc/hakios.exynos_mfc.c                1365  # 1336 today, and the growth of open pull request #320 #329
-drivers/modem/hakios.ipa.c                            872
-drivers/modem/hakios.mpss.c                          6383
-drivers/modem/hakios.qmi.c                            963
-drivers/modem/hakios.shannon.c                       2905  # 2890 today, and the growth of open pull request #319
-drivers/net/hakios.net.c                             1485
-drivers/power/exynos/hakios.exynos_cpufreq.c         1531
-drivers/power/max77705/hakios.max77705.c             1125
-drivers/soc/exynos/hakios.exynos_acpm.c               881
-drivers/soc/exynos/hakios.exynos_m3.c                 907
-drivers/soc/exynos/hakios.exynos_tee.c               1272
-drivers/storage/hakios.apfs_check.c                  1872
-drivers/storage/ufs/hakios.ufs.c                     3755
-drivers/storage/ufs/hakios.ufshc.c                   4044
-drivers/storage/ufs/hakios.ufshc.lga.h                817
-drivers/usb/hakios.dwc3.c                            2294  # 2244 today, and the growth of open pull request #329
-drivers/virtio/hakios.virtio.c                       1032
-drivers/wifi/brcmfmac/hakios.exynos_pcie.c            999
-drivers/wifi/hakios.apple80211.c                      833
-drivers/wifi/hakios.wifi.c                           4432
+drivers/audio/abox/hakios.exynos_abox.c                   2362
+drivers/audio/codec/hakios.cs47l93.c                      1070
+drivers/audio/codec/hakios.max98512.c                      906
+drivers/audio/hakios.adsp.c                               3295
+drivers/audio/hakios.mic.c                                1734
+drivers/audio/hakios.sound.c                              1532
+drivers/audio/hakios.speaker.c                            1237
+drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c             2158
+drivers/camera/exynos/hakios.ak737x.c                      991  # 901 today, and the growth of open pull request #334
+drivers/camera/exynos/hakios.exynos_camera.c              4045  # 3692 today, and the growth of open pull request #334
+drivers/camera/exynos/hakios.exynos_camera_rear.c         1404  # 1395 today, and the growth of open pull request #334
+drivers/camera/exynos/hakios.exynos_camera_star2.c        4482
+drivers/camera/exynos/hakios.exynos_iris.c                1721
+drivers/camera/hakios.camera.c                            4754
+drivers/display/dpu/hakios.exynos_dpu.c                   1043
+drivers/display/panel/hakios.s6e3ha8_gamma.h               913
+drivers/gpu/adreno/hakios.adreno.c                        4114
+drivers/gpu/hakios.gpu.cpp                                1412
+drivers/gpu/mali/hakios.mali.c                            2395
+drivers/gpu/mali/hakios.mali.cpp                          1086
+drivers/gpu/vgpu/hakios.vgpu3d.c                          1173
+drivers/gpu/vgpu/hakios.vgpu3d_xnu.c                      1311
+drivers/haptic/hakios.haptic.c                            1024
+drivers/input/ssp/hakios.ssp.c                            2831
+drivers/input/touch/hakios.focaltech_fw.h                 7288
+drivers/input/touch/hakios.goodix.c                       1562
+drivers/media/mfc/hakios.exynos_mfc.c                     1365
+drivers/modem/hakios.ipa.c                                 872
+drivers/modem/hakios.mpss.c                               6383
+drivers/modem/hakios.qmi.c                                 963
+drivers/modem/hakios.shannon.c                            2905
+drivers/net/hakios.net.c                                  1485
+drivers/power/exynos/hakios.exynos_cpufreq.c              2102  # 1531 today, and the growth of open pull request #337
+drivers/power/max77705/hakios.max77705.c                  1125
+drivers/soc/exynos/hakios.exynos_acpm.c                    881
+drivers/soc/exynos/hakios.exynos_m3.c                      907
+drivers/soc/exynos/hakios.exynos_tee.c                    1272
+drivers/storage/hakios.apfs_check.c                       1872
+drivers/storage/ufs/hakios.ufs.c                          3755
+drivers/storage/ufs/hakios.ufshc.c                        4044
+drivers/storage/ufs/hakios.ufshc.lga.h                     817
+drivers/usb/hakios.dwc3.c                                 2294
+drivers/virtio/hakios.virtio.c                            1032
+drivers/wifi/brcmfmac/hakios.exynos_pcie.c                 999
+drivers/wifi/hakios.apple80211.c                           833
+drivers/wifi/hakios.wifi.c                                4432
+tools/air/argbufcheck.py                                  1096
+tools/air/intrincheck.py                                  2452
+tools/air/kinput.py                                       1451
+tools/air/loweringcheck.py                                 838
+tools/air/metalcheck.py                                   1387
+tools/air/sampcheck.py                                     950
+tools/apfs/apfs-tool.c                                    1790
+tools/apfs/apfs.py                                        1205
+tools/apfs/mkapfs.py                                       938
+tools/apfs/write-tests.py                                  933
+tools/bcm_shub_test.c                                      921
+tools/hakios-config.py                                    1239
+tools/ios27/ca-gpu/hakios/eagl.c                          4335
+tools/ios27/fullroot/pipeline/cache/aot/fp16_stub.py      1424
+tools/ios27/fullroot/pipeline/cache/aot/rewrite-grow.py   1041
+tools/ios27/lse/lse-rewrite.py                             826
+tools/ios27/mesa-ios/starbite-drm/starbite_drm.c          1106
+tools/ios27/metal2/NativeBridgeMetalFrontend.mm           2764
+tools/ios27/metal2/bridge/NativeMetalObjects.rs           2396
+tools/mesa/air/air_intrinsics.c                           2716
+tools/mesa/air/air_metal.c                                7072
+tools/mesa/air/air_metal.h                                1313
+tools/mesa/air/air_metal_test.c                           6765
+tools/mesa/air/air_module.c                               2005
+tools/mesa/air/air_print.c                                 912
+tools/mesa/air/air_run.c                                  2685
+tools/mesa/air/air_to_nir.c                               6753
+tools/mesa/hakios-drm/hakios.drm.c                        1761
+tools/metal/bridge/NativeMetalObjects.rs                  2618
+tools/metal/owesclass.py                                  1002
+tools/modem/shannon_test.c                                 982
+tools/qmi-test/test_qmi.c                                 1562
+userland/src/HakiosMetal.m                                1534
+userland/src/HakiosMetalCA.m                              8747
+userland/src/audio_plugin.c                               1100
+userland/src/camera_device.c                              2041
+userland/src/camera_isp.c                                 1230
+userland/src/eagl.c                                       4781
+userland/src/gfx/gfx_gl.c                                 1083
+userland/src/gnssd.m                                      1936
+userland/src/gnsstool.c                                   1104
+userland/src/gps_app.m                                    1073
+userland/src/hakiosmetal_air.m                            6342
+userland/src/init.c                                       1840
+userland/src/inject.c                                     2048
+userland/src/inject_media.c                                993
+userland/src/inject_sb.c                                  3999
+userland/src/metal_drv_test.m                             7737
+userland/src/metal_stubdev.m                               877
+userland/src/metalvk/NativeBridgeMetalFrontend.mm         2664
+userland/src/metalvk/metal_tri.m                          1361
+userland/src/sbca.c                                       1043
+userland/src/triangle_app.m                               1273
+userland/src/var_store.c                                  1697
+userland/src/vk_test.c                                     956

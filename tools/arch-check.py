@@ -5,10 +5,11 @@
 usage: tools/arch-check.py [--report] [--root DIR]
 
   (none)    exit 1 when a rule is broken; say which file and why
-  --report  also list the files of userland/src/ and tools/ over the ceiling (not yet enforced there)
+  --report  also list every file over the ceiling
 
 The rules:
-  size      a source file of drivers/ or socs/ over CEILING lines fails, unless tools/arch-size.allow lists it with an
+  size      a source file of drivers/, socs/, userland/src/ or tools/ over CEILING lines fails, unless
+            tools/arch-size.allow lists it with an
             allowance it is within. The list only shrinks: an entry for a file that is gone, or that is back under the
             ceiling, fails too (delete the entry), unless the entry names an open pull request that will take the
             file over the ceiling ("#329"); a file that has shrunk well under its allowance is asked to lower it.
@@ -30,7 +31,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 CEILING = 800
 SOURCE = (".c", ".h", ".cpp", ".m", ".mm", ".S", ".s")
-REPORTED = (".c", ".h", ".cpp", ".m", ".mm", ".py", ".sh", ".rs")
+SIZED = SOURCE + (".py", ".sh", ".rs")
+SIZED_TREES = ("drivers", "socs", "userland/src", "tools")
 CODEC_INCLUDES = {"stdbool.h", "stddef.h", "stdint.h", "string.h", "limits.h"}
 SOC_INCLUDES = {"stdint.h"}
 INCLUDE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]')
@@ -110,11 +112,13 @@ def check(root, report):
     layers = read_layers(os.path.join(root, "tools/arch-layers.conf"))
 
     # size
-    seen = set()
-    for p in git_files(root, "drivers", "socs"):
-        if not p.endswith(SOURCE):
+    seen, over = set(), []
+    for p in git_files(root, *SIZED_TREES):
+        if not p.endswith(SIZED):
             continue
         n = count_lines(os.path.join(root, p))
+        if n > CEILING:
+            over.append((n, p))
         if p in allow:
             seen.add(p)
             cap, note, ln = allow[p]
@@ -129,11 +133,11 @@ def check(root, report):
                 notes.append(f"{p}: {n} lines, {cap - n} under its allowance: lower it to {n} "
                              f"(tools/arch-size.allow:{ln})")
         elif n > CEILING:
-            errors.append(f"{p}: {n} lines, over the ceiling of {CEILING} for a file of drivers/ or socs/. Make it two "
+            errors.append(f"{p}: {n} lines, over the ceiling of {CEILING}. Make it two "
                           f"or more files of one responsibility each (docs/architecture.md, \"Conventions\")")
     for p, (cap, note, ln) in allow.items():
         if p not in seen and not re.search(r"#\d+", note):
-            errors.append(f"{p}: listed in tools/arch-size.allow:{ln} but not a file of drivers/ or socs/: delete the entry")
+            errors.append(f"{p}: listed in tools/arch-size.allow:{ln} but not a file that is checked: delete the entry")
 
     # codec and soc layers
     files = git_files(root, "drivers", "socs")
@@ -186,13 +190,7 @@ def check(root, report):
                     errors.append(f"{p}:{n}: includes {inc}: a .c file is a translation unit of its own")
 
     if report:
-        over = []
-        for p in git_files(root, "userland/src", "tools"):
-            if p.endswith(REPORTED):
-                n = count_lines(os.path.join(root, p))
-                if n > CEILING:
-                    over.append((n, p))
-        print(f"not yet enforced: {len(over)} files of userland/src/ and tools/ over {CEILING} lines")
+        print(f"{len(over)} files over {CEILING} lines, each within its allowance or listed above:")
         for n, p in sorted(over, reverse=True):
             print(f"  {n:6d} {p}")
     return errors, notes

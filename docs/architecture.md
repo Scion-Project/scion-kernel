@@ -5,7 +5,8 @@ What the kernel's own code (`drivers/`, `socs/`, and the S9 and Starbite files o
 which part may depend on which, how a driver of several files is laid out in both kernels, and how a file that has grown
 too large is split without changing what the kernel does. It is the design a change is held against in review.
 
-Read on 17 November 2026 from `main` at 131697c and the fork's `scion/xnu-12377` at 1532845. Nothing has been moved by this
+Read on 17 November 2026 from `main` at a6816d1 (after #319, #320, #328, #329 and #330 merged) and the fork's
+`scion/xnu-12377` at 4019eb4. Nothing has been moved by this
 page. What CI checks from now on is in [What CI enforces](#what-ci-enforces); the files and their proposed splits are in
 [architecture-census.md](architecture-census.md). [modular-kernel.md](modular-kernel.md) compares the tree with UniXNU's
 layout and is not repeated here.
@@ -15,7 +16,7 @@ layout and is not repeated here.
 Most drivers here grew one bring-up stage at a time in one file. A typical large one holds, in one translation unit,
 register definitions, a bus or transport, a parser of what a chip or another processor sends, a state machine of steps
 chosen by a boot argument, policy (what may be written, in what order), a device node or sysctl, console commands and
-logging. Forty-four files of `drivers/` are over 800 lines; ten are over 3,000 (one of them generated data). The security audit of 17 November found
+logging. Forty-six files of `drivers/` are over 800 lines; ten are over 3,000 (one of them generated data). The security audit of 17 November found
 its bugs at exactly those seams -- parsers that trusted a length because the transport had read it, device nodes open to
 everyone because the node was declared next to the hardware code, GPU state shared between a probe and a service -- and
 had to write stand-ins for kernel headers before it could run any parser on a computer. A boundary that is a file and a
@@ -59,8 +60,8 @@ the TEE); everything else is mixed inside one file per driver, and the census sa
 - A **SoC header** includes only `<stdint.h>` and other SoC headers. *Checked now.*
 - **No file includes a `.c` file.** One translation unit is one file; the parts of a driver are files of their own,
   compiled on their own. *Checked now.*
-- **No file of `drivers/` or `socs/` is over 800 lines** unless `tools/arch-size.allow` lists it, and an allowance only
-  goes down. *Checked now.*
+- **No file of `drivers/`, `socs/`, `userland/src/` or `tools/` is over 800 lines** unless `tools/arch-size.allow` lists
+  it, and an allowance only goes down. *Checked now.*
 - An **internal header** (`hakios.<driver>_internal.h`) is included only by the files of its own directory. *Next:
   checked once the first driver has one.*
 - Only **OS-interface files** include `<miscfs/devfs/devfs.h>`, `<sys/conf.h>`, `<sys/kern_control.h>`, `<sys/tty.h>`,
@@ -73,18 +74,17 @@ the TEE); everything else is mixed inside one file per driver, and the census sa
 
 `tools/arch-check.py` runs in `.github/workflows/check.yml`:
 
-- **size**: a source file of `drivers/` or `socs/` over 800 lines fails unless `tools/arch-size.allow` lists it with an
-  allowance it is within. The list was taken from today's tree, so CI is green from the start; where an open pull
-  request grows a listed file (#319, #320, #329) its growth is in the allowance and the note names the request, so that
-  it stays green. The list only shrinks: an entry for a file that is gone or back under the ceiling fails until it is
+- **size**: a source file of `drivers/`, `socs/`, `userland/src/` or `tools/` over 800 lines fails unless
+  `tools/arch-size.allow` lists it with an allowance it is within. The list was taken from today's tree, so CI is green
+  from the start; where an open pull request grows a listed file (#334 the cameras, #337 the governor) its growth is in
+  the allowance and the note names the request, so that it stays green. The list only shrinks: an entry for a file that is gone or back under the ceiling fails until it is
   deleted. A change that must grow a listed file raises its number in the same pull request and says why; a reviewer
   then decides whether the file is split first.
 - **codec**: the files `tools/arch-layers.conf` names as codecs include only the C library's freestanding headers and
   other codecs, and are named by a host test CI runs.
 - **soc**: SoC headers include nothing of the kernel.
 - **no `.c` included**.
-- `--report` lists the files of `userland/src/` and `tools/` over the ceiling: 50 today, not yet enforced, because
-  #329 alone adds four new ones (`gnssd.m` and others); they are gated the same way once it has merged.
+- `--report` lists every file over the ceiling: 46 of `drivers/`, 55 of `userland/src/` and `tools/` today.
 
 The two host tests that existed but were not run by CI, `tools/mali-va-test.sh` and `tools/usb-acm-test.sh`, run in it now
 (both pass on Linux and macOS under the sanitizers). Two others cannot run from this repository alone and are not added:
@@ -204,9 +204,10 @@ the file that owns the state; an internal header declares it for the driver's ot
 
 A parser is written as a codec from the start, so its test is a C file in `tools/` that includes the header and feeds it
 good input, mutated input and hostile input under the address and undefined-behaviour sanitizers, and a `tools/*-test.sh`
-that CI runs. The check refuses a codec no CI test names. The two tests today that cut a function out of a driver by its
-first and last lines (`tools/bcm-bt-parsers-test.sh`, and the modem's in #319) are moved to that form when their driver is
-split.
+that CI runs. The check refuses a codec no CI test names. The two tests today that build a driver's code by cutting the
+driver up -- `tools/bcm-bt-parsers-test.sh` takes functions out by their first lines, the modem's
+`tools/modem/shannon-test.sh` (from #319) strips the driver's includes and replaces its secure-monitor call with `sed`
+-- are moved to that form when their driver is split.
 
 ## How a split is proven
 
@@ -252,10 +253,12 @@ The full list, with line ranges, open pull requests and the proposed split of ea
    free drivers: `hakios.ufs.c` (loader transport, devices, own mode, the ufs=3 switch, diagnostics), `hakios.ufshc.c`
    (SoC hooks, slots, shared mode, own mode), `hakios.bcm4361_bt.c` (UART and expander, HCI and patch, the tty and kernel
    control, steps), `hakios.exynos_abox.c`, `hakios.exynos_cpufreq.c`.
-4. **The busy files**, each when the pull requests that touch it have merged: the modem (`hakios.shannon.c`, #319), the
-   video decoder (`hakios.exynos_mfc.c`, #320 and #329), the front camera (`hakios.exynos_camera.c`, #328), the Mali,
-   the sensor hub, the display and the USB gadget (#329), and in the fork the GPU and Mali service (`starlte_gpu.c`,
-   `StarbiteMali.cpp`, #29).
+4. **The files that became free on 17 November** when #319, #320, #328 and #329 merged: the modem
+   (`hakios.shannon.c`, whose codec makes #319's harness a plain include), the sensor hub, the Mali with the fork's
+   `StarbiteMali.cpp` (xnu #29 merged too), the video decoder, the USB gadget, the display.
+5. **The busy files**, each when the pull requests that touch it have merged: the cameras (`hakios.exynos_camera.c`,
+   `_rear.c`, `hakios.ak737x.c`, #334), the governor (`hakios.exynos_cpufreq.c`, #337, and the fork's copy, xnu #38),
+   and in the fork the GPU and the framebuffer (`starlte_gpu.c`, `SweetFramebuffer.cpp`, xnu #37).
 
 ## What a split cannot fix
 
@@ -274,13 +277,13 @@ Five problems are in the structure, not in the size of files. Each has a proposa
    frame path are the same hardware on both phones; the sensors and their tables differ. Proposal: one camera core
    (`hakios.exynos_csis.c`: domain, PHY, DMA, frames), sensor drivers as chip drivers (`hakios.s5k3h1.c`, `hakios.s5k2l3.c`,
    ...), and each phone's camera as a policy file that names its sensors. The iris camera (`hakios.exynos_iris.c`)
-   repeats `isp_up`, `isp_down` and `link_setup` too. Waits for #328.
+   repeats `isp_up`, `isp_down` and `link_setup` too. Waits for #334 (the camera switch, which adds to both).
 3. **Drivers copied into the fork and changed there.** The fork has its own `hakios.exynos_cpufreq.c` (656 of 808 long
    lines the same as this repository's), `hakios.exynos_dpu.c` (387 of 451), `hakios.s6e3ha8.c` and `hakios.exynos_tmu.c`,
    each a fork of a file here that has since moved on in both places. A fix lands in one. Proposal: for each, the
    difference made into a hook or an `#if HAKIOS_XNU` in the file here, the fork's copy deleted and the file taken by
    `profiles/ios-27.copy`, as `hakios.s6e3ha8_gamma.h` already is. One driver per pull request pair, the governor first
-   once its over-current work has settled.
+   once its over-current work (#337, xnu #38) has merged.
 4. **The drivers' public headers live in the other repository.** The drivers are here; the 24 headers that declare what
    they offer each other (`sys/hakios.exynos_hsi2c.h`, `sys/hakios.audio.h`, `sys/hakios.log.h`, ...) are only in the
    fork. A change to a driver's interface is two pull requests, and a host test cannot include them (that is why
