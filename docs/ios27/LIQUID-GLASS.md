@@ -88,9 +88,10 @@ the cap below: 43 % of swipe frames on time (motion 37.4 fps) and 63 % of the dr
 and it is what that phone was left on. The bench phone's 66 % and this 43 % are the same code. The difference is in the frames: 35 chains a frame
 there against 25 on the bench phone, at 0.42 to 0.48 ms a chain, so 14.7 ms of GPU time a frame against 12.2, before the 2.4 ms of the present. At
 60 Hz that does not fit; the GPU, not the CPU, is what a heavy glass frame waits for now. A chain's 0.4 ms is mostly not drawing: every chain is started,
-polled for (10 us looks, then 50 us naps; `sgu_spin_us` sets how long it looks) and flushed on its own, and a pass is two of them. What would shorten it,
-none of it built: the fragment chain of one pass and the vertex/tiler chain of the next on the two job slots at once; the job interrupt instead of the
-poll; fewer passes from CoreAnimation for the same picture.
+polled for (10 us looks, then 50 us naps; `sgu_spin_us` sets how long it looks) and flushed on its own, and a pass is two of them. What would shorten it:
+the job interrupt instead of the poll (built 17 November, not yet run: `sgu_irq=1`, [below](#the-job-interrupt-and-both-job-slots-17-november-2026-built-not-yet-run));
+the fragment chain of one pass and the vertex/tiler chain of the next on the two job slots at once (tried on 12 November, wrong tiles; the interface for it,
+`sgu_slots=2`, below); fewer passes from CoreAnimation for the same picture (not built).
 
 ## A cap on the GPU's wired memory
 
@@ -122,9 +123,103 @@ since (below): no gain.
 - **Three knobs for a chain's cost, built and not yet run**, all off by default: `sgu_flushred=1` (`0537327e`: the Mali's flush reduction, as
   Linux's Panfrost driver has it on this GPU: a chain carries the GPU's flush count from its submit and the cache flush at its start is left out
   when one happened since, which for a queued chain is always), `sgu_spin_us=600` (the worker looks longer before its first nap) and `sgu_depth`
-  above. What to read from a run of each is the queue's own line: time per chain, time queued, depth.
+  above. What to read from a run of each is the queue's own line: time per chain, time queued, depth. Two more, the job interrupt (`sgu_irq=1`)
+  and the second job slot (`sgu_slots=2`), and the order to try all five in, are in the next section.
 - The prewarm of the Metal plug-in did not shorten the device's start (4.4 s again), and chronod's abort comes 4.6 s after the device exists, just
   before the first frame: it waits for the render server's first display state, not for the device. Harmless (it is started again and runs).
+
+## The job interrupt and both job slots (17 November 2026: built, not yet run)
+
+What a chain costs besides its drawing (above) is mostly how its end is found: the queue's worker starts a chain, looks at the
+job slots' raw status every 10 us for `sgu_spin_us` (200), then naps 50 us at a time and looks again. Two changes to that are in the
+fork's `bsd/dev/starlte_gpu.c` (commit `c51aa2ac` of the branch `agent/scion-gpu-irq/job-irq`, not yet in `scion/xnu-12377` nor
+pinned by `profiles/ios-27.conf`), each behind its own boot-argument and off by default; with neither on the command line the kernel
+does what it did before (no interrupt is enabled, no mask register of the GPU is written, nothing else is looked at). Neither has
+been run on a phone.
+
+**`sgu_irq=1`: the worker sleeps until the GPU's job interrupt.** The Mali's three lines, from Samsung's device tree for this
+phone (`mali@17500000`, `interrupts = <0 282 0  0 281 0  0 283 0>`, names JOB, MMU, GPU): SPI 282 for the job slots, 281 for the
+MMU and 283 for the GPU, INTIDs 314, 313 and 315 on the GIC-400. Until now no driver of the iOS 27 tree took a device interrupt:
+`pexpert/arm/pe_fiq.c` enabled the timer's PPI and the two signals between processors and nothing else, `sleh_irq()` ended any
+other interrupt unhandled, every S9 driver polled, and the Wi-Fi driver's `gic_v3_spi_attach()` is a stub that says so
+(`bsd/dev/starlte_wifi.c`). The 16.5 kernel takes device interrupts through `osfmk/arm64/gic_v3_irq.c` of the 8796 fork
+(`gic_v3_spi_attach()`, used by `mfc_irq=1` in `drivers/media/mfc/hakios.exynos_mfc.c` and by the virtio and Wi-Fi drivers); the
+iOS 27 tree now has the GICv2 half of it for the S9, `starlte_gic_spi_attach()` in `pe_fiq.c`: the SPI configured (level, the
+timer's priority), sent to the boot processor's CPU interface (`GICD_ITARGETSR`, the byte `pe_init_fiq()` already reads for each
+processor), enabled with its enable bit read back, and its handler called from `sleh_irq()` before the interrupt is ended. The GPU's
+handler only clears the three mask registers (which lowers the line) and wakes the worker; it clears no status. The worker sets the
+masks (the busy chain's slot's done and failed bits, any MMU fault of AS0 or AS1, the GPU's fault bits 0x81: exactly what its
+look stops at) only while it sleeps, sleeps for `sgu_irq_us` at most (default 1000), and then reads the raw status and retires the
+chain with the same code as before (`sgu_retire_locked()`): a job fault, an MMU fault and a GPU fault go to the same reset. A lost
+interrupt costs one sleep; 16 chains running found done only after a timed-out sleep and the worker naps and looks as without
+`sgu_irq` for the rest of the boot, with a line on the console.
+
+**`sgu_slots=2`: groundwork, and why it is not more.** `sgu_pipe=1` (12 November, `536d5cad`) runs the vertex/tiler chain of the
+next pass on slot 1 beside the fragment chain of this pass on slot 0, when PanVK built with `STARBITE_PANVK_PIPE=1` put the two
+passes' polygon lists into different halves of the tiler heap and says which in the requirements (bits 0x100 and 0x200). On the
+bench phone that day: no GPU fault, 6,331 of 6,500 vertex/tiler chains beside a fragment chain, 26.3 to 27.7 commits a second
+against 24.4, and **wrong 16-pixel tiles** of flat light green or black over the home screen; the heap halves alone, one chain at a
+time, drew clean. So the halves are sound and are not all the two chains share. What the kernel knows of a chain is what StarbiteMali's
+submit carries (`iokit/Kernel/arm/StarbiteMali.cpp`, `struct sbm_submit`): the address of its first job, the requirements (bit 0: a
+fragment chain), and a list of buffers with no word of which are read and which written; the fences (`in_syncs`, `out_sync`) carry
+nothing (the shim's are always signalled) and the user client never looks at them; and a chain reaches buffers its submit does not
+list (the comment at `GEM_CLOSE`). Nothing in that says that the next pass's vertex shaders, tiler and any other job in its chain
+leave alone everything the fragment chain before it reads and writes. Linux's Panfrost does not run two PanVK passes at once either:
+every job there waits for every earlier job that names one of its buffers, and every PanVK batch that draws names the device's
+tiler heap (and every batch its sample-position buffer). So the
+kernel cannot make the second slot correct by itself; the client has to say it, chain by chain. `sgu_slots=2` is that interface: a
+vertex/tiler chain starts beside the fragment chain before it only with the halves as for `sgu_pipe` and requirement bit **0x400**
+(`SGU_REQ_BESIDE_OK`), from the same process. No client sets the bit, so today `sgu_slots=2` runs one chain at a time and counts the
+chains it held back ("refused without the client's word"). `sgu_pipe=1` stays as it was, to find the fault of 12 November.
+
+What PanVK must check before it sets 0x400 on a batch's vertex/tiler chain (`panvk_vX_gpu_queue.c`, where the halves are named):
+the batch before it on the same queue renders (it has a fragment chain) and uses the other half; no pipeline barrier, event wait or
+subpass dependency between the two render passes has a source stage that includes the fragment shader, early or late fragment tests
+or colour attachment output and a destination stage that the vertex/tiler chain runs (draw indirect, vertex input, vertex shader,
+transfer or compute recorded into the same chain); the chain holds no compute or copy job; and its varyings, thread-local storage and
+descriptors are its own (upstream PanVK takes them from the command buffer's pools per batch). And before any of that, the cause of
+the wrong tiles must be known: either a hazard in that list that CoreAnimation's passes hit, or the caches (each chain cleans and
+invalidates the GPU's L2 when it starts and when it ends, now while another slot writes through it). The four command lines built
+for that on 12 November and never run separate the two: `sgu_pipe=1` (and `STARBITE_PANVK_PIPE=1` in `mtl2-env`) with `sgu_pipe_side=0x130`, with
+`sgu_pipe_side=0x103`, with `sgu_pipe_main=0x103`, and with `sgu_pipe_side=0x100 sgu_pipe_main=0x130` (0x1SE: S the flush at the
+start, E at the end, 0 none, 1 clean, 3 clean and invalidate). A clean picture under one of them points at the caches; wrong tiles
+under all four at a dependency. (PanVK's half of `sgu_pipe`, `STARBITE_PANVK_PIPE=1`, was built for that day's bundle and is not in this
+repository yet.) The gain measured on 12 November was small (54 against 52 frames shown per two-second swipe step):
+the long fragment chains and the long vertex/tiler chains belong to different passes, and one pass of look-ahead overlaps little.
+
+**What a run shows.** With `sgu_irq=1`, `sgu_slots=2` or `sgu_pipe=1` the queue's ten-second line has a second one:
+
+    STARLTE GPU QUEUE irq: on; chains seen done by a look L, after a nap N, by the interrupt I, on arming A, after a timed-out
+    sleep T; interrupt to wake avg X us max Y (W), sleeps timed out with the chain running R, interrupts Z; slots: 2, beside
+    another B, both busy U us (P%), refused without the client's word F
+
+and at the first chain `STARLTE GPU QUEUE: the job interrupt (INTID 314) attached (0), MMU's (313) 0, GPU's (315) 0; ...`. The
+interrupt works when I is most of the chains and T stays near 0; X is the time from the handler to the worker running again (the
+time from a slot's end to the handler is not measured: the GPU has no timestamp of it). What the interrupt is for shows in the
+queue's first line: the average microseconds a chain takes as the worker sees it (start to end seen) and, with `sgu_prof=1`, the
+idle time between waiting chains. "Both busy" is from the start of the chain beside to the end of the first one being seen.
+
+**What a phone run must confirm first.** (1) The attach line says 0 for INTID 314: S-Boot's secure monitor left SPI 282 in Group 1,
+where the normal world can enable it (the kernel cannot set a GIC-400's groups; a line it cannot enable is refused at the attach,
+and the worker polls as before). (2) The lines are level-triggered and follow the raw status ANDed with the mask, and a soft reset
+clears the masks (the Mali's documented behaviour, as Panfrost and kbase use it; nothing in this tree wrote the masks before). (3)
+The interrupt reaches the boot processor (ITARGETSR byte of CPU 0) and `thread_wakeup()` from `sleh_irq()` behaves there as on 16.5
+(no other S9 interrupt in this tree to compare with). (4) Interrupt to wake stays well under the 50 us nap. If (1) fails the line
+says NOT attached and nothing else changes.
+
+**The order to try them on a phone** (one boot each, the scripted input of `sweetspeed&4096` on the bench phone, `sgu_prof=1` on
+all of them, the temperature noted; the queue on, as in every Metal run):
+
+1. Nothing new: the reference for the two queue lines (time per chain, idle between chains, naps).
+2. `sgu_flushred=1`: changes what the GPU does per chain, not how its end is found; read the time per chain.
+3. `sgu_irq=1`: first the attach line and the irq line (I most, T near 0, X); then time per chain, idle between chains, frames
+   on time. If the attach failed or T is large, stop here and report the lines.
+4. `sgu_irq=1 sgu_spin_us=0`: sleep at once instead of looking for 200 us first: frees a core; costs X on every chain.
+5. The better of 3 and 4 with `sgu_flushred=1`.
+6. That with `sgu_depth=48`: against the touch-to-picture delay, not frames on time (above).
+7. `sgu_spin_us=600` only if the interrupt did not work (it is the polled path's knob).
+8. Both slots, only after the four diagnostic lines above have named the cause of 12 November's tiles and a PanVK that sets 0x400
+   as described exists: `sgu_slots=2` with the best of 1 to 6, screenshots before any number.
 
 ## Not done
 
@@ -133,7 +228,8 @@ since (below): no gain.
   boot here.
 - The zero-copy scan-out above.
 - The CPU side: backboardd uses 0.19 to 0.25 of a core while swiping on Metal against 0.13 on OpenGL ES (metal2vulkan's and PanVK's per-draw work).
-- A chain's fixed cost (above), which is what a fuller home screen now waits for.
+- A chain's fixed cost (above), which is what a fuller home screen now waits for: the job interrupt and the second slot's interface are built and
+  not run (above); the cause of 12 November's wrong tiles and a PanVK that says when a chain may go beside another are not.
 
 ## How to turn it on
 
