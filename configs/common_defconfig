@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 758 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 760 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1687,7 +1687,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (188)
+# User space (190)
 #
 
 # Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
@@ -2148,6 +2148,12 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.exynos_mfc.c (kernel)
 # CONFIG_MFC_ZC is not set
+
+# the over-current guard, NOT run on a phone (docs/ios27/OCP.md; 0, the default: off) 1 observe, 2 and the OCP block's ...
+# CONFIG_OCP_GUARD is not set
+
+# with ocp_guard: also the S2MPS18's INT5 read each second (BUCK2 at its current limit)
+# CONFIG_OCP_GUARD_FLAGS is not set
 
 # read by passcoded.m (user space)
 # CONFIG_PASSCODE_DEBUG is not set

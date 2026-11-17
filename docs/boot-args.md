@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **700 arguments**: 608 read by the kernel, 24 by the loader, 85 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **702 arguments**: 610 read by the kernel, 24 by the loader, 85 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -600,7 +600,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (188)
+## User space (190)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -755,6 +755,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `mfc_irq` | K | `hakios.exynos_mfc.c` | `CONFIG_MFC_IRQ` |  |
 | `mfc_mif_khz` | K | `hakios.exynos_mfc.c` | `CONFIG_MFC_MIF_KHZ` |  |
 | `mfc_zc` | K | `hakios.exynos_mfc.c` | `CONFIG_MFC_ZC` |  |
+| `ocp_guard` | K | `hakios.exynos_cpufreq.c` | `CONFIG_OCP_GUARD` |  |
+| `ocp_guard_flags` | K | `hakios.exynos_cpufreq.c` | `CONFIG_OCP_GUARD_FLAGS` |  |
 | `passcode_debug` | U | `passcoded.m` | `CONFIG_PASSCODE_DEBUG` |  |
 | `passcode_reset` | K | `MiniAppleKeyStore.cpp` | `CONFIG_PASSCODE_RESET` |  |
 | `passcode_selftest` | K | `MiniAppleKeyStore.cpp` | `CONFIG_PASSCODE_SELFTEST` |  |
