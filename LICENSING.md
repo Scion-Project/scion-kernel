@@ -15,11 +15,11 @@ MIT-0 paths (top-level location, number of files):
 - `.github`: 3 files
 - `avf`: 15 files
 - `configs`: 1 file
-- `docs`: 14 files
+- `docs`: 13 files
 - `drivers`: 19 files
 - `profiles`: 2 files
 - `qemu`: 3 files
-- `tools`: 29 files
+- `tools`: 28 files
 - `xnu`: 1 file
 
 The full per-file list is in the pull request that introduced this file, and every file's own first lines are authoritative.
