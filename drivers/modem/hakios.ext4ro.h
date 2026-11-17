@@ -39,6 +39,8 @@ struct ext4ro {
 #define EXT4RO_INODE_INLINE     0x10000000
 #define EXT4RO_ROOT_INO         2
 #define EXT4RO_MAX_DEPTH        5
+#define EXT4RO_MAX_DIR_BYTES    (16u << 20)     /* a directory bigger than this is not looked through (EFBIG) */
+#define EXT4RO_MAX_BLOCKS       (1ull << 47)    /* so that block * block_size (at most 64 KB) stays inside 64 bits */
 
 static inline uint16_t
 ext4ro_le16(const uint8_t *p)
@@ -79,7 +81,8 @@ ext4ro_open(struct ext4ro *fs)
 	fs->desc_size = fs->is64 ? ext4ro_le16(sb + 0xFE) : 32;
 	fs->blocks = ext4ro_le32(sb + 0x04) | (fs->is64 ? (uint64_t)ext4ro_le32(sb + 0x150) << 32 : 0);
 	if (fs->inodes_per_group == 0 || fs->inode_size < 128 || fs->inode_size > fs->block_size ||
-	    fs->desc_size < 32 || fs->desc_size > 1024 || (fs->desc_size & (fs->desc_size - 1)) != 0) {
+	    fs->desc_size < 32 || fs->desc_size > 1024 || (fs->desc_size & (fs->desc_size - 1)) != 0 ||
+	    fs->blocks > EXT4RO_MAX_BLOCKS) {
 		return EINVAL;
 	}
 	if (incompat & EXT4RO_INCOMPAT_ENCRYPT) {
@@ -209,6 +212,9 @@ ext4ro_map(struct ext4ro *fs, const uint8_t *inode, uint32_t lblk, uint64_t *pbl
 		b = ext4ro_le32(inode + 0x28 + 4 * 13);
 	} else {
 		l -= (uint64_t)per * per;
+		if (l >= (uint64_t)per * per * per) {
+			return EFBIG;           /* past what a block map can name: idx[0] would leave the block */
+		}
 		levels = 3;
 		idx[0] = (uint32_t)(l / per / per);
 		idx[1] = (uint32_t)((l / per) % per);
@@ -241,6 +247,9 @@ ext4ro_lookup(struct ext4ro *fs, uint32_t dir_ino, const char *name, size_t name
 		return ENOTDIR;
 	}
 	size = ext4ro_size(inode);
+	if (size > EXT4RO_MAX_DIR_BYTES) {
+		return EFBIG;                   /* (a size made up on the disk would otherwise be walked block by block) */
+	}
 	for (uint32_t lblk = 0; (uint64_t)lblk * fs->block_size < size; lblk++) {
 		uint64_t pblk;
 
