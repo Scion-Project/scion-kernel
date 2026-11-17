@@ -252,8 +252,13 @@ only (`sweetfg=1 rtc_pmic=1`), Sileo's installs (`persona_lax=1`), Wi-Fi (`wifi_
   Without it some Settings rows may have no symbol.
 - **The lock screen's clock is not drawn** (an empty box where the digits should be; the date line in the test boot read
   "Wed Dec 31"), and the **wallpaper picker** does not work.
-- `chronod` aborts once about 20 seconds after boot and comes back; four widget extensions (Calculator, World Clock, the code
-  scanner, the launcher control) crash three times each at start and stay off.
+- **Control Centre:** four of its controls (Calculator, Timer, Camera, Code Scanner) are empty, because their extensions
+  crash three times each at start and stay off, and Airplane Mode shows on (it is on, in the root's stored preference).
+  The likely cause of the first is a daemon the root build leaves out (`siriactionsd`); `CC_CONTROLS=1` keeps it, untested.
+  `chronod` aborts once about 20 seconds after boot and comes back. Books' and Podcasts' widgets die in dyld unless the
+  line has `sweetatpath=1`. See [CONTROL-CENTRE.md](CONTROL-CENTRE.md).
+- **No crash reports** are written (ReportCrash is not in the root's job set); the console's `CRASH` lines are the record,
+  and `tools/ios27/crashlog-symbolicate.py` symbolicates them. [CONTROL-CENTRE.md](CONTROL-CENTRE.md) has the details.
 - The command line and the patches are for build 24A446 only. Another restore image is refused.
 
 ## Who made what

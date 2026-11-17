@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""edit-launchd.py ROOT LISTS_DIR [--set bp|min] [--hogs] : launchd job edits of the full root (declarative + idempotent: everything
+"""edit-launchd.py ROOT LISTS_DIR [--set bp|min] [--hogs] [--keep LABEL,...] : launchd job edits of the full root (declarative + idempotent: everything
 previously moved to launchd-disabled.plist is put back first, then the chosen set is moved out again).
   1. hardware list (daemons-hw.list): jobs removed from launchd.plist, kept in launchd-disabled.plist (restorable)
   2. --set min : crash-loop list (daemons-crashloop.list) [+ daemons-hogs.list with --hogs], by exact Label
      --set bp  : exactly the job set of the owner build "bp" (daemons-bp.keys: hardware + crash loops + the 86 speed trims + CPU hogs)
+     --keep   : jobs (exact Label, or exact job key) left in launchd.plist although 1. or 2. would move them out; empty by
+                default (no change). For a test of what a removed daemon does, e.g. com.apple.siriactionsd for Control Centre's
+                controls (docs/ios27/CONTROL-CENTRE.md); a keep that matches no job is said.
   3. _PanicOnCrash dropped from every job (a crash loop must never panic the kernel on this port)
   4. launchd-override list -> /private/var/db/com.apple.xpc.launchd/disabled.plist
 """
@@ -11,6 +14,7 @@ import os, plistlib, sys
 root, lists = sys.argv[1], sys.argv[2]
 hogs = '--hogs' in sys.argv
 DSET = sys.argv[sys.argv.index('--set') + 1] if '--set' in sys.argv else 'min'
+KEEP = set(x for x in (sys.argv[sys.argv.index('--keep') + 1] if '--keep' in sys.argv else '').replace(',', ' ').split() if x)
 assert DSET in ('bp', 'min'), DSET
 def rd(p):
     return [l.split('#')[0].strip() for l in open(p) if l.split('#')[0].strip()]
@@ -24,10 +28,12 @@ dis = {}
 hw = rd(lists + '/daemons-hw.list')
 exact = set(rd(lists + '/daemons-crashloop.list')) | (set(rd(lists + '/daemons-hogs.list')) if hogs else set()) if DSET == 'min' else set()
 keys = set(rd(lists + '/daemons-bp.keys')) if DSET == 'bp' else set()
-moved = []
+moved = []; kept = []
 for k in list(jobs):
     lab = jobs[k].get('Label', '') if isinstance(jobs[k], dict) else ''
     if any(h in k or h in lab for h in hw) or lab in exact or k in keys:
+        if lab in KEEP or k in KEEP:
+            kept.append(lab or k); continue
         dis[k] = jobs.pop(k); moved.append(lab or k)
 pc = 0
 for k, j in jobs.items():
@@ -40,6 +46,11 @@ with open(dp, 'wb') as f:
 os.chmod(dp, 0o644); os.chown(dp, 0, 0)
 print(f'launchd.plist: {len(moved)} jobs moved to launchd-disabled.plist ({len(jobs)} left), _PanicOnCrash dropped from {pc}')
 print('  moved:', ' '.join(sorted(moved)))
+if KEEP:
+    print('  kept on (--keep):', ' '.join(sorted(kept)) or '-')
+    lk = {(v.get('Label') if isinstance(v, dict) else None) for v in jobs.values()} | set(jobs)
+    nok = sorted(x for x in KEEP if x not in lk)
+    if nok: print('  --keep names no job of this root:', ' '.join(nok))
 miss = sorted(x for x in exact if x not in {v.get('Label') for v in dis.values()})
 if miss: print('  not on this root:', ' '.join(miss))
 ov = root + '/private/var/db/com.apple.xpc.launchd/disabled.plist'

@@ -43,6 +43,10 @@ some Settings rows lack icons.
 `DAEMON_SET=bp` (default) removes exactly the job set of the owner build so the first full-root boot is comparable with it;
 `DAEMON_SET=min` is the real iOS 27: only jobs for hardware the port has no driver for (`lists/daemons-hw.list`) and measured crash loops
 (`lists/daemons-crashloop.list`) are moved to `launchd-disabled.plist`. The CPU-hog list is opt-in and off.
+Jobs either set would remove can be left on, each off by default (`20-launchd.sh`; running the step again without them
+takes them off again): `CC_CONTROLS=1` keeps `siriactionsd` (Control Centre's App Intent controls die without it),
+`CRASH_REPORTS=1` keeps `ReportCrash` and `osanalyticshelper` (iOS's own crash reports), `KEEP_JOBS="LABEL ..."` keeps any
+job by exact label or job key. None has been booted yet: [CONTROL-CENTRE.md](CONTROL-CENTRE.md).
 
 ## Verification boot (what the tools are for)
 `verify-boot.sh SERIAL BOOT LABEL [MIN]` flashes BOOT (read-back checked), starts `console-capture.sh` for the phone's USB port *before* the
