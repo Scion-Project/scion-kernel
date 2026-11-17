@@ -258,7 +258,7 @@
    'panthor_kmod.c',
  )
 +if host_machine.system() == 'darwin'
-+  libpankmod_lib_files += files('../../../starbite-drm/starbite_drm.c')
++  libpankmod_lib_files += files('../../../starbite-drm/starbite_drm.c', '../../../starbite-drm/starbite_diag.c')
 +endif
  
  libpankmod_lib = static_library(
