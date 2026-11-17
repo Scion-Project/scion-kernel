@@ -62,8 +62,8 @@ decryption of the two archives was not repeated (no room for a second copy of th
         --template inputs/recovery.img                                 # -> out/xnu-boot-ios27.img
 
 The boot image is an Android boot image whose "kernel" is the loader; the loader carries the XNU kernel, the S9's device tree in
-Apple's format (made from your iPhone 11 tree and the S9's own memory map) and a two-word command line (`sbgl=0
-sweetspeed=140347391`; everything else is built into the kernel). The copy of your recovery partition is only a template: its
+Apple's format (made from your iPhone 11 tree and the S9's own memory map) and a short command line (`sbgl=0
+sweetspeed=408782847` and the time the image was made, `sweetepoch=`; everything else is built into the kernel). The copy of your recovery partition is only a template: its
 header and Samsung's device-tree block are kept so that the phone's boot loader accepts the image.
 
 Clean run: the loader built this way is byte for byte the one in the test phones' boot image, and the script given the test
@@ -168,9 +168,25 @@ by the same `fastflash-root.py` from the project's private layout.
 |---|---|
 | Works | Boot to the home screen; the display at 60 Hz; touch; the Mali-G72 GPU (OpenGL ES compositor, or CoreAnimation's Metal renderer with Liquid Glass through PanVK); storage (the system on the phone's UFS, read-write); all eight cores; about 3.6 GB of RAM; the panel's brightness (with the brightness library of section 4); the USB console; Settings and the stock apps start (those that want a network have none). |
 | In the kernel only | The front and rear cameras: sensor, lens, focus, stabiliser and iris are driven and frames can be read from `/dev/hakios-camera` (boot-arguments, off by default). No iOS app sees a camera, and **the Camera app does not appear on the home screen yet**. |
-| Works with extra steps | **The accelerometer and the gyroscope, and screen rotation** ([SENSORS.md](SENSORS.md)): the sensor hub's driver and two HID services in the kernel (`shub=6 shub_hid=3`, off by default) and a small library in backboardd (`tools/ios27/sensors/`, added to the root and to `sweetinject=` by hand). Seen on a phone on 12 November: the orientation followed the hand, and Notes turned to landscape and back. **Rotation works with the OpenGL ES compositor; with the Metal compositor a turn freezes the screen** until that is fixed, so do not use the two together. The magnetometer, barometer, light and proximity sensors are read by the kernel only (`/dev/hakios-sensors`); iOS does not get them. |
-| Built in, off, not part of this page's build | **Wi-Fi** ([WIFI.md](WIFI.md)): the kernel has the S9's Wi-Fi since 12 November behind `wifi_pcie=6 brcmfmac=N`, but the radio driver itself (Linux's brcmfmac, fetched and built by `tools/mk-brcmfmac.sh`) is linked in only if you build it before the kernel, and the phone's own firmware files must be put into the root (`tools/ios27/wifi/60-wifi-firmware.sh`). What a phone has done: in one boot on 10 November, on the work's own branch, the radio loaded its firmware, joined a WPA2 network, got an address by DHCP and answered `ping` and an HTTP request from the kernel's console. iOS itself did not use it: Settings showed Wi-Fi off (wifid is not started). The kernel as merged has been built, with and without the driver, and not booted with Wi-Fi on. |
-| Not in this build | **Cellular** (no modem; the phone-call services are removed), **audio and Bluetooth** (for iOS 27 their drivers exist on unmerged branches only; nothing of them is in this kernel), a passcode (there is no Secure Enclave; the key store answers as a phone without a passcode). With no network there is no activation, no iCloud and no App Store; Setup is marked done by the build. Anything not named under "Works" should be taken as not working. |
+| Works with extra steps | **The accelerometer and the gyroscope, and screen rotation** ([SENSORS.md](SENSORS.md)): the sensor hub's driver and two HID services in the kernel (`shub=6 shub_hid=3`, on by default since 17 November) and a small library in backboardd (`tools/ios27/sensors/`, added to the root and to `sweetinject=` by hand). Seen on a phone on 12 November: the orientation followed the hand, and Notes turned to landscape and back. **Rotation works with the OpenGL ES compositor; with the Metal compositor a turn freezes the screen** until that is fixed, so do not use the two together. The magnetometer, barometer, light and proximity sensors are read by the kernel only (`/dev/hakios-sensors`); iOS does not get them. |
+| Built in, on by default, needs steps this page's build does not do | **Wi-Fi** ([WIFI.md](WIFI.md)): the kernel has the S9's Wi-Fi since 12 November (`wifi_pcie=6 brcmfmac=8`, a default since 17 November), but the radio driver itself (Linux's brcmfmac, fetched and built by `tools/mk-brcmfmac.sh`) is linked in only if you build it before the kernel, and the phone's own firmware files must be put into the root (`tools/ios27/wifi/60-wifi-firmware.sh`). What a phone has done: in one boot on 10 November, on the work's own branch, the radio loaded its firmware, joined a WPA2 network, got an address by DHCP and answered `ping` and an HTTP request from the kernel's console. iOS itself did not use it: Settings showed Wi-Fi off (wifid is not started). The kernel as merged has been built, with and without the driver, and not booted with Wi-Fi on. |
+| Built in, on by default, needs steps this page's build does not do | **Cellular** ([MODEM-IOS.md](MODEM-IOS.md)): the S9's modem is started by the kernel (`cp=7 cp_nv=2 cp_if=1`, defaults since 17 November; its NV data is read from EFS read-only into RAM and nothing is written to the phone), and registers on the network with a SIM in. iOS shows it only with the root step `tools/ios27/modem/66-celld.sh`, and there is no data without your operator's `cp_apn=` on the command line. The phone-call services are removed: no calls, no SMS. **Audio and Bluetooth**: the speakers, the codec, the microphone and the Bluetooth chip are started by the kernel (`abox=8 max98512=3 cs47l93=6 abox_mic=1 abox_rmem=1 bt=7`, defaults since 17 November); iOS uses them only with the root step `tools/ios27/audio-bt/` (`AUDIO_BT=1`). Merged on 17 November; the kernel with all of it on has been built and **not yet run on a phone in this combination**. |
+| Not in this build | A passcode (there is no Secure Enclave; the key store answers as a phone without a passcode). With no network there is no activation, no iCloud and no App Store; Setup is marked done by the build. Anything not named under "Works" should be taken as not working. |
+
+## The S9's hardware is on by default (since 17 November 2026)
+
+The kernel's built-in command line now turns on the S9's own hardware, so that one image has all of it: the sensor hub
+(`shub=6 shub_hid=3`), restart and power off from iOS (`sweethalt=1`), the battery's gauge and the PMIC's clock, both read
+only (`sweetfg=1 rtc_pmic=1`), Sileo's installs (`persona_lax=1`), Wi-Fi (`wifi_pcie=6 brcmfmac=8`), audio and Bluetooth
+(`abox=8 max98512=3 cs47l93=6 abox_mic=1 abox_rmem=1 bt=7`) and the modem (`cp=7 cp_nv=2 cp_delay=40 cp_rfs=1 cp_if=1`).
+
+- To turn one off for a run, name it on the command line with 0: `--cmdline 'sbgl=0 sweetspeed=408782847 cp=0 bt=0'`.
+- The kernel side is on; what iOS needs on top of it (the sensors' library, the Wi-Fi firmware and its service, the audio
+  and Bluetooth step, the cellular daemon) are separate root steps under `tools/ios27/` that the one-command root build
+  of section 5 does not run yet. Without its step a feature is driven by the kernel and not seen by iOS.
+- Nothing here writes to the phone's storage outside USERDATA. The modem's NV data comes from EFS read-only.
+- Each feature was seen on a phone on its own branch (the table above says how far). **All of them on at once has been
+  built and not yet run on a phone.**
 
 ## Known problems
 
@@ -182,7 +198,7 @@ by the same `fastflash-root.py` from the project's private layout.
 - **Icons and Settings symbols** are right only with the rewrite's data-word guard and the CoreImage word in the patch list.
   That last word was proven on a phone only together with a kernel switch, bit 268435456 of `sweetspeed` (IOSurface tells iOS
   its largest sizes). The kernel this page builds has the switch since 12 November, off: the command line above
-  (`sweetspeed=140347391`) does not set it, `sweetspeed=408782847` does. With it set, and the root's icon steps, the Clock,
+  until 17 November (`sweetspeed=140347391`) did not set it; the line since then, `sweetspeed=408782847`, does. With it set, and the root's icon steps, the Clock,
   Settings and Safari icons were drawn on a phone on 12 November; what the switch alone changes has not been measured.
   Without it some Settings rows may have no symbol.
 - **The lock screen's clock is not drawn** (an empty box where the digits should be; the date line in the test boot read
