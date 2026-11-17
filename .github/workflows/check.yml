@@ -80,12 +80,16 @@ jobs:
         run: sh tools/metallib-test.sh
       - name: The Galaxy S9 panel's gamma, worked out from made-up MTPs, holds together (sanitizers)
         run: sh tools/s6e3ha8-gamma-test.sh
+      - name: The Exynos video decoder's checks on a stream's crop and buffer sizes and on a zero-copy surface's planes hold at every edge (sanitizers)
+        run: sh tools/mfc-check-test.sh
       - name: The Galaxy S9's Bluetooth H4 framing, HCI events, .hcd reading and UART divisor hold together (sanitizers)
         run: sh tools/bcm-hci-test.sh
       - name: The Galaxy S9's Bluetooth driver's own parsers (scan events, bt_vsc_ok, bt_trace) hold against hostile bytes (sanitizers)
         run: sh tools/bcm-bt-parsers-test.sh
       - name: The Galaxy S9's sensor hub's SPI frames, packets, CRC-8, RPCs, firmware records and SSP hold together (sanitizers)
         run: sh tools/bcm-shub-test.sh
+      - name: The Galaxy S9's modem driver against what the CP and RADIO give it - frames, file requests, NV writes, packets, the table of contents - whole, bent and mutated (sanitizers)
+        run: sh tools/modem/shannon-test.sh
       - name: The commits of the fork of XNU that the profiles pin can be fetched
         run: |
           for p in ios-16.5 ios-26 ios-27; do python3 tools/xnu-tree.py path "$p"; done

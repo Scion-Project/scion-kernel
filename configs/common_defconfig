@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 755 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 759 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -200,7 +200,7 @@ CONFIG_HAKIOS_EXYNOS_PCIE=y
 CONFIG_HAKIOS_BRCMFMAC=y
 
 #
-# CPU, memory and boot (23)
+# CPU, memory and boot (24)
 #
 
 # CPU cores the kernel uses, 1 to 8; one if not set
@@ -235,6 +235,9 @@ CONFIG_HAKIOS_BRCMFMAC=y
 
 # read by loader_return.c (kernel)
 # CONFIG_ESSLOG is not set
+
+# read by the patch to Apple's files (kernel)
+# CONFIG_FB_PLANES is not set
 
 # read by GenericARMPE.cpp (kernel)
 # CONFIG_MACHINE_NAME is not set
@@ -1870,7 +1873,7 @@ CONFIG_MODEM_AGAIN=y
 # the tele frames turned half round for user space (default 0, as Apollo streams it: no flip)
 # CONFIG_CAM_S9_TELE_TURN is not set
 
-# read by inject.c (user space)
+# read by hakios_metal_shown.c, inject.c (user space)
 # CONFIG_CAMTL is not set
 
 # read by inject_sb.c (user space)
@@ -2265,7 +2268,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_BOOTARGS is not set
 
 #
-# Sensors (16)
+# Sensors (19)
 #
 
 # read by hakios.ssp.c (kernel)
@@ -2277,8 +2280,14 @@ CONFIG_MODEM_AGAIN=y
 # the accelerometer's (and gyroscope's) position in the formation of step 5
 # CONFIG_SHUB_ACC_POS is not set
 
+# read by hakios.ssp.c (kernel)
+# CONFIG_SHUB_AP_AWAKE is not set
+
 # at step 2, power the CHUB domain on if step 1 found it off, using the PMU's chub_on sequence
 # CONFIG_SHUB_CHUB_ON is not set
+
+# read by hakios.ssp.c (kernel)
+# CONFIG_SHUB_COLD is not set
 
 # read by hakios.ssp.c (kernel)
 # CONFIG_SHUB_DIV is not set
@@ -2294,6 +2303,9 @@ CONFIG_MODEM_AGAIN=y
 
 # log the first bytes of every SPI frame (very loud)
 # CONFIG_SHUB_LOG is not set
+
+# the magnetometer's PDC matrix of the S9+'s board (Samsung's ssp-mag-array): 1 the SM-G965F
+# CONFIG_SHUB_MAG is not set
 
 # sample period in ms (default 20; light, proximity and pressure use 200)
 # CONFIG_SHUB_MS is not set

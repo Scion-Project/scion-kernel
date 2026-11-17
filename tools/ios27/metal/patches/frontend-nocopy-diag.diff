@@ -1,0 +1,33 @@
+--- a/tools/ios27/metal2/NativeBridgeMetalFrontend.mm
++++ b/tools/ios27/metal2/NativeBridgeMetalFrontend.mm
+@@ -2416,7 +2416,29 @@
+ }
+ - (id<MTLBuffer>)newBufferWithBytesNoCopy:(void *)pointer length:(NSUInteger)length options:(MTLResourceOptions)options deallocator:(void (^)(void *,NSUInteger))deallocator {
+  NmbBuffer *handle=nmb_buffer_new_no_copy(gDevice,pointer,length,options);
+- if(!handle){NBLOG(@"native-metal: no-copy buffer refused: %@",lastError());return nil;}
++ if(!handle) {
++  // iOS 27: what memory the device would not import, for the first 16 refusals (the kernel's IMPORT_HOST wires the pages
++  // for writing, else for reading, and refuses the range when neither wires): the VM region the pointer is in, its
++  // current and maximum protection, its sharing mode and its tag (who made it: malloc, CoreAnimation, a mapped file ...).
++  static std::atomic<unsigned> described{0};
++  if(described.fetch_add(1)<16) {
++   vm_address_t at=(vm_address_t)(uintptr_t)pointer;vm_size_t size=0;mach_port_t object=MACH_PORT_NULL;
++   vm_region_basic_info_data_64_t basic={};mach_msg_type_number_t count=VM_REGION_BASIC_INFO_COUNT_64;
++   vm_region_extended_info_data_t extended={};mach_msg_type_number_t ecount=VM_REGION_EXTENDED_INFO_COUNT;
++   vm_address_t eat=at;vm_size_t esize=0;mach_port_t eobject=MACH_PORT_NULL;
++   const bool found=vm_region_64(mach_task_self(),&at,&size,VM_REGION_BASIC_INFO_64,(vm_region_info_t)&basic,&count,&object)==KERN_SUCCESS;
++   if(object!=MACH_PORT_NULL)mach_port_deallocate(mach_task_self(),object);
++   const bool efound=vm_region_64(mach_task_self(),&eat,&esize,VM_REGION_EXTENDED_INFO,(vm_region_info_t)&extended,&ecount,&eobject)==KERN_SUCCESS;
++   if(eobject!=MACH_PORT_NULL)mach_port_deallocate(mach_task_self(),eobject);
++   char line[240];
++   snprintf(line,sizeof line,"native-metal: no-copy memory %#lx+%#lx: region %#lx+%#lx prot %d/%d shared %d share mode %d tag %u%s",
++    (unsigned long)(uintptr_t)pointer,(unsigned long)length,(unsigned long)at,(unsigned long)size,found?basic.protection:-1,found?basic.max_protection:-1,
++    found?(int)basic.shared:-1,efound?(int)extended.share_mode:-1,efound?extended.user_tag:0u,
++    (found && (uintptr_t)pointer>=at && (uintptr_t)pointer+length<=at+size)?"":" (spans regions)");
++   sm2_logs(line);
++  }
++  NBLOG(@"native-metal: no-copy buffer refused: %@",lastError());return nil;
++ }
+  NBBuffer *buffer=[NBBuffer new];buffer.handle=handle;buffer.options=options;
+  buffer.wrapped=pointer;buffer.deallocator=deallocator;
+  return (id<MTLBuffer>)buffer;

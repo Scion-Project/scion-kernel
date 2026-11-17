@@ -56,6 +56,7 @@
 #include <sys/hakios.mfc.h>
 #include <sys/hakios.physmap.h>
 #include <sys/hakios.log.h>
+#include "hakios.mfc_check.h"
 
 /* a file of the small image (drivers/storage/hakios.image.c), as hakios.bcm4361_bt.c and hakios.ssp.c take theirs */
 extern const uint8_t *hakios_image_file(const char *dir, const char *name, uint64_t *size, int *disk_out);
@@ -344,6 +345,8 @@ hakios_mfc_uncarve(uint64_t phys)
 }
 
 extern int hakios_surface_mfc_frame(uint32_t sid, uint64_t *y, uint64_t *uv, uint32_t *y_stride, uint32_t *uv_stride, uint32_t *y_bytes, uint32_t *uv_bytes);
+/* a device wrote the surface's pixels: its seed changes (MiniIOSurface.cpp) */
+extern void hakios_surface_written(uint32_t sid);
 
 static void *
 mfc_alloc(uint32_t bytes)
@@ -573,6 +576,11 @@ inst_header(uint32_t bytes, uint32_t *consumed)
 	}
 	/* Crop: CROP1 holds right << 16 | left, CROP2 holds bottom << 16 | top. */
 	uint32_t c1 = R(D_DISPLAY_CROP1), c2 = R(D_DISPLAY_CROP2);
+	if (!mfc_crop_inside(I.width, I.height, c1, c2)) {
+		/* the firmware's numbers are the client's stream's: a crop not inside the picture would wrap crop_w or crop_h */
+		say("exynos_mfc: the header's crop (%#x, %#x) is not inside %ux%u\n", c1, c2, I.width, I.height);
+		return EINVAL;
+	}
 	I.crop_x = c1 & 0xFFFF;
 	I.crop_w = I.width - (c1 & 0xFFFF) - (c1 >> 16);
 	I.crop_y = c2 & 0xFFFF;
@@ -584,6 +592,12 @@ inst_header(uint32_t bytes, uint32_t *consumed)
 	I.plane0 = ROUND_UP(MAX(I.plane0, min0), 256);
 	I.plane1 = ROUND_UP(MAX(I.plane1, min1), 256);
 	I.mv_count = R(D_MIN_NUM_MV);
+	if (!mfc_sizes_sane(min0, min1, R(D_MIN_SCRATCH), I.mv_count, (D_SCRATCH_ADDR - D_MV0) / 4)) {
+		/* a size that rounds up past 32 bits, or more MV buffers than there are D_MV registers (inst_buffers writes one each) */
+		say("exynos_mfc: the header wants planes of %u and %u bytes, scratch %u, %u MV buffers: not taken\n", min0, min1,
+		    R(D_MIN_SCRATCH), I.mv_count);
+		return EINVAL;
+	}
 	I.scratch = ROUND_UP(R(D_MIN_SCRATCH), 256);
 	I.slots = R(D_MIN_NUM_DPB) + 3;
 	if (I.slots > MAX_SLOTS) {
@@ -636,6 +650,7 @@ inst_buffers(void)
 			I.slots = i;
 			break;
 		}
+		bzero(I.slot[i], I.plane0 + I.plane1);  /* the client before this one decoded into the same memory */
 	}
 	W(D_NUM_DPB, I.slots);
 	W(D_FIRST_SIZE, I.plane0);
@@ -769,6 +784,11 @@ inst_frame(uint32_t bytes, uint32_t offset, uint32_t tag, bool last, uint32_t y_
 				r->shown_slot = (int)i;
 				break;
 			}
+		}
+		if (!I.zc && (r->shown_slot < 0 || I.slot_uv[r->shown_slot] != uv)) {
+			/* copied out from here (frame_out): only a frame buffer this driver gave the firmware */
+			say("exynos_mfc: a frame shown at %#x and %#x: not one of the frame buffers\n", y, uv);
+			return EIO;
 		}
 	}
 	return 0;
@@ -1213,7 +1233,8 @@ mfc_ioctl(dev_t dev __unused, u_long cmd, caddr_t data, int flag __unused, proc_
 			 */
 			if (hakios_surface_mfc_frame(d->surface, &y, &uv, &y_stride, &uv_stride, &y_bytes, &uv_bytes) != 0 || y_stride != I.stride ||
 			    uv_stride != I.stride || y_bytes < I.plane0 || uv_bytes < I.plane1 || (y & 0xFF) != 0 || (uv & 0xFF) != 0 ||
-			    y < EXYNOS9810_MEM_MFC_PA || uv + uv_bytes > EXYNOS9810_MEM_MFC_END) {
+			    !mfc_inside(y, y_bytes, EXYNOS9810_MEM_MFC_PA, EXYNOS9810_MEM_MFC_END) ||
+			    !mfc_inside(uv, uv_bytes, EXYNOS9810_MEM_MFC_PA, EXYNOS9810_MEM_MFC_END)) {
 				static int told;
 
 				if (told++ < 4) {
@@ -1227,6 +1248,14 @@ mfc_ioctl(dev_t dev __unused, u_long cmd, caddr_t data, int flag __unused, proc_
 		error = inst_frame(d->bytes, 0, d->tag, d->bytes == 0, (uint32_t)y, (uint32_t)uv, &r);
 		if (error != 0) {
 			break;
+		}
+		/*
+		 * Zero copy: the block decoded into the client's surface (the frame's slot), which nobody locked for writing. Its seed changes, so a
+		 * reader that keeps what it made of the pixels (the window server's converted YCbCr texture of a video frame,
+		 * metal2vulkan's surface_watch.rs) makes it again.
+		 */
+		if (I.zc && !r.finished) {
+			hakios_surface_written(d->surface);
 		}
 		d->finished = r.finished;
 		d->slot = r.slot;

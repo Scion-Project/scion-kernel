@@ -3117,10 +3117,10 @@ s9dev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 }
 
 /*
- * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-camera is opened only by root and by
- * mediaserverd, the capture stack's host (libhakios.media.dylib)
+ * hakios_dev_strict=1 (drivers/core/hakios.platform.c): /dev/hakios-camera is opened only by root and by the capture
+ * stack's host: mediaserverd on iOS 16.5 (libhakios.media.dylib), cameracaptured on iOS 27 (tools/ios27/camera, cam.dylib)
  */
-static const char *const s9dev_open_programs[] = { "/usr/sbin/mediaserverd", NULL };
+static const char *const s9dev_open_programs[] = { "/usr/sbin/mediaserverd", "/usr/libexec/cameracaptured", NULL };
 
 static int
 s9dev_open_strict(dev_t dev, int flags, int type, struct proc *p)

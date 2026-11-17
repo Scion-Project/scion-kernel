@@ -14,13 +14,14 @@
 #                                             PosterBoard Fix A cache patches, full AOT rewrite (rewrite-grow -> fix-cs -> grow-check)
 #   10 macho-a64e   PAC rewrite of every arm64e Mach-O outside the caches
 #   20 launchd      hardware + crash-loop daemons only (lists/), _PanicOnCrash dropped, launchctl overrides   [DISABLE_HOGS=1 = opt-in CPU-hog list]
+#                   [CC_CONTROLS=1 / CRASH_REPORTS=1 / KEEP_JOBS="LABEL ..." = jobs left on that the set would remove; all off]
 #   30 overlay      sbca/m/b/s dylibs (brightness shim = b.dylib), libOSMesa/libsbgl, StarbiteMetal, cc_fips_test stand-in, wallpaper layers
 #   40 prefs        Reduce Motion / Transparency OFF, CA compression off, watchdogs off
 #   50 xpc-disable  MessagesBlastDoorService
 #   60 sileo        the package manager (ENABLE_SILEO=0: out)
-#   90 sensors  91 wifi  92 audio-bt  93 modem   what iOS needs to see the S9's hardware the kernel turns on by default, each
+#   90 sensors  91 wifi  92 audio-bt  93 modem  94 camera   what iOS needs to see the S9's hardware the kernel turns on by default, each
 #                   built from this checkout with the builder's Xcode (DEVELOPER_DIR), each skipped with one line when an input
-#                   only the builder has is missing (WIFI_FW_DIR, HCD), ENABLE_SENSORS/WIFI/AUDIO_BT/MODEM=0 to leave one out;
+#                   only the builder has is missing (WIFI_FW_DIR, HCD), ENABLE_SENSORS/WIFI/AUDIO_BT/MODEM/CAMERA=0 to leave one out;
 #                   a feature that fails is undone and the build goes on (STRICT=1: it stops). feature.sh has the rules.
 # After the steps, OUT.inject: the libraries the root has for the kernel to insert (inject-record.sh), which
 # tools/ios27/s9/make-boot-image.sh puts into the boot image's sweetinject= (docs/ios27/INSTALL-S9.md).

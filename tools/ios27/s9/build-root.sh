@@ -15,6 +15,8 @@
 #   ENABLE_WIFI       Wi-Fi: needs WIFI_FW_DIR=<your phone's own Wi-Fi files>; WIFI_WIFID=0 leaves wifid out
 #   ENABLE_AUDIO_BT   speakers, microphone, Bluetooth: needs HCD=<your phone's own bcm4361B2_*.hcd> and PY with numpy
 #   ENABLE_MODEM      the modem's network, bars and data (c.dylib in SpringBoard); data needs cp_apn= on the boot image's line
+#   ENABLE_CAMERA     the camera (cam.dylib in cameracaptured; docs/ios27/CAMERA.md, NOT run on a phone); needs cam_s9=7 on the
+#                     boot image's line, and then make-boot-image.sh shows the Camera app
 #   STRICT=1          a feature that fails stops the build (otherwise it is undone and the build goes on without it)
 # Next to the image: root-full.img.inject, the libraries to insert, which make-boot-image.sh reads: make the boot image again
 # after the root. About 40 minutes.
