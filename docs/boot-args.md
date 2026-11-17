@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **675 arguments**: 584 read by the kernel, 23 by the loader, 85 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **694 arguments**: 602 read by the kernel, 24 by the loader, 85 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -249,7 +249,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `soc_pas_mpss` | K | `hakios.mpss.c` | `CONFIG_SOC_PAS_MPSS` |  |
 | `soc_smem` | K | `hakios.mpss.c`, `hakios.socinfo.c` | `CONFIG_SOC_SMEM` |  |
 
-## Audio and battery (67)
+## Audio and battery (68)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -266,6 +266,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `abox_rdma_ctrl1` | K | `hakios.exynos_abox.c` | `CONFIG_ABOX_RDMA_CTRL1` |  |
 | `abox_rdma_fmt` | K | `hakios.exynos_abox.c` | `CONFIG_ABOX_RDMA_FMT` |  |
 | `abox_ring_pa` | K | `hakios.exynos_abox.c` | `CONFIG_ABOX_RING_PA` |  |
+| `abox_rmem` | K | `hakios.exynos_abox.c` | `CONFIG_ABOX_RMEM` |  |
 | `abox_route` | K | `hakios.exynos_abox.c` | `CONFIG_ABOX_ROUTE` |  |
 | `abox_sbank` | K | `hakios.exynos_abox.c` | `CONFIG_ABOX_SBANK` |  |
 | `abox_secs` | K | `hakios.exynos_abox.c` | `CONFIG_ABOX_SECS` |  |
@@ -481,10 +482,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `virtio_net_ssid` | K | `hakios.virtio_net.c` | `CONFIG_VIRTIO_NET_SSID` |  |
 | `virtio_net_wifi` | K | `hakios.virtio_net.c` | `CONFIG_VIRTIO_NET_WIFI` |  |
 
-## USB (9)
+## USB (10)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `devsh` | K | `hakios.dwc3.c` | `CONFIG_DEVSH` |  |
 | `usb_gadget` | K | `hakios.dwc3.c` | `CONFIG_USB_GADGET` |  |
 | `usb_gadget_clk` | K | `hakios.dwc3.c` | `CONFIG_USB_GADGET_CLK` |  |
 | `usb_gadget_crlf` | K | `hakios.dwc3.c` | `CONFIG_USB_GADGET_CRLF` |  |
@@ -575,10 +577,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ustacks_threads` | K | `user_exception_trace.c` | `CONFIG_USTACKS_THREADS` |  |
 | `ustacks_tname` | K | `user_exception_trace.c` | `CONFIG_USTACKS_TNAME` |  |
 
-## Loader (13)
+## Loader (14)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `adt_layer` | L | `loader.c` | `CONFIG_ADT_LAYER` |  |
 | `core0` | KL | `loader.c`, `psci_smp.c` | `CONFIG_CORE0` |  |
 | `core1` | L | `loader.c` | `CONFIG_CORE1` |  |
 | `cpumask` | L | `loader.c` | `CONFIG_CPUMASK` |  |
@@ -593,7 +596,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (170)
+## User space (186)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -607,6 +610,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `bt_baud` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_BAUD` |  |
 | `bt_expander_reset` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_EXPANDER_RESET` |  |
 | `bt_hcd` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_HCD` |  |
+| `bt_hcd_wait` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_HCD_WAIT` |  |
 | `bt_keep` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_KEEP` |  |
 | `bt_module` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_MODULE` |  |
 | `bt_scan` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_SCAN` |  |
@@ -615,6 +619,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `bt_uart_mhz` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_UART_MHZ` |  |
 | `bt_vendor` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_VENDOR` |  |
 | `bt_vendor_part` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_VENDOR_PART` |  |
+| `bt_vsc_ok` | K | `hakios.bcm4361_bt.c` | `CONFIG_BT_VSC_OK` |  |
 | `bus_log` | K | `hakios.exynos_acpm.c` | `CONFIG_BUS_LOG` |  |
 | `bus_mask` | K | `hakios.exynos_acpm.c` | `CONFIG_BUS_MASK` |  |
 | `bus_max` | K | `hakios.exynos_acpm.c` | `CONFIG_BUS_MAX` |  |
@@ -659,6 +664,20 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cohtest` | K | `hakios.exynos_m3.c` | `CONFIG_COHTEST` |  |
 | `cohtest_delay` | K | `hakios.exynos_m3.c` | `CONFIG_COHTEST_DELAY` |  |
 | `console_quiet` | K | `1003-avf-console-quiet.patch` | `CONFIG_CONSOLE_QUIET` |  |
+| `cp` | K | `hakios.shannon.c` | `CONFIG_CP` |  |
+| `cp_apn` | K | `hakios.shannon.c` | `CONFIG_CP_APN` |  |
+| `cp_delay` | K | `hakios.shannon.c` | `CONFIG_CP_DELAY` |  |
+| `cp_ds` | K | `hakios.shannon.c` | `CONFIG_CP_DS` |  |
+| `cp_if` | K | `hakios.shannon.c` | `CONFIG_CP_IF` |  |
+| `cp_if_kb` | K | `hakios.shannon.c` | `CONFIG_CP_IF_KB` |  |
+| `cp_nv` | K | `hakios.shannon.c` | `CONFIG_CP_NV` |  |
+| `cp_ping` | K | `hakios.shannon.c` | `CONFIG_CP_PING` |  |
+| `cp_rev` | K | `hakios.shannon.c` | `CONFIG_CP_REV` |  |
+| `cp_rfs` | K | `hakios.shannon.c` | `CONFIG_CP_RFS` |  |
+| `cp_route` | K | `hakios.shannon.c` | `CONFIG_CP_ROUTE` |  |
+| `cp_sim` | K | `hakios.shannon.c` | `CONFIG_CP_SIM` |  |
+| `cp_vss` | K | `hakios.shannon.c` | `CONFIG_CP_VSS` |  |
+| `cp_wait` | K | `hakios.shannon.c` | `CONFIG_CP_WAIT` |  |
 | `cpufreq_gov` | K | `hakios.exynos_cpufreq.c` | `CONFIG_CPUFREQ_GOV` |  |
 | `cpufreq_gov_big_dual` | K | `hakios.exynos_cpufreq.c` | `CONFIG_CPUFREQ_GOV_BIG_DUAL` |  |
 | `cpufreq_gov_big_max` | K | `hakios.exynos_cpufreq.c` | `CONFIG_CPUFREQ_GOV_BIG_MAX` |  |

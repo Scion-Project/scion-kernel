@@ -19,6 +19,11 @@
 #   50 xpc-disable  MessagesBlastDoorService
 # NOT applied (owner wants the real iOS 27): the 86 "speed" daemon trims, Spotlight/Siri/photos/ML/intelligence off-switches.
 # Env: SIZE_GB=32  OUT=out/root-full.img  REUSE_CACHE=1 (use work/cache if its DONE marker exists)  DISABLE_HOGS=1  KEEP_MOUNTED=1
+# DEVICE=frankel (the Pixel 10, Tensor G5; docs/ios27/PIXEL10.md; NOT TESTED: no root has been built or booted for it): its cores
+#   run arm64e and every ARMv8.x instruction the cache uses (Cortex-A520/A725/X4 TRMs: APA3 5, GPA3 1, LSE, FP16, LRCPC2 ...),
+#   so the stock cache is staged unrewritten (no cache pipeline) and the steps that only undo or repair the rewrite
+#   (lists/skip-frankel.list: 10 macho-a64e, 85 textdata-restore) and the S9's Mali GPU bundle (80 metal-ca) are skipped; the
+#   overlay is $IOS27_PRIVATE/overlay-frankel (no Mali GL/Metal pieces). `flash` refuses: there is no flashing tool for a Pixel here.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); cd "$HERE"
 PIPE=${IOS27_PIPELINE:-$HERE/pipeline}; export IOS27_PIPELINE=$PIPE   # cache pipeline + stage script (public part; private pieces via IOS27_PRIVATE)
@@ -27,6 +32,9 @@ cmd=${1:-}; shift || true
 ADB=${ADB:-adb}
 PY=${PY:-python3}; export PY
 IPSW=${IPSW:-$HERE/ipsw}
+DEVICE=${DEVICE:-starlte}
+case $DEVICE in starlte|frankel) ;; *) echo "DEVICE=starlte or frankel" >&2; exit 2;; esac
+[[ $DEVICE == frankel ]] && export OVERLAY=${OVERLAY:-$IOS27_PRIVATE/overlay-frankel}
 OS_DMG=${OS_DMG:-$IPSW/043-70213-665.dmg}; SYS_DMG=${SYS_DMG:-$IPSW/043-69708-712.dmg}; APP_DMG=${APP_DMG:-$IPSW/043-69297-793.dmg}
 BUILD_VERSION=${BUILD_VERSION:-24A446}
 SIZE_GB=${SIZE_GB:-32}; OUT=${OUT:-$HERE/out/root-full.img}; W=$HERE/work
@@ -52,11 +60,13 @@ build)
     attach_src "$OS_DMG" "$OSMNT"; attach_src "$SYS_DMG" "$SYSMNT"; attach_src "$APP_DMG" "$APPMNT"
     cleanup() { detach_if "${ROOTMNT:-}"; [[ -n ${RDEV:-} ]] && hdiutil detach "$RDEV" >/dev/null 2>&1 || true; detach_if "$OSMNT"; detach_if "$SYSMNT"; detach_if "$APPMNT"; }
     trap cleanup EXIT
+    if [[ $DEVICE == frankel ]]; then log "frankel: the stock cache, not rewritten"; else
     if [[ ${REUSE_CACHE:-0} == 1 && -f $W/cache/DONE ]]; then log "reusing $W/cache"; else
         log "cache pipeline (a64e, LSE, corecrypto, PACGA, patches, full AOT rewrite)"
         sudo -u "$OWNER" -H env PY="$PY" IOS27_PRIVATE="$IOS27_PRIVATE" "$PIPE/cache-pipeline.sh" "$SYSMNT/System/Library/Caches/com.apple.dyld" "$W/cache" 2>&1 | tee "$W/cache-pipeline.log"
         grep -q CACHE-PIPELINE-DONE "$W/cache-pipeline.log" || { echo "cache pipeline failed" >&2; exit 1; }
         sudo -u "$OWNER" touch "$W/cache/DONE"
+    fi
     fi
     # ---- 2. blank HFSX volume, byte 0 of USERDATA ----
     log "creating ${SIZE_GB} GiB sparse raw image $OUT"
@@ -66,13 +76,16 @@ build)
     mount -t hfs -o owners "$RDEV" "$ROOTMNT"
     # ---- 3. stage: full OS + cryptexes, all apps, rewritten cache ----
     log "staging (this copies ~22 GB)"
-    CACHE_SRC=$W/cache/c STAGE_ALL_APPS=1 INSTALL_STAGED_APPS=1 bash "$PIPE/root/stage-full-root.sh" "$OSMNT" "$SYSMNT" "$APPMNT" "$ROOTMNT"
+    CACHE_SRC=$([[ $DEVICE == frankel ]] || echo "$W/cache/c") STAGE_ALL_APPS=1 INSTALL_STAGED_APPS=1 bash "$PIPE/root/stage-full-root.sh" "$OSMNT" "$SYSMNT" "$APPMNT" "$ROOTMNT"
     log "herolte tune (setup done, CommCenter out, autorun job, containers skeleton)"
     bash "$IOS27_PRIVATE/herolte-tune-ios-root.sh" "$ROOTMNT" "$BUILD_VERSION"
     n=0; for app in "$ROOTMNT"/private/var/staged_system_apps/*.app; do [[ -d $app && -d $ROOTMNT/Applications/$(basename "$app") ]] || continue; rm -rf "$app"; n=$((n+1)); done
     echo "staged_system_apps: removed $n copies already in /Applications"
     # ---- 4. steps ----
-    for s in "$HERE"/steps.d/[0-9][0-9]-*.sh; do log "step $(basename "$s")"; bash "$s" "$ROOTMNT"; done
+    for s in "$HERE"/steps.d/[0-9][0-9]-*.sh; do
+        if [[ $DEVICE == frankel ]] && grep -qx "$(basename "$s")" "$HERE/lists/skip-frankel.list"; then log "step $(basename "$s"): skipped on frankel"; continue; fi
+        log "step $(basename "$s")"; bash "$s" "$ROOTMNT"
+    done
     sync
     log "offline checks"; chk=0; bash "$HERE/check-root.sh" "$ROOTMNT" | tee "$W/check-root.log" || true; grep -q "ALL HARD CHECKS PASSED" "$W/check-root.log" || chk=1
     df -h "$ROOTMNT"; sync
@@ -92,6 +105,7 @@ check)
     exec bash "$HERE/check-root.sh" "${1:?mounted root}"
     ;;
 flash)
+    [[ $DEVICE == starlte ]] || { echo "flash: the Galaxy S9 (TWRP) only; nothing here writes to a Pixel" >&2; exit 2; }
     SERIAL=${1:?usage: flash SERIAL IMG [BOOT]}; IMG=${2:?IMG}; BOOT=${3:-}
     export ANDROID_SERIAL=$SERIAL
     A="$ADB -s $SERIAL"

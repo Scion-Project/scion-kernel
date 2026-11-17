@@ -12,6 +12,7 @@ ABOX_RDMA_CTRL0	arg	abox_rdma_ctrl0	Audio and battery	k	hakios.exynos_abox.c	bit
 ABOX_RDMA_CTRL1	arg	abox_rdma_ctrl1	Audio and battery	k	hakios.exynos_abox.c	RDMA0's CTRL1 (none: as it reads after reset)
 ABOX_RDMA_FMT	arg	abox_rdma_fmt	Audio and battery	k	hakios.exynos_abox.c	leave RDMA0 CTRL0's FORMAT/FUNC/BUF_UPDATE and SBANK_LIMIT as they read (1: calliope's values)
 ABOX_RING_PA	hex	abox_ring_pa	Audio and battery	k	hakios.exynos_abox.c	the ring at this physical address of abox_rmem (0xFB200000 + 40 MB) instead of the kernel's memory
+ABOX_RMEM	arg	abox_rmem	Audio and battery	k	hakios.exynos_abox.c	
 ABOX_ROUTE	arg	abox_route	Audio and battery	k	hakios.exynos_abox.c	UAIF1 from SIFS0, the mixer (SPUS_CTRL0 OUT 1, MIXP_FORMAT, ROUTE_CTRL0 [7:4] = 1), instead of SIFS1
 ABOX_SBANK	arg	abox_sbank	Audio and battery	k	hakios.exynos_abox.c	
 ABOX_SECS	arg	abox_secs	Audio and battery	k	hakios.exynos_abox.c	how long step 7 plays its tone, 1 to 10 seconds (3)
@@ -39,6 +40,7 @@ ADSP_PAUSE	arg	adsp_pause	Audio and battery	k	hakios.adsp.c
 ADSP_RETURN	arg	adsp_return	Audio and battery	k	hakios.adsp.c	
 ADSP_STEP	arg	adsp_step	Audio and battery	k	hakios.adsp.c	
 ADSP_WAIT	arg	adsp_wait	Audio and battery	k	hakios.adsp.c	
+ADT_LAYER	arg	adt_layer	Loader	l	loader.c	
 APFS_CHEAP	arg	apfs_cheap	Storage and APFS	k	apfs_vfsops.c	
 APFS_CHECK	arg	apfs_check	Storage and APFS	k	hakios.apfs_check.c	walk the whole volume and print only the totals
 APFS_CHUNK	arg	apfs_chunk	Storage and APFS	k	hakios.apfs_check.c	
@@ -88,6 +90,7 @@ BT_AGAIN	arg	bt_again	User space	k	hakios.bt.c	the second look this many seconds
 BT_BAUD	arg	bt_baud	User space	k	hakios.bcm4361_bt.c	
 BT_EXPANDER_RESET	arg	bt_expander_reset	User space	k	hakios.bcm4361_bt.c	at bt=2 and up, take the expander out of reset if it is held there
 BT_HCD	arg	bt_hcd	User space	k	hakios.bcm4361_bt.c	the patch file's name in fw/ (default bcm4361B2.hcd); without it, the phone's own from VENDOR
+BT_HCD_WAIT	arg	bt_hcd_wait	User space	k	hakios.bcm4361_bt.c	
 BT_KEEP	arg	bt_keep	User space	k	hakios.bcm4361_bt.c	leave the chip powered at the end (default: BT_EN and BT_WAKE low once the steps are done or one fails)
 BT_MODULE	arg	bt_module	User space	k	hakios.bcm4361_bt.c	murata or semco: which patch (bcm4361B2_<m>.hcd; default: the module Wi-Fi read in OTP, else a guess)
 BT_SCAN	arg	bt_scan	User space	k	hakios.bcm4361_bt.c	
@@ -96,6 +99,7 @@ BT_TTY	arg	bt_tty	User space	k	hakios.bcm4361_bt.c
 BT_UART_MHZ	arg	bt_uart_mhz	User space	k	hakios.bcm4361_bt.c	UART_BT's clock in MHz, if bt=1 shows the divider or mux not as Android leaves them (default 200)
 BT_VENDOR	arg	bt_vendor	User space	k	hakios.bcm4361_bt.c	never read the patch from the phone's VENDOR partition (default: read it there with ufs=2)
 BT_VENDOR_PART	arg	bt_vendor_part	User space	k	hakios.bcm4361_bt.c	the partition the patch is read from (default VENDOR)
+BT_VSC_OK	arg	bt_vsc_ok	User space	k	hakios.bcm4361_bt.c	
 BUS_LOG	arg	bus_log	User space	k	hakios.exynos_acpm.c	do not log the APM's tables at boot (default: one line per domain, read only)
 BUS_MASK	arg	bus_mask	User space	k	hakios.exynos_acpm.c	
 BUS_MAX	arg	bus_max	User space	k	hakios.exynos_acpm.c	MIF, INT and DISP to their top at boot, kept there (re-asked every 10 s, cheap)
@@ -173,6 +177,20 @@ COHTEST_DELAY	arg	cohtest_delay	User space	k	hakios.exynos_m3.c
 CONSOLE_QUIET	arg	console_quiet	User space	k	1003-avf-console-quiet.patch	
 CORE0	arg	core0	Loader	kl	loader.c,psci_smp.c	the kernel's box for this core (above), if it has one, and only with a kernel on another core to watch
 CORE1	arg	core1	Loader	l	loader.c	core 1, which S-Boot uses for its own display work, listed for the kernel all the same
+CP	arg	cp	User space	k	hakios.shannon.c	
+CP_APN	arg	cp_apn	User space	k	hakios.shannon.c	the access point name stage 6 asks the data context for (the operator's published default; none: no stage 6)
+CP_DELAY	arg	cp_delay	User space	k	hakios.shannon.c	seconds after the boot before the modem's driver does anything (30), so that its lines are in the log
+CP_DS	arg	cp_ds	User space	k	hakios.shannon.c	the dual SIM field told to the modem (0)
+CP_IF	arg	cp_if	User space	k	hakios.shannon.c	with cp=6 or 7 and cp_apn: the active data context becomes a network interface, pdp_ip0 (IPv4, point to point, the CP's address for it), and stays
+CP_IF_KB	arg	cp_if_kb	User space	k	hakios.shannon.c	with cp_if=1: at most N KB through pdp_ip0 in a boot, both ways (2048 by default; the owner's mobile plan), then it drops
+CP_NV	arg	cp_nv	User space	k	hakios.shannon.c	the phone's own NV data, a file nv_data.bin the image's builder put beside the kernel, is given to the modem (none: zeros, and no stage 4)
+CP_PING	arg	cp_ping	User space	k	hakios.shannon.c	the address stage 7 sends its one echo request to (none: the context's first DNS server)
+CP_REV	arg	cp_rev	User space	k	hakios.shannon.c	the board's revision told to the modem (26, this phone's)
+CP_RFS	arg	cp_rfs	User space	k	hakios.shannon.c	an OPEN FILE answered from RAM: the file is not there
+CP_ROUTE	arg	cp_route	User space	k	hakios.shannon.c	with cp_if=1: an IPv4 default route through pdp_ip0 (only when there is none yet: Wi-Fi's wins)
+CP_SIM	arg	cp_sim	User space	k	hakios.shannon.c	in low power mode, once the SIM is ready, one read of its administrative data file (EF_AD, 4 bytes: no identity) is asked, to see if the modem takes
+CP_VSS	arg	cp_vss	User space	k	hakios.shannon.c	the image's VSS part (the voice processor's) is not copied
+CP_WAIT	arg	cp_wait	User space	k	hakios.shannon.c	seconds the started modem is watched before it is put back in reset (20; 25 with the link)
 CPUFREQ_GOV	arg	cpufreq_gov	User space	k	hakios.exynos_cpufreq.c	run it (0, or none: the fixed rates of cpufreq_lit= and cpufreq_big=)
 CPUFREQ_GOV_BIG_DUAL	arg	cpufreq_gov_big_dual	User space	k	hakios.exynos_cpufreq.c	
 CPUFREQ_GOV_BIG_MAX	arg	cpufreq_gov_big_max	User space	k	hakios.exynos_cpufreq.c	
@@ -197,6 +215,7 @@ CS_RELAX_PLATFORM_TASK_PORTS	arg	cs_relax_platform_task_ports	User space	k	1002-
 DDR	arg	ddr	CPU, memory and boot	k	hakios.cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
 DDR_REST	arg	ddr_rest	CPU, memory and boot	k	hakios.cpufreq.c	
 DDR_VOTE	arg	ddr_vote	CPU, memory and boot	k	hakios.cpufreq.c	
+DEVSH	arg	devsh	USB	k	hakios.dwc3.c	
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
 EARLY_LOG	arg	early_log	CPU, memory and boot	k	loader_return.c	right after ml_parse_cpu_topology(), what the kernel will match each processor's MPIDR against
 ESSLOG	arg	esslog	CPU, memory and boot	k	loader_return.c	

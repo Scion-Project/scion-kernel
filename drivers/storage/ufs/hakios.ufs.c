@@ -1092,7 +1092,25 @@ ufs_strategy(buf_t bp)
 	if (offset + len > size) {
 		len = size - offset;
 	}
-	error = ufs_read(part, offset, (uint8_t *)buf_dataptr(bp), len);
+	/*
+	 * A buffer of pages with no kernel mapping (cluster I/O: an exec's page-in on xnu-12377's HFS) has no data pointer:
+	 * map it for the copy, as a block driver must (buf_map); a mapped one is read into as before.
+	 */
+	caddr_t dst = (caddr_t)buf_dataptr(bp);
+	bool mapped = false;
+	if (dst == NULL) {
+		if (buf_map(bp, &dst) != 0 || dst == NULL) {
+			buf_seterror(bp, EIO);
+			buf_setresid(bp, buf_count(bp));
+			buf_biodone(bp);
+			return;
+		}
+		mapped = true;
+	}
+	error = ufs_read(part, offset, (uint8_t *)dst, len);
+	if (mapped) {
+		(void)buf_unmap(bp);
+	}
 	buf_setresid(bp, (uint32_t)(buf_count(bp) - (error ? 0 : len)));
 	if (error) {
 		buf_seterror(bp, error);
@@ -3712,4 +3730,26 @@ hakios_ufs_init(void)
 			thread_deallocate(thread);
 		}
 	}
+}
+
+/*
+ * The block device of the partition NAME (a GPT name, as /dev/ufs_NAME has it), for a kernel that roots on it directly:
+ * FRANKEL's IOFindBSDRoot with rd=ufsroot0 (sweet_ufs_rootdev, ufs_root=NAME). ENODEV before hakios_ufs_init() made the
+ * nodes, ENOENT when no such partition. Nothing else changes here: the device is the read-only one every partition has.
+ */
+int hakios_ufs_dev_by_name(const char *name, dev_t *dev);
+int
+hakios_ufs_dev_by_name(const char *name, dev_t *dev)
+{
+	if (ufs_page == NULL || ufs_bmajor < 0) {
+		return ENODEV;
+	}
+	for (uint32_t i = 0; i < ufs_parts; i++) {
+		if ((ufs_page->part[i].flags & BLOCK_PART_UNIT) == 0 &&
+		    strcmp((const char *)ufs_page->part[i].name, name) == 0) {
+			*dev = makedev(ufs_bmajor, i);
+			return 0;
+		}
+	}
+	return ENOENT;
 }

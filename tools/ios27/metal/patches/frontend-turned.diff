@@ -1,0 +1,211 @@
+--- a/tools/ios27/metal2/NativeBridgeMetalFrontend.mm	2026-11-12 16:10:16
++++ b/tools/ios27/metal2/NativeBridgeMetalFrontend.mm	2026-11-12 16:10:16
+@@ -10,6 +10,7 @@
+ #import <Metal/Metal.h>
+ #import <IOSurface/IOSurfaceRef.h>
+ #import <objc/runtime.h>
++#import <objc/message.h>
+ #include <algorithm>
+ #include <atomic>
+ #include <initializer_list>
+@@ -177,6 +178,11 @@
+ @property(nonatomic) NSUInteger parentRelativeLevel,parentRelativeSlice;
+ @property(nonatomic,strong) id<MTLHeap> parentHeap;
+ @property(nonatomic) int responsibleProcess;
++// A turned texture (the descriptor's rotation, Metal's private property of textures over a surface): the picture is drawn into
++// this texture, unturned, in device memory; turnedTarget is the texture over the surface itself, written from it at commit.
++@property(nonatomic,strong) NBTexture *turnedTarget;
++@property(nonatomic) NSUInteger turn;
++@property(nonatomic) IOSurfaceRef turnedSurface;
+ @end
+ @implementation NBBuffer
+ - (void)dealloc {
+@@ -351,6 +357,7 @@
+    nmb_texture_release(_handle);
+  }
+  if(_surface)CFRelease(_surface);
++ if(_turnedSurface)CFRelease(_turnedSurface);
+ }
+ - (MTLTextureType)textureType {return (MTLTextureType)_descriptor.type;}
+ - (MTLPixelFormat)pixelFormat {return (MTLPixelFormat)_descriptor.format;}
+@@ -376,7 +383,7 @@
+ - (NSUInteger)compressionFootprint {return 0;}
+ - (MTLTextureSwizzleChannels)swizzle {return MTLTextureSwizzleChannelsMake(MTLTextureSwizzleRed,MTLTextureSwizzleGreen,MTLTextureSwizzleBlue,MTLTextureSwizzleAlpha);}
+ - (uint32_t)swizzleKey {return 0;}
+-- (IOSurfaceRef)iosurface {return _surface;}
++- (IOSurfaceRef)iosurface {return _surface?_surface:_turnedSurface;}
+ - (NSUInteger)iosurfacePlane {return _surfacePlane;}
+ - (id<MTLBuffer>)buffer {return _surface?nil:(id<MTLBuffer>)_buffer;}
+ - (NSUInteger)bufferOffset {return _offset;}
+@@ -388,7 +395,7 @@
+ - (MTLResourceID)gpuResourceID {return sweetResourceID(_handle);}
+ - (NSUInteger)resourceIndex {return 0;}
+ - (NSUInteger)uniqueIdentifier {return (NSUInteger)(uintptr_t)_handle;}
+-- (NSUInteger)rotation {return 0;}
++- (NSUInteger)rotation {return _turn;}
+ - (NSUInteger)allocatedSize {
+  if(_surface)return IOSurfaceGetAllocSize(_surface);
+  if(_buffer && !_rowBytes)return [_buffer allocatedSize];
+@@ -948,6 +955,7 @@
+ @property(nonatomic) uint32_t commitIndex;
+ @property(nonatomic,strong) NSMutableArray *scheduledHandlers,*completedHandlers;
+ @property(nonatomic,strong) NSMutableSet *surfaces,*writtenSurfaces;
++@property(nonatomic,strong) NSMutableSet *turned;   // turned textures this buffer drew into or copied with (see sweetEncodeTurns)
+ // Runtime handles retain GPU storage, but only the Objective-C owner retains
+ // a no-copy deallocator, its memory owner and texture/heap ancestry.
+ @property(nonatomic,strong) NSMutableSet *resourceOwners;
+@@ -956,7 +964,9 @@
+ @property(nonatomic) BOOL schedulingDelivered;
+ @property(nonatomic,strong) NSMutableDictionary *userDict;
+ - (void)refuse:(NSString *)what;
++- (void)noteTurned:(NBTexture *)texture;
+ @end
++static void sweetEncodeTurns(NBCommandBuffer *commandBuffer);
+ @interface NBEncoder : NBObject
+ @property(nonatomic) NmbEncoder *handle;
+ @property(nonatomic,strong) NBCommandBuffer *commandBuffer;
+@@ -1287,6 +1297,7 @@
+   if(![o isKindOfClass:[NBTexture class]]){[self.commandBuffer refuse:@"missing or foreign blit texture"];return false;}
+   [self.commandBuffer.resourceOwners addObject:o];
+   if([(NBTexture *)o surface])[self.commandBuffer.surfaces addObject:o];
++  [self.commandBuffer noteTurned:(NBTexture *)o];
+  }
+  return true;
+ }
+@@ -1403,6 +1414,69 @@
+ 
+ static void completed(void *context);
+ static void scheduled(void *context);
++// Turned textures. CoreAnimation draws a display that shows the interface on its side into the display's own surfaces through
++// a texture whose descriptor carries a rotation (a private property of Metal's descriptor; 3 on a phone held in landscape) and
++// the turned size (1792 x 828 over a surface of 828 x 1792 with 3328 bytes a row): the GPU is to store the picture turned, so
++// that the surface still holds what the panel scans out. No Vulkan image can lie over the surface that way, so the texture the
++// caller gets is one of the asked shape in device memory (everything drawn into it and sampled from it is as the caller means
++// it), and every command buffer that drew into it ends with one more pass: a triangle over the surface's own texture that
++// reads the picture through the turn (TurnShaders.metal). The surface is written before the buffer completes, which is when
++// the window server hands it to the display. Cost: one pass over the screen per frame while the interface is turned.
++#include "TurnShaders.inc"          // sweet_turn_metallib[]: TurnShaders.metal, built by the bundle's script
++static std::mutex gTurnLock;
++static id<MTLLibrary> gTurnLibrary;
++static id<MTLSamplerState> gTurnSampler;
++static NSMutableDictionary<NSNumber *,id<MTLRenderPipelineState>> *gTurnPipelines;
++static std::atomic<uint64_t> gTurnPasses;
++// The pipeline that writes a surface of this pixel format through this turn (1, 2 or 3 quarter turns), or nil with the reason logged.
++static id<MTLRenderPipelineState> sweetTurnPipeline(MTLPixelFormat format,NSUInteger turn) {
++ if(turn<1 || turn>3 || !gDeviceObject)return nil;
++ std::lock_guard<std::mutex> lock(gTurnLock);
++ id<MTLDevice> device=(id<MTLDevice>)gDeviceObject;NSError *error=nil;
++ if(!gTurnPipelines)gTurnPipelines=[NSMutableDictionary dictionary];
++ NSNumber *key=@(((uint64_t)format<<2)|turn);
++ if(id<MTLRenderPipelineState> made=gTurnPipelines[key])return made;
++ if(!gTurnLibrary) {
++  dispatch_data_t data=dispatch_data_create(sweet_turn_metallib,sizeof sweet_turn_metallib,nullptr,DISPATCH_DATA_DESTRUCTOR_DEFAULT);
++  gTurnLibrary=[device newLibraryWithData:data error:&error];
++  if(!gTurnLibrary){NBLOG(@"native-metal: turned textures: the library was refused: %@",error.localizedDescription);return nil;}
++ }
++ if(!gTurnSampler) {
++  MTLSamplerDescriptor *sd=[MTLSamplerDescriptor new];
++  sd.minFilter=MTLSamplerMinMagFilterNearest;sd.magFilter=MTLSamplerMinMagFilterNearest;sd.mipFilter=MTLSamplerMipFilterNotMipmapped;
++  sd.sAddressMode=MTLSamplerAddressModeClampToEdge;sd.tAddressMode=MTLSamplerAddressModeClampToEdge;
++  gTurnSampler=[device newSamplerStateWithDescriptor:sd];
++  if(!gTurnSampler)return nil;
++ }
++ MTLRenderPipelineDescriptor *pd=[MTLRenderPipelineDescriptor new];
++ pd.vertexFunction=[gTurnLibrary newFunctionWithName:@"sweet_turn_vert"];
++ pd.fragmentFunction=[gTurnLibrary newFunctionWithName:[NSString stringWithFormat:@"sweet_turn_frag_%lu",(unsigned long)turn]];
++ pd.colorAttachments[0].pixelFormat=format;
++ id<MTLRenderPipelineState> state=(pd.vertexFunction && pd.fragmentFunction)?[device newRenderPipelineStateWithDescriptor:pd error:&error]:nil;
++ if(!state){NBLOG(@"native-metal: turned textures: no pipeline for format %lu turn %lu: %@",(unsigned long)format,(unsigned long)turn,error.localizedDescription);return nil;}
++ gTurnPipelines[key]=state;
++ return state;
++}
++// Before the commit: each turned texture this buffer may have written goes into its surface.
++static void sweetEncodeTurns(NBCommandBuffer *commandBuffer) {
++ NSSet *turned=[commandBuffer.turned copy];[commandBuffer.turned removeAllObjects];
++ for(NBTexture *picture in turned) {
++  NBTexture *target=picture.turnedTarget;
++  id<MTLRenderPipelineState> state=sweetTurnPipeline(target.pixelFormat,picture.turn);
++  if(!state){[commandBuffer refuse:@"turned texture: no pipeline"];return;}
++  MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];
++  pass.colorAttachments[0].texture=(id<MTLTexture>)target;
++  pass.colorAttachments[0].loadAction=MTLLoadActionDontCare;pass.colorAttachments[0].storeAction=MTLStoreActionStore;
++  id<MTLRenderCommandEncoder> encoder=[(id<MTLCommandBuffer>)commandBuffer renderCommandEncoderWithDescriptor:pass];
++  [encoder setRenderPipelineState:state];
++  [encoder setFragmentTexture:(id<MTLTexture>)picture atIndex:0];
++  [encoder setFragmentSamplerState:gTurnSampler atIndex:0];
++  [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
++  [encoder endEncoding];
++  gTurnPasses++;
++ }
++ [commandBuffer.turned removeAllObjects];      // (the pass above reads the picture: it is not a new write of it)
++}
+ @implementation NBCommandBuffer
+ - (instancetype)init {
+  if((self=[super init])){_scheduledHandlers=[NSMutableArray array];_completedHandlers=[NSMutableArray array];_surfaces=[NSMutableSet set];_writtenSurfaces=[NSMutableSet set];_resourceOwners=[NSMutableSet set];_handlers=dispatch_group_create();_schedulingHandlers=dispatch_group_create();}
+@@ -1419,6 +1493,15 @@
+ - (void)refuse:(NSString *)what {
+  if(!self.encodeFailure){self.encodeFailure=what;NBLOG(@"native-metal: command buffer refused: %@",what);}
+ }
++// A turned texture, or a view of one, that a pass of this buffer draws into (or a blit copies with): its surface is written at commit.
++- (void)noteTurned:(NBTexture *)texture {
++ for(NBTexture *root=texture;root;root=(NBTexture *)root.parent) {
++  if(!root.turnedTarget)continue;
++  if(!_turned)_turned=[NSMutableSet set];
++  [_turned addObject:root];
++  return;
++ }
++}
+ - (MTLCommandBufferStatus)status {
+  if(self.failedLocally)return MTLCommandBufferStatusError;
+  return (MTLCommandBufferStatus)nmb_command_buffer_status(_handle);
+@@ -1498,6 +1581,7 @@
+   if(!a.texture)return true;
+   if(![(id)a.texture isKindOfClass:[NBTexture class]])return false;
+   NBTexture *texture=(NBTexture *)a.texture;if(texture.surface){[_surfaces addObject:texture];[_writtenSurfaces addObject:texture];}
++  [self noteTurned:texture];
+   [_resourceOwners addObject:texture];
+   out.texture=texture.handle;out.level=a.level;out.slice=a.slice;out.depth_plane=a.depthPlane;out.load=a.loadAction;out.store=a.storeAction;
+   return true;
+@@ -1575,6 +1659,7 @@
+ }
+ - (void)commit {
+  if(self.committed){NBLOG(@"native-metal: commit twice");return;}
++ if(_turned.count && !self.encodeFailure)sweetEncodeTurns(self);
+  self.committed=YES;
+  self.committedUs=nowUs();
+  {
+@@ -2290,6 +2375,34 @@
+ // 4 KiB context by Turnip), so every process that imports the surface renders and samples the same memory.
+ - (id<MTLTexture>)newTextureWithDescriptor:(MTLTextureDescriptor *)d iosurface:(IOSurfaceRef)surface plane:(NSUInteger)plane {
+  if(!surface || !d)return nil;
++ // A turned texture (above, "Turned textures"): the surface's own texture, unturned, and the picture in device memory.
++ const NSUInteger turn=[d respondsToSelector:@selector(rotation)]?((NSUInteger(*)(id,SEL))objc_msgSend)(d,@selector(rotation)):0;
++ if(turn) {
++  const size_t sw=IOSurfaceGetPlaneCount(surface)?IOSurfaceGetWidthOfPlane(surface,plane):IOSurfaceGetWidth(surface);
++  const size_t sh=IOSurfaceGetPlaneCount(surface)?IOSurfaceGetHeightOfPlane(surface,plane):IOSurfaceGetHeight(surface);
++  const bool quarter=(turn&1)!=0;
++  if(turn>3 || d.textureType!=MTLTextureType2D || d.mipmapLevelCount>1 || d.sampleCount>1 ||
++     d.width!=(quarter?sh:sw) || d.height!=(quarter?sw:sh)) {
++   NBLOG(@"native-metal: turned texture refused: %lux%lu turn %lu over a surface of %zux%zu",(unsigned long)d.width,(unsigned long)d.height,(unsigned long)turn,sw,sh);
++   return nil;
++  }
++  MTLTextureDescriptor *own=[d copy];
++  ((void(*)(id,SEL,NSUInteger))objc_msgSend)(own,@selector(setRotation:),0);
++  own.width=sw;own.height=sh;own.usage=d.usage|MTLTextureUsageRenderTarget;
++  NBTexture *target=(NBTexture *)[(id<MTLDevice>)self newTextureWithDescriptor:own iosurface:surface plane:plane];
++  if(!target)return nil;
++  if(!sweetTurnPipeline(target.pixelFormat,turn))return nil;
++  MTLTextureDescriptor *shape=[d copy];
++  ((void(*)(id,SEL,NSUInteger))objc_msgSend)(shape,@selector(setRotation:),0);
++  shape.storageMode=MTLStorageModePrivate;shape.usage=d.usage|MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
++  NBTexture *picture=(NBTexture *)[(id<MTLDevice>)self newTextureWithDescriptor:shape];
++  if(!picture)return nil;
++  picture.turnedTarget=target;picture.turn=turn;picture.turnedSurface=(IOSurfaceRef)CFRetain(surface);picture.noRecycle=YES;
++  static std::atomic<int> said{0};
++  if(said.fetch_add(1)<4){char line[200];snprintf(line,sizeof line,"native-metal: turned texture %lux%lu fmt %lu turn %lu over surface %u (%zux%zu)",
++   (unsigned long)d.width,(unsigned long)d.height,(unsigned long)d.pixelFormat,(unsigned long)turn,IOSurfaceGetID(surface),sw,sh);sm2_logs(line);}
++  return (id<MTLTexture>)picture;
++ }
+  const size_t planeCount=IOSurfaceGetPlaneCount(surface);
+  if(planeCount>2 || (planeCount?plane>=planeCount:plane!=0))return nil;
+  void *rawBase=IOSurfaceGetBaseAddress(surface);const size_t page=(size_t)getpagesize(),allocation=IOSurfaceGetAllocSize(surface);

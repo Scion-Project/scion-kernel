@@ -57,6 +57,7 @@ This supersedes the summary in `NOTICE`, which stays as the short, canonical lis
 | Mesa (GL=1 images) | `tools/mk-mesa.sh` | Mesa project | MIT and others |
 | Mesa's gfxstream guest Vulkan driver (`src/gfxstream`, with the Vulkan runtime it builds on) | `tools/gfxstream/mk-vk.sh` | Google / AOSP via the Mesa project | MIT |
 | gfxstream (codegen descriptions; host renderer for the Scion app) | `tools/gfxstream/fetch.sh`, `mk-host-android.sh` | Google | Apache-2.0 (some MIT) |
+| Android's list of access point names (data for an image's APN table; not in the repository) | `tools/apn-table.py` (fetched from android.googlesource.com/device/sample at a pinned commit, SHA-256 checked) | The Android Open Source Project | Apache-2.0 |
 | metal2vulkan (runtime, translator, AIR reader; METAL=vk images) | `tools/metal/mk-metal2vulkan.sh` (github.com/steelbrain/metal2vulkan at `720ef1ce9ae2`, with AdrenoMetal's patches and ours in `tools/metal/m2v/`) | Anees Iqbal | GPL-2.0-or-later OR LGPL-3.0-or-later; only ever in its own `libmetal2vulkan.dylib`, which can be replaced |
 | Rust toolchain and crates (ash, libc, sha2, serde ...) | `tools/metal/mk-metal2vulkan.sh` (rustup into `xnu-deps/rust`, crates.io) | the Rust project, crate authors | MIT / Apache-2.0 |
 | Turnip, Mesa's Vulkan driver (TURNIP=1) | `tools/mk-turnip.sh`, in `tools/mk-mesa.sh`'s tree | Mesa project, 25.0.7 | MIT and others |

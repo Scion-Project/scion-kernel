@@ -12,6 +12,7 @@ abox_rdma_ctrl0	k
 abox_rdma_ctrl1	k
 abox_rdma_fmt	k
 abox_ring_pa	k
+abox_rmem	k
 abox_route	k
 abox_sbank	k
 abox_secs	k
@@ -40,6 +41,7 @@ adsp_pause	k
 adsp_return	k
 adsp_step	k
 adsp_wait	k
+adt_layer	l
 apfs_cheap	k
 apfs_check	k
 apfs_chunk	k
@@ -93,6 +95,7 @@ bt_again	k
 bt_baud	k
 bt_expander_reset	k
 bt_hcd	k
+bt_hcd_wait	k
 bt_keep	k
 bt_module	k
 bt_scan	k
@@ -101,6 +104,7 @@ bt_tty	k
 bt_uart_mhz	k
 bt_vendor	k
 bt_vendor_part	k
+bt_vsc_ok	k
 bus_log	k
 bus_mask	k
 bus_max	k
@@ -183,6 +187,20 @@ cohtest_delay	k
 console_quiet	k
 core0	kl
 core1	l
+cp	k
+cp_apn	k
+cp_delay	k
+cp_ds	k
+cp_if	k
+cp_if_kb	k
+cp_nv	k
+cp_ping	k
+cp_rev	k
+cp_rfs	k
+cp_route	k
+cp_sim	k
+cp_vss	k
+cp_wait	k
 cpufreq	k
 cpufreq_gov	k
 cpufreq_gov_big_dual	k
@@ -209,6 +227,7 @@ cs_relax_platform_task_ports	k
 ddr	k
 ddr_rest	k
 ddr_vote	k
+devsh	k
 display_probe	k
 early_log	k
 epoch	k
