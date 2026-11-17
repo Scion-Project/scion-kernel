@@ -87,7 +87,7 @@ tools/qmi-test/test_qmi.c                                 1562
 userland/src/HakiosMetal.m                                1534
 userland/src/HakiosMetalCA.m                              8747
 userland/src/audio_plugin.c                               1100
-userland/src/camera_device.c                              1982
+userland/src/camera_device.c                              1985
 userland/src/camera_isp.c                                 1230
 userland/src/eagl.c                                       4781
 userland/src/gfx/gfx_gl.c                                 1083

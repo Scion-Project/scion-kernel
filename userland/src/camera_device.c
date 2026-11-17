@@ -368,6 +368,8 @@ struct output {
 
 static void let_go(struct output *out);
 
+CFDictionaryRef (*hakios_camera_colour_info)(void);     /* VideoOutputsColorInfo the graph has not set (NULL: empty) */
+
 #define OUTPUTS 3
 static const char *const output_names[OUTPUTS] = { "PrimaryScaler", "SecondaryScaler", "StillImage" };
 
@@ -566,7 +568,8 @@ stream_copy_property(CMBaseObjectRef o, CFStringRef key, CFAllocatorRef allocato
 		 * the graph set is given back as it is.
 		 */
 		pthread_mutex_lock(&s->lock);
-		value = s->colour_info != NULL ? CFRetain(s->colour_info) : new_dict();
+		value = s->colour_info != NULL ? CFRetain(s->colour_info) :     /* iOS 27: the node's own (camera_colour.c) */
+		    hakios_camera_colour_info != NULL ? hakios_camera_colour_info() : new_dict();
 		pthread_mutex_unlock(&s->lock);
 	} else if (key_is(key, "SupportedPropertiesDictionary")) {
 		value = CFRetain(s->supported);

@@ -306,6 +306,7 @@ image_added(const struct mach_header *header, intptr_t slide)
 	replace_methods();
 	scioncam_layout_fallback();
 	scioncam_no_thumbnails();
+	scioncam_colour_info();
 	if (trace_level > 0) {
 		scioncam_trace_vendor();
 		scioncam_trace_state();
