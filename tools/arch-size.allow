@@ -1,0 +1,53 @@
+# tools/arch-size.allow: the files of drivers/ and socs/ allowed over the ceiling of 800 lines (tools/arch-check.py,
+# docs/architecture.md). "path allowance [# note]". This list only shrinks: when a file is split or shortened, lower its
+# number or delete its line in the same pull request. A file not listed here may not pass the ceiling.
+#
+# Taken on 17 November 2026 from main at 131697c; where an open pull request grows the file, the allowance includes its
+# growth (its net added lines) so that it stays green, and the note names it: lower the number once it has merged.
+# hakios.focaltech_fw.h is made by a tool from the touch firmware (generated data, not code).
+drivers/audio/abox/hakios.exynos_abox.c              2362
+drivers/audio/codec/hakios.cs47l93.c                 1070
+drivers/audio/codec/hakios.max98512.c                 906
+drivers/audio/hakios.adsp.c                          3295
+drivers/audio/hakios.mic.c                           1734
+drivers/audio/hakios.sound.c                         1532
+drivers/audio/hakios.speaker.c                       1237
+drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c        2158
+drivers/camera/exynos/hakios.ak737x.c                 901
+drivers/camera/exynos/hakios.exynos_camera.c         3692
+drivers/camera/exynos/hakios.exynos_camera_rear.c    1395
+drivers/camera/exynos/hakios.exynos_camera_star2.c   4482
+drivers/camera/exynos/hakios.exynos_iris.c           1721
+drivers/camera/hakios.camera.c                       4754
+drivers/display/dpu/hakios.exynos_dpu.c              1043  # 749 today, and the growth of open pull request #329
+drivers/display/panel/hakios.s6e3ha8_gamma.h          913
+drivers/gpu/adreno/hakios.adreno.c                   4114
+drivers/gpu/hakios.gpu.cpp                           1412
+drivers/gpu/mali/hakios.mali.c                       2395  # 2216 today, and the growth of open pull request #329
+drivers/gpu/mali/hakios.mali.cpp                     1086  # 755 today, and the growth of open pull request #329
+drivers/gpu/vgpu/hakios.vgpu3d.c                     1173
+drivers/gpu/vgpu/hakios.vgpu3d_xnu.c                 1311
+drivers/haptic/hakios.haptic.c                       1024
+drivers/input/ssp/hakios.ssp.c                       2831  # 2594 today, and the growth of open pull request #329
+drivers/input/touch/hakios.focaltech_fw.h            7288
+drivers/input/touch/hakios.goodix.c                  1562
+drivers/media/mfc/hakios.exynos_mfc.c                1365  # 1336 today, and the growth of open pull request #320 #329
+drivers/modem/hakios.ipa.c                            872
+drivers/modem/hakios.mpss.c                          6383
+drivers/modem/hakios.qmi.c                            963
+drivers/modem/hakios.shannon.c                       2905  # 2890 today, and the growth of open pull request #319
+drivers/net/hakios.net.c                             1485
+drivers/power/exynos/hakios.exynos_cpufreq.c         1531
+drivers/power/max77705/hakios.max77705.c             1125
+drivers/soc/exynos/hakios.exynos_acpm.c               881
+drivers/soc/exynos/hakios.exynos_m3.c                 907
+drivers/soc/exynos/hakios.exynos_tee.c               1272
+drivers/storage/hakios.apfs_check.c                  1872
+drivers/storage/ufs/hakios.ufs.c                     3755
+drivers/storage/ufs/hakios.ufshc.c                   4044
+drivers/storage/ufs/hakios.ufshc.lga.h                817
+drivers/usb/hakios.dwc3.c                            2294  # 2244 today, and the growth of open pull request #329
+drivers/virtio/hakios.virtio.c                       1032
+drivers/wifi/brcmfmac/hakios.exynos_pcie.c            999
+drivers/wifi/hakios.apple80211.c                      833
+drivers/wifi/hakios.wifi.c                           4432
