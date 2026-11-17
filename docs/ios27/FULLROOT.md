@@ -33,6 +33,8 @@ some Settings rows lack icons.
    `_PanicOnCrash` dropped; `lists/`; `DISABLE_HOGS=1` adds the opt-in CPU-hog list) | `30 overlay` (builder's userland shims,
    manifest-checked) | `40 prefs` (Reduce Motion / Reduce Transparency OFF, CA compression off, watchdogs off) |
    `50 xpc-disable` (MessagesBlastDoorService) |
+   `60 sileo` (the package manager: the Procursus bootstrap and Sileo as `/jb`, seeded to `/var/jb` at the first boot, kept and
+   flushed; default on, `ENABLE_SILEO=0` turns it off; needs `tools/ios27/sileo/prepare.sh` first; [SILEO.md](SILEO.md)) |
    `70 lsd-extkit` (ExtensionKit FeatureFlag off + LaunchServices store rebuild: the kernel has no AMFI trust cache, so the signed
    extension-point cache was rejected and no framework-declared extension point registered; `ENABLE_LSD_EXTKIT=0` turns it off).
 4. `check-root.sh`: required files, cache hard links, patched words, launchd plist sanity, prefs, Mach-O rewrite complete.

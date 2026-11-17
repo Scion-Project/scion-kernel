@@ -12,6 +12,8 @@
 #   patches.txt                tools/ios27/s9/patches-24A446.txt, after every expected word was found in your cache
 #   undef.txt + the oracle     pipeline/cache/aot/make-oracle.sh over your cache (tables in pipeline/cache/aot/oracle/, not in git)
 #   overlay/ + MANIFEST.sha256 a copy of OVERLAY_DIR with the manifest steps.d/30-overlay.sh checks
+#   jb/ (of the checkout)      the package manager's prefix for steps.d/60-sileo.sh (tools/ios27/sileo/prepare.sh; needs the
+#                              network for two pinned downloads, zstd, and Xcode's iPhoneOS SDK)
 set -euo pipefail
 SRC=${1:?usage: prepare-root-inputs.sh STOCK_CACHE_DIR [OVERLAY_DIR]}; OV=${2:-}
 HERE=$(cd "$(dirname "$0")" && pwd); T27=$(cd "$HERE/.." && pwd); FR=$T27/fullroot
@@ -77,4 +79,11 @@ else
 	echo "NOTE: no StarbiteMetal.bundle in the overlay: build-root.sh will use the OpenGL ES compositor (ENABLE_METAL_CA=0)"
 fi
 echo "overlay: $(grep -c . "$P/overlay/MANIFEST.sha256" || true) files"
+# 6. the package manager's prefix (steps.d/60-sileo.sh): the Procursus bootstrap and Sileo, pinned, and the two programs
+# that seed and keep it, into jb/ of this checkout. ENABLE_SILEO=0 here and at the build leaves the root without it.
+if [ "${ENABLE_SILEO:-1}" = 1 ]; then
+	"$HERE/../sileo/prepare.sh"
+else
+	echo "NOTE: ENABLE_SILEO=0: no package manager on this root (build with ENABLE_SILEO=0 as well)"
+fi
 echo "ready: IOS27_PRIVATE=$P"
