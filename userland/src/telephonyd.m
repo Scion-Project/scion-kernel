@@ -49,7 +49,8 @@
  *
  * The modem: this is meant to become the place where the phone's own modem state reaches CoreTelephony. The
  * kernel's modem drivers publish it as sysctl kern.hakios.cellular_* (drivers/modem/hakios.mpss.c on redwood;
- * the star2lte Shannon driver will, docs/cellular-star2lte.md), and modem_read() below reads them. Today
+ * the Exynos 9810's Shannon driver, drivers/modem/hakios.shannon.c, does not yet: docs/cellular.md), and
+ * modem_read() below reads them. Today
  * nothing there says that a SIM is in, so have_subscription() is false and every answer is "no SIM"; that
  * function and the two subscription answers are where a real subscription goes once the kernel has one.
  *

@@ -22,7 +22,7 @@ Files fix: app-extension binaries over 4 MB inside frameworks had been dropped.
 
 | File | Size | Feature | Effect of leaving it out | Recommendation |
 |---|---|---|---|---|
-| `TelephonyUtilities.framework/callservicesd` | 5.0 MB | call state for the Phone app, FaceTime, SpringBoard's call UI, CallKit apps (VoIP calls in WhatsApp and similar) | its lookups fail; CallKit apps cannot report or answer calls | **Add back** (KEEP_DAEMONS). Cellular calls still need the IPC route ([cellular-star2lte.md](cellular-star2lte.md)), but VoIP/CallKit does not |
+| `TelephonyUtilities.framework/callservicesd` | 5.0 MB | call state for the Phone app, FaceTime, SpringBoard's call UI, CallKit apps (VoIP calls in WhatsApp and similar) | its lookups fail; CallKit apps cannot report or answer calls | **Add back** (KEEP_DAEMONS). Cellular calls still need the IPC route ([cellular.md](cellular.md)), but VoIP/CallKit does not |
 | `AssistantServices.framework/assistantd` | 5.2 MB | Siri, the server side of dictation | its lookups fail. Siri cannot work anyway: `System/Library/Assistant` and the voices are left out too | Add back only together with Siri; on its own it only stops lookups |
 | `usr/libexec/searchpartyd` | 13.1 MB | Find My (devices, AirTags), offline finding | Find My has no backend | Leave out (needs an Apple ID and Bluetooth LE beacons) |
 | `usr/libexec/lskdd` | 20.0 MB | purpose not identified here; never missed in a lookup so far | none seen | Leave out |
@@ -68,7 +68,7 @@ and `Helpers` binary is now in the image. The one extension the phone still show
 | `usr/share/tokenizer` | 54 MB | Japanese, Chinese and Korean word segmentation (`ko` 7.8) | CJK search and typing are weaker | With Korean typing: `ko` (7.8 MB) |
 | `System/Library/VideoProcessors`, `ImagingNetworks` | 45 MB | Apple's camera processing: noise reduction, portrait, stabilisation | not used by our camera path | Leave out |
 | `System/Library/Photos/Resources` | 29.5 MB | the music of Memories (FlexAudio 23.5), the Photos map atlas (4.0) | Memories are silent; the Photos map lacks its atlas | Optional: PhotosAtlas (4 MB) |
-| `System/Library/Carrier Bundles` | 25.7 MB | carrier settings (APN, MMS, carrier name) | read through CommCenter, which this port replaces ([cellular-star2lte.md](cellular-star2lte.md)) | Leave out until a telephony daemon reads them |
+| `System/Library/Carrier Bundles` | 25.7 MB | carrier settings (APN, MMS, carrier name) | read through CommCenter, which this port replaces ([cellular.md](cellular.md)) | Leave out until a telephony daemon reads them |
 | `System/Library/UserNotifications/Bundles` | 13.6 MB | the notification sections of system services (IDS firewall 6.7, Bluetooth 1.6, Wallet 1.1, Do Not Disturb 0.6, Game Center, Exposure Notification) | those services cannot post notifications | Optional: Do Not Disturb and Bluetooth (2.2 MB) |
 | `System/Library/AppPlaceholders` | 10.6 MB | placeholders for deleted system apps (the image ships the apps themselves) | none | Leave out |
 | `System/Library/ProductDocuments` | 6.2 MB | warranty and regulatory texts (OnBoardingBundles, the privacy notices, *are* kept) | Settings > Legal has fewer pages | Leave out |

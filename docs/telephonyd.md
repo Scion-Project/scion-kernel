@@ -69,8 +69,8 @@ a handful of times per session. telephonyd leaves them alone.
 ## The seam for the modem
 
 `modem_read()` reads the kernel's `kern.hakios.cellular_up`, `_registered`, `_bars`, `_dbm`, `_radio` and `_operator`
-(published by `drivers/modem/hakios.mpss.c` on redwood, and later by the star2lte Shannon driver; see
-[cellular-star2lte.md](cellular-star2lte.md)). `have_subscription()` decides whether there is a SIM to describe. It is
+(published by `drivers/modem/hakios.mpss.c` on redwood; the Exynos 9810's Shannon driver, `drivers/modem/hakios.shannon.c`
+with `cp=N`, does not publish them yet; see [cellular.md](cellular.md)). `have_subscription()` decides whether there is a SIM to describe. It is
 false today, because the kernel publishes registration and signal but no SIM state. When the kernel publishes a SIM, the
 work goes in these places:
 
