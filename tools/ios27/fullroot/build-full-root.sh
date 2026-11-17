@@ -14,6 +14,7 @@
 #                                             PosterBoard Fix A cache patches, full AOT rewrite (rewrite-grow -> fix-cs -> grow-check)
 #   10 macho-a64e   PAC rewrite of every arm64e Mach-O outside the caches
 #   20 launchd      hardware + crash-loop daemons only (lists/), _PanicOnCrash dropped, launchctl overrides   [DISABLE_HOGS=1 = opt-in CPU-hog list]
+#                   [CC_CONTROLS=1 / CRASH_REPORTS=1 / KEEP_JOBS="LABEL ..." = jobs left on that the set would remove; all off]
 #   30 overlay      sbca/m/b/s dylibs (brightness shim = b.dylib), libOSMesa/libsbgl, StarbiteMetal, cc_fips_test stand-in, wallpaper layers
 #   40 prefs        Reduce Motion / Transparency OFF, CA compression off, watchdogs off
 #   50 xpc-disable  MessagesBlastDoorService
