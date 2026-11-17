@@ -29,6 +29,12 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); FR=$(cd "$HERE/../fullroot" && pwd)
 IN=$(cd "${1:-inputs}" && pwd)
 for f in os.dmg systemos.dmg appos.dmg; do [ -f "$IN/$f" ] || { echo "build-root: no $IN/$f (tools/ios27/s9/fetch-apple-inputs.sh)" >&2; exit 1; }; done
+# a quarantined image is mounted with the quarantine option and the copy of its files fails (fetch-apple-inputs.sh)
+for f in os.dmg systemos.dmg appos.dmg; do
+	if xattr -p com.apple.quarantine "$IN/$f" >/dev/null 2>&1; then
+		echo "build-root: $IN/$f carries com.apple.quarantine (from the download): the copy of its files would fail. Take it off: xattr -d com.apple.quarantine $IN/$f" >&2; exit 1
+	fi
+done
 export IOS27_PRIVATE=${IOS27_PRIVATE:-$FR/private}
 for f in herolte-tune-ios-root.sh patches.txt undef.txt overlay/MANIFEST.sha256; do
 	[ -f "$IOS27_PRIVATE/$f" ] || { echo "build-root: no $IOS27_PRIVATE/$f (tools/ios27/s9/prepare-root-inputs.sh)" >&2; exit 1; }

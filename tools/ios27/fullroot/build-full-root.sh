@@ -73,6 +73,11 @@ build)
     B_PRIV=; [[ ! -f $IOS27_PRIVATE/BUILD ]] || read -r B_PRIV < "$IOS27_PRIVATE/BUILD" || true
     ios27_build_same "the private directory ($IOS27_PRIVATE/BUILD)" "$B_PRIV" "this build (BUILD_VERSION)" "$BUILD_VERSION" || exit 1
     for f in "$OS_DMG" "$SYS_DMG" "$APP_DMG"; do [[ -f $f ]] || { echo "missing $f" >&2; exit 1; }; done
+    # a quarantined image is mounted with the quarantine option, and rsync then fails on its files' extended attributes
+    # half way through staging (macOS 27's openrsync): stop now, before anything is copied
+    for f in "$OS_DMG" "$SYS_DMG" "$APP_DMG"; do
+        ! xattr -p com.apple.quarantine "$f" >/dev/null 2>&1 || { echo "$f carries com.apple.quarantine (from the download): xattr -d com.apple.quarantine $f" >&2; exit 1; }
+    done
     # ---- 0. the S9's vendor firmware, before anything is copied: complete and checked, or no build (firmware.sh) ----
     . "$HERE/firmware.sh"
     if [[ $DEVICE == starlte && ( ${ENABLE_WIFI:-1} != 0 || ${ENABLE_AUDIO_BT:-1} != 0 ) ]]; then
