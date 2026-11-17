@@ -211,6 +211,21 @@ translations(void)
 	(void)host(&v, fe37, sizeof(fe37), out, sizeof(out));
 	n = chip(&v, cc_200b_12, sizeof(cc_200b_12), out, sizeof(out));
 	CHECK(n == sizeof(cc_200b_12) && out[4] == 0x37 && out[5] == 0xfe && out[6] == 0x12, "the chip's status kept");
+	{
+		/* the second form phone 1's bluetoothd sent: Apple's second byte 02, a passive entry */
+		static const uint8_t fe37_b[] = { 0x01, 0x37, 0xfe, 0x0c, 0x01, 0x00, 0x01, 0x02, 0x02, 0x00, 0xe0, 0x01, 0x2b,
+			0x00, 0x1e, 0x00 };
+		static const uint8_t to_b[] = { 0x01, 0x0b, 0x20, 0x07, 0x00, 0xe0, 0x01, 0x2b, 0x00, 0x01, 0x00 };
+		static const uint8_t two_phys[] = { 0x01, 0x37, 0xfe, 0x13, 0x01, 0x00, 0x05, 0x02, 0x01, 0x01, 0x40, 0x00, 0x30,
+			0x00, 0x1e, 0x00, 0x01, 0x40, 0x00, 0x30, 0x00, 0x1e, 0x00 };
+
+		n = host(&v, fe37_b, sizeof(fe37_b), out, sizeof(out));
+		CHECK(n == sizeof(to_b) && memcmp(out, to_b, n) == 0, "0xFE37's second form sent as 0x200B");
+		(void)chip(&v, cc_200b, sizeof(cc_200b), out, sizeof(out));
+		n = host(&v, two_phys, sizeof(two_phys), out, sizeof(out));
+		CHECK(n == 11 && out[1] == 0x0b && out[2] == 0x20, "two PHYs (1M and coded): the 1M entry sent");
+		(void)chip(&v, cc_200b, sizeof(cc_200b), out, sizeof(out));
+	}
 	sent(&v, fe37_bad, sizeof(fe37_bad));
 	sent(&v, fe37_short, sizeof(fe37_short));
 	sent(&v, own_200b, sizeof(own_200b));

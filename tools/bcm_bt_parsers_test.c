@@ -347,6 +347,14 @@ trace(void)
 		CHECK(strstr(said, "01 09 10 00 a1 a2 .. .. .. ..") != NULL && strstr(said, "a6") == NULL, "Read_BD_ADDR: %s", said);
 		trace_bytes(&trace_out, wr, sizeof(wr));
 		CHECK(strstr(said, "b1 b2 .. .. .. ..") != NULL && strstr(said, "b6") == NULL, "Write_BD_ADDR: %s", said);
+		{
+			static const uint8_t adv[] = { 0x04, 0x3e, 0x0c, 0x02, 0x01, 0x00, 0x00, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6,
+				0x00, 0xb0 };
+
+			trace_bytes(&trace_in, adv, sizeof(adv));
+			CHECK(strstr(said, "c1 c2 .. .. .. ..") != NULL && strstr(said, "c6") == NULL, "an advertising report: %s",
+			    said);
+		}
 	}
 	for (int round = 0; round < 300000; round++) {
 		uint8_t s[96];

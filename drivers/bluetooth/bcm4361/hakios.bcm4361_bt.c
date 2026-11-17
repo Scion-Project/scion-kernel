@@ -1610,7 +1610,10 @@ trace_line(struct h4_trace *t)
 	for (uint32_t i = 0; i < keep && at < (int)sizeof(line) - 8; i++) {
 		/* the address's first four bytes left out of Write_BD_ADDR (FC01) and of Read_BD_ADDR's (1009) reply */
 		bool hide = (t->type == 1 && (t->hdr[0] | t->hdr[1] << 8) == 0xFC01 && i >= 2 && i < 6) || (t->type == 4 &&
-		    t->hdr[0] == 0x0E && keep > 3 && (t->first[1] | t->first[2] << 8) == 0x1009 && i >= 6 && i < 10);
+		    t->hdr[0] == 0x0E && keep > 3 && (t->first[1] | t->first[2] << 8) == 0x1009 && i >= 6 && i < 10) ||
+		    /* and a neighbour's, in an LE advertising report (legacy 02 or extended 0D) */
+		    (t->type == 4 && t->hdr[0] == 0x3E && ((t->first[0] == 0x02 && i >= 6 && i < 10) || (t->first[0] == 0x0D &&
+		    i >= 7 && i < 11)));
 
 		at += hide ? snprintf(line + at, sizeof(line) - at, " ..") : snprintf(line + at, sizeof(line) - at, " %02x",
 		    t->first[i]);

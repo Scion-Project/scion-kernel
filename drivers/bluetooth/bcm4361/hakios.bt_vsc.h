@@ -68,19 +68,24 @@ struct bt_vsc_rule {
 
 /*
  * 0xFE37, LE Set Scan Parameters Multi-Core (Apple's): the parameters of LE Set Extended Scan Parameters (0x2041: own
- * address type, scanning filter policy, scanning PHYs), then two of Apple's (a scan-core mode, the number of entries),
- * then per entry the scan type, interval and window and a scan-core window: phone 1, 17 November, "01 00 01 02 01 01 40
- * 00 30 00 1e 00" (own address 01, policy 00, PHYs 01 = LE 1M, mode 02, one entry: active, 40 ms, 30 ms, scan core 0x1e),
- * read in that order from bluetoothd's packing of its arguments. This chip has no scan core: LE Set Scan Parameters
- * (0x200B: type, interval, window, own address type, policy) with the LE 1M entry is what it can do.
+ * address type, scanning filter policy, scanning PHYs), then two bytes of Apple's (scan-core settings), then per PHY in
+ * the PHYs mask the scan type, interval and window and a scan-core window. Phone 1, 17 November: "01 00 01 02 01 01 40
+ * 00 30 00 1e 00" and "01 00 01 02 02 00 e0 01 2b 00 1e 00" (own address 01, policy 00, PHYs 01 = LE 1M, Apple's 02 and
+ * 01 or 02, one entry: active 0x40/0x30, passive 0x1e0/0x2b, scan core 0x1e), read in that order from bluetoothd's
+ * packing of its arguments. This chip has no scan core: LE Set Scan Parameters (0x200B: type, interval, window, own
+ * address type, policy) with the LE 1M entry (the first: the PHYs mask's lowest bit) is what it can do.
  */
 static inline uint8_t
 bt_vsc_x_scan_params(const uint8_t *p, uint8_t n, uint8_t *out)
 {
+	unsigned phys = 0;
 	uint16_t interval, window;
 
-	if (n < 12 || p[4] < 1 || n != 5u + 7u * p[4] || (p[2] & 0x01) == 0) {
-		return 0;                       /* not the shape above, or no LE 1M entry (the first entry is the 1M one) */
+	for (unsigned bit = 0; bit < 8; bit++) {
+		phys += (p[n >= 3 ? 2 : 0] >> bit) & 1u;
+	}
+	if (n < 12 || n != 5u + 7u * phys || (p[2] & 0x01) == 0) {
+		return 0;                       /* not the shape above, or no LE 1M entry */
 	}
 	interval = (uint16_t)(p[6] | p[7] << 8);
 	window = (uint16_t)(p[8] | p[9] << 8);
