@@ -66,7 +66,7 @@ tools/bcm_shub_test.c                                      921
 tools/hakios-config.py                                    1239
 tools/ios27/ca-gpu/hakios/eagl.c                          4335
 tools/ios27/fullroot/pipeline/cache/aot/fp16_stub.py      1424
-tools/ios27/fullroot/pipeline/cache/aot/rewrite-grow.py   1041
+tools/ios27/fullroot/pipeline/cache/aot/rewrite-grow.py   1047
 tools/ios27/lse/lse-rewrite.py                             826
 tools/ios27/mesa-ios/starbite-drm/starbite_drm.c          1106
 tools/ios27/metal2/NativeBridgeMetalFrontend.mm           2764
