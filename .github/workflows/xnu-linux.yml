@@ -103,6 +103,24 @@ jobs:
           source ./xnu-env.sh
           JOBS=$(nproc) tools/soc-compile.sh
 
+      - name: "The Galaxy S9's own kernel (starlte_defconfig): the phone's drivers, which the builds above leave out"
+        # The modem, the sensor hub, the cameras, the codec and a dozen more are built by no configuration but a phone's, and
+        # the S9's stopped compiling for five days in November without any job here noticing (a header of the S9+'s
+        # camera asked of every phone). This is a compile and link, like the SoC tables above: nothing says it boots.
+        # The Wi-Fi radio's object (Linux's brcmfmac) is fetched and built by xnu-build.sh on the way (tools/mk-brcmfmac.sh).
+        run: |
+          source ./xnu-env.sh
+          python3 tools/hakios-device.py sync starlte
+          python3 tools/hakios-config.py defconfig starlte_defconfig > /dev/null
+          tools/make-kernel.sh -j"$(nproc)" > device-compile-starlte.log 2>&1 || true
+          if grep -q "make-kernel: built" device-compile-starlte.log; then
+            echo "starlte_defconfig: linked ($(grep -E '^#define HAKIOS_DRIVERS_COUNT' xnu-src/xnu-8796.121.2/bsd/dev/hakios.drivers.h | awk '{print $3}') drivers)"
+          else
+            grep -E ' error:|Undefined symbols|referenced from' device-compile-starlte.log | head -30
+            tail -15 device-compile-starlte.log
+            exit 1
+          fi
+
       - name: Loader (xnuloader/build.sh)
         # identity.h comes from the device tree of the builder's own IPSW (xnuloader/mkidentity.sh);
         # CI fetches nothing of Apple's, so it builds with the placeholder (no Apple data). Under AVF
@@ -119,6 +137,7 @@ jobs:
           name: xnu-build-log
           path: |
             build.log
+            device-compile-starlte.log
             xnu-deps/*.log
           retention-days: 7
 
