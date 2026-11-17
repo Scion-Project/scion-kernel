@@ -47,8 +47,16 @@ both = [dis[k].get('Label') for k in dis if k in jobs]; print('ok    disabled jo
 for need in ('com.apple.backboardd', 'com.apple.SpringBoard', 'com.apple.configd', 'com.apple.lsd', 'com.apple.runningboardd', 'com.herolte.autorun'):
     has = any(j.get('Label') == need for j in jobs.values()); print(('ok    ' if has else 'FAIL  ') + 'job ' + need); bad |= (not has)
 ov = plistlib.load(open(r + '/private/var/db/com.apple.xpc.launchd/disabled.plist', 'rb'))
+# jobs a feature step turns on again on purpose, recognised by how the step starts them (steps.d/92-audio-bt.sh runs
+# bluetoothd through hakios-inject with the S9's Bluetooth library)
+on_by_step = {'com.apple.bluetoothd': ('92-audio-bt', '/usr/libexec/hakios-inject')}
 for gone in ('com.apple.CommCenter', 'com.apple.bluetoothd', 'com.apple.imagent', 'com.apple.rapportd', 'com.apple.terminusd'):
-    has = any(j.get('Label') == gone for j in jobs.values()) and ov.get(gone) is not True; print(('FAIL  still enabled: ' if has else 'ok    off: ') + gone); bad |= has
+    on = [j for j in jobs.values() if j.get('Label') == gone]
+    has = bool(on) and ov.get(gone) is not True
+    step = on_by_step.get(gone)
+    if has and step and all((j.get('ProgramArguments') or [None])[0] == step[1] for j in on):
+        print('ok    on by %s (through %s): %s' % (step[0], step[1], gone)); continue
+    print(('FAIL  still enabled: ' if has else 'ok    off: ') + gone); bad |= has
 print('info  launchctl overrides:', len(ov))
 sys.exit(1 if bad else 0)
 PY
@@ -80,9 +88,15 @@ print('FAIL  prefs' if bad else 'ok    prefs: ReduceMotion/Transparency OFF, CA 
 PY
 # overlay + Mach-O pass idempotent
 (cd "$H/../overlay" 2>/dev/null && true); O=${OVERLAY:-${IOS27_PRIVATE:-$H/private}/overlay}
-n=0; while IFS= read -r l; do h=${l%% *}; f=${l#*  }; f=${f#./}; [[ $(shasum -a 256 "$R/$f" 2>/dev/null | cut -c1-64) == "$h" ]] || { n=$((n+1)); echo "      overlay differs: $f"; }; done < "$O/MANIFEST.sha256"
+# files of the overlay that steps.d/80-metal-ca.sh owns after it: the two test jobs' plists it deletes, the two lists it
+# writes (mtl2-env keeps the overlay's other lines, in its own order); they are not compared
+OWNED80=" System/Library/LaunchDaemons/com.starbite.m2vtest.plist System/Library/LaunchDaemons/com.starbite.mtl27test.plist private/var/local/mtl2-env private/var/local/mtl2-clients "
+n=0; while IFS= read -r l; do h=${l%% *}; f=${l#*  }; f=${f#./}
+    case $OWNED80 in *" $f "*) info "overlay file left to 80-metal-ca: $f"; continue;; esac
+    [[ $(shasum -a 256 "$R/$f" 2>/dev/null | cut -c1-64) == "$h" ]] || { n=$((n+1)); echo "      overlay differs: $f"; }; done < "$O/MANIFEST.sha256"
 [[ $n == 0 ]] && ok "overlay files all present with matching sha256" || bad "$n overlay files differ"
-r=$("$PY" -I "${IOS27_PIPELINE:-$H/pipeline}/root/macho-rewrite.py" "${IOS27_PIPELINE:-$H/pipeline}/cache/a64e-rewrite.py" "$R" --dry-run 2>&1 | tail -1); echo "info  Mach-O a64e dry run: $r"
+# the same rewriter steps.d/10-macho-a64e.sh runs (tools/ios27/a64e/a64e-rewrite.py; there is none under pipeline/cache)
+r=$("$PY" -I "${IOS27_PIPELINE:-$H/pipeline}/root/macho-rewrite.py" "${A64E:-$H/../a64e/a64e-rewrite.py}" "$R" --dry-run 2>&1 | tail -1); echo "info  Mach-O a64e dry run: $r"
 case $r in *"'ret': 0, 'br': 0, 'blr': 0, 'pac': 0,"*"errors 0") ok "Mach-O a64e rewrite is complete (0 sites left, 0 errors)";; *) bad "Mach-O a64e rewrite incomplete";; esac
 # the package manager (steps.d/60-sileo.sh): all of it or none of it, and nothing it must not bring
 if [[ -d $R/jb ]]; then
