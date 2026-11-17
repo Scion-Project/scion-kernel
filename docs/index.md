@@ -90,6 +90,8 @@ on the Adreno 642L, at 100 to 104 frames a second in page swipes on a 120 Hz pan
   Scion offers a passcode and will not present anything as Face ID.
 - [The iris camera](iris-camera.md): why the Galaxy S9's infrared iris camera's frames never reach memory (Samsung keeps them in the
   secure world), with the evidence from Samsung's kernel.
+- [The iris scanner through Samsung's own trusted application](iris-ta-route.md): whether Scion could ask Samsung's iris TA, through
+  its normal interface, to enrol and match; the verdict, what must be proven in which order, and the owner's decisions (a study).
 
 ## What works
 
