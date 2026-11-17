@@ -108,6 +108,8 @@ jobs:
         run: sh tools/modem/shannon-test.sh
       - name: The Galaxy S9 Mali's GPU addresses for panfrost's buffers (hakios.mali_va.h) hold together (sanitizers)
         run: sh tools/mali-va-test.sh
+      - name: The framebuffer's sweetfb_nowait present state machine (hakios.sweetfb_present.h) shows only finished frames, releases each swap once and never strands one, over random schedules (sanitizers)
+        run: sh tools/sweetfb-present-test.sh
       - name: The Galaxy S9 secure-OS probe's DER reader (hakios.exynos_tee_der.h) keeps inside what the keymaster TA sends, mutated or cut short (sanitizers)
         run: sh tools/exynos-tee-der-test.sh
       - name: The rule that holds the Galaxy S9's M3s at 1794 MHz unless the over-current guard's stage two allows more (hakios.exynos_cpufreq_ceiling.h) (sanitizers)
