@@ -452,6 +452,8 @@ modem_wait	k
 modem_wda_off	k
 net_names	k
 net_trace	k
+ocp_guard	k
+ocp_guard_flags	k
 pan	k
 panel	k
 panel_brightness	k
