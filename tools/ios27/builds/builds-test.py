@@ -7,8 +7,8 @@
   - build-conf.sh (sourced by bash) gives for 24A446 exactly what the tools had written in them before the manifests:
     build 24A446, class n104ap, the patch list tools/ios27/s9/patches-24A446.txt, the three image names of
     build-full-root.sh's defaults, the refusal text of prepare-root-inputs.sh;
-  - the refusals: a build with no .conf (fetch-apple-inputs.sh, prepare-root-inputs.sh), a candidate with no patch list
-    (prepare-root-inputs.sh), and a mixture of builds (build-root.sh: inputs of one build, a private directory of another).
+  - the refusals: a build with no .conf (fetch-apple-inputs.sh, prepare-root-inputs.sh), a build with no patch list
+    (build-conf.sh), and a mixture of builds (build-root.sh: inputs of one build, a private directory of another).
 Runs on Linux (CI) and macOS; it never reaches a step that needs a restore image, root, or the network.
 usage: tools/ios27/builds/builds-test.py"""
 import os
@@ -61,9 +61,11 @@ for b in builds:
     check(c.get('STATUS') in ('supported', 'candidate'), '%s.conf: STATUS supported or candidate' % b)
     check(re.fullmatch(r'\d+', c.get('IPSW_SIZE', '')) is not None, '%s.conf: IPSW_SIZE is a number of bytes' % b)
     check(c.get('IPSW_NAME') == '%s_%s_%s_Restore.ipsw' % (c.get('PRODUCT'), c.get('VERSION'), b), '%s.conf: IPSW_NAME is Apple\'s name' % b)
+    p = os.path.join(T27, c.get('PATCHES', ''))
     if c.get('STATUS') == 'supported':
-        p = os.path.join(T27, c.get('PATCHES', ''))
         check(bool(c.get('PATCHES')) and os.path.isfile(p), '%s.conf: a supported build has its patch list' % b)
+    if c.get('PATCHES'):
+        check(os.path.isfile(p), '%s.conf: its patch list is there' % b)
         if os.path.isfile(p):
             rows = [l.split(None, 3) for l in open(p) if l.strip() and not l.startswith('#')]
             good = all(len(r) == 4 and re.fullmatch(r'0x[0-9a-f]{9}', r[0]) and re.fullmatch(r'[0-9a-f]{8}', r[1])
@@ -84,8 +86,13 @@ v, pr = (out.split('\n') + ['', ''])[6:8]
 check('(iOS %s, 24A446, %s)' % (v, pr) == '(iOS 27.0.1, 24A446, iPhone12,1)', 'prepare-root-inputs.sh: the same refusal text for 24A446')
 rc, out, err = sh('. "%s"; ios27_build_check 99Z999' % LIB)
 check(rc == 1 and '99Z999.conf' in err, 'a build with no .conf is refused')
-rc, out, err = sh('. "%s"; ios27_build_check 24B156 && ios27_build_patches 24B156' % LIB)
-check(rc == 1 and 'NOTE: build 24B156 is candidate' in err and 'no cache patch list yet' in err, 'a candidate is named and has no patch list')
+rc, out, err = sh('. "%s"; ios27_build_check 24B156' % LIB)
+check(rc == 0 and 'NOTE: build 24B156 is candidate' in err, 'a candidate build is named on stderr')
+with tempfile.TemporaryDirectory() as t:      # a build whose manifest names no patch list yet
+    with open(os.path.join(t, '99Z999.conf'), 'w') as f:
+        f.write('BUILD=99Z999\nPATCHES=\nSTATUS=candidate\n')
+    rc, out, err = sh('. "%s"; IOS27_BUILDS_DIR="%s"; ios27_build_patches 99Z999' % (LIB, t))
+    check(rc == 1 and 'no cache patch list yet' in err, 'a build with no patch list is refused')
 rc, out, err = sh('. "%s"; ios27_build_same A 24A446 B 24A446 && ios27_build_same A "" B 24B156 && ! ios27_build_same A 24A446 B 24B156' % LIB)
 check(rc == 0, 'ios27_build_same: equal or unknown passes, two different builds fail')
 
@@ -101,7 +108,8 @@ with tempfile.TemporaryDirectory() as t:
     rc, out, err = sh('"%s" "%s" "%s/out"' % (os.path.join(T27, 's9', 'fetch-apple-inputs.sh'), ipsw, t), {'IOS27_BUILD': '99Z999'})
     check(rc == 1 and '99Z999.conf' in err, 'fetch-apple-inputs.sh refuses a build with no .conf')
     rc, out, err = sh('"%s" /nonexistent' % os.path.join(T27, 's9', 'prepare-root-inputs.sh'), {'IOS27_BUILD': '24B156'})
-    check(rc == 1 and 'no cache patch list yet' in err, 'prepare-root-inputs.sh refuses 24B156 until it has a patch list')
+    check(rc == 1 and 'NOTE: build 24B156 is candidate' in err and 'no dyld_shared_cache_arm64e' in err,
+          'prepare-root-inputs.sh takes 24B156 (a candidate, said once) with its own patch list')
     rc, out, err = sh('"%s" /nonexistent' % os.path.join(T27, 's9', 'prepare-root-inputs.sh'))
     check(rc == 1 and 'no dyld_shared_cache_arm64e' in err and 'NOTE' not in err, 'prepare-root-inputs.sh goes on for 24A446 as before')
 

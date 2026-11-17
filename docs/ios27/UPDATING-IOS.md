@@ -4,23 +4,31 @@ Scion's iOS 27 line is made for **iOS 27.0.1, build 24A446**, the iPhone 11's (i
 release for that phone is **iOS 27.2.1, build 24B156** (9 November 2026, the only build Apple signs; Apple's catalogue,
 api.ipsw.me). This page says what in the tree belongs to 24A446, what is likely to be different in 24B156, what only the
 new restore image can answer, and the steps of a move, with who does each and the disk each needs. Written on 17 November
-2026 without the new image (nothing was downloaded) and without a phone: **nothing on this page has been run on 24B156.**
+2026, first from public sources only. Later that day the owner's own 24B156 restore image was on the Mac mini, and the
+section "24B156: what was found" was read from it. There was no phone: **nothing on this page has been run on 24B156.**
 
 The tools now take the build from one place (`tools/ios27/builds/`, below); the build they use is still 24A446 and what
 they make for it is unchanged.
 
 ## The short version
 
-- **Kernel.** Apple's iOS 27.2 kernel is `xnu-13432.42.3` (Darwin 27.2.0); 27.0.1's is `xnu-13432.2.10`; 27.2.1 has the
-  same kernel as 27.2. Apple has published neither. Scion's kernel is xnu-12377 (iOS 26) with Darwin 27's eight system
-  calls added. The public record says a new system call in 27.2 is unlikely, but only the 27.2 kernel itself can say.
-- **User space.** Every address Scion uses in Apple's shared cache moves (QuartzCore alone grew by 31 KB of code). They
-  are 5 one-word patches, 14 addresses of QuartzCore plus about ten offsets and sizes in `sbca`, and the order of 136 shader names. They
-  were found by hand, and they have to be found again.
-- **Effort.** About 8 to 15 working days. 5 to 8 of them need a phone. Most of the work is finding the addresses again
-  and getting the picture back to where 24A446 is now.
-- **Disk.** The Mac mini cannot do this today. It has about 42 GB free; the move needs about 100 GB at its peak while
-  24A446 is kept beside it (section "Disk").
+- **Kernel.** 24B156's kernel is `xnu-13432.42.3~28` (Darwin 27.2.0, read from its kernelcache); 27.0.1's is
+  `xnu-13432.2.10`. Apple has published neither. Scion's kernel is xnu-12377 (iOS 26) with Darwin 27's eight system calls
+  added. Compared with the fork's tables, 24B156 adds or renumbers no system call or Mach trap. It serves two MIG routines
+  more: IOKit's `io_service_get_wait_info` and `mach_memory_entry_region_info`, which Scion's kernel answers with
+  `MIG_BAD_ID`.
+- **User space.** Every address Scion uses in Apple's shared cache moves (QuartzCore alone grew by 31 KB of code). In
+  24B156 these were found again by name:
+  - four of the five one-word patches: `tools/ios27/s9/patches-24B156.txt`, checked by the repository's own tools;
+  - all 14 QuartzCore addresses of `sbca`, with the words it checks and its offsets unchanged:
+    `tools/ios27/builds/24B156-sbca.txt`;
+  - the 136 shader names, which are unchanged.
+
+  The CoreImage word was not carried over.
+- **Effort.** With the 24B156 findings below, about 6 to 12 working days. 4 to 7 of them need a phone. Most of the
+  remaining work is getting the picture back to where 24A446 is now.
+- **Disk.** The move needs about 100 GB at its peak while 24A446 is kept beside it (section "Disk"). The Mac mini had
+  42 GB free in the morning and about 96 GB after a cleanup. The 24B156 inputs take 15.5 GB.
 - **When.** After the rendering and performance work that is open on 24A446 has landed. The parts that need no phone can
   be done in parallel once there is disk for them.
 
@@ -30,7 +38,8 @@ they make for it is unchanged.
 |---|---|
 | `DEFAULT` | One line: the build every tool uses when nothing says otherwise. Today `24A446`. |
 | `24A446.conf` | What the tools need to know of 24A446: version, product, device class (`n104ap`), the restore image's name and size, Apple's kernel version, the three images' names (`build-full-root.sh`'s defaults), the patch list (`s9/patches-24A446.txt`), `STATUS=supported`. `KEY=VALUE` lines, read and never executed. |
-| `24B156.conf` | The same for 24B156, `STATUS=candidate`, with no patch list and no image names (only the restore image can give them). |
+| `24B156.conf` | The same for 24B156, `STATUS=candidate`: the image names from its manifest, the kernel read from its kernelcache, and a first patch list (`s9/patches-24B156.txt`, four of the five words). |
+| `24B156-sbca.txt` | Candidates for sbca's 24B156 block (`sbca.c` is left alone: the 24A446 line uses it). |
 | `build-conf.sh` | Sourced by the tools: `ios27_build_default`, `_get`, `_check`, `_patches`, `_of_inputs` (from `inputs/SOURCE.txt`), `_of_root` (an image's `SystemVersion.plist`), `_same` (refuses a mixture). bash 3.2. |
 | `builds-test.py` | CI: the manifests parse; for 24A446 the library gives exactly the values the scripts had written in them; the refusals below happen. |
 
@@ -41,7 +50,7 @@ STATUS is not `supported` is named in one line on stderr.
 
 - `fetch-apple-inputs.sh`: a build with no `.conf`. A restore image of another build than the one asked for. That second
   refusal is as before, and now names the builds that have a `.conf`.
-- `prepare-root-inputs.sh`: a build with no patch list (24B156 today). A cache whose expected words are not there (as
+- `prepare-root-inputs.sh`: a build with no patch list. A cache whose expected words are not there (as
   before). It also checks a mounted image whose `System/Library/CoreServices/SystemVersion.plist` names another build. It
   writes `BUILD` into the private directory.
 - `build-root.sh`: inputs whose `SOURCE.txt` names another build than `IOS27_BUILD` or the private directory's `BUILD`.
@@ -63,9 +72,9 @@ changes:
   and a made-up cache. Both were made for the test: a manifest of our own and dummy files, nothing of Apple's. The logs,
   the files and `patches.txt` were the same byte for byte.
 - **Not run:** `build-full-root.sh build`, which needs `sudo`. Its new checks were read and parsed, not executed. The check
-  of a mounted SystemOS image's `SystemVersion.plist` in `prepare-root-inputs.sh` was not run against Apple's images: if
-  that image has the file and it names a different string for 24A446, that step would refuse, and the next person to run
-  it should say so.
+  of a mounted SystemOS image's `SystemVersion.plist` in `prepare-root-inputs.sh` was run on 24B156's images: its SystemOS
+  image has that file, naming 24B156, the same as its OS image. It was not run on 24A446's images, which are expected to
+  be the same.
 
 To add a build: put `<BUILD>.conf` beside the others. Its patch list goes under `tools/ios27/s9/`, named
 `patches-<BUILD>.txt`. When a root of it has booted, `STATUS=supported`. `DEFAULT` changes in its own commit, when the
@@ -187,7 +196,118 @@ proven only with 24A446, which is what `INSTALL-S9.md:256` means.
   CoreUtils and Messages (149715). **E** Scion's kernel is xnu-12377 plus its own code, so none of Apple's kernel fixes
   reach the S9 by moving. What moves is the user-space fixes.
 
+## 24B156: what was found (17 November 2026, from the restore image)
+
+The owner's own restore image (`iPhone12,1_27.2.1_24B156_Restore.ipsw`, 10,977,415,204 bytes) was on the Mac mini.
+`IOS27_BUILD=24B156 tools/ios27/s9/fetch-apple-inputs.sh` took its inputs into an agent's folder: OS 9.3 GB, SystemOS
+6.2 GB, AppOS 16 MB, the device tree 235 KB. The images were read mounted read-only. Nothing of them is in the
+repository; the numbers in `patches-24B156.txt` and `24B156-sbca.txt` are addresses and instruction words, as for 24A446.
+Not run on a phone; no root was built.
+
+**Kernel** (the kernelcache `kernelcache.release.iphone12b`, read with blacktop's `ipsw kernel`; compared with the xnu
+fork's `syscalls.master` and `syscall_sw.c`, and with the MIG subsystems of the fork's own built STARLTE kernel, by
+symbol):
+
+- Version: `Darwin Kernel Version 27.2.0 ... root:xnu-13432.42.3~28/RELEASE_ARM64_T8030`.
+- System calls: 558 entries (0 to 557). No number that 24B156 implements is missing or different in the fork, and the
+  argument counts agree. Darwin 27's eight calls are where commit 0120 put them. The fork additionally implements 18
+  numbers that this iOS kernel compiles out (System V IPC, `grab_pgo_data`, ...), as for 27.0.1.
+- Mach traps: 62 real traps, the same numbers, names and argument counts as the fork's table. None was added or moved.
+- MIG: the same 17 subsystems at the same bases. Two of them end one routine later than the fork's:
+  - `is_iokit` 2800-2892 (fork 2800-2891). Routine 2891 is `io_service_get_wait_info`, the request of IOKit's new
+    `IOServiceGetWaitInfo` (its client stub sends id 2891 and expects 2991).
+  - `memory_entry` 4900-4905 (fork 4900-4904). Routine 4904 is `mach_memory_entry_region_info` in `libsystem_kernel`.
+
+  Scion's kernel answers both with `MIG_BAD_ID`, so the caller gets an error and no crash. Who calls them was not found:
+  not SystemConfiguration, `configd`, `backboardd` or `launchd`. A daemon that cannot live with that error is the one
+  kernel-side risk found. The fix, when one shows, is a routine in the fork's `device.defs` / `memory_entry.defs`.
+- The sysctl names the stand-ins answer (`security.mac.lockdown_mode_state_public`, AMFI's `developer_mode_status` and
+  `developer_mode_resolved`) are still in the cache. The four APFS `fsctl` numbers of `sweet_hfs_pclass.h` are still in
+  PosterFoundation.
+
+**Shared cache** (`System/Library/Caches/com.apple.dyld` of SystemOS):
+
+- Format: magic `dyld_v1  arm64e`; the main header's mapping array at 0x238, as in 24A446.
+- Size: 80 files with headers (main and `.01` to `.79`; the last three are `.dylddata`, `.dyldreadonly` and
+  `.dyldlinkedit`), plus `.atlas` and `.symbols`. 24A446 had 79.
+- `sharedRegionSize` is 0x187948000 (the mapped extent 0x187944000). That is larger than `rewrite-grow.py`'s
+  `SHARED_SIZE` 0x17c228000, but none of the 34 gaps the grow pass may use ends beyond it (0xf668000 bytes of room in
+  all). So the assertion holds and the constant need not change for 24B156.
+- Every gap owner has one RX mapping, the code signature at the end, and a zero header tail from 0x2a8. These are the
+  assumptions of `rewrite-grow.py`'s `finalize`.
+- Within the fork's 8 GiB shared region.
+- Not run (no numpy on the Mac mini): `dsc-isa-census.py`, the cache pipeline, `make-oracle.sh`, `textdata-guard.py
+  scan`. These are the first things to run on 24B156, in that order.
+
+**The five patch words.** Each was found by the function its 24A446 line names. `prepare-root-inputs.sh` (run as far as
+its numpy step) found every expected word, and `cachepatch.py --dry-run` would patch each one:
+
+| 24A446 line | 24B156 | Confidence |
+|---|---|---|
+| SystemConfiguration, the IOKit-quiesce block | `____wait_for_IOKit_to_quiesce_block_invoke`, first word `pacibsp` → `ret` | high: the same symbol, the same word |
+| SafariCore `WBSSetUpAccessToAppDataContainerWithIdentifier` | its first word, `pacibsp` → `ret` | high (assumes it is still a void function) |
+| QuartzCore `render_for_time` clamp | the `tbz w20, #0` that skips the now + 0.1 s clamp unless the display is internal and on (bytes 1 and 5 of its state), now `+0x50` (was `+0x54`): → `b +0x50` | high: the same test and the same constant after it |
+| PosterFoundation viability dictionary | `PFPosterPathURLResourceValues`'s block: `NSDictionary` of IsReadable and FileProtection(None), `mov w4, #2` → `#1` | high |
+| CoreImage default context | **not carried over.** `-[CIContext initWithOptions:]` is laid out differently. The 24A446 word was a `bl` to an Objective-C stub, turned into `b +0x38`; no such call in the same position. | — |
+
+**sbca, the texture table, the injected libraries:**
+
+- All 14 QuartzCore addresses exist by name (`24B156-sbca.txt`).
+- The words sbca checks before it patches are the same: `PUSH_SURFACE_CBNZ` and the three words of
+  `framebuffer_format_was`.
+- The renderer slot (+0x1d0) and the `function_supported` slot (+0x480) are unchanged.
+- The server's +0x628/+0x630/+0x60, the 0x68-byte renderer and the +0xf0 load are in the new `renderer()`.
+- Not checked: `GLES_CONTEXT_SIZE` and the display's +0x140/+0x150.
+- `TextureFunction_codes` has the same 136 names in the same order as `hakios.gl.h`.
+- Rotation (`orientation.c`): `CMDeviceOrientation`, `CMDeviceOrientationManager` and the five selectors exist.
+- Status bar (`scion-bars.m`): `STStatusBarData`, `STMutableStatusBarData`, `STStatusBarDataCellularEntry`,
+  `STStatusBarOverridesStatusDomainPublisher` (`updateDataWithBlock:` on its superclass), `cellularEntry`,
+  `entryForKey:`, `setCellularEntry:` and `STStatusBarDataCellularTypeDescription` exist. `SBStatusBarStateAggregator`
+  exists but has no `+sharedInstance` in 24B156; the library asks `respondsToSelector:` and skips that path. Whether
+  24A446 had it is not known.
+- `sbwall.m` uses public UIKit only.
+
+**Device tree.** `mkadt_starlte.py --iphone11` and `adt-extra-ram.py` ran on 24B156's `n104ap.adt`. The donor gives
+the `/product` node, which is there.
+
+**Root names:**
+
+- Every label and job key of `fullroot/lists/` is in 24B156's `launchd.plist`, except `com.apple.datamigrator` (an
+  override; harmless when absent).
+- `starlte-disabled-ios27.list` matches fully; `starlte-disabled.list` lacks only `com.apple.cloudd.sync`.
+- New jobs on this image include `com.apple.appledepthd` (depth hardware the S9 does not have: a likely crash loop, a
+  candidate for `daemons-hw.list`), `healthcontentd` and `speechmodeltrainingd`. `memoryanalyticsd` is not on the iPhone
+  11 image. `aggregated` is gone.
+- `MessagesBlastDoorService.xpc` and the ExtensionKit flag `enforce_xpc_cache_code_signing` are there.
+
+**Not carried over mechanically**, to do before 24B156 can replace 24A446:
+
+1. The CoreImage word: by hand, then a phone.
+2. sbca's 24B156 block in `sbca.c`, chosen at build time: from `24B156-sbca.txt`, plus `GLES_CONTEXT_SIZE` and the display
+   offsets checked.
+3. The selectors 27.2's QuartzCore sends to the Metal device, against `tools/ios27/metal2/`.
+4. The cache pipeline on 24B156 (`dsc-isa-census.py` first), the oracle, the text-data scan and review. These need numpy.
+5. On the first boots:
+   - whether anything needs `io_service_get_wait_info` or `mach_memory_entry_region_info`;
+   - PosterBoard's store schema;
+   - AppleKeyStore's new key-state fields;
+   - the sandbox-extension layouts;
+   - IO80211's layouts;
+   - `appledepthd` and the crash loops.
+6. `b.dylib` and the Metal bundle rebuilt for 24B156 if they link anything that moved.
+
+**What 24B156 needs before it can boot, with confidence:**
+
+- **Nothing in the kernel is known to be missing** (high confidence for system calls and traps; medium for the two MIG
+  routines, which return an error rather than stop the boot).
+- A root built with the four-word patch list and `sbca`'s 24B156 block should reach SpringBoard as 24A446's did (medium:
+  the rewrite pipeline has not run on this cache).
+- Without the sbca block it boots to a blank screen, and without the CoreImage word some Settings symbols are missing.
+
 ## What only the new restore image can answer, in the order to ask
+
+(Written before the image was on the disk. Questions 1 to 3 and most of 5 to 7 are answered in the section above. 4 is
+answered for the system calls, traps, sysctl names and fsctl numbers, and 8 is not.)
 
 1. **The kernel's tables, before the 11 GB download.** Take only the kernelcache and the manifest out of Apple's
    remote restore image. blacktop's `ipsw` reads single files of a remote IPSW. The kernelcache is a few tens of MB:
@@ -223,9 +343,9 @@ proven only with 24A446, which is what `INSTALL-S9.md:256` means.
 | # | Step | Who | Disk on the Mac mini |
 |---|---|---|---|
 | 0 | Free disk (below). Decide which test phone carries 24B156. | Claudius; Dylan for the phone | — |
-| 1 | Question 1 above: the kernelcache and the manifest only. If a new call or trap shows up: an xnu fork commit (APSL, like 0120), STARLTE and FRANKEL built. | an agent (download approved by Claudius) | < 200 MB |
-| 2 | The restore image from Apple, then `IOS27_BUILD=24B156 tools/ios27/s9/fetch-apple-inputs.sh IPSW inputs-24B156`; delete the IPSW. | an agent | 11 GB for the image, then about 25 GB free during the unpacking (the script's own figure); about 20 GB stays (three images and the tree) |
-| 3 | Questions 2 to 8 with the images mounted read-only. Write `patches-24B156.txt`, `sbca.c`'s `SBCA_IOS27` set for 24B156 (a second block chosen at build time, so 24A446 keeps its own), the texture table, the conf's image names. Draft PR, `STATUS` still `candidate`. | an agent; no phone | none beyond step 2 |
+| 1 | **Done 17 Nov.** Question 1 above: the kernelcache and the manifest only. If a new call or trap shows up: an xnu fork commit (APSL, like 0120), STARLTE and FRANKEL built. | an agent (download approved by Claudius) | < 200 MB |
+| 2 | **Done 17 Nov** (into an agent's folder, from the owner's download). The restore image from Apple, then `IOS27_BUILD=24B156 tools/ios27/s9/fetch-apple-inputs.sh IPSW inputs-24B156`; delete the IPSW. | an agent | 11 GB for the image, then about 25 GB free during the unpacking (the script's own figure); about 20 GB stays (three images and the tree) |
+| 3 | **Partly done 17 Nov** (`patches-24B156.txt` without CoreImage, `24B156-sbca.txt`). Questions 2 to 8 with the images mounted read-only. Write `patches-24B156.txt`, `sbca.c`'s `SBCA_IOS27` set for 24B156 (a second block chosen at build time, so 24A446 keeps its own), the texture table, the conf's image names. Draft PR, `STATUS` still `candidate`. | an agent; no phone | none beyond step 2 |
 | 4 | Userland for 24B156: `sbca`, `libsbgl`, the Metal bundle if needed, o/c/m dylibs. The overlay directory. | an agent | ~10 GB build tree (shared with 24A446's) |
 | 5 | `IOS27_BUILD=24B156 prepare-root-inputs.sh` into a SEPARATE private directory (`IOS27_PRIVATE=.../private-24B156`), then `sudo IOS27_PRIVATE=... tools/ios27/s9/build-root.sh inputs-24B156`, `OUT=.../root-24B156.img`. | an agent with `sudo` (or Claudius) | 62 GB free when it starts (`build-full-root.sh:60-61`); about 20 GB stays (the image); delete `work/` after |
 | 6 | `make-boot-image.sh` with the same kernel and the new root's `.inject` record. | an agent | < 100 MB |
@@ -303,19 +423,20 @@ constraint. None of this fits beside seven agents' build trees today.
 
 | Part | Agent time | Phone time |
 |---|---|---|
-| Step 1 | half a day | — |
-| Step 3 (five words, sbca, the table, the names) | 2 to 4 days | — |
+| Step 1 | done (the section above) | — |
+| Step 3: the CoreImage word, sbca's 24B156 block in code, the Metal selectors (four words, the addresses, the table and the names are done) | 1 to 2 days | — |
+| The cache pipeline, oracle and text-data scan on 24B156 (needs numpy) | half a day | — |
 | Step 4 and 5 | 1 day | — |
 | First boots to a picture | 1 to 3 days | yes |
 | Parity, feature by feature, and the launchd lists | 3 to 5 days | yes |
 | A kernel change, if step 1 finds one | + 1 to 3 days | yes |
-| **Total** | **8 to 15 working days** | **5 to 8 of them** |
+| **Total** | **6 to 12 working days** | **4 to 7 of them** |
 
 **Recommendation.** Do not move while the rendering, performance, camera and Control Centre work is being measured on
 24A446. Their findings are addresses and baselines of 24A446, and moving first would mean finding them twice. Order:
 
-1. Now: step 1 (kernelcache only), once Claudius allows the download.
-2. Once there is disk: steps 2 and 3, offline, in parallel with that work.
+1. Done on 17 November: step 1, steps 2 and 3 as far as tools and names go (the section "24B156: what was found").
+2. Offline, in parallel with that work: the rest of step 3 (the CoreImage word, sbca's 24B156 block, the Metal selectors) and the cache pipeline on 24B156 (needs numpy).
 3. Once those tracks have landed: the phone steps, on whichever build is then the newest. The work is the same for
    27.2.1 or 27.3.
 
