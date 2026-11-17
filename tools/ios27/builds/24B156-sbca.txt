@@ -1,26 +1,38 @@
-# sbca's QuartzCore numbers for iOS 27.2.1 (24B156): CANDIDATES, NOT BUILT AND NOT RUN ON A PHONE.
-# userland/src/sbca.c (SBCA_IOS27) carries the 24A446 set and is left as it is, because the 24A446 line uses it. This list is what
-# its 24B156 block would hold. Each address is the cache symbol named beside it in the builder's own 24B156 image
-# (17 November 2026). Each word sbca checks before it changes anything was read there and is the same as in 24A446. The offsets
-# were seen in the 24B156 code. Unslid shared-cache addresses: numbers only, no Apple code.
-# name                      24B156          how it was found / checked
-QC_ACCEL_SERVER_VTABLE      0x1e2258720     vtable for CA::WindowServer::AccelServer (symbol start, as in 24A446)
-QC_RENDERER_SLOT            0x1e2258900     the entry holding AccelServer::renderer(): +0x1e0 from the symbol, +0x1d0 from the address point (24A446: the same)
-QC_ACCEL_RENDERER           0x184301bb4     CA::WindowServer::AccelServer::renderer()
-QC_GLES_CONTEXT_CTOR        0x18455c15c     CA::OGL::GLESContext::GLESContext(void *) (C1)
-QC_MALLOC_ZONE              0x1edecbb20     malloc_zone (static, QuartzCore)
-QC_MALLOC_ZONE_ONCE         0x1edeca398     x_malloc_get_zone()::once
-QC_MALLOC_ZONE_INIT         0x1843a2260     malloc_zone_init()
-QC_GLES_CONTEXT_VTABLE      0x1e224eac8     vtable for CA::OGL::GLESContext + 0x10 (the address point objects hold; check against 24A446's convention)
-QC_FUNCTION_SUPPORTED_AT    0x480           GLContext::function_supported() const in that vtable: +0x480 from the address point (24A446: the same)
-QC_FUNCTION_SUPPORTED       0x18460d5a0     CA::OGL::GLContext::function_supported() const
-QC_TEX_FRAGMENT_SHADERS     0x1e05cf3f0     CA::OGL::tex_fragment_shaders
-QC_METAL_WAIT_ONCE          0x1eb03e460     CAMetalContextCreate's once
-QC_PUSH_SURFACE_FOUND_BR    0x18434f8c0     in CA::OGL::Context::push_surface: cbnz x8 (b50001e8, PUSH_SURFACE_CBNZ: the same word)
-QC_FRAMEBUFFER_PIXEL_FORMAT 0x18434cff4     CA::WindowServer::IOMFBDisplay::framebuffer_pixel_format(): its first three words are framebuffer_format_was
-QC_EDR_CLIENT               0x18467d73c     CA::EDRClient::client()
-# Seen in AccelServer::renderer() of 24B156: the server's +0x628 (context) and +0x630 (renderer), +0x60 (display), a 0x68-byte
-# allocation (RENDERER_SIZE) and a +0xf0 load. NOT checked: GLES_CONTEXT_SIZE (0xba0), the display's +0x140/+0x150,
-# RENDERER_BUFFER_SIZE.
-# The texture-function names (tools/ios27/ca-gpu/hakios/hakios.gl.h, 136) are those of 24B156's
-# CA::OGL::MetalContext::TextureFunction_codes in the same order: no change.
+# sbca's QuartzCore numbers for iOS 27.2.1 (24B156, iPhone12,1). NOT RUN ON A PHONE: no root of 24B156 has booted.
+# Found on 17 November 2026 in the builder's own 24B156 restore image (SystemOS's shared cache), each by the same symbol and
+# the same instruction or pointer pattern as its 24A446 line (24A446-sbca.txt), and checked with `tools/ios27/ca-gpu/
+# sbca_table.py verify 24B156 CACHE --symbols QC.txt` (QC.txt: `ipsw dyld symaddr --image QuartzCore CACHE`): 35 ok, 0 FAIL.
+# One offset differs from 24A446 besides the addresses: the display's renderer field is at +0x158 (24A446 +0x150; the Metal
+# device moved from +0x140 to +0x148), read in renderer() at the same store of the server's renderer into its display.
+# GLES_CONTEXT_SIZE, RENDERER_SIZE, RENDERER_BUFFER_SIZE and the server's offsets are unchanged. Numbers and names only.
+# NAME                      VALUE                       ANCHOR                                                          how verified
+QC_ACCEL_SERVER_VTABLE      1e2258720                   sym:__ZTVN2CA12WindowServer11AccelServerE                       symbol (vtable start)
+QC_RENDERER_SLOT            1e2258900                   sym:__ZTVN2CA12WindowServer11AccelServerE+0x1e0                 symbol + 0x1e0, as 24A446; holds QC_ACCEL_RENDERER
+QC_ACCEL_RENDERER           184301bb4                   sym:__ZN2CA12WindowServer11AccelServer8rendererEv               symbol
+QC_GLES_CONTEXT_CTOR        18455c15c                   sym:__ZN2CA3OGL11GLESContextC1EPv                               symbol; called by _initWithEAGLContext after the allocation
+QC_MALLOC_ZONE              1edecbb20                   sym:__ZL11malloc_zone                                           symbol
+QC_MALLOC_ZONE_ONCE         1edeca398                   sym:__ZZ17x_malloc_get_zoneE4once                               symbol
+QC_MALLOC_ZONE_INIT         1843a2260                   sym:__ZL16malloc_zone_initv                                     symbol
+QC_GLES_CONTEXT_VTABLE      1e224eac8                   sym:__ZTVN2CA3OGL11GLESContextE+0x10                            symbol + 0x10, as 24A446
+QC_FUNCTION_SUPPORTED_AT    480                         -                                                               the vtable entry there holds QC_FUNCTION_SUPPORTED (as 24A446)
+QC_FUNCTION_SUPPORTED       18460d5a0                   sym:__ZNK2CA3OGL9GLContext18function_supportedEv                symbol
+QC_TEX_FRAGMENT_SHADERS     1e05cf3f0                   sym:__ZN2CA3OGLL20tex_fragment_shadersE                         symbol; entry 20 (c3s) empty
+QC_METAL_WAIT_ONCE          1eb03e460                   sym:__ZZ20CAMetalContextCreateE4once                            symbol
+QC_PUSH_SURFACE             18434f83c                   sym:__ZN2CA3OGL7Context12push_surfaceEPNS0_7SurfaceEbjj         symbol (evidence only)
+QC_PUSH_SURFACE_FOUND_BR    18434f8c0                   sym:__ZN2CA3OGL7Context12push_surfaceEPNS0_7SurfaceEbjj+0x84    symbol + 0x84, as 24A446; the word is PUSH_SURFACE_CBNZ
+PUSH_SURFACE_CBNZ           b50001e8                    -                                                               cbnz x8, +0x3c: read at QC_PUSH_SURFACE_FOUND_BR (as 24A446)
+PUSH_SURFACE_B              1400000f                    -                                                               b +0x3c: the same target
+QC_FRAMEBUFFER_PIXEL_FORMAT 18434cff4                   sym:__ZN2CA12WindowServer12IOMFBDisplay24framebuffer_pixel_formatEv symbol; first three words are FRAMEBUFFER_FORMAT_WAS
+FRAMEBUFFER_FORMAT_WAS      d503237f,6dbc23e9,a90157f6  -                                                               read at QC_FRAMEBUFFER_PIXEL_FORMAT (as 24A446)
+GLES_CONTEXT_SIZE           ba0                         -                                                               _initWithEAGLContext: mov w2, #size before the call to QC_GLES_CONTEXT_CTOR (as 24A446)
+RENDERER_SIZE               68                          -                                                               renderer(): mov w1, #size (as 24A446)
+RENDERER_BUFFER_SIZE        40000                       -                                                               _initWithEAGLContext: mov w0, #size (as 24A446)
+SERVER_CONTEXT_AT           628                         -                                                               renderer(): str to the server + 0x628 (as 24A446)
+SERVER_RENDERER_AT          630                         -                                                               renderer(): str to the server + 0x630 (as 24A446)
+SERVER_DISPLAY_AT           60                          -                                                               renderer(): ldr display, [server, #0x60] (as 24A446)
+DISPLAY_RENDERER_AT         158                         -                                                               renderer(): str renderer, [display, #0x158] (24A446: 0x150; the Metal device is at +0x148)
+CONTEXT_SET_COMPRESSION     f0                          -                                                               renderer(): ldr x9, [x16, #0xf0]! on the context's vtable (as 24A446)
+QC_EDR_CLIENT               18467d73c                   sym:__ZN2CA9EDRClient6clientEv                                  symbol; first two words are EDR_CLIENT_WAS
+EDR_CLIENT_WAS              d503237f,d10143ff           -                                                               read at QC_EDR_CLIENT (the words sbca.c checks; as 24A446)
+QC_CARENDERER_INIT_EAGL     1846ceb98                   sym:-[CARenderer~_initWithEAGLContext:options:]                 symbol (evidence only: GLES_CONTEXT_SIZE, RENDERER_BUFFER_SIZE)
+QC_TEXTURE_FUNCTION_CODES   1e05d61d0                   sym:__ZN2CA3OGL12MetalContext21TextureFunction_codesE           symbol (evidence only): 136 names, hakios.gl.h's order

@@ -54,6 +54,10 @@ jobs:
         run: python3 tools/ios27/s9/cmdline-inject-test.py
       - name: "iOS builds: the manifests of tools/ios27/builds, and the tools refusing an unknown build or a mixture of builds"
         run: python3 tools/ios27/builds/builds-test.py
+      - name: sbca's QuartzCore tables per iOS build (tables, headers, checker)
+        run: python3 tools/ios27/ca-gpu/sbca_table_test.py
+      - name: shared-cache header facts for the AOT rewrite
+        run: python3 tools/ios27/fullroot/pipeline/cache/aot/dsc_header_test.py
       - name: The backup tool only reads, copies exactly, and proves every copy
         run: python3 tools/backup-partitions-test.py
       - name: Saved var archives use the newest intact slot

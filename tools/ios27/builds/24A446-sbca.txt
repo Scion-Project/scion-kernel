@@ -1,0 +1,36 @@
+# sbca's QuartzCore numbers for iOS 27.0.1 (24A446, iPhone12,1): the set the iOS 27 line has booted with since October 2026.
+# The values are those userland/src/sbca.c carried before the tables (its SBCA_IOS27 block), unchanged. On 17 November 2026
+# each was checked again against a stock 24A446 shared cache with `tools/ios27/ca-gpu/sbca_table.py verify 24A446 CACHE
+# --symbols QC.txt` (QC.txt: `ipsw dyld symaddr --image QuartzCore CACHE`): 35 ok, 0 FAIL. The ANCHOR column is the symbol each
+# address is; the pointer, instruction and size checks are the verify command's (sbca_table.py). Numbers and names only.
+# NAME                      VALUE                       ANCHOR                                                          how verified
+QC_ACCEL_SERVER_VTABLE      1e8fd77d8                   sym:__ZTVN2CA12WindowServer11AccelServerE                       symbol (vtable start)
+QC_RENDERER_SLOT            1e8fd79b8                   sym:__ZTVN2CA12WindowServer11AccelServerE+0x1e0                 symbol + 0x1e0 (+0x1d0 from the address point); holds QC_ACCEL_RENDERER
+QC_ACCEL_RENDERER           184415838                   sym:__ZN2CA12WindowServer11AccelServer8rendererEv               symbol
+QC_GLES_CONTEXT_CTOR        18466da0c                   sym:__ZN2CA3OGL11GLESContextC1EPv                               symbol; called by _initWithEAGLContext after the allocation
+QC_MALLOC_ZONE              1e709e650                   sym:__ZL11malloc_zone                                           symbol
+QC_MALLOC_ZONE_ONCE         1e709cf68                   sym:__ZZ17x_malloc_get_zoneE4once                               symbol
+QC_MALLOC_ZONE_INIT         1844b62b8                   sym:__ZL16malloc_zone_initv                                     symbol
+QC_GLES_CONTEXT_VTABLE      1e8fd8250                   sym:__ZTVN2CA3OGL11GLESContextE+0x10                            symbol + 0x10, the address point objects hold
+QC_FUNCTION_SUPPORTED_AT    480                         -                                                               the vtable entry there holds QC_FUNCTION_SUPPORTED
+QC_FUNCTION_SUPPORTED       18471afec                   sym:__ZNK2CA3OGL9GLContext18function_supportedEv                symbol
+QC_TEX_FRAGMENT_SHADERS     1e05feb80                   sym:__ZN2CA3OGLL20tex_fragment_shadersE                         symbol; entry 20 (c3s) empty
+QC_METAL_WAIT_ONCE          1e4062540                   sym:__ZZ20CAMetalContextCreateE4once                            symbol
+QC_PUSH_SURFACE             184464080                   sym:__ZN2CA3OGL7Context12push_surfaceEPNS0_7SurfaceEbjj         symbol (evidence only)
+QC_PUSH_SURFACE_FOUND_BR    184464104                   sym:__ZN2CA3OGL7Context12push_surfaceEPNS0_7SurfaceEbjj+0x84    symbol + 0x84; the word is PUSH_SURFACE_CBNZ
+PUSH_SURFACE_CBNZ           b50001e8                    -                                                               cbnz x8, +0x3c: read at QC_PUSH_SURFACE_FOUND_BR
+PUSH_SURFACE_B              1400000f                    -                                                               b +0x3c: the same target (sbca's word)
+QC_FRAMEBUFFER_PIXEL_FORMAT 184461838                   sym:__ZN2CA12WindowServer12IOMFBDisplay24framebuffer_pixel_formatEv symbol; first three words are FRAMEBUFFER_FORMAT_WAS
+FRAMEBUFFER_FORMAT_WAS      d503237f,6dbc23e9,a90157f6  -                                                               read at QC_FRAMEBUFFER_PIXEL_FORMAT
+GLES_CONTEXT_SIZE           ba0                         -                                                               _initWithEAGLContext: mov w2, #size before the call to QC_GLES_CONTEXT_CTOR
+RENDERER_SIZE               68                          -                                                               renderer(): mov w1, #size
+RENDERER_BUFFER_SIZE        40000                       -                                                               _initWithEAGLContext: mov w0, #size
+SERVER_CONTEXT_AT           628                         -                                                               renderer(): str to the server + 0x628
+SERVER_RENDERER_AT          630                         -                                                               renderer(): str to the server + 0x630
+SERVER_DISPLAY_AT           60                          -                                                               renderer(): ldr display, [server, #0x60]
+DISPLAY_RENDERER_AT         150                         -                                                               renderer(): str renderer, [display, #0x150] (the Metal device is at +0x140)
+CONTEXT_SET_COMPRESSION     f0                          -                                                               renderer(): ldr x9, [x16, #0xf0]! on the context's vtable
+QC_EDR_CLIENT               184787f88                   sym:__ZN2CA9EDRClient6clientEv                                  symbol; first two words are EDR_CLIENT_WAS
+EDR_CLIENT_WAS              d503237f,d10143ff           -                                                               read at QC_EDR_CLIENT (the words sbca.c checks)
+QC_CARENDERER_INIT_EAGL     1847d7984                   sym:-[CARenderer~_initWithEAGLContext:options:]                 symbol (evidence only: GLES_CONTEXT_SIZE, RENDERER_BUFFER_SIZE)
+QC_TEXTURE_FUNCTION_CODES   1e05fc8d0                   sym:__ZN2CA3OGL12MetalContext21TextureFunction_codesE           symbol (evidence only): 136 names, hakios.gl.h's order
