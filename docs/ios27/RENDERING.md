@@ -18,19 +18,20 @@ point are at the end.
 
 | What is seen | Compositor | Cause | How sure | Changed |
 |---|---|---|---|---|
-| App switcher: the cards are blank white, only the app's icon and name above each | Metal (OpenGL ES: no picture yet) | the snapshot behind each card is drawn into an extended-range IOSurface, and the plug-in refuses that command buffer | refusal: certain; that it is the card's picture: likely | `frontend-dexr-surfaces.diff` |
-| App switcher: the background is black | Metal (OpenGL ES: no picture yet) | there is no wallpaper for the switcher to show: PosterBoard has no poster, and the stop-gap image is put on two other windows only | likely | nothing (see below) |
+| App switcher: the background is black | Metal (OpenGL ES: no picture yet) | the reduced picture the switcher puts behind its cards is drawn into an extended-range IOSurface, and the plug-in refuses that command buffer | refusal: certain; that it is the background: likely | `frontend-dexr-surfaces.diff` |
+| App switcher: the cards of apps opened earlier are blank white (icon and name only); the app just left is drawn | not Metal (a file read) | their saved snapshots are compressed files of decmpfs type 16, which this kernel cannot read | likely | nothing (a kernel decompressor) |
 | Home screen and lock screen wallpaper black | both | no poster ([METAL.md](METAL.md), [GPU-PATH.md](GPU-PATH.md)); with the stop-gap image installed both are drawn | certain | nothing new |
 | Blur black (Control Centre, dock, folders) | Metal, without `SWEET_MTL2_DEXR=1` | metal2vulkan refuses CoreAnimation's variable-blur downsample, which samples an extended-range texture through a mip-filtered sampler | certain | none new: `SWEET_MTL2_DEXR=1` (on in the root build) is the answer and is drawn on 17 November |
 | Lock screen clock an empty box | Metal, earlier configurations | the clock's glass goes through the same blur | guess | not reproduced on 17 November: the clock is drawn |
 | No-copy buffers refused, 10 to 30 a boot in backboardd | Metal | the kernel's IMPORT_HOST cannot wire the memory, PanVK's import fails, metal2vulkan answers `NotRepresentable` | refusal: certain; what is lost with it: not known | `frontend-nocopy-diag.diff` (a line describing the memory) |
 | A start-up command buffer refused at `generateMipmapsForTexture` | Metal | metal2vulkan has no mipmap generation | certain | nothing: seen once a boot, on CoreAnimation's start-up textures, with no visible effect known |
 
-### The app switcher's cards
+### The app switcher's background
 
-**Seen.** A screenshot of the switcher on 17 November (Settings, Games and a third app open): a black screen, three white
-cards stacked, the icon and name of each above it, nothing of the apps' own pictures. A frame taken while the switcher opened
-shows the white cards over a blurred home screen.
+**Seen.** Every screenshot of the switcher on 17 November, on the image of 13 November and on the day's kernel alike: the
+background is black where iOS shows the blurred home screen and wallpaper. With only Settings opened since the boot its card
+is drawn; with apps the owner had opened earlier (Settings, Games and a third), their cards are white (next section). A frame
+taken while the switcher opened shows the cards over a blurred home screen: the live blur works, the settled picture does not.
 
 **The console.** The owner swiped up from the bottom edge of Settings at 18:03:17 (the touch from (799, 2948) to (813, 2563)
 in panel pixels) and then swiped cards away. The plug-in's lines at that moment, in this order:
@@ -41,7 +42,8 @@ in panel pixels) and then swiped cards away. The plug-in's lines at that moment,
 Format 554 is BGR10_XR (extended-range sRGB, 10 bits a channel in 32 bits); the texture is a render target over an IOSurface
 ("memory", storage 0) a quarter of the 828 x 1702 canvas in each direction. The same pair is in the boot before it (one
 refusal at 17:54:47, when the switcher was opened, and one at 18:01:16) and in the first phone's own `mtl2.log` at 207 x 448
-(the quarter of the 1792-row canvas). Each of those boots has one or two, the first at the moment the switcher opened. Boots
+(the quarter of the 1792-row canvas). Each of those boots has one or two, the first at the moment the switcher opened, also
+in the boot where the Settings card was drawn (18:14:34, the switcher opened at 18:14:32). Boots
 of 10 and 12 November (two phones) show the same refusal right after a full-size 828 x 1792 BGR10_XR surface target was made,
 up to eight times a boot.
 
@@ -53,9 +55,11 @@ BGR10_XR target is then an 8-byte RGBA16Float color drawn into a 4-byte BGR10_XR
 (`render.rs`, `check_pipeline`: a placed color whose format differs and has no view of the attachment's size), and a
 refusal drops the whole command buffer.
 
-**What the refused buffer drew (likely).** The quarter-size extended-range surface made the moment an app leaves the
-screen, once per app, is the reduced snapshot the switcher shows on the app's card; its command buffer is dropped, so the
-card has nothing to show. Not seen directly: the switcher's snapshot files were not looked at.
+**What the refused buffer drew (likely).** The quarter-size extended-range surface is made each time the switcher opens,
+whether or not its cards are drawn, and right after the refusal the same surface is made a texture to be sampled (`usage
+0x1`, same size): a reduced picture of what lies behind the switcher, drawn once and then blurred and shown behind the
+cards. Its command buffer is dropped, so the background has nothing in it: black. Not seen directly; experiment E2 decides.
+(On 17 November the stop-gap wallpaper of `sbwall.m` is on the home screen window, so a drawn background would show it.)
 
 **Changed.** `tools/ios27/metal/patches/frontend-dexr-surfaces.diff` (applied by `mk-bundle27.sh` after the four
 before it): a render encoder notes which of its pass's color textures kept an extended-range format; when a pipeline whose
@@ -71,11 +75,9 @@ What it does not do: a pass that mixes a held and an unheld extended-range color
 holds it (the mask is per color, so that works); a pipeline that gets functions added after it was made
 (`addRenderPipelineFunctionsWithDescriptor`) is made again without them (not seen with CoreAnimation).
 
-### The switcher's black background
+### The switcher's background if E2 leaves it black
 
-**Seen.** The same screenshots: everything around the cards is black, where iOS shows the wallpaper behind the switcher.
-
-**Likely cause: there is no wallpaper.** PosterBoard has never made a poster on this port (no poster extension is started;
+**The other explanation: there is no wallpaper.** PosterBoard has never made a poster on this port (no poster extension is started;
 the wallpaper picker fails, [UI-NIGHT-1114.md](UI-NIGHT-1114.md)), so the windows that should hold the wallpaper hold nothing.
 What the home and lock screens show is the stop-gap of `tools/ios27/metal/sbwall.m`: an image added as a layer to
 SpringBoard's `SBHomeScreenWindow` (under the icons) and `_SBWallpaperSecureWindow` (the lock screen), the two windows of its
@@ -84,12 +86,27 @@ default list; its console lines of 17 November list fourteen SpringBoard windows
 frame taken while the switcher opened showed a blurred home screen behind the cards, so blur itself works there; the black
 comes once the switcher has settled.
 
-**Not changed.** Putting the stop-gap image under the switcher window too (`/private/var/local/sbwallpaper-windows` =
+If E2 shows the background still black with no refusal, this is the cause. **Not changed.** Putting the stop-gap image under the switcher window too (`/private/var/local/sbwallpaper-windows` =
 `Wallpaper:top HomeScreen:bottom MainSwitcher:bottom`, no code) would be a fallback, not a fix: the switcher window also
 carries apps as they open and close, so the image could hide the home screen during those animations. It is experiment E4
 below, to run only after E1 says the background is black under OpenGL ES as well. The fix is a real poster.
 
-### Blur, and the lock screen's clock
+### The switcher's white cards
+
+**Seen.** The cards of apps opened in an earlier session are white with the app's icon and name; the card of the app just
+left (Settings, in a fresh boot) is drawn.
+
+**Likely cause: the saved snapshots cannot be read.** The kernel logs `decmpfs ... tried to access a compressed file of
+unregistered type 16` (the path is redacted) 67 to 185 times a boot. They cluster where the switcher shows saved snapshots:
+46 in the eight seconds the owner's switcher was up (18:03:17 to 18:03:25), 26 in the minute of another boot's switcher with
+white cards, and 4 when only the fresh Settings card was shown. iOS keeps an app's snapshots as files; files that were
+compressed in place (the decmpfs header in an extended attribute) can be read on this kernel only if it has a decompressor
+of their type, and the iOS 27 kernel registers type 1 alone ([METAL.md](METAL.md) saw the same for nine SplashBoard images of
+the restore image). The card of the app just left comes from the snapshot in memory, not from the file. Not Metal, and
+nothing is changed here: the fix is a decompressor of type 16 in the kernel, or snapshots written uncompressed, after E5
+names the files and the type.
+
+
 
 The blur of iOS 27's materials is drawn by CoreAnimation's variable-blur shaders. Without `SWEET_MTL2_DEXR=1` each command
 buffer that uses the downsample is refused:
@@ -124,7 +141,7 @@ the first 64 problem lines of a process, so the counts are a floor):
 | no-copy buffer: `HostMemory`, `NotRepresentable` | 1,791 (and about 14,600 more in the trace lines of five stress runs) | 60 | images given to the render server as memory (likely) | diagnostic added |
 | texture over IOSurface: `BufferTexture(RowPitch ...)` | 180 | 3 | the display surfaces asked for turned (landscape) | fixed 12 November ([METAL-ROTATION.md](METAL-ROTATION.md)) |
 | `variable_blur_clamp_downsample_frag_lph`: `Format`, `NotImplemented` | 54 | 3 | the blur of every material | answered by `SWEET_MTL2_DEXR=1` |
-| `setRenderPipelineState`: `AttachmentFormat(Color(0))` | 46 | 10 | drawing into BGR10_XR surfaces: the switcher's card snapshots (likely), full-size ones on 10 and 12 November | `frontend-dexr-surfaces.diff` |
+| `setRenderPipelineState`: `AttachmentFormat(Color(0))` | 46 | 10 | drawing into BGR10_XR surfaces: the switcher's reduced background (likely), full-size ones on 10 and 12 November | `frontend-dexr-surfaces.diff` |
 | `generateMipmapsForTexture`: `MipmapGeneration`, `NotImplemented` | 4 | 4 | CoreAnimation's start-up textures (776 x 24, 10 levels) | none needed so far |
 | `glass_background_cr_lph`: `Format`, `NotImplemented` | 2 | 1 | glass, with `SWEET_MTL2_DEXR` off | answered by `SWEET_MTL2_DEXR=1` |
 | texture: `OutOfMemory(Device)` | 3 | 2 | GPU memory at the cap | [UI-NIGHT-1114.md](UI-NIGHT-1114.md) |
@@ -171,14 +188,16 @@ hold (the switcher), take a screenshot; then a screenshot of the lock screen and
 
 | | What | Outcome and meaning |
 |---|---|---|
-| E1 | the OpenGL ES compositor, nothing else changed | cards with the app's picture: the card defect is the Metal path's; background black too: the background is the missing wallpaper |
-| E2 | the bundle with `frontend-dexr-surfaces.diff` (Metal compositor) | `made again with colors 0x1` and no `AttachmentFormat`, cards with the app's picture: fixed; cards still white without a refusal: the snapshot is lost elsewhere |
+| E1 | the OpenGL ES compositor, nothing else changed | background drawn: the black is the Metal path's; white cards under OpenGL ES too: the cards are not the Metal path's (E5) |
+| E2 | the bundle with `frontend-dexr-surfaces.diff` (Metal compositor) | `made again with colors 0x1`, no `AttachmentFormat`, the blurred home screen and wallpaper behind the cards: fixed; still black with no refusal: the background is the missing wallpaper (E4) |
 | E3 | the old bundle, `SWEET_MTL2_DEXR=0` (control) | cards drawn, `variable_blur` refusals, blur black, clock box empty: both what the variable is for and its flaw confirmed |
-| E4 | only if E1's background is black: `sbwallpaper-windows` with `MainSwitcher:bottom` | image behind the cards: the cause is the missing poster; icons vanishing while an app opens or closes: that fallback is not acceptable |
+| E4 | only if E2's background stays black with no refusal: `sbwallpaper-windows` with `MainSwitcher:bottom` | image behind the cards: the cause is the missing poster; icons vanishing while an app opens or closes: that fallback is not acceptable |
+| E5 | no boot: on a root pulled after the switcher showed white cards, the decmpfs header (`com.apple.decmpfs`: magic, type) of the files in the apps' snapshot folders (SplashBoard) | type 16 there: the white cards are these files; then the type's algorithm decides the kernel work |
 
 ## Not done
 
-- The switcher's background needs a poster: the wallpaper picker ([UI-NIGHT-1114.md](UI-NIGHT-1114.md)) is the way to one.
+- The switcher's white cards: a decmpfs type 16 decompressor (or uncompressed snapshots), after E5.
+- A real wallpaper needs a poster: the wallpaper picker ([UI-NIGHT-1114.md](UI-NIGHT-1114.md)) is the way to one.
 - What the no-copy refusals cost (the diagnostic line, then a picture).
 - Mipmap generation in the plug-in (none needed so far).
 - Nothing on this page was run on a phone.

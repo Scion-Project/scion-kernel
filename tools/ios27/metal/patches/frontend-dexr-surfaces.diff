@@ -35,7 +35,7 @@
 - [self check:nmb_render_set_pipeline(self.handle,[(NBRenderPipeline *)state handle]) what:"setRenderPipelineState"];
 + NBRenderPipeline *pipeline=(NBRenderPipeline *)state;
 + // A pipeline whose extended-range colors SWEET_MTL2_DEXR holds as RGBA16Float, drawn into a pass whose texture there kept
-+ // its format (iOS 27: the app switcher's snapshots, BGR10_XR IOSurfaces): the pipeline as the descriptor asked for those
++ // its format (iOS 27: the app switcher's reduced background, a BGR10_XR IOSurface): the pipeline as the descriptor asked for those
 + // colors, as metal2vulkan refuses a state color of another size than the pass's (AttachmentFormat).
 + if(const unsigned keep=pipeline.dexrColors & self.extendedRangeColors) {
 +  NBRenderPipeline *exact=sweetExactPipeline(pipeline,keep);
