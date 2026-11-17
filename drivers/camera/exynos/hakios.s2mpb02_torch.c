@@ -273,9 +273,14 @@ configure(void)
 static int
 torch_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 {
-	uint32_t level;
-	int error = uiomove((caddr_t)&level, sizeof(level), uio);
+	uint32_t level = 0;
+	int error;
 
+	/* a write shorter than a level: uiomove() would move what there is and leave the rest of `level' as it was */
+	if (uio_resid(uio) < (user_ssize_t)sizeof(level)) {
+		return EINVAL;
+	}
+	error = uiomove((caddr_t)&level, sizeof(level), uio);
 	if (error != 0) {
 		return error;
 	}

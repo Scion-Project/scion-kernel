@@ -1418,7 +1418,6 @@ rfs_write_data(const uint8_t *d, uint32_t n)
 	cp.w_got += take;
 	if (cp.w_got == cp.w_len) {
 		cp.w_active = false;
-		cp.rfs_more = 0;
 		cp.nv_writes_kept++;
 		rfs_nv_answer(2, cp.w_id, true, cp.w_off, cp.w_len);
 		say("cp: NV write %u of the CP (offset %#x, %u bytes) kept in RAM only, answered\n", cp.nv_writes_kept, cp.w_off,
@@ -1426,12 +1425,28 @@ rfs_write_data(const uint8_t *d, uint32_t n)
 	}
 }
 
-/* a frame that continues a file request (multi-frame or a long frame) */
+/*
+ * Bytes that continue a file request, however the link brings them: a frame of their own, the rest of a frame longer
+ * than one buffer (rings_receive's cp.more[]), or the next frames of a multi-frame message. They are counted against
+ * the request's own length and nothing else (cp.rfs_more: its first four bytes, which count its 6-byte header, as
+ * Samsung's RFS header does); an NV write takes its data from them only. A write is accepted only when its data fit
+ * its request (rfs_received), so it is complete when the request is; one that is not is refused when the request ends
+ * and never takes the bytes of a later request.
+ */
 static void
 rfs_continued(const uint8_t *m, uint32_t n)
 {
-	if (cp.w_active) {
-		rfs_write_data(m, n);
+	uint32_t k = MIN(n, cp.rfs_more);
+
+	if (cp.w_active && k != 0) {
+		rfs_write_data(m, k);
+	}
+	cp.rfs_more -= k;
+	if (cp.rfs_more == 0 && cp.w_active) {
+		cp.w_active = false;
+		rfs_nv_answer(2, cp.w_id, false, cp.w_off, cp.w_len);
+		say("cp: NV write of the CP (offset %#x, %u bytes) ended after %u bytes: refused\n", cp.w_off, cp.w_len,
+		    cp.w_got);
 	}
 }
 
@@ -1446,8 +1461,7 @@ rfs_received(const uint8_t *m, uint32_t n)
 	 * data) goes on through the next frames with nothing to mark them. Those frames are data: counted, dropped,
 	 * never looked into (seen twice: taken for requests, their first bytes were printed) */
 	if (cp.rfs_more != 0) {
-		rfs_continued(m, MIN(n, cp.rfs_more));
-		cp.rfs_more -= MIN(cp.rfs_more, n);
+		rfs_continued(m, n);
 		cp.dropped[3]++;
 		return;
 	}
@@ -1479,10 +1493,11 @@ rfs_received(const uint8_t *m, uint32_t n)
 				    length, ok ? "answered from the RAM copy" : "refused (out of the NV data or too long for one frame)");
 				return;
 			}
-			if (!fits) {
+			if (!fits || len < 14 || length > len - 14) {
+				/* (its data must be in the NV data and in the request: 6 bytes of header, offset, length, data) */
 				rfs_nv_answer(2, id, false, offset, length);
-				say("cp: FILE REQUEST %u from the CP: an NV WRITE out of the NV data (offset %#x, %u bytes): refused\n",
-				    cp.rfs_requests, offset, length);
+				say("cp: FILE REQUEST %u from the CP: an NV WRITE out of the NV data or longer than its request (offset "
+				    "%#x, %u bytes, request %u): refused\n", cp.rfs_requests, offset, length, len);
 				return;
 			}
 			say("cp: FILE REQUEST %u from the CP: an NV WRITE, offset %#x, %u bytes: into the RAM copy only\n",
@@ -2155,9 +2170,9 @@ rings_receive(void)
 				continue;
 			}
 			if (cp.more[i] != 0) {
-				/* the rest of a frame longer than one buffer (a file request with data): counted, not copied,
-				 * not looked into; with cp_nv=2 an NV write's bytes go to the RAM copy */
-				if (i == RING_RFS && cp.w_active) {
+				/* the rest of a frame longer than one buffer (a file request with data): counted, not looked
+				 * into; on the file ring the bytes of the request it continues (rfs_continued) */
+				if (i == RING_RFS && cp.rfs_more != 0) {
 					uint32_t k = MIN(n, cp.more[i]);
 
 					memcpy(frame, cp.ipc + r->buffers + (uint32_t)rp * r->size, k);
@@ -2189,7 +2204,7 @@ rings_receive(void)
 				bool rest = cp.multi[i];
 
 				cp.multi[i] = (frame[4] & 0x80) != 0;
-				if (rest && i == RING_RFS && cp.w_active) {
+				if (rest && i == RING_RFS && cp.rfs_more != 0) {
 					rfs_continued(frame + hdr, n - hdr);
 				}
 				if (rest) {

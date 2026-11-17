@@ -1,0 +1,157 @@
+--- a/tools/ios27/metal2/NativeBridgeMetalFrontend.mm
++++ b/tools/ios27/metal2/NativeBridgeMetalFrontend.mm
+@@ -846,7 +846,18 @@
+ @end
+ @interface NBRenderPipeline : NBObject
+ @property(nonatomic) NmbRenderPipeline *handle;
++// SWEET_MTL2_DEXR: the colors (bit i, color i) this pipeline holds as RGBA16Float though the descriptor asked for an
++// extended-range format, the descriptor and options it was made from, and the pipelines made from them again with some
++// of those colors as asked, by those colors (`sweetExactPipeline`).
++@property(nonatomic) unsigned dexrColors;
++@property(nonatomic,strong) MTLRenderPipelineDescriptor *dexrDescriptor;
++@property(nonatomic) MTLPipelineOption dexrOptions;
++@property(nonatomic,strong) NSMutableDictionary<NSNumber *,NBRenderPipeline *> *exact;
+ @end
++static NBRenderPipeline *sweetExactPipeline(NBRenderPipeline *pipeline,unsigned keep);
++static bool sweetExtendedRange(MTLPixelFormat f) {
++ switch((unsigned long)f){case 552:case 553:case 554:case 555:return true;default:return false;}
++}
+ @implementation NBRenderPipeline
+ - (void)dealloc {nmb_render_pipeline_release(_handle);}
+ // The threadgroup size a tile dispatch of this pipeline could use: the device's limit (no tile shaders are offered).
+@@ -1118,13 +1129,25 @@
+ @end
+ 
+ @interface NBRenderEncoder : NBEncoder
++// The pass's colors (bit i, color i) whose texture keeps an extended-range format (552-555): a texture over an IOSurface or
++// a buffer, which SWEET_MTL2_DEXR cannot hold as RGBA16Float.
++@property(nonatomic) unsigned extendedRangeColors;
+ @end
+ @implementation NBRenderEncoder
+ - (void)setRenderPipelineState:(id<MTLRenderPipelineState>)state {
+  if(self.refused)return;
+  if(![(id)state isKindOfClass:[NBRenderPipeline class]]){[self.commandBuffer refuse:@"foreign render pipeline"];return;}
+  [self.commandBuffer.resourceOwners addObject:state];
+- [self check:nmb_render_set_pipeline(self.handle,[(NBRenderPipeline *)state handle]) what:"setRenderPipelineState"];
++ NBRenderPipeline *pipeline=(NBRenderPipeline *)state;
++ // A pipeline whose extended-range colors SWEET_MTL2_DEXR holds as RGBA16Float, drawn into a pass whose texture there kept
++ // its format (iOS 27: the app switcher's reduced background, a BGR10_XR IOSurface): the pipeline as the descriptor asked for those
++ // colors, as metal2vulkan refuses a state color of another size than the pass's (AttachmentFormat).
++ if(const unsigned keep=pipeline.dexrColors & self.extendedRangeColors) {
++  NBRenderPipeline *exact=sweetExactPipeline(pipeline,keep);
++  if(!exact){[self.commandBuffer refuse:@"render pipeline for an extended-range texture"];return;}
++  pipeline=exact;
++ }
++ [self check:nmb_render_set_pipeline(self.handle,pipeline.handle) what:"setRenderPipelineState"];
+ }
+ - (void)setVertexBuffer:(id<MTLBuffer>)b offset:(NSUInteger)o atIndex:(NSUInteger)i {[self buffer:b offset:o index:i stage:1];}
+ - (void)setFragmentBuffer:(id<MTLBuffer>)b offset:(NSUInteger)o atIndex:(NSUInteger)i {[self buffer:b offset:o index:i stage:2];}
+@@ -1568,6 +1591,7 @@
+ - (void)presentDrawable:(id<MTLDrawable>)drawable afterMinimumDuration:(CFTimeInterval)d {if(drawable)[self addCompletedHandler:^(id<MTLCommandBuffer>){[drawable presentAfterMinimumDuration:d];}];}
+ - (id<MTLRenderCommandEncoder>)renderCommandEncoderWithDescriptor:(MTLRenderPassDescriptor *)d {
+  NmbRenderPassDescriptor pass={};
++ unsigned extendedRangeColors=0;
+  {
+   id<MTLTexture> first=d.colorAttachments[0].texture;
+   if(first) {
+@@ -1589,6 +1613,7 @@
+  for(unsigned i=0;i<8;i++) {
+   MTLRenderPassColorAttachmentDescriptor *c=d.colorAttachments[i];
+   if(!attachment(c,pass.colors[i]))return [self refuseEncoder:[NBRenderEncoder new] why:@"foreign color attachment"];
++  if(c.texture && sweetExtendedRange(c.texture.pixelFormat))extendedRangeColors|=1u<<i;
+   pass.colors[i].clear[0]=c.clearColor.red;pass.colors[i].clear[1]=c.clearColor.green;pass.colors[i].clear[2]=c.clearColor.blue;pass.colors[i].clear[3]=c.clearColor.alpha;
+  }
+  if(!attachment(d.depthAttachment,pass.depth) || !attachment(d.stencilAttachment,pass.stencil))return [self refuseEncoder:[NBRenderEncoder new] why:@"foreign depth/stencil attachment"];
+@@ -1599,7 +1624,8 @@
+   [_resourceOwners addObject:d.visibilityResultBuffer];
+   pass.visibility=[(NBBuffer *)d.visibilityResultBuffer handle];
+  }
+- return [self encoder:[NBRenderEncoder new] handle:self.committed?nullptr:nmb_render_encoder_new(_handle,&pass) what:@"renderCommandEncoder"];
++ NBRenderEncoder *encoder=[NBRenderEncoder new];encoder.extendedRangeColors=extendedRangeColors;
++ return [self encoder:encoder handle:self.committed?nullptr:nmb_render_encoder_new(_handle,&pass) what:@"renderCommandEncoder"];
+ }
+ - (void)addScheduledHandler:(MTLCommandBufferHandler)block {if(block)@synchronized(self){[_scheduledHandlers addObject:[block copy]];}}
+ - (void)addCompletedHandler:(MTLCommandBufferHandler)block {if(block)@synchronized(self){[_completedHandlers addObject:[block copy]];}}
+@@ -1889,7 +1915,7 @@
+  BuiltLinkedFunctions vertexLinked,fragmentLinked;
+ };
+ // A render pipeline descriptor in the bridge's form; false, with the error, for a function of another device.
+-static bool renderDescriptor(MTLRenderPipelineDescriptor *d,BuiltRenderDescriptor *b,NSError **error) {
++static bool renderDescriptor(MTLRenderPipelineDescriptor *d,BuiltRenderDescriptor *b,NSError **error,unsigned keep=0,unsigned *held=nullptr) {
+  if(!d || ![(id)d.vertexFunction isKindOfClass:[NBFunction class]] || (d.fragmentFunction && ![(id)d.fragmentFunction isKindOfClass:[NBFunction class]])) {
+   if(error)*error=nbError(@"foreign function");return false;
+  }
+@@ -1902,7 +1928,9 @@
+  p->vertex=[(NBFunction *)d.vertexFunction handle];p->fragment=d.fragmentFunction?[(NBFunction *)d.fragmentFunction handle]:nullptr;
+  for(unsigned i=0;i<8;i++) {
+   MTLRenderPipelineColorAttachmentDescriptor *a=d.colorAttachments[i];
+-  p->colors[i]={(uint64_t)dexr(a.pixelFormat),(uint64_t)a.writeMask,(uint64_t)a.blendingEnabled,(uint64_t)a.sourceRGBBlendFactor,(uint64_t)a.destinationRGBBlendFactor,
++  const MTLPixelFormat f=((keep>>i)&1)?a.pixelFormat:dexr(a.pixelFormat);
++  if(held && f!=a.pixelFormat)*held|=1u<<i;
++  p->colors[i]={(uint64_t)f,(uint64_t)a.writeMask,(uint64_t)a.blendingEnabled,(uint64_t)a.sourceRGBBlendFactor,(uint64_t)a.destinationRGBBlendFactor,
+       (uint64_t)a.rgbBlendOperation,(uint64_t)a.sourceAlphaBlendFactor,(uint64_t)a.destinationAlphaBlendFactor,(uint64_t)a.alphaBlendOperation};
+  }
+  p->depth_format=d.depthAttachmentPixelFormat;p->stencil_format=d.stencilAttachmentPixelFormat;p->samples=d.rasterSampleCount;
+@@ -2097,6 +2125,42 @@
+ }
+ @end
+ 
++static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &archives,NSError **error);
++// A render pipeline of `d`, its colors in `keep` (bit i, color i) as the descriptor asks and the others through dexr().
++// A pipeline that dexr() changed keeps a copy of the descriptor for sweetExactPipeline.
++static NBRenderPipeline *sweetRenderPipeline(MTLRenderPipelineDescriptor *d,MTLPipelineOption options,unsigned keep,NSError **error) {
++ auto *b=new BuiltRenderDescriptor();unsigned held=0;
++ if(!renderDescriptor(d,b,error,keep,&held)){delete b;return nil;}
++ std::vector<NmbBinaryArchive *> archives;
++ if(!pipelineArchives(d.binaryArchives,archives,error)){delete b;return nil;}
++ const NmbPipelineOptions creation={(uint64_t)options,archives.data(),archives.size()};
++ const uint64_t pipelineBegan=nowUs();
++ const bool logJournal=!gJournalPath.empty();
++ const NBCost costBegan=logJournal?NBCost::now():NBCost{};
++ NmbRenderPipeline *handle=nmb_render_pipeline_new_with_options(gDevice,&b->raw,&creation);delete b;gTimePipeline.add(pipelineBegan);
++ if(logJournal)journalRenderPipeline(d,pipelineBegan,handle?nullptr:nmb_last_error(),NBCost::now().since(costBegan));
++ if(!handle)return failWith<NBRenderPipeline *>(error,@"render pipeline",nil);
++ NBRenderPipeline *state=[NBRenderPipeline new];state.handle=handle;gPipelines++;if(error)*error=nil;
++ if(held){state.dexrColors=held;state.dexrDescriptor=[d copy];state.dexrOptions=options;}
++ return state;
++}
++// `pipeline` made again with its colors in `keep` as its descriptor asked (once for each `keep`; nil, with a line, where
++// the runtime refuses it). Made at the first draw that needs it, as a pipeline the cache knows is cheap and one it does
++// not costs one compile.
++static NBRenderPipeline *sweetExactPipeline(NBRenderPipeline *pipeline,unsigned keep) {
++ @synchronized(pipeline) {
++  if(!pipeline.exact)pipeline.exact=[NSMutableDictionary dictionary];
++  if(NBRenderPipeline *made=pipeline.exact[@(keep)])return made;
++  NSError *error=nil;
++  NBRenderPipeline *made=sweetRenderPipeline(pipeline.dexrDescriptor,pipeline.dexrOptions,keep,&error);
++  static std::atomic<unsigned> lines{0};
++  if(!made)NBLOG(@"native-metal: render pipeline with colors %#x in their extended-range format refused: %@",keep,error);
++  else if(lines.fetch_add(1)<8)
++   sm2_logs([NSString stringWithFormat:@"native-metal: render pipeline made again with colors %#x in their extended-range format (a pass over a surface)",keep].UTF8String);
++  if(made)pipeline.exact[@(keep)]=made;
++  return made;
++ }
++}
+ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &archives,NSError **error) {
+  for(id archive in list) {
+   if(![archive isKindOfClass:[NBBinaryArchive class]]){if(error)*error=nbError(@"foreign binary archive");return false;}
+@@ -2543,18 +2607,7 @@
+ - (id<MTLRenderPipelineState>)newRenderPipelineStateWithDescriptor:(MTLRenderPipelineDescriptor *)d options:(MTLPipelineOption)options
+                                                         reflection:(MTLAutoreleasedRenderPipelineReflection *)reflection error:(NSError **)error {
+  if(reflection)*reflection=nil;
+- auto *b=new BuiltRenderDescriptor();
+- if(!renderDescriptor(d,b,error)){delete b;return nil;}
+- std::vector<NmbBinaryArchive *> archives;
+- if(!pipelineArchives(d.binaryArchives,archives,error)){delete b;return nil;}
+- const NmbPipelineOptions creation={(uint64_t)options,archives.data(),archives.size()};
+- const uint64_t pipelineBegan=nowUs();
+- const bool logJournal=!gJournalPath.empty();
+- const NBCost costBegan=logJournal?NBCost::now():NBCost{};
+- NmbRenderPipeline *handle=nmb_render_pipeline_new_with_options(gDevice,&b->raw,&creation);delete b;gTimePipeline.add(pipelineBegan);
+- if(logJournal)journalRenderPipeline(d,pipelineBegan,handle?nullptr:nmb_last_error(),NBCost::now().since(costBegan));
+- if(!handle)return failWith<id<MTLRenderPipelineState>>(error,@"render pipeline",nil);
+- NBRenderPipeline *state=[NBRenderPipeline new];state.handle=handle;gPipelines++;if(error)*error=nil;return (id<MTLRenderPipelineState>)state;
++ return (id<MTLRenderPipelineState>)sweetRenderPipeline(d,options,0,error);
+ }
+ - (id<MTLBinaryArchive>)newBinaryArchiveWithDescriptor:(MTLBinaryArchiveDescriptor *)d error:(NSError **)error {
+  if(d.url && !d.url.isFileURL){if(error)*error=nbError(@"a file URL is required");return nil;}

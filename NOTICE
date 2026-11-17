@@ -125,5 +125,11 @@ Fetched at build time, never committed:
   repository: tools/mk-star2-setfiles.sh makes them at build time, with his tools/extract-2l3-setfile.py and
   tools/extract-3m3-setfile.py, from three headers of Samsung's GPL-2.0 kernel (the S5K2L3's and S5K3M3's register tables and
   RAM patches) fetched from github.com/ananjaser1211/Apollo at a pinned commit.
+  userland/src/gnssd.m and gnss_chip.c (his GNSS daemon) load the BCM4775's baseband code (the "ESW", Broadcom's), which is
+  not in this repository: the S9+'s device repository (scion-star2lte, tools/fetch-firmware.sh) cuts it out of Broadcom's
+  gpsd at build time and checks it by its sums. The protocol bytes in gnss_chip.c and gnsstool.c are the messages as seen
+  on the wire; the magnetometer matrices in drivers/input/ssp/hakios.ssp.c are numbers from the S9+'s device trees.
+  His patches under tools/mesa/panvk/ change Mesa (MIT) and those under tools/metal/m2v/ change metal2vulkan
+  (GPL-2.0-or-later OR LGPL-3.0-or-later), each under the licence of the code it changes, as their headers say.
 - Nils (github.com/dwaris): his commits to this repository, from 12 November 2026 (drivers/audio/abox/hakios.exynos_abox.c,
   drivers/audio/codec/hakios.max98512.c), under the licence of the files they change.
