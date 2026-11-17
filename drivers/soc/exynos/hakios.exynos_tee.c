@@ -867,47 +867,7 @@ der_param(struct der *d, uint32_t tag, uint64_t value)
 	der_wrap(d, start, 0x30);
 }
 
-/* A TLV at *at of limit: its tag, contents and length; *at past it. */
-static bool
-der_next(const uint8_t *base, uint32_t limit, uint32_t *at, uint8_t *tag, uint32_t *contents, uint32_t *length)
-{
-	uint32_t i = *at, l;
-
-	if (i + 2 > limit) {
-		return false;
-	}
-	*tag = base[i++];
-	l = base[i++];
-	if (l & 0x80) {
-		uint32_t count = l & 0x7f;
-
-		if (count == 0 || count > 3 || i + count > limit) {
-			return false;
-		}
-		l = 0;
-		while (count-- > 0) {
-			l = (l << 8) | base[i++];
-		}
-	}
-	if (l > limit - i) {
-		return false;
-	}
-	*contents = i;
-	*length = l;
-	*at = i + l;
-	return true;
-}
-
-static int64_t
-der_read_integer(const uint8_t *base, uint32_t contents, uint32_t length)
-{
-	uint64_t v = (length > 0 && (base[contents] & 0x80)) ? ~0ull : 0;
-
-	for (uint32_t i = 0; i < length && i < 9; i++) {
-		v = (v << 8) | base[contents + i];
-	}
-	return (int64_t)v;
-}
+#include "hakios.exynos_tee_der.h"
 
 struct km_answer {
 	int64_t err;

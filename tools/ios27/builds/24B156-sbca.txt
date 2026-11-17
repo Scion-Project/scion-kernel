@@ -1,0 +1,26 @@
+# sbca's QuartzCore numbers for iOS 27.2.1 (24B156): CANDIDATES, NOT BUILT AND NOT RUN ON A PHONE.
+# userland/src/sbca.c (SBCA_IOS27) carries the 24A446 set and is left as it is, because the 24A446 line uses it. This list is what
+# its 24B156 block would hold. Each address is the cache symbol named beside it in the builder's own 24B156 image
+# (17 November 2026). Each word sbca checks before it changes anything was read there and is the same as in 24A446. The offsets
+# were seen in the 24B156 code. Unslid shared-cache addresses: numbers only, no Apple code.
+# name                      24B156          how it was found / checked
+QC_ACCEL_SERVER_VTABLE      0x1e2258720     vtable for CA::WindowServer::AccelServer (symbol start, as in 24A446)
+QC_RENDERER_SLOT            0x1e2258900     the entry holding AccelServer::renderer(): +0x1e0 from the symbol, +0x1d0 from the address point (24A446: the same)
+QC_ACCEL_RENDERER           0x184301bb4     CA::WindowServer::AccelServer::renderer()
+QC_GLES_CONTEXT_CTOR        0x18455c15c     CA::OGL::GLESContext::GLESContext(void *) (C1)
+QC_MALLOC_ZONE              0x1edecbb20     malloc_zone (static, QuartzCore)
+QC_MALLOC_ZONE_ONCE         0x1edeca398     x_malloc_get_zone()::once
+QC_MALLOC_ZONE_INIT         0x1843a2260     malloc_zone_init()
+QC_GLES_CONTEXT_VTABLE      0x1e224eac8     vtable for CA::OGL::GLESContext + 0x10 (the address point objects hold; check against 24A446's convention)
+QC_FUNCTION_SUPPORTED_AT    0x480           GLContext::function_supported() const in that vtable: +0x480 from the address point (24A446: the same)
+QC_FUNCTION_SUPPORTED       0x18460d5a0     CA::OGL::GLContext::function_supported() const
+QC_TEX_FRAGMENT_SHADERS     0x1e05cf3f0     CA::OGL::tex_fragment_shaders
+QC_METAL_WAIT_ONCE          0x1eb03e460     CAMetalContextCreate's once
+QC_PUSH_SURFACE_FOUND_BR    0x18434f8c0     in CA::OGL::Context::push_surface: cbnz x8 (b50001e8, PUSH_SURFACE_CBNZ: the same word)
+QC_FRAMEBUFFER_PIXEL_FORMAT 0x18434cff4     CA::WindowServer::IOMFBDisplay::framebuffer_pixel_format(): its first three words are framebuffer_format_was
+QC_EDR_CLIENT               0x18467d73c     CA::EDRClient::client()
+# Seen in AccelServer::renderer() of 24B156: the server's +0x628 (context) and +0x630 (renderer), +0x60 (display), a 0x68-byte
+# allocation (RENDERER_SIZE) and a +0xf0 load. NOT checked: GLES_CONTEXT_SIZE (0xba0), the display's +0x140/+0x150,
+# RENDERER_BUFFER_SIZE.
+# The texture-function names (tools/ios27/ca-gpu/hakios/hakios.gl.h, 136) are those of 24B156's
+# CA::OGL::MetalContext::TextureFunction_codes in the same order: no change.

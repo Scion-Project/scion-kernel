@@ -34,6 +34,10 @@ made from the conf files. SoC numbers are not here: they are in `socs/<soc>/incl
 
 ## Adding a driver
 
+[docs/architecture.md](../docs/architecture.md) says which layer each part of a driver belongs to, how a driver of several files
+is named and listed, and what CI checks (`tools/arch-check.py`: no file here over 800 lines unless `tools/arch-size.allow`
+lists it). In short:
+
 Put it in `drivers/<class>/` (a directory of its own if it is more than one file or more than a few hundred lines), add a line to
 `drivers/map`, a `driver` block (or a `standard` line) to `drivers/<class>/conf`, then `python3 tools/drivers-check.py`. The
 `bsd/conf/files` and `iokit/conf/files` lines are made from the conf files (`tools/hakios-config.py kernel`). If the rest of the

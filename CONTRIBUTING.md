@@ -16,6 +16,10 @@
 - Licenses: the kernel patch and files are APSL 2.0 (derived from XNU); everything else is MIT, but for
   a patch to third-party code, which keeps that code's license (`THIRD_PARTY_LICENSES.md`).
   Third-party code goes into `NOTICE`.
+- Kernel code: [docs/architecture.md](docs/architecture.md) is the design a change is reviewed against (layers, one
+  responsibility per file, codecs with host tests, steps as tables) and ends with how to add a driver. No file of
+  `drivers/` or `socs/` passes 800 lines unless `tools/arch-size.allow` lists it (`python3 tools/arch-check.py`); a file
+  that has to grow past that is split first, in a pull request that moves code and changes nothing else.
 
 ## Legal and licensing
 
