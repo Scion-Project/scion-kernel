@@ -24,6 +24,9 @@
 #                   FIRMWARE_OFFLINE=1, FIRMWARE_DIR=DIR as there), and a file missing or wrong stops this; none: a tree
 #                   without it (shub=4 and up then find no image: no sensors, no rotation). The image then carries
 #                   Broadcom's and Samsung's file: it is private anyway (below).
+#   [--canvas WxH]  the screen iOS draws (the device tree's /arm-io/disp0 canvas, mkadt_starlte.py --canvas). Default: the
+#                   iPhone 11's own 828x1792. The S9's panel shape is 828x1702 (docs/ios27/PRESENT.md): with it the line must
+#                   say the same (sweetfb_lw=828 sweetfb_lh=1702), and this refuses a line whose sweetfb_lw/sweetfb_lh differ.
 #   [--loader I]    default xnuloader/sboot/out/xnu_boot.Image (tools/ios27/s9/build-loader.sh)
 #   [--out O]       default out/xnu-boot-ios27.img (out/ is not in git; the image holds your IPSW's device identity: never share it)
 # What it does (the steps the project's test images are made with): strip -x copy of the kernel; the S9's Apple device tree
@@ -36,7 +39,7 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd); T27=$ROOT/tools/ios27
 PY=${PY:-python3}
 KERNEL= DONOR= TEMPLATE= LINE= OUT=$ROOT/out/xnu-boot-ios27.img LOADER=$ROOT/xnuloader/sboot/out/xnu_boot.Image
 LINEFILE=$T27/cmdline/starlte-rc.txt
-RECORD=default CAMERA_NODE=auto FIRMWARE=auto
+RECORD=default CAMERA_NODE=auto FIRMWARE=auto CANVAS=
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--kernel) KERNEL=$2; shift ;; --donor-adt) DONOR=$2; shift ;; --template) TEMPLATE=$2; shift ;;
@@ -44,7 +47,8 @@ while [ $# -gt 0 ]; do
 	--loader) LOADER=$2; shift ;; --out) OUT=$2; shift ;; --inject-record) RECORD=$2; shift ;;
 	--camera-node) CAMERA_NODE=$2; shift ;;
 	--firmware) FIRMWARE=$2; shift ;;
-	-h | --help) sed -n '3,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--canvas) CANVAS=$2; shift ;;
+	-h | --help) sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "make-boot-image: unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -54,6 +58,8 @@ die() { echo "make-boot-image: $*" >&2; exit 1; }
 [ -f "$DONOR" ] || die "--donor-adt: no device tree at '$DONOR' (tools/ios27/s9/fetch-apple-inputs.sh)"
 [ -f "$TEMPLATE" ] || die "--template: no boot image at '$TEMPLATE' (tools/ios27/s9/flash.sh pull-template)"
 [ -f "$LOADER" ] || die "no loader at $LOADER (tools/ios27/s9/build-loader.sh)"
+case "$CANVAS" in '' | [1-9]*x[1-9]*) ;; *) die "--canvas WxH (got '$CANVAS')" ;; esac
+case "$CANVAS" in *[!0-9x]* | *x*x*) die "--canvas WxH (got '$CANVAS')" ;; esac
 # the sensor hub's image for the device tree (firmware.sh: complete and checked, or no image)
 SHUB_FILES=
 case "$FIRMWARE" in
@@ -80,12 +86,21 @@ if [ "$RECORD" != none ]; then
 	[ -f "$RECORD" ] || die "--inject-record: no record at '$RECORD' (tools/ios27/fullroot/inject-record.sh)"
 	LINE=$("$PY" "$T27/s9/cmdline-inject.py" compose --line "$LINE" --record "$RECORD" --kernel "$KERNEL") || die "the record $RECORD cannot go on this command line (above)"
 fi
+# the canvas and the framebuffer size the kernel is given must agree (it scales sweetfb_lw x sweetfb_lh to the panel): the
+# line's value, else the kernel's built-in one (osfmk/arm/arm_init.c: sweetfb_lw=828 sweetfb_lh=1792)
+if [ -n "$CANVAS" ]; then
+	for kv in "sweetfb_lw=${CANVAS%x*}=828" "sweetfb_lh=${CANVAS#*x}=1792"; do
+		k=${kv%%=*}; want=${kv#*=}; want=${want%=*}; builtin=${kv##*=}
+		got=$(printf ' %s ' "$LINE" | tr ' ' '\n' | sed -n "s/^$k=//p" | tail -1)
+		[ "${got:-$builtin}" = "$want" ] || die "--canvas $CANVAS needs $k=$want (the line gives ${got:-nothing, so the built-in $builtin applies})"
+	done
+fi
 n=$(printf '%s' "$LINE" | wc -c | tr -d ' ')
 [ "$n" -le 607 ] || die "the command line is $n bytes; the payload holds 607 (it would be cut)"
 mkdir -p "$(dirname "$OUT")"
 W=$(mktemp -d "${TMPDIR:-/tmp}/bootimg.XXXXXX"); trap 'rm -rf "$W"' EXIT
 cp "$KERNEL" "$W/kernel.x"; xcrun strip -x "$W/kernel.x"
-"$PY" "$T27/mkadt_starlte.py" --big --bank2 --bank2-mb 1536 --iphone11 "$DONOR" "$W/base.adt" >/dev/null
+"$PY" "$T27/mkadt_starlte.py" --big --bank2 --bank2-mb 1536 --iphone11 "$DONOR" ${CANVAS:+--canvas "$CANVAS"} "$W/base.adt" >/dev/null
 "$PY" "$T27/adt-extra-ram.py" "$W/base.adt" "$W/ram.adt"
 if [ -n "$SHUB_FILES" ]; then
 	"$PY" "$T27/adt-firmware.py" "$W/ram.adt" "$W/fw.adt" $SHUB_FILES | sed 's/^/make-boot-image: \/scion-firmware: /'

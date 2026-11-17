@@ -278,8 +278,9 @@ if __name__ == '__main__':
                         help='iOS 14 identity from the real D10AP device tree '
                              '(build/ipsw-14/d10ap.adt), 750x1334 @2x canvas')
     parser.add_argument('--canvas', metavar='WxH',
-                        help='with --ipad7: another canvas, e.g. 1440x2960 = the whole panel '
-                             '(720x1480 points @2x); boot-args sweetfb_lw/sweetfb_lh must match')
+                        help='with --ipad7 or --iphone11: another canvas, e.g. 1440x2960 = the whole panel '
+                             '(720x1480 points @2x), or 828x1702 (the panel\'s shape at the iPhone 11\'s width); '
+                             'boot-args sweetfb_lw/sweetfb_lh must match')
     parser.add_argument('--scale', type=int, choices=(2, 3),
                         help='with --ipad7: display and artwork scale (phone UI: 3)')
     parser.add_argument('--artwork-subtype', type=int,

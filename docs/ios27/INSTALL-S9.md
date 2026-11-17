@@ -73,6 +73,14 @@ before there is a root. `make-boot-image.sh` does that by default: it fetches th
 build does (section 5, "The S9's firmware"), and stops if a file is missing or wrong. `--firmware none` makes an image
 without it, and then there are no sensors and no rotation.
 
+**The panel's own shape.** By default iOS draws the iPhone 11's 828 x 1792 screen, which is not the panel's shape, and the
+kernel scales it to the panel. The test phones draw 828 x 1702, the panel's shape exactly
+(`docs/ios27/PRESENT.md`): `--canvas 828x1702` puts that canvas in the device tree (`mkadt_starlte.py --canvas`), and the
+line must then give the kernel the same size (`--cmdline 'sbgl=0 sweetspeed=408782847 sweetfb_lh=1702'`; the width 828 is
+built in). The script refuses a canvas the line does not match. Checked offline only: without `--canvas` the image is made
+as before (the same bytes but the device tree's random seed and the header's checksum); with it the tree's display
+properties are those of the 828 x 1702 tree the test phones boot. A boot image made with `--canvas` has not been booted.
+
 **Make the boot image again after the root (section 5).** The root build leaves beside the root image a record of the
 libraries it installed for the kernel to insert into programs (`tools/ios27/fullroot/out/root-full.img.inject`: the
 rotation's `o.dylib` for backboardd, the status bar's `c.dylib` for SpringBoard). `make-boot-image.sh` reads that record
