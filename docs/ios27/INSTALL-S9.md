@@ -187,8 +187,11 @@ only (`sweetfg=1 rtc_pmic=1`), Sileo's installs (`persona_lax=1`), Wi-Fi (`wifi_
   and Bluetooth step, the cellular daemon) are separate root steps under `tools/ios27/` that the one-command root build
   of section 5 does not run yet. Without its step a feature is driven by the kernel and not seen by iOS.
 - Nothing here writes to the phone's storage outside USERDATA. The modem's NV data comes from EFS read-only.
-- Each feature was seen on a phone on its own branch (the table above says how far). **All of them on at once has been
-  built and not yet run on a phone.**
+- How far each has been on a phone, on its own branch: the sensors and rotation (12 November), Wi-Fi and Sileo's installs
+  (13 November), the modem registered and carrying data (13 November), audio and Bluetooth in part (9 November; the
+  table above). **Never run on a phone at all:** restart and power off from iOS (`sweethalt`), the battery's gauge
+  (`sweetfg`), the PMIC's clock (`rtc_pmic`) and the heat protection (`tmu=3`): written on 14 and 17 November with no
+  phone attached, and built. **All of the defaults on at once has been built and not yet run on a phone.**
 
 ## Known problems
 
