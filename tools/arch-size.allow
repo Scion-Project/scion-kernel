@@ -13,7 +13,7 @@ drivers/audio/hakios.adsp.c                               3295
 drivers/audio/hakios.mic.c                                1734
 drivers/audio/hakios.sound.c                              1532
 drivers/audio/hakios.speaker.c                            1237
-drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c             2221  # +33: bt_vsc= translations through kctl_send, the address masked on the console; split next
+drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c             2222  # +34: bt_vsc= translations through kctl_send, addresses masked on the console; split next
 drivers/camera/exynos/hakios.ak737x.c                      991  # 901 today, and the growth of open pull request #334
 drivers/camera/exynos/hakios.exynos_camera.c              4045  # 3692 today, and the growth of open pull request #334
 drivers/camera/exynos/hakios.exynos_camera_rear.c         1404  # 1395 today, and the growth of open pull request #334

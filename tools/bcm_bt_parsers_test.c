@@ -355,6 +355,12 @@ trace(void)
 			CHECK(strstr(said, "c1 c2 .. .. .. ..") != NULL && strstr(said, "c6") == NULL, "an advertising report: %s",
 			    said);
 		}
+		{
+			static const uint8_t inq[] = { 0x04, 0x2f, 0x0a, 0x01, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0x01, 0x00, 0x00 };
+
+			trace_bytes(&trace_in, inq, sizeof(inq));
+			CHECK(strstr(said, "01 d1 d2 .. .. .. ..") != NULL && strstr(said, "d6") == NULL, "an inquiry result: %s", said);
+		}
 	}
 	for (int round = 0; round < 300000; round++) {
 		uint8_t s[96];
