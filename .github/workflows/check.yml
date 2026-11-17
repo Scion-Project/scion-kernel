@@ -98,6 +98,8 @@ jobs:
         run: sh tools/mali-va-test.sh
       - name: The Galaxy S9 secure-OS probe's DER reader (hakios.exynos_tee_der.h) keeps inside what the keymaster TA sends, mutated or cut short (sanitizers)
         run: sh tools/exynos-tee-der-test.sh
+      - name: The rule that holds the Galaxy S9's M3s at 1794 MHz unless the over-current guard's stage two allows more (hakios.exynos_cpufreq_ceiling.h) (sanitizers)
+        run: sh tools/exynos-cpufreq-ceiling-test.sh
       - name: The USB gadget's CDC-ACM descriptors and control requests (hakios.usb_acm.h) hold together (sanitizers)
         run: sh tools/usb-acm-test.sh
       - name: The UFS driver's commands and the whitelist every one passes before it reaches the flash (hakios.ufshc_upiu.h) hold against mutated commands (sanitizers)

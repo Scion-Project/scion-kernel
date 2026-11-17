@@ -225,7 +225,9 @@ Rank by expected user-visible gain per unit of risk. "Built" means compiled, not
    - **Facts**: Samsung allows 2314 MHz with one or two M3s online (`single_freq`/`dual_freq`) and 1794 with three or four. The APM's voltages are 856 mV at 1794 and 1012 mV at 2314 (s3a's table), 80 % more dynamic power per running core (I: (1012/856)² × 2314/1794 = 1.80). Two running instead of four is 0.90 of the cluster's dynamic power, plus the leakage of the two parked cores at the higher voltage. Samsung's own kernel runs above 1794 only with its over-current protector driven (`exynos-ocp`, `max-freq-wo-ocp = <1794000>`) and the other two cores powered off. This tree has neither. That is the risk: the symptom of an over-current would be a reset, not damage, but it is untested.
    - **Gain**: only where one thread is the limit. After honest fences, SpringBoard's or backboardd's main thread may be (§2.3).
    - **Verify**: `stat` "big ms" above 1794 non-zero, the temperatures every minute, the gaps.
-   - **Whether to run 2314 without the OCP driver is the owner's call.**
+   - **Whether to run 2314 without the OCP driver is the owner's call.** The owner's answer (17 November): not without it.
+     `gov_policy=3` now parks as before but holds the M3s at 1794 MHz unless the over-current guard's stage two allows more
+     (`OCP.md`, (3a)).
 9. **The worker's priority** (`sgu_pri=92`, this page's fork branch).
    - **State**: built, not run.
    - **Gain**: small (G). It matters if a time-constrained render thread shares the worker's core.
@@ -267,7 +269,7 @@ screen first, then the same 300 s of console swipes. Record the temperatures eve
 | E4 | best + `sgu_pri=92` (fork branch `agent/scion-perf/perfmap`) | idle between chains | keep if it falls |
 | E5 | best + `sgu_depth=32` | `queued avg`, gaps | for touch latency; keep if frames do not drop |
 | E6 | best + `perfmap=1` (same branch) | `STARLTE PERFMAP` lines: PLL_MIF rate, the APM's MIF / INT / G3D tables | MIF below 1794 MHz: open the MIF task; a G3D level above 572 MHz at 950 mV or less: the owner decides on porting `mali_max` |
-| E7 | best + `gov_policy=3` (owner's yes first, §4 item 8) | `stat` big ms above 1794, temperatures, gaps, any reset | keep only if gaps improve, big under 83 C, no reset |
+| E7 | best + `gov_policy=3` (owner's yes first, §4 item 8; held at 1794 MHz since 17 November, `OCP.md` (3a), so this is parking alone) | `stat` big ms above 1794 (0 now), temperatures, gaps, any reset | keep only if gaps improve, big under 83 C, no reset |
 | E8 | the rebuilt bundle with `STARBITE_DRM_SEQ=1` in `mtl2-env` | the shim's `SBDRM ... fences by chain number on` line, `drm[pid] fences 10 s:`, `STARLTE GPU WAITS`, frames, gaps, no GPU fault | the expected step from 25 toward 38 a second on s3a's content |
 | E9 | best + `PANVK_DEBUG=noafbc` in `mtl2-env` | per-chain time | what AFBC buys (a measurement) |
 

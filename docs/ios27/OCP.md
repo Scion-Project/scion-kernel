@@ -24,6 +24,7 @@ Line numbers are those of `Scion-Project/android_kernel_samsung_exynos9810` at `
 - (1) The facts
 - (2) The design
 - (3) The implementation: `ocp_guard=`
+- (3a) Every other option held at 1794 MHz
 - (4) The phone tests
 - (5) What is not built, and why
 - Not verified
@@ -155,8 +156,9 @@ Samsung allows.
   note); `cpufreq_ocp_regs=1` read the OCP registers on an M3 and **the governor's thread never came back from the first read**
   (builds 14-19), which left the M3s at their starting rate, 105 C at boot (commit dab99986). Why is not known: a trap to a
   higher exception level that never returns would look like that.
-- 16.5 and 27, S9: `gov_policy=3` runs two M3s at 2314 MHz with the other two parked in WFI. Neither of those is Samsung's
-  protection: in Samsung's terms all four are online.
+- 16.5 and 27, S9: `gov_policy=3` ran two M3s at 2314 MHz with the other two parked in WFI. Neither of those is Samsung's
+  protection: in Samsung's terms all four are online. Since 17 November it is held at 1794 MHz like every other option of
+  ours unless stage two allows more: (3a).
 
 ## (2) The design
 
@@ -242,7 +244,7 @@ of it runs and the governor is what it was.
 
 | Boot-argument | |
 |---|---|
-| `ocp_guard=1` | observe: OCP_WARN1/2 read, the M3s' PMU power status read, SPI 213 attached and counted, the self-test. No M3 register touched. The M3s at 1794 MHz at most whatever else is asked (`gov_policy=3`, `cpufreq_gov_big_max=`) |
+| `ocp_guard=1` | observe: OCP_WARN1/2 read, the M3s' PMU power status read, SPI 213 attached and counted, the self-test. No M3 register touched. The M3s at 1794 MHz at most whatever else is asked (`gov_policy=3`, `cpufreq_gov_big_max=`), as without the guard: (3a) |
 | `ocp_guard=2` | and the five OCP registers read once on cpu 4, the flag read on each interrupt and each second. Nothing written |
 | `ocp_guard=3` | stage one: armed as Samsung's driver runs it (IRP, step-down, release, watchdog); the ceiling still 1794 MHz |
 | `ocp_guard=4` | stage two: the rule of (2)(b). Refuses today (2)(c) |
@@ -261,6 +263,45 @@ The lines (on the console and, on 16.5, the loader's log):
 - `cpufreq_gov: ocp_guard: THROTTLE (interrupt, n so far): OCPTHROTTCTL ...; the M3s' ceiling A -> B kHz (rate C)`
 - `cpufreq_gov: ocp_guard: DEAD for this boot: <why>; the M3s stay at or under 1794000 kHz`
 - `cpufreq_gov: ocp_guard: stage two: <reason> (n M3s on, big m mC)`
+
+## (3a) Every other option held at 1794 MHz
+
+The owner's decision of 17 November: none of Scion's own options takes the M3s above 1794 MHz unless the guard's stage two
+allows it. The rule is one function, `drivers/power/exynos/hakios.exynos_cpufreq_ceiling.h` (plain C, host-tested by
+`tools/exynos-cpufreq-ceiling-test.sh` in CI), the same stage two uses: above 1794 MHz only with `ocp_guard=4`, stage one armed
+and alive, a fresh big-zone temperature under 83 C and at most two M3s on (of four, the ones not taken offline by CPU_OFF);
+then 2314 MHz at most. Both kernels use it: 16.5's driver (scion-kernel) and the iOS 27 fork's copy, which takes the header
+through `profiles/ios-27.copy`.
+
+| Option | Above 1794 MHz before | Now |
+|---|---|---|
+| `gov_policy=3` (16.5 and 27) | 2314 MHz with two M3s parked in WFI | parks as before; the M3s at 1794 MHz at most |
+| `gov_policy=2`, `gov_policy=4` with `cpufreq_gov_big_max=` (16.5 and 27) | up to 2314 MHz on all four (no online limit in those policies) | 1794 MHz at most |
+| `cpufreq_gov_big_max=` with `gov_policy=1` (16.5 and 27) | up to the online count's limit (2314 MHz with two or fewer online) | 1794 MHz at most |
+| `cpufreq_big=` without `cpufreq_gov=1` (16.5, `hakios.exynos_acpm.c`) | any rate asked, set once at boot | 1794 MHz at most (no governor, so no guard: the rule always refuses) |
+
+Where it is applied: `ceiling_now()` (the ceiling every policy, boost and summary line works with) and `set_rate()` (every
+request to the APM, the boot's first rate included), and the fixed rate of `cpufreq_big=`. Everything else is as before: rates
+at or under 1794 MHz, the A55s, the thermal steps and the 96 C cut, the guard's levels 1 to 4. The line, once a boot:
+
+    cpufreq_gov: big: gov_policy=3 asks up to 2314000 kHz; held at 1794 MHz: needs ocp_guard=4 (docs/ios27/OCP.md)
+
+(`cpufreq_gov_big_max=` in place of `gov_policy=3` when that is what asked; for `cpufreq_big=` the `dvfs:` line ends with
+"; cpufreq_big= held at 1794 MHz: needs ocp_guard=4 (docs/ios27/OCP.md)"; going above it also needs `cpufreq_gov=1`, the guard
+runs in the governor.)
+
+**Not under the rule: 16.5's `cpufreq_ocp=1`** (Anan Jaser, 12 November: kernel commits 1ba917b1, f4dd75d8, dab99986). It writes
+the PMIC's OCP_WARN1 and, when that reads back on, sets the M3s' limits by how many are busy (2314 MHz for one or two, 1924
+MHz for three or four; `cpufreq_gov_big_single=`, `_dual=`, `_quad=` and `cpufreq_gov_big_oc=`, up to 2704 MHz, exist only with
+it). That path is left exactly as it was: while it is on, `ceiling_now()` and `set_rate()` do not apply the rule. So with
+`cpufreq_ocp=1` on, our options are not held either: `gov_policy=3` still reaches 2314 MHz (under Anan's busy-count limits),
+`cpufreq_gov_big_max=` still raises the ceiling as far as his limits, as before. Whether `cpufreq_ocp=1` should give way to the
+rule, or be left as the contributor's own choice, is the planner's decision. (`ocp_guard` itself is refused with
+`cpufreq_ocp=1`, as before.) If the PMIC's warning does not read back on, `cpufreq_ocp=1` is off and the rule holds.
+
+Phone test (one boot, 16.5 or 27, `cpufreq_gov=1 tmu=3 gov_policy=3`, no `ocp_guard`, no `cpufreq_ocp`): the held line appears
+once, soon after the governor starts; the summaries' "big ... max" never above 1794 and the M3s' "measured" never above it;
+`stat`'s "big ms" above 1794 stays 0. Not run on a phone.
 
 ## (4) The phone tests
 
