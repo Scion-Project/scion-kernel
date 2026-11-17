@@ -511,7 +511,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			-o obj/libhakios.bluetoothd.dylib src/inject_bluetoothd.c
 		$DYN -O2 -dynamiclib -install_name /redwood/lib/libhakios.media.dylib -framework CoreFoundation -framework CoreMedia \
 			-framework CoreVideo -framework IOSurface -lobjc \
-			-o obj/libhakios.media.dylib src/inject_media.c src/camera_device.c src/camera_isp.c src/mfc_decoder.c
+			-o obj/libhakios.media.dylib src/inject_media.c src/camera_device.c src/camera_say.c src/camera_isp.c src/mfc_decoder.c
 		# the output device of the audio server: a plug-in for CoreAudio's HAL
 		$DYN -bundle -framework CoreFoundation -o obj/HakiosAudio src/audio_plugin.c
 		# the plug-in Metal loads when the kernel names it (boot-arg metal=1): a device, its buffers and the libraries it reads
