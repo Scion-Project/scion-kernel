@@ -3,7 +3,8 @@
 # 91-wifi.sh ROOT [undo] : what iOS needs on the root to use the S9's Wi-Fi (docs/ios27/WIFI.md), the kernel's side
 # (wifi_pcie=6 brcmfmac=8, with brcmfmac linked in: tools/mk-brcmfmac.sh before the kernel) being on by default:
 #   tools/ios27/wifi/60-wifi-firmware.sh   the BCM4361's firmware, NVRAMs and CLM into /private/var/hakios/wifi/
-#   tools/ios27/wifi/62-wifid-loadable.sh  launchd may start wifid on the S9 (WIFI_WIFID=0 leaves this one out)
+#   tools/ios27/wifi/62-wifid-loadable.sh  launchd may start wifid on the S9 (WIFI_WIFID=0 leaves this one out; WIFI_LOG=1, tests:
+#                                          wifid's stderr and os_log into /private/var/local/oslog/wifid.err)
 #   tools/ios27/wifi/63-wifi-netservice.sh configd's Wi-Fi service (DHCP at once, not after minutes), on a root that has
 #                                          configd's preferences; a root that has never booted has none, and is left so
 # Not the test job tools/ios27/wifi/64-wifi-nettest.sh: that is for a test root only, by hand.

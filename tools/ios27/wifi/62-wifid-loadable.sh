@@ -11,6 +11,9 @@
 # The other way, without touching the root, is a test image whose ADT has /arm-io/wlan (adt-wlan-node.py): that is the way
 # wifid has been seen started on a phone (13 Nov 2026); this step's way has NOT been run on a phone.
 # The values taken out are kept in /usr/local/share/scion/wifid-limit.plist (written once, at the first run that takes one out).
+# WIFI_LOG=1 (tests): also wifid's stderr and stdout into /private/var/local/oslog/wifid.{err,out}, with OS_ACTIVITY_DT_MODE=YES so
+# its os_log goes there too (logd is off on this root), as AUDIO_BT_LOG=1 does for audiomxd. The file then names the joined
+# network: keep it private. Recorded in the same file; undo takes it out again. NOT RUN ON A PHONE.
 #   undo  puts them back where they were and deletes that file.
 set -euo pipefail
 R=$1
@@ -24,6 +27,8 @@ root, how = sys.argv[1:]
 KEEP = os.path.join(root, 'usr/local/share/scion/wifid-limit.plist')
 kept = plistlib.load(open(KEEP, 'rb')) if os.path.exists(KEEP) else {}
 LABEL = 'com.apple.wifid'
+LOG = os.environ.get('WIFI_LOG') == '1'
+LOGKEYS = {'StandardErrorPath': '/private/var/local/oslog/wifid.err', 'StandardOutPath': '/private/var/local/oslog/wifid.out'}
 changed = 0
 
 def write(p, d, st):
@@ -52,6 +57,17 @@ for rel in ('System/Library/xpc/launchd.plist', 'System/Library/xpc/launchd-disa
                 j['_LimitLoadToDeviceTree'] = kept[slot]; n += 1
         elif '_LimitLoadToDeviceTree' in j:
             kept.setdefault(slot, j.pop('_LimitLoadToDeviceTree')); n += 1
+        if how == 'undo' and kept.get('log|' + slot):
+            for key in LOGKEYS:
+                n += j.pop(key, None) is not None
+            n += j.get('EnvironmentVariables', {}).pop('OS_ACTIVITY_DT_MODE', None) is not None
+            if kept.get('log|' + slot) == 2 and not j.get('EnvironmentVariables', True):
+                del j['EnvironmentVariables']   # (the step made it)
+        elif how != 'undo' and LOG and not kept.get('log|' + slot):
+            kept['log|' + slot] = 1 if 'EnvironmentVariables' in j else 2
+            j.update(LOGKEYS)
+            j.setdefault('EnvironmentVariables', {})['OS_ACTIVITY_DT_MODE'] = 'YES'
+            n += 1
     if n:
         write(p, d, st); changed += n
 if how == 'undo':
@@ -64,9 +80,13 @@ if how == 'undo':
                 pass
     print('62-wifid-loadable: undone, com.apple.wifid limited to its device-tree nodes again (%d place(s) changed)' % changed)
 else:
+    if LOG:
+        os.makedirs(os.path.join(root, 'private/var/local/oslog'), exist_ok=True)
+        os.chmod(os.path.join(root, 'private/var/local/oslog'), 0o777)
     if changed:
         os.makedirs(os.path.dirname(KEEP), exist_ok=True)
         with open(KEEP, 'wb') as f:
             plistlib.dump(kept, f, fmt=plistlib.FMT_XML)
-    print('62-wifid-loadable: com.apple.wifid no longer limited to a device-tree node (%d place(s) changed)' % changed)
+    print('62-wifid-loadable: com.apple.wifid no longer limited to a device-tree node (%d place(s) changed)%s' % (changed,
+          '; its stderr and os_log into /private/var/local/oslog/wifid.err (WIFI_LOG=1)' if LOG else ''))
 PY
