@@ -18,11 +18,17 @@
 #                   adt-isp-node.py). auto (the default): only when the line, with the kernel's built-in arguments, has cam_s9=7
 #                   and the record names the root's /usr/lib/cam.dylib for cameracaptured (step 94-camera); without both the
 #                   tree is as before and the app hidden. yes: always; no: never.
+#   [--firmware auto|none]   the sensor hub's image (bcm_sensorhub_a1.bin), which the kernel loads before there is a root, in
+#                   the device tree's /scion-firmware (tools/ios27/adt-firmware.py; docs/ios27/SENSORS.md). auto (the default):
+#                   the device's firmware made complete and checked by tools/ios27/fullroot/firmware.sh (FIRMWARE_FROM=DIR,
+#                   FIRMWARE_OFFLINE=1, FIRMWARE_DIR=DIR as there), and a file missing or wrong stops this; none: a tree
+#                   without it (shub=4 and up then find no image: no sensors, no rotation). The image then carries
+#                   Broadcom's and Samsung's file: it is private anyway (below).
 #   [--loader I]    default xnuloader/sboot/out/xnu_boot.Image (tools/ios27/s9/build-loader.sh)
 #   [--out O]       default out/xnu-boot-ios27.img (out/ is not in git; the image holds your IPSW's device identity: never share it)
 # What it does (the steps the project's test images are made with): strip -x copy of the kernel; the S9's Apple device tree
 # (mkadt_starlte.py --big --bank2 --bank2-mb 1536 --iphone11, then adt-extra-ram.py: 8 cores, the 1.5 GiB window of the second DRAM
-# bank, seven extra RAM ranges of the first; camera/adt-isp-node.py, see --camera-node); mkpayload.py (kernel + ADT + command line -> SWEETXNU payload, padded to 4 KiB);
+# bank, seven extra RAM ranges of the first; adt-firmware.py, see --firmware; camera/adt-isp-node.py, see --camera-node); mkpayload.py (kernel + ADT + command line -> SWEETXNU payload, padded to 4 KiB);
 # starlte-pack-boot.py (the loader as the image's kernel, the payload appended, a one-page empty ramdisk).
 # Nothing here touches a phone.
 set -euo pipefail
@@ -30,14 +36,15 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd); T27=$ROOT/tools/ios27
 PY=${PY:-python3}
 KERNEL= DONOR= TEMPLATE= LINE= OUT=$ROOT/out/xnu-boot-ios27.img LOADER=$ROOT/xnuloader/sboot/out/xnu_boot.Image
 LINEFILE=$T27/cmdline/starlte-rc.txt
-RECORD=default CAMERA_NODE=auto
+RECORD=default CAMERA_NODE=auto FIRMWARE=auto
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--kernel) KERNEL=$2; shift ;; --donor-adt) DONOR=$2; shift ;; --template) TEMPLATE=$2; shift ;;
 	--cmdline) LINE=$2; LINEFILE=; shift ;; --cmdline-file) LINEFILE=$2; shift ;;
 	--loader) LOADER=$2; shift ;; --out) OUT=$2; shift ;; --inject-record) RECORD=$2; shift ;;
 	--camera-node) CAMERA_NODE=$2; shift ;;
-	-h | --help) sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--firmware) FIRMWARE=$2; shift ;;
+	-h | --help) sed -n '3,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "make-boot-image: unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -47,6 +54,18 @@ die() { echo "make-boot-image: $*" >&2; exit 1; }
 [ -f "$DONOR" ] || die "--donor-adt: no device tree at '$DONOR' (tools/ios27/s9/fetch-apple-inputs.sh)"
 [ -f "$TEMPLATE" ] || die "--template: no boot image at '$TEMPLATE' (tools/ios27/s9/flash.sh pull-template)"
 [ -f "$LOADER" ] || die "no loader at $LOADER (tools/ios27/s9/build-loader.sh)"
+# the sensor hub's image for the device tree (firmware.sh: complete and checked, or no image)
+SHUB_FILES=
+case "$FIRMWARE" in
+auto)
+	. "$T27/fullroot/firmware.sh"
+	fw_prepare || die "the S9's firmware is not complete (above): --firmware none packs a tree without the sensor hub's image"
+	for f in $(fw_files sensorhub); do SHUB_FILES="$SHUB_FILES $FIRMWARE_DIR/sensorhub/$f"; done
+	[ -n "$SHUB_FILES" ] || die "$FIRMWARE_DIR/sensorhub/SHA256SUMS names no file"
+	;;
+none) echo "make-boot-image: --firmware none: no sensor hub image in the device tree (no sensors)" ;;
+*) die "--firmware auto or none (got '$FIRMWARE')" ;;
+esac
 if [ -n "$LINEFILE" ]; then [ -f "$LINEFILE" ] || die "no command line file $LINEFILE"; LINE=$(cat "$LINEFILE"); fi
 case "$LINE" in *$'\n'*) die "the command line has more than one line" ;; esac
 # the calendar's floor: the time this image was made, unless the line has its own (the kernel's clock starts there until the
@@ -68,6 +87,10 @@ W=$(mktemp -d "${TMPDIR:-/tmp}/bootimg.XXXXXX"); trap 'rm -rf "$W"' EXIT
 cp "$KERNEL" "$W/kernel.x"; xcrun strip -x "$W/kernel.x"
 "$PY" "$T27/mkadt_starlte.py" --big --bank2 --bank2-mb 1536 --iphone11 "$DONOR" "$W/base.adt" >/dev/null
 "$PY" "$T27/adt-extra-ram.py" "$W/base.adt" "$W/ram.adt"
+if [ -n "$SHUB_FILES" ]; then
+	"$PY" "$T27/adt-firmware.py" "$W/ram.adt" "$W/fw.adt" $SHUB_FILES | sed 's/^/make-boot-image: \/scion-firmware: /'
+	mv -f "$W/fw.adt" "$W/ram.adt"
+fi
 # the camera's /arm-io/isp (the Camera app shown) only when this line asks the kernel for the stream (cam_s9=7) and the
 # root's record has the capture device (step 94-camera): tools/ios27/camera/adt-isp-node.py, docs/ios27/CAMERA.md
 "$PY" "$T27/camera/adt-isp-node.py" "$W/ram.adt" "$W/starlte.adt" --when "$CAMERA_NODE" --line "$LINE" --kernel "$KERNEL" \

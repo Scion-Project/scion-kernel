@@ -25,8 +25,10 @@ bytes). It is Broadcom's and Samsung's and is in no repository of ours: `devices
 it from your own copy or from the pinned public tree and checks it against `SHA256SUMS`
 (`devices/starlte/firmware/sensorhub/README.md`).
 
-On the 16.5 line it travels in the small image's `fw/` directory. An ios-27 boot image has no RAM disk, so it travels in
-the device tree instead:
+On the 16.5 line it travels in the small image's `fw/` directory. An ios-27 boot image has no RAM disk, and the hub is
+loaded before there is a root, so it travels in the device tree instead. `tools/ios27/s9/make-boot-image.sh` does this by
+default since 17 November: it fetches the file and checks it (`tools/ios27/fullroot/firmware.sh`, as the root build does), stops
+if it is missing or wrong, and adds it (`--firmware none`: an image without it, and then no sensors). By hand:
 
     tools/ios27/adt-firmware.py PLAIN.adt WITH-FW.adt devices/starlte/firmware/sensorhub/bcm_sensorhub_a1.bin
 
