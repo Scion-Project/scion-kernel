@@ -40,8 +40,9 @@ defaults, and [scion-starlte's README](https://github.com/Scion-Project/scion-st
 
 Written, but not working yet:
 
-- the iris camera (`iris_s9=N`, off unless asked): the sensor answers with `iris_s9_smc=1`, and no frame has reached
-  memory. `fp_s9=N` panics the kernel on its probe.
+- the iris camera (`iris_s9=N`, off unless asked): the sensor answers with `iris_s9_smc=1`, and no frame reaches memory;
+  by Samsung's design its frames go only to the secure world, so it stays a probe of the sensor (docs/iris-camera.md).
+  `fp_s9=N` panics the kernel on its probe. There is no Face ID, and none is planned (docs/ios27/BIOMETRICS.md).
 - the headphones (`cs47l93_hp=1`).
 - booting on an M3 (`bootcpu=4`).
 

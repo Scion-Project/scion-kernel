@@ -86,6 +86,10 @@ on the Adreno 642L, at 100 to 104 frames a second in page swipes on a 120 Hz pan
 - [Screen-off power](screen-off-power.md): what the Galaxy S9 does with its screen off, and `panel_sleep=1`, `sleep_cores=1` (off by default).
 - [The passcode](passcode.md): Settings' passcode and the lock screen, on a key store with no Secure Enclave (it locks the
   screen, it does not encrypt), and how to get back in (`passcode_reset=1`).
+- [Face ID, studied](ios27/BIOMETRICS.md): what Face ID is made of on iOS 27, what the Galaxy S9 can offer in its place, and why
+  Scion offers a passcode and will not present anything as Face ID.
+- [The iris camera](iris-camera.md): why the Galaxy S9's infrared iris camera's frames never reach memory (Samsung keeps them in the
+  secure world), with the evidence from Samsung's kernel.
 
 ## What works
 
