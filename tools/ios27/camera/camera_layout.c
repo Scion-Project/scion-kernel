@@ -16,7 +16,8 @@
  * What this does: -[FigCaptureClientApplicationStateMonitor layoutMonitor:didUpdateLayout:] is replaced (checked first:
  * 4 arguments, returns void). When the monitor is the main display's (+[FigCaptureDisplayLayoutMonitor
  * sharedDisplayLayoutMonitor]) and the layout it gives is nil, or has no foreground application while FrontBoard's own
- * monitor under it (its FBSDisplayLayoutMonitor) has no layout at all, the client is given in its place a layout of that display
+ * layout under it (its FBSDisplayLayoutMonitor's) is missing or names no application at all, the client is given in its
+ * place a layout of that display
  * with the client's own application as its one foreground application (a FigCaptureDisplayLayout made with its own
  * -_init, -setDisplayType: and -setForegroundApps:). Every layout FrontBoard does publish goes through unchanged, and
  * RunningBoard's state still decides: an application that leaves the screen is still seen as in the background. With no
@@ -79,18 +80,49 @@ layout_with(id monitor, id app)
 	return made;
 }
 
-/*
- * FrontBoard gave MONITOR (a FigCaptureDisplayLayoutMonitor) nothing: its FBSDisplayLayoutMonitor (_layoutMonitor) has no
- * current layout. CMCapture then hands its clients an empty FigCaptureDisplayLayout, not nil (phone 1, 22:14).
- */
-static bool
-frontboard_gave_nothing(id monitor)
+/* FrontBoard's own layout under MONITOR (its FBSDisplayLayoutMonitor's -currentLayout), or nil */
+static id
+frontboard_layout(id monitor)
 {
 	Ivar ivar = class_getInstanceVariable(object_getClass(monitor), "_layoutMonitor");
 	id fbs = ivar != NULL ? object_getIvar(monitor, ivar) : nil;
 
-	return fbs == nil || (class_respondsToSelector(object_getClass(fbs), sel_registerName("currentLayout")) &&
-	    send(fbs, "currentLayout") == nil);
+	return fbs != nil && class_respondsToSelector(object_getClass(fbs), sel_registerName("currentLayout")) ?
+	       send(fbs, "currentLayout") : nil;
+}
+
+/*
+ * FrontBoard gave MONITOR (a FigCaptureDisplayLayoutMonitor) no application: no layout at all, or a layout none of whose
+ * elements is an application's (-isUIApplicationElement). On phone 1 (17 November, 22:25) FrontBoard's monitor had a
+ * layout and CMCapture found no foreground application in it while the Camera app was on the screen; CMCapture then hands
+ * its clients an empty FigCaptureDisplayLayout, not nil.
+ */
+static bool
+frontboard_gave_nothing(id monitor)
+{
+	id fbs = frontboard_layout(monitor), elements, all;
+	SEL is_app = sel_registerName("isUIApplicationElement");
+
+	if (fbs == nil) {
+		return true;
+	}
+	if (!class_respondsToSelector(object_getClass(fbs), sel_registerName("elements")) ||
+	    (elements = send(fbs, "elements")) == nil) {
+		return true;
+	}
+	all = class_respondsToSelector(object_getClass(elements), sel_registerName("allObjects")) ? send(elements, "allObjects") :
+	    elements;
+	if (all == nil || !class_respondsToSelector(object_getClass(all), sel_registerName("objectAtIndex:"))) {
+		return false;   /* not a collection this knows: as FrontBoard says */
+	}
+	for (CFIndex i = 0, n = CFArrayGetCount((CFArrayRef)all); i < n; i++) {
+		id e = (id)CFArrayGetValueAtIndex((CFArrayRef)all, i);
+
+		if (class_respondsToSelector(object_getClass(e), is_app) && ((bool (*)(id, SEL))objc_msgSend)(e, is_app)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 static long
@@ -115,9 +147,23 @@ w_did_update(id self, SEL sel, id monitor, id layout)
 	id app, made;
 
 	if (is_main && __atomic_fetch_add(&diagnosed, 1, __ATOMIC_RELAXED) < 3) {
-		say("layout: the main display's layout for a client: %s, %ld foreground app(s), FrontBoard's monitor %s",
-		    layout == nil ? "nil" : "a layout", foreground_count(layout),
-		    frontboard_gave_nothing(monitor) ? "has NO layout" : "has a layout");
+		id fbs = frontboard_layout(monitor);
+		char text[900] = "nil";
+		CFStringRef d = fbs != nil ? CFCopyDescription((CFTypeRef)fbs) : NULL;
+		CFIndex used = 0;
+
+		if (d != NULL) {
+			CFStringGetBytes(d, CFRangeMake(0, CFStringGetLength(d)), kCFStringEncodingUTF8, '?', false, (UInt8 *)text,
+			    sizeof(text) - 1, &used);
+			text[used] = '\0';
+			CFRelease(d);
+			for (char *c = text; *c != '\0'; c++) {
+				*c = *c == '\n' ? ' ' : *c;
+			}
+		}
+		say("layout: the main display's layout for a client: %s, %ld foreground app(s); FrontBoard's %s an application: %s",
+		    layout == nil ? "nil" : "a layout", foreground_count(layout), frontboard_gave_nothing(monitor) ? "names NO" :
+		    "names", text);
 	}
 	if (!nothing || (app = client_application(self)) == nil || (made = layout_with(monitor, app)) == nil) {
 		o_did_update(self, sel, monitor, layout);
