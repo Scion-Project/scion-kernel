@@ -186,6 +186,25 @@ phone yet.** With the trace on and the library in the app, Camera.app says each 
 and its answer for each preset: `trace: app: Front Camera has N format(s)`, `trace: app: ... takes AVCaptureSessionPresetPhoto:
 yes`. `NONE` there means cameracaptured still found none of the plist's formats.
 
+### The third cause: cameracaptured never sees the app in the foreground (17 November, 21:30)
+
+With the formats (above), phone 1's next boot had the cameras with formats (the back camera 16), the Photo preset taken
+and the session configured, and then interrupted at once: `AVCaptureSession was interrupted for
+VideoDeviceNotAvailableInBackground`, while the app was on the screen (RunningBoard: `running-active-Visible`). The
+capture session server lets a client use the camera only while it is in the foreground, and its
+`FigCaptureClientApplicationStateMonitor` (CMCapture) joins RunningBoard's state with the main display's layout from
+FrontBoard: the client must be among the layout's foreground applications. cameracaptured's own log (the trace's os_log
+file) says `FBSDisplayLayoutService: timed out waiting for initial layout update from com.apple.frontboard.main-display;
+publishing nil`, and no layout came after it; SpringBoard's own layout monitors logged `layout: (null)` too. FrontBoard's
+display layouts are not published on this port. Why is not known yet; it is FrontBoard's business, not the camera's.
+
+`tools/ios27/camera/camera_layout.c` (cameracaptured, with the kernel's camera only): when the main display's layout
+monitor hands a client a nil layout, the client is given a layout of that display with its own application in front.
+Every real layout goes through unchanged, and RunningBoard's state still decides, so an application that leaves the
+screen is still in the background. Said once a client: `hakios: camera: layout: FrontBoard gave the main display no
+layout: com.apple.camera is taken as its foreground application`. With `cam_trace`, `camera_statetrace.c` also says the
+layouts that do arrive and the monitor's states (`hakios: camera: trace: state: ...`). **Not run on a phone yet.**
+
 ### The trace
 
 `cam.dylib` has a trace, off by default. It is on with `cam_trace=1` on the boot image's command line, or with the file
