@@ -40,6 +40,7 @@ adsp_pause	k
 adsp_return	k
 adsp_step	k
 adsp_wait	k
+adt_layer	l
 apfs_cheap	k
 apfs_check	k
 apfs_chunk	k
@@ -223,6 +224,7 @@ cs_relax_platform_task_ports	k
 ddr	k
 ddr_rest	k
 ddr_vote	k
+devsh	k
 display_probe	k
 early_log	k
 epoch	k
