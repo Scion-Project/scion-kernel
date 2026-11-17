@@ -48,6 +48,7 @@ _HERE=os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0,_HERE)
 fp16mod=_load('fp16_stub',os.path.join(_HERE,'fp16_stub.py'))
 miscmod=_load('misc_stub',os.path.join(_HERE,'misc_stub.py'))
+dsc_header=_load('dsc_header',os.path.join(_HERE,'dsc_header.py'))   # shared region, header layout
 
 # ---------------------------------------------------------------------------------------------------
 # instruction classes
@@ -520,8 +521,10 @@ def cache_pool(c, skip=(), extra=()):
 
 
 PAGE = 0x4000
-SHARED_START, SHARED_SIZE = 0x180000000, 0x17c228000
-HDR_ZERO_FROM, HDR_ZERO_TO = 0x2a8, 0x4000      # zero part of a subcache header (after mapping_and_slide_info[0])
+# The shared region and a header's zero tail come from the cache's own headers (dsc_header.py). On 24A446 they are the
+# numbers this file had written in: SHARED_START, SHARED_SIZE = 0x180000000, 0x17c228000; the tail of a one-mapping
+# subcache's header from 0x2a8 (after mapping_and_slide_info[0]); the fixed header ends at 0x238.
+HDR_ZERO_TO = 0x4000                                # the header page
 
 
 def parse_header_maps(hdr):
@@ -561,8 +564,10 @@ class GapPool:
                 continue
             self.gaps.append({'start': g0, 'end': g1, 'owner': owner, 'name': f'GAP:{g0:x}'})
         # the region before the first and after the last mapping is outside the shared region: never used
+        with open(c.main, 'rb') as f:
+            shared_start, shared_size = dsc_header.shared_region(f.read(0x100))
         for g in self.gaps:
-            assert SHARED_START <= g['start'] and g['end'] <= SHARED_START + SHARED_SIZE
+            assert shared_start <= g['start'] and g['end'] <= shared_start + shared_size
             c.add_virtual(g['start'], g['end'] - g['start'], g['name'])
 
     def regions(self):
@@ -597,7 +602,7 @@ class GapPool:
             assert o == 0 and a + s == g['start'] and mx == 5 and ip == 5, (owner, maps)
             cso, css = struct.unpack_from('<QQ', data, 0x28)
             assert cso == s and cso + css == len(data), (owner, hex(cso), hex(css), hex(len(data)))
-            for off in range(0, 0x238, 4):      # any other header word that looks like a file offset past the TEXT
+            for off in range(0, dsc_header.fixed_header_end(data), 4):   # any other header word that looks like a file offset past the TEXT
                 if off in (0x28, 0x2c):
                     continue
                 v = struct.unpack_from('<I', data, off)[0]
@@ -627,9 +632,10 @@ def patch_header(path, new):
     with open(path, 'r+b') as f:
         hdr = bytearray(f.read(PAGE))
         mo, mc, wo, wc, maps, mws = parse_header_maps(hdr)
-        assert not any(hdr[HDR_ZERO_FROM:HDR_ZERO_TO]), path + ': header free space not zero'
+        zero_from = dsc_header.mapping_arrays_end(hdr)
+        assert not any(hdr[zero_from:HDR_ZERO_TO]), path + ': header free space not zero'
         assert wc in (0, mc), (path, mc, wc)
-        loc1 = (max(mo + 32 * mc, HDR_ZERO_FROM) + 15) & ~15
+        loc1 = (max(mo + 32 * mc, zero_from) + 15) & ~15
         arr1 = b''.join(struct.pack('<QQQII', *m) for m in maps + list(new))
         pos = loc1 + len(arr1)
         if wc:

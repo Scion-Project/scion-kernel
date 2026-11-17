@@ -96,15 +96,24 @@
  *   bt_addr=<a>      at bt=7, the chip's address, "xx:xx:xx:xx:xx:xx" (default: the phone's own, the text of
  *                    /bluetooth/bt_addr in its EFS partition, read only, as Samsung's Android gives it to the chip;
  *                    bt_addr=0: the chip keeps Broadcom's default 43:61:b2:...)
- *   bt_vsc_ok=LIST   at bt=7: vendor commands the chip rejects are said once; those in LIST (hex opcodes, ','; "all",
- *                    "-OPCODE" to leave one out) are
- *                    answered as done for iOS's bluetoothd (kctl_pump(), vsc_byte()); "log": said only. Off by default
+ *   bt_addr_efs=1    xnu-12377: the phone's own address from EFS:/bluetooth/bt_addr as above (read only, through the
+ *                    modem's ext4 reader), when no bt_addr= is given; without it the chip keeps Broadcom's default, which
+ *                    every S9 then shares. Off by default; not yet run on a phone
+ *   bt_vsc=1         at bt=7, Apple's vendor commands this chip does not know answered for iOS's bluetoothd as the table of
+ *                    hakios.bt_vsc.h says (a whole reply, true of this chip; nothing but vendor commands is touched);
+ *                    "log": the chip's rejections of vendor commands said only. Off by default; not yet run on a phone
+ *   bt_vsc_ok=LIST   (tests only) at bt=7, the status of the chip's rejection of a listed vendor command (hex opcodes, ',';
+ *                    "all", "-OPCODE" to leave one out) set to 00, nothing else: malformed for commands with return
+ *                    parameters (bluetoothd aborts on 0xFDDA's). Off by default
  *   bt_trace=N       at bt=7, the H4 packets on com.apple.uart.bluetooth, both ways, on the console: at most N lines a
  *                    second (each: the direction, the type, the opcode, event or handle, the length, the first bytes);
  *                    the packets beyond that are counted and the count said with the next line
  *   bt_keep=1        leave the chip powered at the end (default: BT_EN and BT_WAKE low once the steps are done or one fails)
  *   bt_hcd=<name>    the patch file's name in fw/ (default bcm4361B2.hcd); without it, the phone's own from VENDOR
  *   bt_module=<m>    murata or semco: which patch (bcm4361B2_<m>.hcd; default: the module Wi-Fi read in OTP, else a guess)
+ *   bt_otp_wait=<s>  seconds to wait for Wi-Fi's reading of the module in OTP when both patches are on the root (120)
+ *                    (xnu-12377: the root build puts both there; then the module's own is taken; 0: Murata's first at
+ *                    once, as before). Only with brcmfmac=2 and up; with one patch on the root that one is taken at once
  *   bt_vendor=0      never read the patch from the phone's VENDOR partition (default: read it there with ufs=2)
  *   bt_vendor_part=<name>  the partition the patch is read from (default VENDOR)
  *   bt_expander_reset=1  at bt=2 and up, take the expander out of reset if it is held there
@@ -142,10 +151,12 @@
 #include <sys/sysctl.h>
 #include <sys/hakios.exynos_soc.h>
 #include "hakios.bcm_hci.h"
+#include "hakios.bt_vsc.h"
 #if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377 (ios-27): vnode file reader */
 #include <sys/vnode.h>
 #include <sys/vnode_internal.h>
 #include <kern/kalloc.h>
+#include "hakios.ext4ro.h"
 #endif
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
@@ -727,6 +738,19 @@ root_file(const char *path, uint64_t max, uint8_t **data, uint64_t *size)
 	return e;
 }
 
+/* is there a file at path (the root filesystem mounted)? */
+static bool
+root_has(const char *path)
+{
+	vnode_t vp = NULLVP;
+
+	if (rootvnode == NULLVP || vnode_lookup(path, 0, &vp, vfs_context_kernel()) != 0) {
+		return false;
+	}
+	vnode_put(vp);
+	return true;
+}
+
 static uint8_t *hcd_data;
 static uint64_t hcd_size;
 static char hcd_file[128];
@@ -737,7 +761,7 @@ module_patch(char *file, size_t room, uint64_t *size)
 {
 	char arg[96] = "", module[16] = "", paths[2][128];
 	unsigned npaths = 0;
-	uint32_t wait_s = 180;
+	uint32_t wait_s = 180, otp_wait = 120, wifi_steps = 0;
 	bool guessed = false;
 	int last[2] = { 0, 0 };
 
@@ -747,6 +771,11 @@ module_patch(char *file, size_t room, uint64_t *size)
 		return hcd_data;
 	}
 	PE_parse_boot_argn("bt_hcd_wait", &wait_s, sizeof(wait_s));
+	PE_parse_boot_argn("bt_otp_wait", &otp_wait, sizeof(otp_wait));
+	PE_parse_boot_argn("brcmfmac", &wifi_steps, sizeof(wifi_steps));
+	if (wifi_steps < 2) {
+		otp_wait = 0;           /* nobody reads the chip's OTP in this run */
+	}
 	if (PE_parse_boot_arg_str("bt_hcd", arg, sizeof(arg)) && arg[0] != 0) {
 		snprintf(paths[npaths++], sizeof(paths[0]), "%s%s", arg[0] == '/' ? "" : HCD_DIR, arg);
 	} else if (PE_parse_boot_arg_str("bt_module", module, sizeof(module)) && module[0] != 0) {
@@ -759,6 +788,28 @@ module_patch(char *file, size_t room, uint64_t *size)
 	say("bt: 6: the patch from the root filesystem: %s%s%s (waiting up to %u s for it)\n", paths[0],
 	    npaths > 1 ? ", else " : "", npaths > 1 ? paths[1] : "", wait_s);
 	for (uint32_t waited = 0; ; waited++) {
+		/*
+		 * Both modules' patches on the root and nobody said which: the module's own, as Wi-Fi read it from the chip's OTP
+		 * (brcmfmac=2 and up, after wifi_delay=), waited for up to bt_otp_wait seconds while both are there; then Murata's
+		 * first, as before. One patch on the root is taken at once, as before.
+		 */
+		if (guessed && npaths == 2) {
+			const char *read = hakios_bcm4361_module();
+
+			if (read != NULL && (strcmp(read, "murata") == 0 || strcmp(read, "semco") == 0)) {
+				snprintf(paths[0], sizeof(paths[0]), HCD_DIR "bcm4361B2_%s.hcd", read);
+				npaths = 1;
+				guessed = false;
+				say("bt: 6: the module is %s's, as Wi-Fi read it from the chip's OTP: %s\n", read, paths[0]);
+			} else if (waited < otp_wait && root_has(paths[0]) && root_has(paths[1])) {
+				if (waited % 30 == 0) {
+					say("bt: 6: both patches are on the root: waiting up to %u s for Wi-Fi to read the module from the "
+					    "chip's OTP (bt_otp_wait=, bt_module=)\n", otp_wait);
+				}
+				sleep_ms(1000);
+				continue;
+			}
+		}
 		for (unsigned k = 0; k < npaths; k++) {
 			uint8_t *d = NULL;
 			uint64_t s = 0;
@@ -1023,10 +1074,11 @@ raise_baud(uint32_t baud)
 	return true;
 }
 
+/* an address for the console: its last two bytes only (the phone's own and its neighbours' stay off the logs) */
 static void
 addr_text(const uint8_t *a, char *out, size_t cap)
 {
-	snprintf(out, cap, "%02x:%02x:%02x:%02x:%02x:%02x", a[5], a[4], a[3], a[2], a[1], a[0]);
+	snprintf(out, cap, "..:..:..:..:%02x:%02x", a[1], a[0]);
 }
 
 /* a name from EIR or advertising data: 0x09 complete name, else 0x08 shortened */
@@ -1556,7 +1608,15 @@ trace_line(struct h4_trace *t)
 	}
 	at += snprintf(line + at, sizeof(line) - at, " len %u:", t->plen);
 	for (uint32_t i = 0; i < keep && at < (int)sizeof(line) - 8; i++) {
-		at += snprintf(line + at, sizeof(line) - at, " %02x", t->first[i]);
+		/* the address's first four bytes left out of Write_BD_ADDR (FC01) and of Read_BD_ADDR's (1009) reply */
+		bool hide = (t->type == 1 && (t->hdr[0] | t->hdr[1] << 8) == 0xFC01 && i >= 2 && i < 6) || (t->type == 4 &&
+		    t->hdr[0] == 0x0E && keep > 3 && (t->first[1] | t->first[2] << 8) == 0x1009 && i >= 6 && i < 10) ||
+		    /* and a neighbour's, in an LE advertising report (legacy 02 or extended 0D) */
+		    (t->type == 4 && t->hdr[0] == 0x3E && ((t->first[0] == 0x02 && i >= 6 && i < 10) || (t->first[0] == 0x0D &&
+		    i >= 7 && i < 11)));
+
+		at += hide ? snprintf(line + at, sizeof(line) - at, " ..") : snprintf(line + at, sizeof(line) - at, " %02x",
+		    t->first[i]);
 	}
 	if (trace_skipped != 0 && at < (int)sizeof(line) - 40) {
 		at += snprintf(line + at, sizeof(line) - at, " (%u not shown before)", trace_skipped);
@@ -1612,10 +1672,12 @@ trace_bytes(struct h4_trace *t, const uint8_t *b, size_t n)
 	}
 }
 
-static void vsc_reset(void);           /* bt_vsc_ok: a new client starts at a packet's start (below) */
+static void vsc_reset(void);           /* bt_vsc: a new client starts at a packet's start (below) */
+static struct bt_vsc vsc;
+static bool vsc_on;
 static kern_ctl_ref kctl_ref;
 static volatile u_int32_t kctl_unit;
-static uint8_t kctl_rx[256];            /* read from the chip, not yet taken by the socket */
+static uint8_t kctl_rx[512];            /* read from the chip, not yet taken by the socket (an event at least) */
 static size_t kctl_rx_len;
 static uint32_t kctl_bytes_in, kctl_bytes_out;
 static uint32_t kctl_full;               /* times the socket had no room (bt_trace) */
@@ -1670,11 +1732,13 @@ kctl_disconnect(__unused kern_ctl_ref ref, u_int32_t unit, __unused void *unitin
 	return 0;
 }
 
+static void vsc_xnote(void);
+
 static errno_t
 kctl_send(__unused kern_ctl_ref ref, u_int32_t unit, __unused void *unitinfo, mbuf_t m, __unused int flags)
 {
-	uint8_t buf[256];
-	size_t len = mbuf_pkthdr_len(m), off = 0;
+	uint8_t buf[256], out[2 * BT_VSC_OUT_MAX];
+	size_t len = mbuf_pkthdr_len(m), off = 0, olen = 0;
 	errno_t error = 0;
 
 	if (!kctl_owns || unit != kctl_unit) {
@@ -1685,10 +1749,25 @@ kctl_send(__unused kern_ctl_ref ref, u_int32_t unit, __unused void *unitinfo, mb
 
 		if (mbuf_copydata(m, off, n, buf) != 0) {
 			error = EINVAL;
+			continue;
+		}
+		/* bt_vsc: a command is held until it is whole, and may go as another (hakios.bt_vsc.h) */
+		for (size_t k = 0; vsc_on && k < n && error == 0; k++) {
+			olen += bt_vsc_host_byte(&vsc, buf[k], out + olen);
+			if (olen > sizeof(out) - BT_VSC_OUT_MAX || k == n - 1) {
+				error = olen == 0 || bt_write(out, olen, 2000) ? 0 : EIO;
+				trace_bytes(&trace_out, out, error == 0 ? olen : 0);
+				olen = 0;
+			}
+		}
+		if (vsc_on) {
+			vsc_xnote();
 		} else if (!bt_write(buf, n, 2000)) {
 			error = EIO;
 		} else {
 			trace_bytes(&trace_out, buf, n);
+		}
+		if (error == 0) {
 			off += n;
 			kctl_bytes_out += (uint32_t)n;
 		}
@@ -1746,113 +1825,54 @@ kctl_setopt(__unused kern_ctl_ref ref, __unused u_int32_t unit, __unused void *u
 	return 0;
 }
 
-/*
- * bt_vsc_ok=LIST (default none: nothing below runs): iOS's bluetoothd sends Apple's own vendor commands (OGF 0x3F), made
- * for Apple's controllers; the BCM4361 answers many with status 01 (unknown command). bluetoothd lives with most of them,
- * but not with all: on iOS 27 a rejected LE-scan setting ("OLYMPIC_SET_RETAIN_LE_SCAN_DUPLICATES_ON_START") restarts its
- * stack, again and again. With bt_vsc_ok given, each vendor command the chip rejects is said once (its opcode), and those
- * in LIST (hex opcodes joined by ',', e.g. bt_vsc_ok=0xfd5a,0xfd73; "log" to only say them, "all" (tests) for every one, "-OPCODE" to leave one out of "all") are answered as done: the
- * status byte of the chip's Command Complete is set to 00 on its way to bluetoothd. Nothing else in the stream changes.
- */
-static char vsc_arg[128];
-static uint16_t vsc_ok[16], vsc_not[16];
-static unsigned vsc_ok_n, vsc_not_n;
-static bool vsc_on, vsc_all;
-static uint16_t vsc_said[64];
-static unsigned vsc_said_n;
-static struct {
-	uint8_t hdr[7];         /* the packet's first bytes (type, event, length, ncmd, opcode, status) */
-	uint32_t at, total;     /* where in the packet the next byte is, and its whole length (0 until known) */
-} vsc_in;
-
+/* bt_vsc= and bt_vsc_ok= (above; hakios.bt_vsc.h): the filter on the chip's replies to vendor commands, per client */
 static void
 vsc_reset(void)
 {
-	vsc_in.at = vsc_in.total = 0;
+	bt_vsc_reset(&vsc);
 }
 
 static void
 vsc_init(void)
 {
-	char *p = vsc_arg;
+	char arg[128];
 
-	if (!PE_parse_boot_argn("bt_vsc_ok", vsc_arg, sizeof(vsc_arg))) {
-		return;
+	if (PE_parse_boot_arg_str("bt_vsc", arg, sizeof(arg)) && strcmp(arg, "0") != 0) {
+		vsc.table = strcmp(arg, "log") != 0;
+		vsc.log = true;
 	}
-	vsc_on = true;
-	vsc_all = strncmp(vsc_arg, "all", 3) == 0;      /* (tests) every rejected vendor command answered as done ... */
-	while (*p != 0) {
-		bool neg = *p == '-';                   /* ... but those named with '-': "all,-0xfdda" */
-		char *end = NULL;
-		unsigned long v = strtoul(neg ? p + 1 : p, &end, 16);
-
-		if (end != NULL && end != (neg ? p + 1 : p) && v > 0 && v <= 0xffff) {
-			if (neg && vsc_not_n < sizeof(vsc_not) / sizeof(vsc_not[0])) {
-				vsc_not[vsc_not_n++] = (uint16_t)v;
-			} else if (!neg && vsc_ok_n < sizeof(vsc_ok) / sizeof(vsc_ok[0])) {
-				vsc_ok[vsc_ok_n++] = (uint16_t)v;
-			}
-		}
-		p = end != NULL && end != p ? end : p + 1;
-		while (*p == ',' || *p == ' ') {
-			p++;
-		}
+	if (PE_parse_boot_arg_str("bt_vsc_ok", arg, sizeof(arg))) {
+		bt_vsc_parse_ok(&vsc, arg);
+		vsc.log = true;
 	}
-	say("bt: bt_vsc_ok: vendor commands the chip rejects are said; %s answered as done\n", vsc_all ? "all" : vsc_ok_n ? "those listed" : "none");
+	vsc_on = vsc.log;
+	if (vsc_on) {
+		say("bt: vendor commands the chip rejects are said; %s%s\n", vsc.table ? "those in hakios.bt_vsc.h's table answered "
+		    "as it says" : "none answered by the table", vsc.ok_all || vsc.ok_n ? "; bt_vsc_ok (tests): others answered 00" : "");
+	}
 }
 
-/* one byte from the chip, on its way to the socket: returns it, or 00 for a listed vendor command's rejection */
-static uint8_t
-vsc_byte(uint8_t b)
+/* the client's side (kctl_send): a vendor command's first translation */
+static void
+vsc_xnote(void)
 {
-	uint32_t i = vsc_in.at++;
+	if (vsc.xnote) {
+		vsc.xnote = false;
+		say("bt: vendor command %#06x: sent as %#06x for this chip: %s\n", bt_vsc_table[vsc.xnote_rule].opcode,
+		    bt_vsc_table[vsc.xnote_rule].to, bt_vsc_table[vsc.xnote_rule].what);
+	}
+}
 
-	if (i < sizeof(vsc_in.hdr)) {
-		vsc_in.hdr[i] = b;
+/* the chip's side (the pump): a vendor command's first rejection */
+static void
+vsc_note(void)
+{
+	if (vsc.note) {
+		vsc.note = false;
+		say("bt: vendor command %#06x: status %02x from the chip%s%s\n", vsc.note_opcode, vsc.note_status, vsc.note_rule >= 0 ?
+		    ": answered for iOS: " : vsc.note_rule == -2 ? ": answered 00 for iOS (bt_vsc_ok)" : "", vsc.note_rule >= 0 ?
+		    bt_vsc_table[vsc.note_rule].what : "");
 	}
-	if (i == 0 && b != 0x02 && b != 0x03 && b != 0x04) {
-		vsc_in.at = 0;                  /* not a packet type: wait for one */
-		return b;
-	}
-	if (vsc_in.total == 0) {
-		uint8_t t = vsc_in.hdr[0];
-
-		if (t == 0x04 && i == 2) {
-			vsc_in.total = 3u + vsc_in.hdr[2];
-		} else if (t == 0x03 && i == 3) {
-			vsc_in.total = 4u + b;
-		} else if (t == 0x02 && i == 4) {
-			vsc_in.total = 5u + ((uint32_t)b << 8 | vsc_in.hdr[3]);
-		}
-	}
-	if (i == 6 && vsc_in.hdr[0] == 0x04 && vsc_in.hdr[1] == 0x0e && vsc_in.hdr[2] >= 4 && b != 0) {
-		uint16_t op = (uint16_t)(vsc_in.hdr[5] << 8 | vsc_in.hdr[4]);
-
-		if ((op >> 10) == 0x3f) {
-			bool ok = vsc_all, said = false;
-
-			for (unsigned k = 0; k < vsc_ok_n; k++) {
-				ok |= vsc_ok[k] == op;
-			}
-			for (unsigned k = 0; k < vsc_not_n; k++) {
-				ok &= vsc_not[k] != op;
-			}
-			for (unsigned k = 0; k < vsc_said_n; k++) {
-				said |= vsc_said[k] == op;
-			}
-			if (!said && vsc_said_n < sizeof(vsc_said) / sizeof(vsc_said[0])) {
-				vsc_said[vsc_said_n++] = op;
-				say("bt: vendor command %#06x: status %02x from the chip%s\n", op, b, ok ? ": answered 00 for iOS (bt_vsc_ok)" : "");
-			}
-			if (ok) {
-				b = 0;
-			}
-		}
-	}
-	if (vsc_in.total != 0 && vsc_in.at >= vsc_in.total) {
-		vsc_in.at = vsc_in.total = 0;
-	}
-	return b;
 }
 
 /* from the pump: what the chip sent, to the socket, while it has room */
@@ -1863,8 +1883,13 @@ kctl_pump(int *in)
 	int c;
 
 	while (kctl_owns && *in < 1024) {
-		while (kctl_rx_len < sizeof(kctl_rx) && (c = bt_getc()) >= 0) {
-			kctl_rx[kctl_rx_len++] = vsc_on ? vsc_byte((uint8_t)c) : (uint8_t)c;
+		while (kctl_rx_len + BT_VSC_OUT_MAX <= sizeof(kctl_rx) && (c = bt_getc()) >= 0) {
+			if (vsc_on) {
+				kctl_rx_len += bt_vsc_chip_byte(&vsc, (uint8_t)c, kctl_rx + kctl_rx_len);
+				vsc_note();
+			} else {
+				kctl_rx[kctl_rx_len++] = (uint8_t)c;
+			}
 		}
 		if (kctl_rx_len == 0) {
 			return;
@@ -1976,6 +2001,40 @@ addr_parse(const char *t, size_t n, uint8_t out[6])
  */
 #define HCI_BCM_WRITE_BD_ADDR   0xFC01
 
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: EFS through the modem's read-only ext4 reader */
+static int
+efs_read(__unused void *ctx, uint64_t off, void *dst, uint32_t len)
+{
+	return hakios_ufs_read_partition("EFS", off, dst, len, NULL);
+}
+
+/* bt_addr_efs=1: the text of EFS:/bluetooth/bt_addr (hakios.ext4ro.h: no write path; EFS is not mounted). Not yet run */
+static bool
+efs_addr(uint8_t want[6])
+{
+	struct ext4ro fs = { .read = efs_read, .ctx = NULL };
+	uint8_t text[64];
+	uint64_t got = 0;
+	bool ok = false;
+
+	if (ext4ro_open(&fs) != 0 || fs.block_size == 0 || fs.block_size > 65536) {
+		return false;
+	}
+	fs.blk = kalloc_data(fs.block_size, Z_WAITOK);
+	fs.blk2 = kalloc_data(fs.block_size, Z_WAITOK);
+	if (fs.blk != NULL && fs.blk2 != NULL && ext4ro_read_file(&fs, "/bluetooth/bt_addr", text, sizeof(text), &got) == 0) {
+		ok = addr_parse((const char *)text, (size_t)got, want);
+	}
+	if (fs.blk != NULL) {
+		kfree_data(fs.blk, fs.block_size);
+	}
+	if (fs.blk2 != NULL) {
+		kfree_data(fs.blk2, fs.block_size);
+	}
+	return ok;
+}
+#endif
+
 static void
 set_own_address(void)
 {
@@ -1998,11 +2057,15 @@ set_own_address(void)
 		}
 		from = "bt_addr=";
 	} else {
-#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: no EFS reader in this tree */
-		/* Starbite port: no EFS reader in this tree */
-		say("bt: 7: no bt_addr=<a> (the phone's EFS:/bluetooth/bt_addr is not read on this kernel): the chip keeps "
-		    "its default\n");
-		return;
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: EFS read only with bt_addr_efs=1 (efs_addr() below) */
+		uint32_t efs = 0;
+
+		if (!PE_parse_boot_argn("bt_addr_efs", &efs, sizeof(efs)) || efs == 0 || !efs_addr(want)) {
+			say("bt: 7: no bt_addr=<a>%s: the chip keeps its default\n", efs ? ", and EFS:/bluetooth/bt_addr not read or "
+			    "not an address" : " (bt_addr_efs=1 reads the phone's own from EFS:/bluetooth/bt_addr)");
+			return;
+		}
+		from = "the phone's EFS:/bluetooth/bt_addr (bt_addr_efs=1)";
 #else   /* xnu-8796: read address from EFS partition */
 		if (hakios_partition_file("EFS", "/efs", "/bluetooth/bt_addr", 64, &data, &size) == 0 && data != NULL &&
 		    addr_parse((const char *)data, (size_t)size, want)) {

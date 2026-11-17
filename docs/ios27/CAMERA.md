@@ -9,7 +9,9 @@ test at the end is what is left.
 
 What it gives when it works: the Camera app on the home screen, its preview from the S9's camera, and a photograph. One
 camera per boot: the front one (`cam_s9=7`), or the rear one (`cam_s9=7 cam_rear=1`). The app's back and front cameras
-both show the camera of that boot (below, "One camera per boot").
+both show the camera of that boot (below, "One camera per boot"). With `cam_switch=1` as well, both cameras in one boot,
+the app's button switching between them (below, "Both cameras in one boot"; written and checked on the build machine,
+**not run on a phone**).
 
 ## Turning it on
 
@@ -20,7 +22,7 @@ both show the camera of that boot (below, "One camera per boot").
 2. The boot image, made again after the root, with the kernel's camera asked for:
 
        tools/ios27/s9/make-boot-image.sh --kernel hakios-kernel --donor-adt inputs/n104ap.adt --template inputs/recovery.img \
-           --cmdline 'sbgl=0 sweetspeed=408782847 cam_s9=7'              # the rear camera: ... cam_s9=7 cam_rear=1
+           --cmdline 'sbgl=0 sweetspeed=442337279 cam_s9=7'              # the rear camera: ... cam_s9=7 cam_rear=1
 
    With `cam_s9=7` on the line and the record naming `cam.dylib`, the device tree gets `/arm-io/isp` and iOS shows the
    Camera app (`--camera-node auto`, the default; `yes` or `no` to force it). Without either, the tree is as before and the
@@ -59,17 +61,45 @@ MobileGestalt cache on a phone that has been booted many times says otherwise is
 
 ## One camera per boot
 
-The S9's driver drives one sensor per boot: the front S5K3H1 unless `cam_rear=1`, then the rear S5K2L3. The node's frames
-carry the sensor number last asked for (`HAKIOS_CAMERA_SENSOR` only relabels them on the S9: `asked_sensor` in
-`hakios.exynos_camera.c`), so the device's back stream (sensor 1) and front stream (sensor 2) both get the boot's camera.
-Switching between the two in one boot (the app's button) needs the driver to power one sensor down and the other up and to
-move between CSIS1 and CSIS0 on that command, as the S9+'s driver does; that is not written. With it, nothing on the iOS
-side changes: `camera_device.c` already asks for its stream's sensor when a stream starts.
+Without `cam_switch=1` the S9's driver drives one sensor per boot: the front S5K3H1 unless `cam_rear=1`, then the rear
+S5K2L3. The node's frames carry the sensor number last asked for (`HAKIOS_CAMERA_SENSOR` only relabels them: `asked_sensor`
+in `hakios.exynos_camera.c`), so the device's back stream (sensor 1) and front stream (sensor 2) both get the boot's camera.
+This is the default, and `cam_switch` changes nothing of it when absent or 0.
+
+## Both cameras in one boot (`cam_switch=1`)
+
+**Not run on a phone.** With `cam_s9=7 cam_switch=1` the driver has both cameras in the run, one streaming at a time,
+starting with the one `cam_rear` names (the front without it). The node's `HAKIOS_CAMERA_SENSOR` (1 the rear camera, 2 the
+front), which `camera_device.c` already sends when its stream's frames are another camera's, changes the camera: the
+running one is stopped and powered down exactly as a stream that nobody reads any more is, the other one's numbers are put
+in (its CSIS, D-PHY, WDMA, lanes, mode, sensor bus, lens), and it is brought up exactly as the first read of a boot brings a
+camera up. The S9+'s driver (`hakios.exynos_camera_star2.c`) switches the same way: one stream ends, the next begins with
+the camera asked for. The protocol is unchanged: the frames' header says which camera took each frame and its size
+(1632 x 1224 for the front, 2016 x 1512 for the rear), and `camera_device.c` makes its buffer again when the size changes,
+as it does for the S9+'s cameras; nothing on the iOS side changes, and PR 328's `cam.dylib` needs nothing more.
+
+What the driver guarantees (`drivers/camera/exynos/hakios.exynos_camera_switch.h`, checked on the build machine by
+`tools/exynos-camera-switch-test.sh` under the sanitizers, in CI):
+- never two cameras powered: the other camera is brought up only after the running one is down and no reader holds one of
+  its frames;
+- no frame of the old camera is given after the ask (the ring's newest frame is dropped at once), and a frame being copied
+  out when the ask comes is refused (`EAGAIN`, counted as `dropped`): a reader gets the new camera's frames or an error,
+  never one camera's frame labelled as the other's;
+- a change whose new camera does not come up (no answer on its bus, the domain not coming on, no frame) ends with
+  everything down, **both cameras off**, and readers get `EIO`; the next open tries the camera asked for again;
+- two changes in quick succession are taken in turn; one asked back before the stream saw the first is no change.
+
+The rear camera's stabiliser and iris are put in their safe state when it powers down, as at the end of any rear stream
+(the iris back at F1.5, the servo off and the gyro asleep, before its supplies go). Nothing writes the lens's EEPROM; the
+iris camera and its IR LED are never touched. With `cam_af=N` each camera's own lens is driven while that camera streams
+(the two lenses' state is kept apart, `hakios.ak737x.c`). `cam_s9_exp`, `cam_s9_ispdiv` and `cam_s9_addr` apply to the
+boot's first camera only; the other one starts from its own defaults (the rear camera's 466 MHz ISPPRE bus clock, without
+which CSIS0 overflows, among them).
 
 ## Not done
 
 - Run on a phone: everything on this page.
-- Switching cameras within a boot (above).
+- Switching cameras within a boot: written (`cam_switch=1`, above), not run on a phone: the phone test below.
 - The front camera's focus motor from iOS (16.5's `inject_media.c` gives the iPhone X plist's front camera the back camera's
   autofocus keys; N104's plist has the same layout, not done here).
 - Photographs in HEIC need the software encoder registration to work in cameracaptured as it did in mediaserverd; if it
@@ -78,7 +108,7 @@ side changes: `camera_device.c` already asks for its stream's sensor when a stre
 ## The phone test
 
 Boot arguments: the root with `94-camera` (check the build's line `94-camera: /usr/lib/cam.dylib built ...` and
-`make-boot-image: ... adt-isp-node: /arm-io/isp with camera-front and camera-rear`), `--cmdline 'sbgl=0 sweetspeed=408782847
+`make-boot-image: ... adt-isp-node: /arm-io/isp with camera-front and camera-rear`), `--cmdline 'sbgl=0 sweetspeed=442337279
 cam_s9=7'`. In the console log, in order:
 
 | Stage | Look for | If not |
@@ -93,3 +123,154 @@ cam_s9=7'`. In the console log, in order:
 
 A run that ends with the Camera app crashing or cameracaptured restarting (`exec cameracaptured` more than once): the
 console's crash lines name the place; `ENABLE_CAMERA=0`, or a boot image without `cam_s9=7`, gives the phone back as it was.
+
+## The first phone test (17 November) and the trace
+
+Phone 1 booted this page's pieces on 17 November with the front camera (`cam_s9=7`). The kernel, cameracaptured and
+SpringBoard rows of the table above passed. The capture stack also ran a session of its own about 9 seconds after
+cameracaptured started, before any tap. It asked the device for its streams, and 30 frames of 1632 x 1224 came from the
+kernel before it gave them back (`device: streams given back (2)`). The app's row failed: the Camera app opened in Photo
+mode, with its flip button, but its viewfinder stayed black. What the console says around the tap, in order:
+
+1. The touch goes down on the icon. `SWEET Sandbox: cameracaptured privilege 1003 denied`, then `hakios: camera: the
+   device made: two streams` follow at once, still before `exec Camera`.
+2. `exec Camera`.
+3. Two seconds after the touch, `hakios: camera: stream: stop (0 frames, 0 pictures given)` comes twice: the two streams of
+   the device made in step 1 are let go.
+4. Nothing more of the camera's for the 35 seconds the log goes on. No `device made`, no `streams asked for`, no
+   `frames begin`. Camera and cameracaptured do not crash.
+
+What that settles, from the log and from iOS 27.0.1's CMCapture (24A446's shared cache, names and code read on the build
+Mac):
+
+- **The device in step 1 is SpringBoard's prewarm, not the app's session.** It is made on the touch-down, before the app
+  exists. CMCapture's `FigCaptureSessionPrewarm` takes the vendor's default device ahead of a launch
+  (`-[BWFigCaptureDeviceVendor prewarmDefaultVideoDeviceForPID:completionHandler:]`). A device no client takes is closed by
+  the vendor's close timer (`_setupDeviceCloseTimerForDevice:reason:`): that is the two `stop` lines of step 3, the streams'
+  invalidation, and not a refusal.
+- **Privilege 1003 is `PRIV_SYSTEM_OVERRIDE`** (`bsd/sys/priv.h`). Its caller is `cs_prewarmSystemOverride`'s block in
+  CMCapture: `system_override(1000000000, 4)` (4 is `SYS_OVERRIDE_FAST_JETSAM`) on a queue of its own, its result not
+  looked at. Denied, the prewarm only goes without the faster jetsam; it is not what stops the camera. **1015 is
+  `PRIV_PROC_CPUMON_OVERRIDE`** (the next line is the kernel's `denied attempt to escape CPU monitor`): cameracaptured
+  stays under the default CPU monitor, which matters only to a process that uses the CPU for long. On an iPhone both are
+  granted by entitlements cameracaptured has (`com.apple.private.kernel.system-override` and
+  `com.apple.private.kernel.override-cpumon`). The fork's sandbox stand-in grants neither (`sweet_sandbox_priv_grant` in
+  `bsd/kern/sweet_amfi.c` grants only `PRIV_WORK_INTERVAL` and `PRIV_DARKBOOT`). The fork's pull request 39 adds
+  `sweet_priv_ent=1` (off by default): with it, a process that holds either entitlement is granted that privilege.
+- **The app's session never asked cameracaptured for the camera.** A session that builds its graph needs the device again (the
+  prewarm's was closed), and `the device made` is said at every creation. It also asks for streams, which is said for the
+  first three requests (two were used at boot, so the third would have been said). Neither line came. So the stop is before
+  the vendor: in the app, or in cameracaptured's session server before it builds a graph. It is not in what the device or
+  its streams answer (`asked for ...`). The causes that the table above names for this row (`vendor: NONE`, unanswered
+  asks) are not what happened.
+- What is left: the app not starting its session (its own preflight: camera authorization, the device it is given, the
+  state it waits for), or the session server not running it. The server's decision line has the form `ClientStartedSession:%d
+  Cam/Audio:%d/%d bg:%d prewarming:%d ... shouldRun:%d`: whether the server thinks the app is in the background, and whether
+  TCC refused the client (`FigCaptureTCCAccessCheckAuditToken`). Its arguments are not in the console because logd is off
+  on this root and os_log goes nowhere. The trace below takes it.
+
+### The cause, found by the trace (17 November, 20:35)
+
+A second boot of phone 1 had `cam_trace=1` and the library also in Camera.app. Its log names the stop. The app connects
+to cameracaptured's capture source and capture session servers. Then tccd answers the camera's access request with
+`kTCCErrorDomain Code=6 "server error: Failed to issue Sandbox Extension for kTCCServiceCamera"`. The app's
+`AVCaptureDeviceInput` then fails (`AVFoundationErrorDomain Code=-11852 "Cannot use Front Camera"`, not authorized), its
+mode-and-device command fails (`-32200`, cannot capture), and no session ever asks the vendor for the camera.
+
+tccd needs a sandbox extension to hand the app with its answer. The fork's sandbox stand-in issues one only when the
+boot line's `sweetspeed` has the bit `0x2000000` (`bsd/kern/sweet_amfi.c`, `SWEET_SPEED_SBX_EXT`); without it the issue
+call answers ENOENT. Both camera boots of 17 November used `sweetspeed=408782847` (`0x185d87ff`), which lacks that bit.
+**The camera needs `sweetspeed` with `0x2000000`**: `sweetspeed=442337279` is the value above with it. The microphone's
+request fails the same way (Live Photos), and this root has no audio server anyway, so the app's audio input still fails.
+Neither has been tried on a phone yet.
+
+Also in that log: `Attempting to use an unsupported session preset AVCaptureSessionPresetPhoto on device ... Front Camera`.
+It may only follow from the failed input, or the device's formats may not match N104's presets. The traced boot with the
+corrected `sweetspeed` decides it.
+
+### The trace
+
+`cam.dylib` has a trace, off by default. It is on with `cam_trace=1` on the boot image's command line, or with the file
+`/private/var/hakios/camera/trace` on the phone (`94-camera.sh` writes it with `CAMERA_TRACE=1`). With it:
+
+- `hakios: camera: trace: ...`: every call the device and its streams get, with what was answered (a name's first 40,
+  then one in 500). Where the device or a stream is made, started, stopped, invalidated or freed, its callers too, as
+  shared-cache addresses with the slide taken off. Look them up with `ipsw dyld a2s CACHE ADDRESS` (the cache of the
+  restore image, as `crashlog-symbolicate.py` does).
+- `hakios: camera: trace: vendor: ...`: the capture device vendor's register client, copy device, copy streams, take
+  back, prewarm and unregister calls, with the client's pid and application, the positions and types asked for, and the
+  error each returned. The methods are wrapped only where their arguments and return type are as on iOS 27.0.1.
+- `CAMLOG[pid cameracaptured] K: ...`: cameracaptured's own os_log (K: I default, E error, F fault, D debug). Errors
+  and faults always go to the console; other lines go only when they name the camera's business (capture, session,
+  device, stream, TCC, background, ...). At most 3000 lines go to the console, and every line goes to
+  `/private/var/local/oslog/cameracaptured.log`. `cam_trace=2` also turns on os_log's info and debug levels.
+- With `CAMERA_TRACE_APP=1` (or the root's inject record's line edited to `/usr/lib/cam.dylib cameracaptured Camera`), the
+  library also goes into Camera.app. There it only takes the app's os_log (`CAMLOG[pid Camera] ...`) while the trace is
+  on, and replaces nothing.
+
+Without the switch the library does what it did before, and `camera_device.c` on iOS 16.5 is unchanged in behaviour.
+**The trace has not been run on a phone.**
+
+### The test that decides it
+
+1. Root: this branch's `cam.dylib` (`tools/ios27/camera/build.sh`) in `/usr/lib/cam.dylib`. Better, the root step with
+   `CAMERA_TRACE_APP=1`, or the record edited as above, and the boot image made again.
+2. Boot line: `sweetspeed` with the sandbox extensions' bit, and `cam_trace=1`: `--cmdline 'sbgl=0 sweetspeed=442337279
+   cam_s9=7 cam_trace=1'` (408782847, the line of 17 November, lacks `0x2000000`: see "The cause" above).
+3. Wait about 60 seconds after SpringBoard is up. Tap the Camera icon once. Wait 30 seconds. Take a screenshot.
+   Optionally, tap the flip button and wait 10 seconds.
+4. The lines expected, in order, and what a missing one means:
+
+| Line | Missing means |
+|---|---|
+| `SCIONCAM[pid]: in cameracaptured: the trace is on (cam_trace=1) ... (4 of 4 entry points)` | the switch was not seen (boot line or file); fewer than 4: os_log is only partly taken |
+| `trace: vendor: 10 of 10 methods traced` | a method is named `not as on iOS 27.0.1`: that call is not traced |
+| at the tap: `trace: vendor: prewarm the default device for pid N`, `trace: device: made: callers ...` | SpringBoard did not prewarm (no harm) |
+| `trace: vendor: register client pid P app com.apple.camera ...` (P is Camera's pid from `exec Camera`) | **the app never reached cameracaptured**: read the `CAMLOG[pid Camera]` lines (the app's own reason: authorization, the session's runtime error or interruption) |
+| `trace: vendor: copy device for client C ... -> <...>, error 0` | an error number here, or `nil`: the vendor refused the session the device. The `CAMLOG[... cameracaptured]` lines just before it say why (TCC, priority, the client's state) |
+| `trace: vendor: copy streams positions ... -> 2 stream(s), error 0` | the session wanted a camera the device does not offer (the positions and types are in the line) |
+| `hakios: camera: device: streams asked for`, `stream: frames begin`, `PrimaryScaler: the first picture given` | the graph was built but did not start: the `trace: stream (...): copy, NOT answered` lines and the `CAMLOG` errors just before the stop name the property or the step |
+| a `CAMLOG[... cameracaptured]` line with `ClientStartedSession:1 ... bg:1` or `shouldRun:0` | the session server holds the app's session back: `bg:1`, the app is seen in the background (the display layout as cameracaptured sees it); `interruptions`/`cameraStolen`, another client has the camera |
+
+The rear camera: the same test with `cam_s9=7 cam_rear=1 cam_trace=1`. With the run-time switch (`cam_switch=1`, scion-kernel
+PR 341) the same lines are expected, and the flip button's tap gives `trace: vendor: copy streams positions (...)` with the
+other position, then `stream: the Back Camera's frames stop for the Front Camera's` (or the other way round).
+
+## The phone test of the switch (`cam_switch=1`)
+
+Prove the one-camera boots first (the table above, front and then rear). Then, first without iOS's camera, the kernel's own
+reader (`cam_s9_selfread`, which opens and reads the node through the file system as a program does):
+
+    --cmdline 'sbgl=0 sweetspeed=408782847 cam_s9=7 cam_switch=1 cam_s9_cached=1 cam_s9_selfread=900 cam_s9_selfread_switch=150'
+
+thirty seconds after the boot it reads 900 frames and asks for the other camera after every 150 (front, rear, front ...).
+From the USB console, `sysctl kern.hakios.camera_switch.sensor=1` (or `=2`) asks for the rear (front) camera of a stream
+being read; `sysctl kern.hakios.camera_switch` gives the counters (`asked`, `done`, `failed`, `superseded`, `refused`,
+`dropped`, `step`, `ms`). Then with the Camera app: the same boot without `cam_s9_selfread*`, the app opened, its button
+pressed a few times each way.
+
+Expected lines in the console log, in order, for a good change from the front to the rear camera:
+
+| Step | Look for | What it means if it is the last line |
+|---|---|---|
+| start | `exynos_camera: cam_switch=1: both cameras in this run, the front camera first`; step 1's lines for BOTH cameras (`1: S2MPB02 ID`, the four front LDOs, `rear: 1: S2MPB03 ID ...`) | `switch: the rear camera's supplies could not be read: the front camera only in this run`: the S2MPB03 or its bus; SENSOR 1 is refused (`... is not offered in this run`) |
+| 1 asked | `switch: 1: the reader asks for the rear camera (sensor 1): no more frames of the stream that runs are given ...` (selfread: `selfread: HAKIOS_CAMERA_SENSOR written ... taken`) | no line: the write did not reach the node, or `cam_switch=1` is not on the line |
+| 2 stopped | `switch: 2: the front camera's stream stops ...`, `5: the sensor's frame count 0xff after the stop`, `7: the stream ends (the other camera is asked for)` | the thread is stuck in a frame wait: `no frame end in 300 ms` lines |
+| 3 down | `switch: 3: the front camera powered down ...`, `powered down: MCLK and reset low, the bus pins inputs, BUCK2 and the LDOs off as found`, `the ISPPRE domain off again ...` | `NOT ALL OFF (a write failed)`: a supply's write did not read back; nothing more is written in the run |
+| 4 readers out | `switch: 4: the front camera is off and no reader holds a frame of it (powered down, the ISPPRE domain off, every write read back)` | `NOT POWERED DOWN` or `the ISPPRE domain left on`: stop and look at the lines above |
+| 5 the side | `switch: 5: the rear camera's way in: CSIS0, 4 lanes, 2016 x 1512`; the first time, `switch: 5: CSIS0, its D-PHY and its WDMA mapped` | |
+| 6 up | `switch: 6: ...`, `rear: 2: THE SENSOR ANSWERS at 0x10: model ID 0x20c3`, `3: ISPPRE on`, `the D-PHY of CSIS0` | `rear: 2: the sensor does not answer` then `switch: FAILED at step 6 (the rear camera): ... BOTH cameras are off; readers get EIO until the next open` |
+| 7 streaming | `switch: 7: ...`, `5: STREAM ON: 0x0100 = 0x0103`, `the sensor's frame count` not 0xff | `switch: FAILED at step 7`: the mode or the link (the rear camera's own run, scion-starlte `CAMERA.md`) |
+| 8 done | `switch: 8: THE REAR CAMERA'S FIRST FRAME (2016 x 1512, frame N) M ms after the ask: the change is done (1 done, 0 failed)`; selfread: `the first frame of sensor 1 (2016 x 1512 ...) M ms after the ask` | `switch: FAILED at step 8`: no frame came (`no frame end in 300 ms` five times) |
+| the reader | selfread's summary: `the switch: K change(s) asked, K gave the other camera's frames, 0 frame(s) WRONG` | any `selfread: WRONG: frame ... is sensor S's ...`: a frame of the other camera after the ask; the switch is broken, report the log |
+
+From the rear camera back to the front: the same steps with the cameras' names swapped (step 3: `rear: OIS: the servo
+switched off` if `cam_rear_ois=2`, the iris back at F1.5 if `cam_rear_ap` moved it, `rear: powered down: ... off as found`;
+step 6: `2: THE SENSOR ANSWERS: model ID ...` (the S5K3H1's); step 8: `THE FRONT CAMERA'S FIRST FRAME (1632 x 1224 ...)`). In the
+Camera app: the preview turns to the other camera within a second or so of the button (cameracaptured's log:
+`hakios: camera: the frames changed (sensor 2, 1632x1224, now 1, 2016x1512): the buffer made again`), and the photograph
+is of the camera shown.
+
+A change that fails leaves both cameras off and the node giving `EIO` (the Camera app's preview stops: `the kernel's
+camera has had a fault`); reopening the app opens the node again and tries the camera asked for. A boot without
+`cam_switch=1` gives the phone back as it was.

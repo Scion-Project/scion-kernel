@@ -4,8 +4,7 @@
  * itself, on a computer under the sanitizers (tools/bcm-bt-parsers-test.sh takes them out of the driver as they stand
  * into bt_pieces.h). The chip passes on what radio peers send, so every count and length here is taken as hostile.
  *
- * What stands in for the kernel: say() (formats into a buffer, so that its arguments are read), the boot-argument
- * reader (gives the text the test sets), the clock (a counter), strlcpy (Linux's C library has none before 2.38).
+ * What stands in for the kernel: say() (formats into a buffer, so that its arguments are read), the clock (a counter), strlcpy (Linux's C library has none before 2.38).
  *
  * What is checked:
  *   - scan_event() and ad_name(): good Inquiry Result (02), with RSSI (22), Extended (2F) and LE Advertising Report
@@ -15,11 +14,8 @@
  *     a buffer of exactly 2 + length bytes, so the sanitizer stops any read past it; the list stops at SCAN_MAX
  *     devices; a name is at most 32 characters and ends;
  *   - 300000 events made from the good ones by a fixed-seed mutator, the same way;
- *   - vsc_byte() (bt_vsc_ok): a rejected vendor command that is listed has its status set to 00 and nothing else in
- *     the stream changes; one not listed passes as it is; ACL packets of any length and mutated streams leave it at a
- *     packet's start again after a reset, and it writes nothing outside its seven header bytes; the boot-argument's
- *     list longer than the tables is cut, not written past them;
- *   - trace_bytes() and trace_line() (bt_trace): mutated streams with the longest numbers the line can carry.
+ *   - trace_bytes() and trace_line() (bt_trace): mutated streams with the longest numbers the line can carry; the phone's
+ *     address in Read_BD_ADDR's reply and Write_BD_ADDR shown by its last two bytes only.
  */
 #include <stdarg.h>
 #include <stdbool.h>
@@ -68,19 +64,6 @@ test_strlcpy(char *dst, const char *src, size_t cap)
 	return n;
 }
 #define strlcpy test_strlcpy
-
-static const char *boot_arg;
-
-static bool
-PE_parse_boot_argn(const char *name, void *out, int cap)
-{
-	(void)name;
-	if (boot_arg == NULL) {
-		return false;
-	}
-	test_strlcpy(out, boot_arg, (size_t)cap);
-	return true;
-}
 
 #define NSEC_PER_SEC    1000000000ull
 #define NSEC_PER_MSEC   1000000ull
@@ -328,121 +311,6 @@ scan_mutated(void)
 	CHECK(heard_any > 30000, "the mutated events still carry reports (%lu)", heard_any);
 }
 
-/* ---- bt_vsc_ok ---- */
-static void
-vsc(void)
-{
-	/* Command Complete for vendor command fd5a: status 01 (unknown command) */
-	static const uint8_t rejected[] = { 0x04, 0x0e, 0x04, 0x01, 0x5a, 0xfd, 0x01 };
-	static const uint8_t other[] = { 0x04, 0x0e, 0x04, 0x01, 0x73, 0xfd, 0x01 };
-	static const uint8_t std_rej[] = { 0x04, 0x0e, 0x04, 0x01, 0x03, 0x0c, 0x01 };
-	static const uint8_t acl[] = { 0x02, 0x01, 0x20, 0x07, 0x00, 0x04, 0x0e, 0x04, 0x01, 0x5a, 0xfd, 0x01 };
-	uint8_t out[32];
-	char longlist[128];
-	size_t k = 0;
-
-	/* a list longer than the tables: 30 opcodes to answer, 30 to leave out */
-	for (int i = 0; i < 12; i++) {
-		k += (size_t)snprintf(longlist + k, sizeof(longlist) - k, "fd%02x,-fc%02x,", 0x5a + i, i);
-	}
-	longlist[sizeof(longlist) - 1] = 0;
-	boot_arg = longlist;
-	vsc_init();
-	CHECK(vsc_on && !vsc_all && vsc_ok_n <= sizeof(vsc_ok) / sizeof(vsc_ok[0]) && vsc_not_n <= sizeof(vsc_not) /
-	    sizeof(vsc_not[0]) && vsc_ok[0] == 0xfd5a, "the list read: %u to answer, %u to leave", vsc_ok_n, vsc_not_n);
-	vsc_ok_n = vsc_not_n = 0;
-	boot_arg = "0xfd5a, ,,-,0x,zz,-0xfd73,99999999999999999999,fd5b";
-	vsc_init();
-	CHECK(vsc_ok_n == 2 && vsc_ok[0] == 0xfd5a && vsc_ok[1] == 0xfd5b && vsc_not_n == 1 && vsc_not[0] == 0xfd73,
-	    "a list with junk in it: %u %u", vsc_ok_n, vsc_not_n);
-
-	vsc_reset();
-	for (size_t i = 0; i < sizeof(rejected); i++) {
-		out[i] = vsc_byte(rejected[i]);
-	}
-	CHECK(memcmp(out, rejected, 6) == 0 && out[6] == 0, "a listed vendor command's rejection answered 00");
-	for (size_t i = 0; i < sizeof(other); i++) {
-		out[i] = vsc_byte(other[i]);
-	}
-	CHECK(memcmp(out, other, sizeof(other)) == 0, "one left out passes as it is");
-	for (size_t i = 0; i < sizeof(std_rej); i++) {
-		out[i] = vsc_byte(std_rej[i]);
-	}
-	CHECK(memcmp(out, std_rej, sizeof(std_rej)) == 0, "a standard command's rejection passes as it is");
-	for (size_t i = 0; i < sizeof(acl); i++) {
-		out[i] = vsc_byte(acl[i]);
-	}
-	CHECK(memcmp(out, acl, sizeof(acl)) == 0, "the same bytes inside an ACL packet pass as they are");
-	for (size_t i = 0; i < sizeof(rejected); i++) {
-		out[i] = vsc_byte(rejected[i]);
-	}
-	CHECK(out[6] == 0, "and the packet after it is found");
-
-	/* every rejected vendor opcode once: the said-once table fills and stops */
-	for (unsigned op = 0xfc00; op < 0xfd00; op++) {
-		uint8_t e[7] = { 0x04, 0x0e, 0x04, 0x01, (uint8_t)op, (uint8_t)(op >> 8), 0x01 };
-
-		for (size_t i = 0; i < sizeof(e); i++) {
-			(void)vsc_byte(e[i]);
-		}
-	}
-	CHECK(vsc_said_n == sizeof(vsc_said) / sizeof(vsc_said[0]), "the said-once table full (%u)", vsc_said_n);
-
-	/* mutated streams; an ACL packet of the largest length */
-	{
-		uint8_t hdr[5] = { 0x02, 0x01, 0x20, 0xff, 0xff };
-
-		vsc_reset();
-		for (size_t i = 0; i < sizeof(hdr); i++) {
-			(void)vsc_byte(hdr[i]);
-		}
-		for (unsigned i = 0; i < 0xffff; i++) {
-			(void)vsc_byte(0x04);
-		}
-		CHECK(vsc_in.at == 0 && vsc_in.total == 0, "an ACL packet of 65535 bytes ends where it says");
-	}
-	for (int round = 0; round < 300000; round++) {
-		uint8_t s[64];
-		size_t n = 0;
-
-		for (int parts = 1 + (int)(mut() % 3); parts > 0; parts--) {
-			const uint8_t *g = mut() % 2 ? rejected : mut() % 2 ? acl : other;
-			size_t gn = g == acl ? sizeof(acl) : sizeof(rejected);
-
-			memcpy(s + n, g, gn);
-			n += gn;
-		}
-		for (int m = (int)(mut() % 3); m > 0; m--) {
-			size_t at = mut() % n;
-
-			switch (mut() % 4) {
-			case 0: s[at] = (uint8_t)mut(); break;
-			case 1: s[at] = 0xff; break;
-			case 2: s[at] ^= (uint8_t)(1u << (mut() % 8)); break;
-			default: n = at + 1; break;
-			}
-		}
-		for (size_t i = 0; i < n; i++) {
-			uint8_t b = vsc_byte(s[i]);
-
-			if (b != s[i] && b != 0) {
-				CHECK(false, "a byte changed to something other than 00");
-			}
-		}
-		if (vsc_said_n > sizeof(vsc_said) / sizeof(vsc_said[0]) || (vsc_in.total != 0 && vsc_in.at >= vsc_in.total)) {
-			CHECK(false, "bt_vsc_ok's state: at %u of %u, %u said", vsc_in.at, vsc_in.total, vsc_said_n);
-		}
-		if (mut() % 16 == 0) {
-			vsc_reset();
-		}
-	}
-	vsc_reset();
-	for (size_t i = 0; i < sizeof(rejected); i++) {
-		out[i] = vsc_byte(rejected[i]);
-	}
-	CHECK(out[6] == 0, "after all of it, a reset and a rejection: answered 00");
-}
-
 /* ---- bt_trace ---- */
 static void
 trace(void)
@@ -470,6 +338,24 @@ trace(void)
 		trace_bytes(&trace_in, evt + i, 1);
 	}
 	CHECK(strstr(said, "<C evt 0e len 4: 01 03 0c 00") != NULL, "an event's line, a byte at a time: %s", said);
+	{
+		/* the phone's address: Read_BD_ADDR's reply and Write_BD_ADDR show its last two bytes only */
+		static const uint8_t rd[] = { 0x04, 0x0e, 0x0a, 0x01, 0x09, 0x10, 0x00, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6 };
+		static const uint8_t wr[] = { 0x01, 0x01, 0xfc, 0x06, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6 };
+
+		trace_bytes(&trace_in, rd, sizeof(rd));
+		CHECK(strstr(said, "01 09 10 00 a1 a2 .. .. .. ..") != NULL && strstr(said, "a6") == NULL, "Read_BD_ADDR: %s", said);
+		trace_bytes(&trace_out, wr, sizeof(wr));
+		CHECK(strstr(said, "b1 b2 .. .. .. ..") != NULL && strstr(said, "b6") == NULL, "Write_BD_ADDR: %s", said);
+		{
+			static const uint8_t adv[] = { 0x04, 0x3e, 0x0c, 0x02, 0x01, 0x00, 0x00, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6,
+				0x00, 0xb0 };
+
+			trace_bytes(&trace_in, adv, sizeof(adv));
+			CHECK(strstr(said, "c1 c2 .. .. .. ..") != NULL && strstr(said, "c6") == NULL, "an advertising report: %s",
+			    said);
+		}
+	}
 	for (int round = 0; round < 300000; round++) {
 		uint8_t s[96];
 		size_t n = 0;
@@ -511,7 +397,6 @@ main(void)
 	scan_good();
 	scan_hostile();
 	scan_mutated();
-	vsc();
 	trace();
 	printf("bcm_bt_parsers_test: %d checks, %d failed (%lu lines said)\n", checks, failures, lines);
 	return failures ? 1 : 0;

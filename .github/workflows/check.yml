@@ -54,6 +54,12 @@ jobs:
         run: python3 tools/ios27/s9/cmdline-inject-test.py
       - name: "iOS builds: the manifests of tools/ios27/builds, and the tools refusing an unknown build or a mixture of builds"
         run: python3 tools/ios27/builds/builds-test.py
+      - name: sbca's QuartzCore tables per iOS build (tables, headers, checker)
+        run: python3 tools/ios27/ca-gpu/sbca_table_test.py
+      - name: shared-cache header facts for the AOT rewrite
+        run: python3 tools/ios27/fullroot/pipeline/cache/aot/dsc_header_test.py
+      - name: The S9's firmware in the iOS 27 root build is complete and checked or the build stops, and the root says what it has (made-up files)
+        run: bash tools/ios27/fullroot/firmware-test.sh
       - name: The backup tool only reads, copies exactly, and proves every copy
         run: python3 tools/backup-partitions-test.py
       - name: Saved var archives use the newest intact slot
@@ -88,16 +94,22 @@ jobs:
         run: sh tools/mfc-check-test.sh
       - name: The Galaxy S9's Bluetooth H4 framing, HCI events, .hcd reading and UART divisor hold together (sanitizers)
         run: sh tools/bcm-hci-test.sh
-      - name: The Galaxy S9's Bluetooth driver's own parsers (scan events, bt_vsc_ok, bt_trace) hold against hostile bytes (sanitizers)
+      - name: The Galaxy S9's Bluetooth driver's own parsers (scan events, bt_trace) hold against hostile bytes (sanitizers)
         run: sh tools/bcm-bt-parsers-test.sh
+      - name: The vendor-command table of the Galaxy S9's Bluetooth (bt_vsc) answers whole replies and touches nothing else (sanitizers)
+        run: sh tools/bt-vsc-test.sh
       - name: The Galaxy S9's sensor hub's SPI frames, packets, CRC-8, RPCs, firmware records and SSP hold together (sanitizers)
         run: sh tools/bcm-shub-test.sh
+      - name: The Galaxy S9's camera switch (front and rear in one boot) keeps its rules over hostile timings (sanitizers)
+        run: sh tools/exynos-camera-switch-test.sh
       - name: The Galaxy S9's modem driver against what the CP and RADIO give it - frames, file requests, NV writes, packets, the table of contents - whole, bent and mutated (sanitizers)
         run: sh tools/modem/shannon-test.sh
       - name: The Galaxy S9 Mali's GPU addresses for panfrost's buffers (hakios.mali_va.h) hold together (sanitizers)
         run: sh tools/mali-va-test.sh
       - name: The Galaxy S9 secure-OS probe's DER reader (hakios.exynos_tee_der.h) keeps inside what the keymaster TA sends, mutated or cut short (sanitizers)
         run: sh tools/exynos-tee-der-test.sh
+      - name: The rule that holds the Galaxy S9's M3s at 1794 MHz unless the over-current guard's stage two allows more (hakios.exynos_cpufreq_ceiling.h) (sanitizers)
+        run: sh tools/exynos-cpufreq-ceiling-test.sh
       - name: The USB gadget's CDC-ACM descriptors and control requests (hakios.usb_acm.h) hold together (sanitizers)
         run: sh tools/usb-acm-test.sh
       - name: The UFS driver's commands and the whitelist every one passes before it reaches the flash (hakios.ufshc_upiu.h) hold against mutated commands (sanitizers)

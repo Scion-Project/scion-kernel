@@ -53,41 +53,11 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 #include "camera_isp.h"
+#include "camera_say.h"
 
-void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1, 2)));
-
-void
-hakios_camera_say(const char *format, ...)
-{
-	char line[400];
-	va_list ap;
-	int n = snprintf(line, sizeof(line), "hakios: camera: ");
-
-	va_start(ap, format);
-	n += vsnprintf(line + n, sizeof(line) - (size_t)n, format, ap);
-	va_end(ap);
-	if (n > (int)sizeof(line) - 2) {
-		n = sizeof(line) - 2;
-	}
-	line[n++] = '\n';
-#ifdef HAKIOS_CAMERA_CONSOLE
-	/*
-	 * iOS 27 (tools/ios27/camera): cameracaptured's standard error goes nowhere, so the lines go to the console, which
-	 * the kernel keeps in its log (as the status bar's c.dylib does in SpringBoard)
-	 */
-	static int console = -1;
-
-	if (console < 0) {
-		console = open("/dev/console", O_WRONLY | O_NOCTTY | O_NONBLOCK);
-	}
-	if (console >= 0) {
-		(void)write(console, line, (size_t)n);
-		return;
-	}
-#endif
-	write(2, line, (size_t)n);
-}
 #define say hakios_camera_say
+#define say_value hakios_camera_say_value
+#define say_once hakios_camera_say_once
 
 /* ---- CoreMedia's derived objects, as Darwin userland 16.5 lays them out ---------------------------------------- */
 
@@ -206,48 +176,6 @@ find_functions(void)
 		return false;
 	}
 	return true;
-}
-
-/* ---- what is asked and not answered: said once per name ------------------------------------------- */
-
-static CFMutableSetRef said_names;
-static pthread_mutex_t said_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static void
-say_value(const char *what, CFStringRef key, CFTypeRef value)
-{
-	char name[160] = "?", text[300] = "";
-
-	CFStringGetCString(key, name, sizeof(name), kCFStringEncodingUTF8);
-	if (value != NULL) {
-		CFStringRef d = CFCopyDescription(value);
-
-		CFStringGetCString(d, text, sizeof(text), kCFStringEncodingUTF8);
-		CFRelease(d);
-		for (char *c = text; *c; c++) {
-			*c = *c == '\n' ? ' ' : *c;
-		}
-	}
-	say("%s %s%s%s", what, name, value ? " = " : "", text);
-}
-
-static void
-say_once(const char *what, CFStringRef key, CFTypeRef value)
-{
-	CFStringRef tag = CFStringCreateWithFormat(NULL, NULL, CFSTR("%s %@"), what, key);
-
-	pthread_mutex_lock(&said_lock);
-	if (said_names == NULL) {
-		said_names = CFSetCreateMutable(NULL, 0, &kCFTypeSetCallBacks);
-	}
-	bool first = !CFSetContainsValue(said_names, tag);
-
-	CFSetAddValue(said_names, tag);
-	pthread_mutex_unlock(&said_lock);
-	CFRelease(tag);
-	if (first) {
-		say_value(what, key, value);
-	}
 }
 
 /* ---- numbers and dictionaries ---------------------------------------------------------------------- */
@@ -675,6 +603,7 @@ stream_copy_property(CMBaseObjectRef o, CFStringRef key, CFAllocatorRef allocato
 		say_once("stream: no answer for", key, NULL);
 		return ERR_NOT_AVAILABLE;
 	}
+	hakios_camera_trace_named("stream: answered", s->camera->name, key, value);
 	*(CFTypeRef *)out = value;
 	return 0;
 }
@@ -737,6 +666,7 @@ stream_set_property(CMBaseObjectRef o, CFStringRef key, CFTypeRef value)
 {
 	struct stream *s = stream_of(o);
 
+	hakios_camera_trace_named("stream: set", s->camera->name, key, value);
 	if (key_is(key, "FormatIndex")) {
 		int64_t i = 0;
 
@@ -1670,6 +1600,7 @@ stream_begin(CMBaseObjectRef o, bool graph)
 static OSStatus
 stream_start(CMBaseObjectRef o)
 {
+	hakios_camera_trace_callers("stream: Start", stream_of(o)->camera->name);
 	return stream_begin(o, true);
 }
 
@@ -1678,6 +1609,7 @@ stream_stop(CMBaseObjectRef o)
 {
 	struct stream *s = stream_of(o);
 
+	hakios_camera_trace_callers("stream: Stop", s->camera->name);
 	say("stream: stop (%llu frames, %llu pictures given)", (unsigned long long)s->frames,
 	    (unsigned long long)s->out[0].delivered);
 	pthread_mutex_lock(&s->lock);
@@ -1754,6 +1686,7 @@ stream_add_attachments(CMBaseObjectRef o, CMSampleBufferRef sbuf, CFDictionaryRe
 static OSStatus
 stream_invalidate(CMBaseObjectRef o)
 {
+	hakios_camera_trace_callers("stream: invalidated", stream_of(o)->camera->name);
 	(void)stream_stop(o);
 	return 0;
 }
@@ -1763,6 +1696,7 @@ stream_finalize(CMBaseObjectRef o)
 {
 	struct stream *s = stream_of(o);
 
+	hakios_camera_trace_callers("stream: freed", s->camera->name);
 	pthread_mutex_lock(&all_streams_lock);
 	for (unsigned i = 0; i < CAMERAS; i++) {
 		if (all_streams[i] == o) {
@@ -1872,6 +1806,7 @@ device_copy_property(CMBaseObjectRef o, CFStringRef key, CFAllocatorRef allocato
 		say_once("device: no answer for", key, NULL);
 		return ERR_NOT_AVAILABLE;
 	}
+	hakios_camera_trace_named("device: answered", NULL, key, NULL);
 	*(CFTypeRef *)out = value;
 	return 0;
 }
@@ -1890,7 +1825,8 @@ static OSStatus
 device_request_streams(CMBaseObjectRef o, CFArrayRef streams, CFDictionaryRef options)
 {
 	(void)o;
-	if (requests++ < 3) {
+	hakios_camera_trace_callers("device: RequestStreams", NULL);
+	if (requests++ < 3 || hakios_camera_trace) {
 		say("device: streams asked for (%ld)%s", streams ? (long)CFArrayGetCount(streams) : 0L, options ? ", with options" : "");
 		if (options != NULL) {
 			say_once("device: the request's options", CFSTR("RequestStreams"), options);
@@ -1910,6 +1846,7 @@ device_request_streams(CMBaseObjectRef o, CFArrayRef streams, CFDictionaryRef op
 			CMBaseObjectRef st = (CMBaseObjectRef)CFArrayGetValueAtIndex(streams, i);
 
 			if (st != NULL) {
+				hakios_camera_trace_callers("device: RequestStreams: a stream", stream_of(st)->camera->name);
 				(void)stream_begin(st, false);
 			}
 		}
@@ -1922,7 +1859,8 @@ device_relinquish_streams(CMBaseObjectRef o, CFArrayRef streams, CFDictionaryRef
 {
 	(void)o;
 	(void)options;
-	if (relinquishes++ < 3) {
+	hakios_camera_trace_callers("device: RelinquishStreams", NULL);
+	if (relinquishes++ < 3 || hakios_camera_trace) {
 		say("device: streams given back (%ld)", streams ? (long)CFArrayGetCount(streams) : 0L);
 	} else if (relinquishes % 1000 == 0) {
 		say("device: streams given back %u times", relinquishes);
@@ -1934,6 +1872,7 @@ static OSStatus
 device_invalidate(CMBaseObjectRef o)
 {
 	(void)o;
+	hakios_camera_trace_callers("device: invalidated", NULL);
 	return 0;
 }
 
@@ -1942,6 +1881,7 @@ device_finalize(CMBaseObjectRef o)
 {
 	struct device *d = derived_storage(o);
 
+	hakios_camera_trace_callers("device: freed", NULL);
 	if (d->streams) {
 		CFRelease(d->streams);
 	}
@@ -2030,6 +1970,7 @@ hakios_camera_device_create(CFAllocatorRef allocator, CFDictionaryRef options, C
 		CFRelease(stream[i]);
 	}
 	*out = device;
+	hakios_camera_trace_callers("device: made", NULL);
 	if (count == 3) {
 		say("the device made: three streams, the back camera (also the flashlight's), the front one and the back "
 		    "telephoto (kern.hakios.camera_tele %u)", tele_state());

@@ -50,6 +50,7 @@ camera/exynos bsd/dev/hakios.s2mpb02_torch.c
 camera/exynos bsd/dev/hakios.exynos_camera.c
 camera/exynos bsd/dev/hakios.ak737x.c
 camera/exynos bsd/dev/hakios.exynos_camera_rear.c
+camera/exynos bsd/dev/hakios.exynos_camera_switch.h
 camera/exynos bsd/dev/hakios.exynos_camera_star2.c
 camera/exynos bsd/dev/hakios.exynos_iris.c
 
@@ -70,6 +71,7 @@ power    bsd/dev/hakios.battery.c
 power    iokit/Kernel/hakios.battery.cpp
 power/max77705 bsd/dev/hakios.max77705.c
 power/exynos bsd/dev/hakios.exynos_cpufreq.c
+power/exynos bsd/dev/hakios.exynos_cpufreq_ceiling.h
 power/exynos bsd/dev/hakios.scion_gov.c
 power/exynos bsd/dev/hakios.exynos_tmu.c
 power/exynos bsd/dev/hakios.exynos_tmu.h
@@ -128,6 +130,7 @@ bluetooth bsd/dev/hakios.bt.c
 bluetooth/bcm4361 bsd/dev/hakios.bcm4361_bt.c
 bluetooth/bcm4361 iokit/Kernel/hakios.bt_node.cpp
 bluetooth/bcm4361 bsd/dev/hakios.bcm_hci.h
+bluetooth/bcm4361 bsd/dev/hakios.bt_vsc.h
 
 # The AVF guest's (Scion: avf/README.md): the PCI bus and the virtio transport every virtio driver goes through, the
 # console, the virtio GPU and its 3D path (SCGPU), and the Scion app's sound, flashlight and battery

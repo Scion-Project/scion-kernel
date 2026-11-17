@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 759 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 764 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1380,7 +1380,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_SOC_SMEM is not set
 
 #
-# Cameras (39)
+# Cameras (41)
 #
 
 # the cameras (5 is what the README uses) [needs fw-camera/ from the phone]
@@ -1464,6 +1464,9 @@ CONFIG_MODEM_AGAIN=y
 # the reader also writes HAKIOS_CAMERA_FOCUS, as a capture device would (cam_af=4): after its
 # CONFIG_CAM_S9_SELFREAD_FOCUS is not set
 
+# with cam_switch=1: the reader writes HAKIOS_CAMERA_SENSOR for the other camera after every
+# CONFIG_CAM_S9_SELFREAD_SWITCH is not set
+
 # read by hakios.exynos_camera.c (kernel)
 # CONFIG_CAM_S9_SELFREAD_X is not set
 
@@ -1481,6 +1484,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.camera.c (kernel)
 # CONFIG_CAM_SHUTTER is not set
+
+# with 7: both cameras in one run, one streaming at a time, switched by the reader's SENSOR command
+# CONFIG_CAM_SWITCH is not set
 
 # read by hakios.camera.c (kernel)
 # CONFIG_CAM_VBLANK is not set
@@ -1687,7 +1693,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (189)
+# User space (192)
 #
 
 # Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
@@ -1726,6 +1732,9 @@ CONFIG_MODEM_AGAIN=y
 # read by hakios.bcm4361_bt.c (kernel)
 # CONFIG_BT_ADDR is not set
 
+# the text of EFS:/bluetooth/bt_addr (hakios.ext4ro.h: no write path; EFS is not mounted)
+# CONFIG_BT_ADDR_EFS is not set
+
 # the second look this many seconds later (0: no second look; 30)
 # CONFIG_BT_AGAIN is not set
 
@@ -1747,6 +1756,9 @@ CONFIG_MODEM_AGAIN=y
 # murata or semco: which patch (bcm4361B2_<m>.hcd; default: the module Wi-Fi read in OTP, else a guess)
 # CONFIG_BT_MODULE is not set
 
+# seconds to wait for Wi-Fi's reading of the module in OTP when both patches are on the root (120)
+# CONFIG_BT_OTP_WAIT is not set
+
 # read by hakios.bcm4361_bt.c (kernel)
 # CONFIG_BT_SCAN is not set
 
@@ -1764,6 +1776,9 @@ CONFIG_MODEM_AGAIN=y
 
 # the partition the patch is read from (default VENDOR)
 # CONFIG_BT_VENDOR_PART is not set
+
+# a command is held until it is whole, and may go as another (hakios.bt_vsc.h)
+# CONFIG_BT_VSC is not set
 
 # read by hakios.bcm4361_bt.c (kernel)
 # CONFIG_BT_VSC_OK is not set

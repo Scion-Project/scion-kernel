@@ -129,6 +129,9 @@
 #                                   files are not in the repository, only their sums: devices/NAME/tools/fetch-firmware.sh
 #                                   makes them complete first (FIRMWARE_FROM=DIR: from a directory of your own, else the
 #                                   public sources it pins; devices/starlte/firmware/audio/README.md).
+#                                   Default: the device the kernel is configured for, CONFIG_DEVICE of ../.config, when
+#                                   its repository has firmware sums: so an S9 image always carries its firmware and its
+#                                   drivers never need the phone's VENDOR partition; DEVICE=none: without.
 #                                   This does not start the modem; the XNU MPSS driver is still required.
 #   system.apfs      the system image, the root filesystem (the resident RAM disk, /dev/md0), an
 #                    APFS container: the part of Darwin userland 16.5 chosen by ../sysimage/select-system.py at
@@ -511,7 +514,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			-o obj/libhakios.bluetoothd.dylib src/inject_bluetoothd.c
 		$DYN -O2 -dynamiclib -install_name /redwood/lib/libhakios.media.dylib -framework CoreFoundation -framework CoreMedia \
 			-framework CoreVideo -framework IOSurface -lobjc \
-			-o obj/libhakios.media.dylib src/inject_media.c src/camera_device.c src/camera_isp.c src/mfc_decoder.c
+			-o obj/libhakios.media.dylib src/inject_media.c src/camera_device.c src/camera_say.c src/camera_isp.c src/mfc_decoder.c
 		# the output device of the audio server: a plug-in for CoreAudio's HAL
 		$DYN -bundle -framework CoreFoundation -o obj/HakiosAudio src/audio_plugin.c
 		# the plug-in Metal loads when the kernel names it (boot-arg metal=1): a device, its buffers and the libraries it reads
@@ -1048,6 +1051,15 @@ fi
 # there (a public repository does not carry Samsung's and Broadcom's binaries), only their sums; the device's own
 # tools/fetch-firmware.sh makes the directory complete -- from FIRMWARE_FROM=DIR, a directory of your own, else from the
 # public sources it pins -- and stops this build with what to do if a file cannot be had or is not the pinned one
+if [ -z "${DEVICE+set}" ]; then
+	DEVICE=$(sed -n 's/^CONFIG_DEVICE="\(.*\)"$/\1/p' ../.config 2>/dev/null | tail -1)
+	if [ -n "$DEVICE" ] && ls ../devices/$DEVICE/firmware/*/SHA256SUMS >/dev/null 2>&1; then
+		echo "build.sh: DEVICE=$DEVICE (CONFIG_DEVICE of ../.config): its firmware goes into fw/ (DEVICE=none: without)"
+	else
+		DEVICE=
+	fi
+fi
+[ "$DEVICE" != none ] || DEVICE=
 if [ -n "$DEVICE" ]; then
 	[ -d ../devices/$DEVICE/firmware ] || { echo "build.sh: DEVICE=$DEVICE: no devices/$DEVICE/firmware (python3 tools/hakios-device.py sync $DEVICE)" >&2; exit 1; }
 	if [ -x ../devices/$DEVICE/tools/fetch-firmware.sh ]; then

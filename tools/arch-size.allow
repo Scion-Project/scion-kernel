@@ -13,7 +13,7 @@ drivers/audio/hakios.adsp.c                               3295
 drivers/audio/hakios.mic.c                                1734
 drivers/audio/hakios.sound.c                              1532
 drivers/audio/hakios.speaker.c                            1237
-drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c             2158
+drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c             2221  # +33: bt_vsc= translations through kctl_send, the address masked on the console; split next
 drivers/camera/exynos/hakios.ak737x.c                      991  # 901 today, and the growth of open pull request #334
 drivers/camera/exynos/hakios.exynos_camera.c              4045  # 3692 today, and the growth of open pull request #334
 drivers/camera/exynos/hakios.exynos_camera_rear.c         1404  # 1395 today, and the growth of open pull request #334
@@ -66,7 +66,7 @@ tools/bcm_shub_test.c                                      921
 tools/hakios-config.py                                    1239
 tools/ios27/ca-gpu/hakios/eagl.c                          4335
 tools/ios27/fullroot/pipeline/cache/aot/fp16_stub.py      1424
-tools/ios27/fullroot/pipeline/cache/aot/rewrite-grow.py   1041
+tools/ios27/fullroot/pipeline/cache/aot/rewrite-grow.py   1047
 tools/ios27/lse/lse-rewrite.py                             826
 tools/ios27/mesa-ios/starbite-drm/starbite_drm.c           985
 tools/ios27/metal2/NativeBridgeMetalFrontend.mm           2764
@@ -87,7 +87,7 @@ tools/qmi-test/test_qmi.c                                 1562
 userland/src/HakiosMetal.m                                1534
 userland/src/HakiosMetalCA.m                              8747
 userland/src/audio_plugin.c                               1100
-userland/src/camera_device.c                              2041
+userland/src/camera_device.c                              1982
 userland/src/camera_isp.c                                 1230
 userland/src/eagl.c                                       4781
 userland/src/gfx/gfx_gl.c                                 1083

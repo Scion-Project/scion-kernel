@@ -1,0 +1,317 @@
+--- a/tools/ios27/metal2/NativeBridgeMetalFrontend.mm
++++ b/tools/ios27/metal2/NativeBridgeMetalFrontend.mm
+@@ -27,6 +27,7 @@
+ #include <mach/mach.h>
+ #include "bridge/NativeMetalObjects.h"
+ #include "NativeBridgeMetalFrontend.h"
++#include "PassLog.h"
+ 
+ extern "C" void sys_dcache_flush(void *start, size_t length);
+ 
+@@ -825,6 +826,7 @@
+ @end
+ @interface NBComputePipeline : NBObject
+ @property(nonatomic) NmbComputePipeline *handle;
++@property(nonatomic,copy) NSString *passName;   // the kernel's name, for the pass log
+ @end
+ @implementation NBComputePipeline
+ - (void)dealloc {nmb_compute_pipeline_release(_handle);}
+@@ -846,6 +848,7 @@
+ @end
+ @interface NBRenderPipeline : NBObject
+ @property(nonatomic) NmbRenderPipeline *handle;
++@property(nonatomic,copy) NSString *passName;   // the fragment function's name, for the pass log
+ // SWEET_MTL2_DEXR: the colors (bit i, color i) this pipeline holds as RGBA16Float though the descriptor asked for an
+ // extended-range format, the descriptor and options it was made from, and the pipelines made from them again with some
+ // of those colors as asked, by those colors (`sweetExactPipeline`).
+@@ -957,6 +960,7 @@
+ @public
+  EncodedWork encodedWork;   // the command buffer's single encoder thread, not global counter deltas
+  uint64_t createdUs;
++ uint32_t passLogID,passLogEncoders;   // PassLog.h: its window and number (0: not logged), encoders so far
+ }
+ @property(nonatomic) NmbCommandBuffer *handle;
+ @property(nonatomic,strong) NBQueue *queue;
+@@ -982,7 +986,46 @@
+ @property(nonatomic) NmbEncoder *handle;
+ @property(nonatomic,strong) NBCommandBuffer *commandBuffer;
+ @property(nonatomic) BOOL refused;
++@property(nonatomic) NBPassLog *passLog;   // PassLog.h: set while its command buffer is logged
+ @end
++// PassLog.h's view of a texture: its flags, then the texture at `index` of the logged stage (index >= 32: used, not bound).
++static void passLogFlags(id<MTLTexture> tex,char f[8]) {
++ unsigned n=0;
++ if([(id)tex isKindOfClass:[NBTexture class]]) {
++  NBTexture *t=(NBTexture *)tex;
++  if(t.surface)f[n++]='s';
++  if(t.parent)f[n++]='v';else if(t.buffer && !t.surface)f[n++]='b';
++ }
++ switch(tex.storageMode){case MTLStorageModePrivate:f[n++]='P';break;case MTLStorageModeShared:f[n++]='S';break;case MTLStorageModeMemoryless:f[n++]='m';break;default:f[n++]='M';break;}
++ if(tex.usage&MTLTextureUsageRenderTarget)f[n++]='r';
++ if(tex.usage&MTLTextureUsageShaderWrite)f[n++]='w';
++ f[n]=0;
++}
++static void passLogTex(NBPassLog *l,unsigned index,id<MTLTexture> t) {
++ if(!l)return;
++ if(!t){passLogTexture(l,index,nullptr,0,0,0,0,"");return;}
++ char f[8];passLogFlags(t,f);
++ passLogTexture(l,index,(__bridge const void *)t,(uint32_t)t.width,(uint32_t)t.height,(uint32_t)t.pixelFormat,(uint32_t)t.mipmapLevelCount,f);
++}
++// A render pass's head: the target's size and samples, then each attachment (c<i>, d, st) with its texture and load/store actions.
++static void passLogRenderHead(NBPassLog *l,MTLRenderPassDescriptor *d) {
++ if(!l)return;
++ char t[160];
++ id<MTLTexture> first=d.colorAttachments[0].texture?:d.depthAttachment.texture;
++ const uint64_t w=d.renderTargetWidth?:(first?first.width:0),h=d.renderTargetHeight?:(first?first.height:0);
++ l->targetPx=w*h;
++ snprintf(t,sizeof t,"%llux%llu s%lu",(unsigned long long)w,(unsigned long long)h,(unsigned long)d.defaultRasterSampleCount);l->head=t;
++ auto one=[&](const char *name,MTLRenderPassAttachmentDescriptor *a) {
++  if(!a.texture)return;
++  char f[8];passLogFlags(a.texture,f);
++  snprintf(t,sizeof t," | %s %lux%lu f%lu %s n%lu L%luS%lu",name,(unsigned long)a.texture.width,(unsigned long)a.texture.height,
++   (unsigned long)a.texture.pixelFormat,f,(unsigned long)a.texture.sampleCount,(unsigned long)a.loadAction,(unsigned long)a.storeAction);
++  l->head+=t;
++  if(a.resolveTexture){snprintf(t,sizeof t," >%lux%lu",(unsigned long)a.resolveTexture.width,(unsigned long)a.resolveTexture.height);l->head+=t;}
++ };
++ for(unsigned i=0;i<8;i++){char name[4]={'c',(char)('0'+i),0};one(name,d.colorAttachments[i]);}
++ one("d",d.depthAttachment);one("st",d.stencilAttachment);
++}
+ static void waitForResource(id resource) {
+  const uint64_t began=nowUs();
+  NSArray *pending;@synchronized(gInFlight){pending=gInFlight.allObjects;}
+@@ -998,13 +1041,16 @@
+  gTimeResourceWait.add(began);
+ }
+ @implementation NBEncoder
+-- (void)dealloc {if(_handle)nmb_encoder_discard(_handle);}
++- (void)dealloc {if(_handle)nmb_encoder_discard(_handle);if(_passLog){_passLog->head+=" (not ended)";passLogEnd(_passLog);}}
+ - (bool)check:(bool)ok what:(const char *)what {
++ passLogLeave(_passLog);
++ if(_passLog && _passLog->kind=='B'){passLogName(_passLog,what);passLogCount(_passLog);}
+  if(_refused)return false;
+  if(!ok)[_commandBuffer refuse:[NSString stringWithFormat:@"%s: %@",what,lastError()]];
+  return ok;
+ }
+ - (void)endEncoding {
++ if(_passLog){if(_refused)_passLog->head+=" (refused)";passLogEnd(_passLog);_passLog=nullptr;}
+  if(_refused){_refused=NO;return;}
+  NmbEncoder *handle=_handle;_handle=nullptr;
+  if(!handle){[_commandBuffer refuse:@"endEncoding twice"];return;}
+@@ -1018,6 +1064,7 @@
+ - (void)barrierAfterQueueStages:(NSUInteger)after beforeStages:(NSUInteger)before {(void)after;(void)before;}
+ // Stage 0 compute, 1 vertex, 2 fragment (the bridge's numbering).
+ - (void)buffer:(id<MTLBuffer>)buffer offset:(NSUInteger)offset index:(NSUInteger)index stage:(uint32_t)stage {
++ passLogEnter(_passLog);
+  if(_refused)return;
+  if(buffer && ![(id)buffer isKindOfClass:[NBBuffer class]]){[_commandBuffer refuse:@"foreign buffer"];return;}
+  if(buffer) {
+@@ -1027,7 +1074,9 @@
+  [self check:nmb_encoder_set_buffer(_handle,stage,buffer?[(NBBuffer *)buffer handle]:nullptr,offset,(uint32_t)index) what:"setBuffer"];
+ }
+ - (void)texture:(id<MTLTexture>)texture index:(NSUInteger)index stage:(uint32_t)stage {
++ passLogEnter(_passLog);
+  if(_refused)return;
++ if(_passLog && stage!=1)passLogTex(_passLog,(unsigned)index,texture);
+  if(texture && ![(id)texture isKindOfClass:[NBTexture class]]){[_commandBuffer refuse:@"foreign texture"];return;}
+  if(texture)[_commandBuffer.resourceOwners addObject:texture];
+  if(texture && [(NBTexture *)texture surface]) {
+@@ -1039,12 +1088,14 @@
+  [self check:nmb_encoder_set_texture(_handle,stage,texture?[(NBTexture *)texture handle]:nullptr,(uint32_t)index) what:"setTexture"];
+ }
+ - (void)sampler:(id<MTLSamplerState>)sampler index:(NSUInteger)index stage:(uint32_t)stage {
++ passLogEnter(_passLog);
+  if(_refused)return;
+  if(sampler && ![(id)sampler isKindOfClass:[NBSampler class]]){[_commandBuffer refuse:@"foreign sampler"];return;}
+  if(sampler)[_commandBuffer.resourceOwners addObject:sampler];
+  [self check:nmb_encoder_set_sampler(_handle,stage,sampler?[(NBSampler *)sampler handle]:nullptr,(uint32_t)index) what:"setSamplerState"];
+ }
+ - (void)bytes:(const void *)bytes length:(NSUInteger)length index:(NSUInteger)index stage:(uint32_t)stage {
++ passLogEnter(_passLog);
+  if(_refused)return;
+  [self check:nmb_encoder_set_bytes(_handle,stage,bytes,length,(uint32_t)index) what:"setBytes"];
+ }
+@@ -1067,6 +1118,7 @@
+ - (void)updateFence:(id<MTLFence>)fence {[self fence:fence stages:0 update:true];}
+ - (void)waitForFence:(id<MTLFence>)fence {[self fence:fence stages:0 update:false];}
+ - (void)offset:(NSUInteger)offset index:(NSUInteger)index stage:(uint32_t)stage {
++ passLogEnter(_passLog);
+  if(_refused)return;
+  [self check:nmb_encoder_set_buffer_offset(_handle,stage,offset,(uint32_t)index) what:"setBufferOffset"];
+ }
+@@ -1077,9 +1129,11 @@
+ @implementation NBComputeEncoder
+ - (MTLDispatchType)dispatchType {return MTLDispatchTypeSerial;}
+ - (void)setComputePipelineState:(id<MTLComputePipelineState>)state {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
+  if(![(id)state isKindOfClass:[NBComputePipeline class]]){[self.commandBuffer refuse:@"foreign compute pipeline"];return;}
+  [self.commandBuffer.resourceOwners addObject:state];
++ passLogName(self.passLog,[(NBComputePipeline *)state passName].UTF8String);
+  [self check:nmb_compute_set_pipeline(self.handle,[(NBComputePipeline *)state handle]) what:"setComputePipelineState"];
+ }
+ - (void)setBuffer:(id<MTLBuffer>)b offset:(NSUInteger)o atIndex:(NSUInteger)i {[self buffer:b offset:o index:i stage:0];}
+@@ -1107,8 +1161,10 @@
+  [self check:nmb_compute_set_threadgroup_memory(self.handle,(uint32_t)n,(uint32_t)i) what:"setThreadgroupMemoryLength"];
+ }
+ - (void)dispatch:(MTLSize)size group:(MTLSize)group threads:(bool)threads {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
+  gDispatches++;self.commandBuffer->encodedWork.dispatches++;
++ passLogDispatch(self.passLog,(uint64_t)size.width*size.height*size.depth*(threads?1:(uint64_t)group.width*group.height*group.depth));
+  const uint64_t s[3]={size.width,size.height,size.depth},g[3]={group.width,group.height,group.depth};
+  [self check:nmb_compute_dispatch(self.handle,s,g,threads) what:"dispatch"];
+ }
+@@ -1135,8 +1191,10 @@
+ @end
+ @implementation NBRenderEncoder
+ - (void)setRenderPipelineState:(id<MTLRenderPipelineState>)state {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
+  if(![(id)state isKindOfClass:[NBRenderPipeline class]]){[self.commandBuffer refuse:@"foreign render pipeline"];return;}
++ passLogName(self.passLog,[(NBRenderPipeline *)state passName].UTF8String);
+  [self.commandBuffer.resourceOwners addObject:state];
+  NBRenderPipeline *pipeline=(NBRenderPipeline *)state;
+  // A pipeline whose extended-range colors SWEET_MTL2_DEXR holds as RGBA16Float, drawn into a pass whose texture there kept
+@@ -1190,19 +1248,23 @@
+  (void)lo;(void)hi;[self setFragmentSamplerStates:s withRange:r];
+ }
+ - (void)setDepthStencilState:(id<MTLDepthStencilState>)state {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
+  if(state && ![(id)state isKindOfClass:[NBDepthStencil class]]){[self.commandBuffer refuse:@"foreign depth/stencil state"];return;}
+  if(state)[self.commandBuffer.resourceOwners addObject:state];
+  [self check:nmb_render_set_depth_stencil(self.handle,state?[(NBDepthStencil *)state handle]:nullptr) what:"setDepthStencilState"];
+ }
+ - (void)setViewport:(MTLViewport)v {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
+  const double values[6]={v.originX,v.originY,v.width,v.height,v.znear,v.zfar};
+  [self check:nmb_render_set_viewport(self.handle,values) what:"setViewport"];
+ }
+ - (void)setViewports:(const MTLViewport *)v count:(NSUInteger)c {if(v && c)[self setViewport:v[0]];}
+ - (void)setScissorRect:(MTLScissorRect)r {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
++ if(self.passLog){self.passLog->scissorSet=true;self.passLog->currentScissor=(uint64_t)r.width*r.height;}
+  const uint64_t values[4]={r.x,r.y,r.width,r.height};
+  [self check:nmb_render_set_scissor(self.handle,values) what:"setScissorRect"];
+ }
+@@ -1213,6 +1275,7 @@
+ - (void)setStencilStoreAction:(MTLStoreAction)sa {(void)sa;}
+ // The runtime takes cull mode, winding and fill mode together; this encoder keeps Metal's defaults until each is set.
+ - (void)raster {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
+  NSNumber *cull=objc_getAssociatedObject(self,"cull"),*winding=objc_getAssociatedObject(self,"winding"),*fill=objc_getAssociatedObject(self,"fill");
+  [self check:nmb_render_set_raster(self.handle,cull.unsignedLongLongValue,winding.unsignedLongLongValue,fill.unsignedLongLongValue) what:"raster state"];
+@@ -1250,8 +1313,10 @@
+  const float c[4]={r,g,b,a};[self check:nmb_render_set_blend_color(self.handle,c) what:"setBlendColor"];
+ }
+ - (void)drawPrimitives:(MTLPrimitiveType)t vertexStart:(NSUInteger)s vertexCount:(NSUInteger)n instanceCount:(NSUInteger)i baseInstance:(NSUInteger)b {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
+  gDraws++;self.commandBuffer->encodedWork.draws++;
++ passLogDraw(self.passLog,(uint64_t)n*i);
+  [self check:nmb_render_draw(self.handle,t,(uint32_t)s,(uint32_t)n,(uint32_t)i,(uint32_t)b) what:"drawPrimitives"];
+ }
+ - (void)drawPrimitives:(MTLPrimitiveType)t vertexStart:(NSUInteger)s vertexCount:(NSUInteger)n instanceCount:(NSUInteger)i {
+@@ -1262,10 +1327,12 @@
+ }
+ - (void)drawIndexedPrimitives:(MTLPrimitiveType)t indexCount:(NSUInteger)n indexType:(MTLIndexType)k indexBuffer:(id<MTLBuffer>)b indexBufferOffset:(NSUInteger)o
+                 instanceCount:(NSUInteger)i baseVertex:(NSInteger)v baseInstance:(NSUInteger)bi {
++ passLogEnter(self.passLog);
+  if(self.refused)return;
+  if(![(id)b isKindOfClass:[NBBuffer class]]){[self.commandBuffer refuse:@"foreign index buffer"];return;}
+  [self.commandBuffer.resourceOwners addObject:b];
+  gDraws++;self.commandBuffer->encodedWork.draws++;
++ passLogDraw(self.passLog,(uint64_t)n*i);
+  [self check:nmb_render_draw_indexed(self.handle,t,(uint32_t)n,k,[(NBBuffer *)b handle],o,(uint32_t)i,(int32_t)v,(uint32_t)bi) what:"drawIndexedPrimitives"];
+ }
+ - (void)drawIndexedPrimitives:(MTLPrimitiveType)t indexCount:(NSUInteger)n indexType:(MTLIndexType)k indexBuffer:(id<MTLBuffer>)b indexBufferOffset:(NSUInteger)o
+@@ -1321,6 +1388,7 @@
+   [self.commandBuffer.resourceOwners addObject:o];
+   if([(NBTexture *)o surface])[self.commandBuffer.surfaces addObject:o];
+   [self.commandBuffer noteTurned:(NBTexture *)o];
++  passLogTex(self.passLog,99,(id<MTLTexture>)o);
+  }
+  return true;
+ }
+@@ -1564,7 +1632,10 @@
+ - (id)encoder:(NBEncoder *)encoder handle:(NmbEncoder *)handle what:(NSString *)what {
+  if(self.committed)return [self refuseEncoder:encoder why:[what stringByAppendingString:@" after commit"]];
+  if(!handle)return [self refuseEncoder:encoder why:[NSString stringWithFormat:@"%@: %@",what,lastError()]];
+- encoder.handle=handle;encoder.commandBuffer=self;return encoder;
++ encoder.handle=handle;encoder.commandBuffer=self;
++ if(passLogID)encoder.passLog=passLogNew(passLogID,passLogEncoders++,[encoder isKindOfClass:[NBRenderEncoder class]]?'R':
++                                         [encoder isKindOfClass:[NBComputeEncoder class]]?'C':'B');
++ return encoder;
+ }
+ - (id<MTLComputeCommandEncoder>)computeCommandEncoder {
+  return [self encoder:[NBComputeEncoder new] handle:self.committed?nullptr:nmb_compute_encoder_new(_handle) what:@"computeCommandEncoder"];
+@@ -1625,7 +1696,9 @@
+   pass.visibility=[(NBBuffer *)d.visibilityResultBuffer handle];
+  }
+  NBRenderEncoder *encoder=[NBRenderEncoder new];encoder.extendedRangeColors=extendedRangeColors;
+- return [self encoder:encoder handle:self.committed?nullptr:nmb_render_encoder_new(_handle,&pass) what:@"renderCommandEncoder"];
++ id made=[self encoder:encoder handle:self.committed?nullptr:nmb_render_encoder_new(_handle,&pass) what:@"renderCommandEncoder"];
++ passLogRenderHead(encoder.passLog,d);
++ return made;
+ }
+ - (void)addScheduledHandler:(MTLCommandBufferHandler)block {if(block)@synchronized(self){[_scheduledHandlers addObject:[block copy]];}}
+ - (void)addCompletedHandler:(MTLCommandBufferHandler)block {if(block)@synchronized(self){[_completedHandlers addObject:[block copy]];}}
+@@ -1688,6 +1761,8 @@
+  if(_turned.count && !self.encodeFailure)sweetEncodeTurns(self);
+  self.committed=YES;
+  self.committedUs=nowUs();
++ if(passLogID){char t[120];snprintf(t,sizeof t,"PL w%u c%u commit e%u enc%lluus",passLogID>>16,passLogID&0xffff,passLogEncoders,
++  (unsigned long long)(self.committedUs-createdUs));passLogSay(t);}
+  {
+   std::lock_guard<std::mutex> lock(gCommitLock);
+   // Assign once under the same lock as publication. A concurrent commit cannot reuse this index.
+@@ -1739,6 +1814,8 @@
+   std::lock_guard<std::mutex> lock(gCommitLock);
+   CommitRecord &r=gCommitRing[commandBuffer.commitIndex%32];
+   if(r.index==commandBuffer.commitIndex)r.callbackUs=took;
++  if(commandBuffer->passLogID){char t[120];snprintf(t,sizeof t,"PL w%u c%u done gpu%lluus",commandBuffer->passLogID>>16,
++   commandBuffer->passLogID&0xffff,(unsigned long long)took);passLogSay(t);}
+  }
+  [commandBuffer finish];
+ }
+@@ -1749,7 +1826,9 @@
+ - (id<MTLCommandBuffer>)commandBuffer {
+  NmbCommandBuffer *handle=nmb_command_buffer_new(_handle);
+  if(!handle){NBLOG(@"native-metal: commandBuffer refused: %@",lastError());return nil;}
+- NBCommandBuffer *commandBuffer=[NBCommandBuffer new];commandBuffer.handle=handle;commandBuffer.queue=self;return (id<MTLCommandBuffer>)commandBuffer;
++ NBCommandBuffer *commandBuffer=[NBCommandBuffer new];commandBuffer.handle=handle;commandBuffer.queue=self;
++ commandBuffer->passLogID=passLogCommandBuffer();
++ return (id<MTLCommandBuffer>)commandBuffer;
+ }
+ - (id<MTLCommandBuffer>)commandBufferWithUnretainedReferences {return [self commandBuffer];}
+ - (void)setSubmissionQueue:(dispatch_queue_t)queue {(void)queue;}   // submission happens on the caller's thread here
+@@ -2141,6 +2220,7 @@
+  if(logJournal)journalRenderPipeline(d,pipelineBegan,handle?nullptr:nmb_last_error(),NBCost::now().since(costBegan));
+  if(!handle)return failWith<NBRenderPipeline *>(error,@"render pipeline",nil);
+  NBRenderPipeline *state=[NBRenderPipeline new];state.handle=handle;gPipelines++;if(error)*error=nil;
++ state.passName=d.fragmentFunction.name?:(d.label?:@"-");
+  if(held){state.dexrColors=held;state.dexrDescriptor=[d copy];state.dexrOptions=options;}
+  return state;
+ }
+@@ -2578,7 +2658,8 @@
+  const uint64_t pipelineBegan=nowUs();
+  NmbComputePipeline *handle=nmb_compute_pipeline_new_with_options(gDevice,[(NBFunction *)function handle],&creation);gTimePipeline.add(pipelineBegan);
+  if(!handle){NBLOG(@"native-metal: compute pipeline (%@) refused: %@",[(NBFunction *)function name],lastError());return failWith<id<MTLComputePipelineState>>(error,@"compute pipeline",nil);}
+- NBComputePipeline *state=[NBComputePipeline new];state.handle=handle;gPipelines++;if(error)*error=nil;return (id<MTLComputePipelineState>)state;
++ NBComputePipeline *state=[NBComputePipeline new];state.handle=handle;state.passName=[(NBFunction *)function name];gPipelines++;if(error)*error=nil;
++ return (id<MTLComputePipelineState>)state;
+ }
+ - (id<MTLComputePipelineState>)newComputePipelineStateWithDescriptor:(MTLComputePipelineDescriptor *)d error:(NSError **)error {
+  return [(id<MTLDevice>)self newComputePipelineStateWithDescriptor:d options:MTLPipelineOptionNone reflection:nil error:error];
+@@ -2593,7 +2674,7 @@
+  const uint64_t pipelineBegan=nowUs();
+  NmbComputePipeline *handle=nmb_compute_pipeline_new_with_descriptor(gDevice,&b.raw,&creation);gTimePipeline.add(pipelineBegan);
+  if(!handle){NBLOG(@"native-metal: compute pipeline (%@) refused: %@",[(NBFunction *)d.computeFunction name],lastError());return failWith<id<MTLComputePipelineState>>(error,@"compute pipeline",nil);}
+- NBComputePipeline *state=[NBComputePipeline new];state.handle=handle;state.label=d.label;gPipelines++;
++ NBComputePipeline *state=[NBComputePipeline new];state.handle=handle;state.label=d.label;state.passName=d.computeFunction.name?:d.label;gPipelines++;
+  if(error)*error=nil;return (id<MTLComputePipelineState>)state;
+ }
+ - (void)newComputePipelineStateWithFunction:(id<MTLFunction>)function completionHandler:(void (^)(id<MTLComputePipelineState>,NSError *))completionHandler {

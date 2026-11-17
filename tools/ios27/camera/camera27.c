@@ -46,6 +46,11 @@
  * Every line it says goes to the console (the kernel's log), prefixed "hakios: camera:" (camera_device.c's) or
  * "SCIONCAM:" (this file's).
  *
+ * The trace (cam_trace=1 on the boot line, or the file /private/var/hakios/camera/trace; camera_trace.c): every call the
+ * device, its streams and the vendor get, said with its answer, and the program's os_log taken (camera_oslog.c), so that one
+ * boot names what stops a session. Also in Camera.app when the root's record inserts this library there too
+ * (94-camera.sh, CAMERA_TRACE_APP=1): there only the app's os_log is taken, nothing is replaced. Off: as before.
+ *
  * NOT RUN ON A PHONE. Built for iOS 27 and loaded into nothing yet: whether cameracaptured's capture graph asks the
  * device for anything 16.5's did not, and whether Camera.app's session builds, are what the phone test is for
  * (docs/ios27/CAMERA.md).
@@ -63,8 +68,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "camera_oslog.h"
+#include "camera_trace.h"
 
 #define PROGRAM         "cameracaptured"
+#define APP             "Camera"        /* Camera.app's executable, where the record names it (the trace only) */
 #define CAMERA_NODE     "/dev/hakios-camera"
 
 typedef int (*device_create_fn)(const void *allocator, const void *options, void **out);
@@ -288,11 +296,27 @@ replace_methods(void)
 }
 
 /* every image, those already there and each one after (CMCapture is linked by cameracaptured, so it is there) */
+static int trace_level;
+
 static void
 image_added(const struct mach_header *header, intptr_t slide)
 {
 	(void)header, (void)slide;
 	replace_methods();
+	if (trace_level > 0) {
+		scioncam_trace_vendor();
+	}
+}
+
+/* the trace's start in this program: its os_log taken, and said */
+static void
+trace_start(const char *name)
+{
+	int hooked = scioncam_oslog_start(name, trace_level);
+
+	say("in %s: the trace is on (cam_trace=%d): every call of the camera's device, streams and vendor said; os_log to the "
+	    "console and /private/var/local/oslog/%s.log (%d of 4 entry points%s)", name, trace_level, name, hooked % 10,
+	    hooked >= 10 ? ", info and debug on" : "");
 }
 
 __attribute__((constructor))
@@ -301,6 +325,12 @@ scion_camera_init(void)
 {
 	const char *name = getprogname();
 
+	if (name != NULL && strcmp(name, APP) == 0) {
+		if ((trace_level = scioncam_trace_level()) > 0) {
+			trace_start(name);
+		}
+		return;
+	}
 	if (name == NULL || strcmp(name, PROGRAM) != 0) {
 		return;
 	}
@@ -310,6 +340,10 @@ scion_camera_init(void)
 		return;
 	}
 	say("in %s: the kernel has a camera (" CAMERA_NODE "): the capture stack gets the S9's camera device", name);
+	if ((trace_level = scioncam_trace_level()) > 0) {
+		hakios_camera_trace = 1;
+		trace_start(name);
+	}
 	register_hevc_encoder();
 	_dyld_register_func_for_add_image(image_added);
 }

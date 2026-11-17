@@ -57,6 +57,7 @@
 #include <kern/thread.h>
 #include <stdarg.h>
 #include <sys/systm.h>
+#include "hakios.exynos_cpufreq_ceiling.h"	/* (the M3s' rule above 1794000: cpufreq_big= too) */
 
 #define MBOX_PA         EXYNOS_APM_MBOX_PA
 #define MBOX_INTGR0     0x08
@@ -841,7 +842,8 @@ hakios_exynos_bus_start(void)
  * The Galaxy S9's CPU clocks through ACPM's DVFS (Samsung's cal_dfs_set_rate -> exynos_acpm_set_rate: domain index,
  * kHz, FREQ_REQ). acpm_dvfs_exynos9810.h: dvfs_cpucl0 (the A55s) is index 2, dvfs_cpucl1 (the M3s) index 3.
  * boot-args cpufreq_lit=kHz, cpufreq_big=kHz; nothing without them. With cpufreq_gov=1 the governor
- * (drivers/power/exynos/hakios.exynos_cpufreq.c) sets both clusters' rates instead, and these two are not used.
+ * (drivers/power/exynos/hakios.exynos_cpufreq.c) sets both clusters' rates instead, and these two are not used. The M3s at
+ * 1794000 at most here (no governor, so no over-current guard: hakios.exynos_cpufreq_ceiling.h's rule refuses).
  */
 void hakios_exynos_dvfs_start(void);
 void
@@ -856,8 +858,9 @@ hakios_exynos_dvfs_start(void)
 		return;
 	}
 	for (uint32_t i = 0; i < sizeof(doms) / sizeof(doms[0]); i++) {
-		uint32_t want = 0, before = 0, after = 0;
+		uint32_t want = 0, before = 0, after = 0, held;
 		int e1, e2, e3;
+		char line[256];
 
 		if (!PE_parse_boot_argn(doms[i].arg, &want, sizeof(want)) || want == 0) {
 			continue;
@@ -866,16 +869,13 @@ hakios_exynos_dvfs_start(void)
 			printf("dvfs: no ACPM: %s left as they are\n", doms[i].name);
 			return;
 		}
+		held = doms[i].index == 3 ? ceil_big(want, ceil_why(&(struct ceil_in){ .guard = 0 })) : want;
 		e1 = hakios_acpm_dvfs_get(doms[i].index, &before);
-		e2 = hakios_acpm_dvfs_set(doms[i].index, want);
+		e2 = hakios_acpm_dvfs_set(doms[i].index, held);
 		e3 = hakios_acpm_dvfs_get(doms[i].index, &after);
-		{
-			char line[160];
-
-			snprintf(line, sizeof(line), "dvfs: %s: %u kHz (%d) -> asked %u kHz (%d) -> now %u kHz (%d)\n", doms[i].name,
-			    before, e1, want, e2, after, e3);
-			printf("%s", line);
-			loader_log_line(line);
-		}
+		snprintf(line, sizeof(line), "dvfs: %s: %u kHz (%d) -> asked %u kHz (%d) -> now %u kHz (%d)%s\n", doms[i].name, before,
+		    e1, held, e2, after, e3, held < want ? "; cpufreq_big= held at 1794 MHz: needs ocp_guard=4 (docs/ios27/OCP.md)" : "");
+		printf("%s", line);
+		loader_log_line(line);
 	}
 }

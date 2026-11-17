@@ -3,8 +3,9 @@
  * The Galaxy S9's rear camera (starlte, Exynos 9810): a Samsung S5K2L3 (Android's camera 0, "fimc-is_sensor_2l3"), its
  * supplies, clock, reset and bus, and its register tables. hakios.exynos_camera.c, the front camera's driver, does the
  * rest (the ISPPRE domain, the CSIS, its DMA, the frames, /dev/hakios-camera) and calls in here for the rear camera's own
- * parts. Only with boot-arg cam_rear=1 in a run with cam_s9=N on this phone: with cam_rear absent or 0 nothing below
- * runs, no register named here is read or written, and the front camera is as it was. Every address and number is this
+ * parts. Only with boot-arg cam_rear=1 in a run with cam_s9=N on this phone (or cam_switch=1 with cam_s9=7, where the run
+ * has both cameras): with neither, nothing below runs, no register named here is read or written, and the front camera is
+ * as it was. Every address and number is this
  * phone's, from its device tree and the S9 kernel's camera driver (fimc-is2), read as data.
  *
  * THE HARDWARE
@@ -92,7 +93,8 @@
  * no table here; nothing in iOS's user space has read the device.
  *
  * Boot-args:
- *   cam_rear=1         the camera of this run (cam_s9=N's steps, camshot, the stream) is the rear one
+ *   cam_rear=1         the camera of this run (cam_s9=N's steps, camshot, the stream) is the rear one. With cam_switch=1
+ *                      (hakios.exynos_camera.c) the first camera of the run, and this file is in use with or without it
  *   cam_rear_ois=N     the stabiliser: 1 its status, version and clock read, 2 that and its servo on (0 or none: powered
  *                      and left alone)
  *   cam_rear_ois_mode=M  with 2: 0 still (the default), 1 video, 5 centring
@@ -128,7 +130,7 @@
 #ifndef HAKIOS_DEVICE_IS_STAR2LTE
 
 /* what hakios.exynos_camera.c calls (it declares them too) */
-uint32_t hakios_s9rear_setup(uint32_t ipclk_mhz, int (*say)(const char *, ...));
+uint32_t hakios_s9rear_setup(uint32_t ipclk_mhz, int (*say)(const char *, ...), uint32_t also);
 bool hakios_s9rear_map(vm_offset_t peric0, vm_offset_t peric1, vm_offset_t cmu_top);
 bool hakios_s9rear_look(void);
 bool hakios_s9rear_up(void);
@@ -414,17 +416,24 @@ pb03_pins(bool on)
 	}
 }
 
+/*
+ * Whether the run's camera is the rear one (cam_rear=1). `also' (cam_switch=1): this file is in use either way, the rear
+ * camera being the other one of the run (hakios.exynos_camera.c's side_set()); its boot-args are read as with cam_rear=1.
+ */
 uint32_t
-hakios_s9rear_setup(uint32_t ipclk_mhz, int (*say_fn)(const char *, ...))
+hakios_s9rear_setup(uint32_t ipclk_mhz, int (*say_fn)(const char *, ...), uint32_t also)
 {
-	uint32_t addr = 0;
+	uint32_t addr = 0, first = 0;
 
 	say = say_fn;
-	if (!PE_parse_boot_argn("cam_rear", &cam_rear, sizeof(cam_rear)) || cam_rear == 0) {
+	if (PE_parse_boot_argn("cam_rear", &first, sizeof(first)) && first != 0) {
+		first = 1;
+	}
+	if (!first && !also) {
 		cam_rear = 0;
 		return 0;
 	}
-	cam_rear = 1;
+	cam_rear = 1;                   /* (here: this file is in use in the run) */
 	PE_parse_boot_argn("cam_rear_ois", &cam_rear_ois, sizeof(cam_rear_ois));
 	if (cam_rear_ois > 2) {
 		cam_rear_ois = 2;
@@ -443,7 +452,7 @@ hakios_s9rear_setup(uint32_t ipclk_mhz, int (*say_fn)(const char *, ...))
 		sensor_addr = (uint8_t)addr;
 	}
 	pb03_bus.ipclk_mhz = sensor_bus.ipclk_mhz = ipclk_mhz;
-	return cam_rear;
+	return first;
 }
 
 struct hakios_hsi2c *
