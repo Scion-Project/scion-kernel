@@ -11,13 +11,14 @@ and answered pings (scion-starlte `WIFI.md`, stages a-e). The iOS 27 kernel uses
 | What | Where |
 |---|---|
 | the drivers | `drivers/wifi/brcmfmac/hakios.exynos_pcie.c`, `hakios.brcmfmac.c`, `drivers/wifi/lx/hakios.lx.c`, `drivers/wifi/hakios.sta.c`, `hakios.apple80211.c`, `hakios.wlan.cpp`, `drivers/net/hakios.net.c`: copied into the fork's tree at build time (`profiles/ios-27.copy`) |
-| brcmfmac itself | `tools/mk-brcmfmac.sh` (Linux 7.0.14's brcmfmac, ISC, on `wifi/lx`) makes `xnu-deps/build/brcmfmac/out/brcmfmac.o`; `tools/ios27/build-xnu-ios.sh` links it in (`HAKIOS_OBJECTS`) when it is there, its debug map stripped |
+| brcmfmac itself | `tools/mk-brcmfmac.sh` (Linux 7.0.14's brcmfmac, ISC, on `wifi/lx`) makes `xnu-deps/build/brcmfmac/out/brcmfmac.o`; `tools/ios27/build-xnu-ios.sh` links it in (`HAKIOS_OBJECTS`), its debug map stripped; for STARLTE it runs `tools/mk-brcmfmac.sh` first when the object is missing and stops when it cannot be made (`NOWIFI=1`: a kernel without Wi-Fi, on purpose; until 17 November a missing object gave a kernel without Wi-Fi, said only in its boot log) |
 | what this tree lacks | the fork's `bsd/dev/starlte_wifi.c`: the radio's files from the root filesystem, polling instead of INTx, the late start |
-| the files | `tools/ios27/wifi/60-wifi-firmware.sh ROOT` (run by the root build's step `tools/ios27/fullroot/steps.d/91-wifi.sh` when `WIFI_FW_DIR` is given; INSTALL-S9.md, "The S9's features in the root"): the phone's own `bcmdhd_sta.bin_b2`, `bcmdhd_clm.blob` and `nvram.txt_*` (from the phone's VENDOR, or fetched by scion-starlte `tools/fetch-firmware.sh`), checked against scion-starlte `firmware/wifi/SHA256SUMS`, into `/private/var/hakios/wifi/`. None of them is in any repository |
+| the files | `tools/ios27/wifi/60-wifi-firmware.sh ROOT` (run by the root build's step `tools/ios27/fullroot/steps.d/91-wifi.sh`, by default since 17 November; INSTALL-S9.md, "The S9's firmware"): every file of scion-starlte's `firmware/wifi/` (`bcmdhd_sta.bin_b0`/`_b2`, `bcmdhd_clm.blob`, the three `nvram.txt_*`; the kernel takes the NVRAM of the module the chip's OTP names), fetched by `devices/starlte/tools/fetch-firmware.sh` through `tools/ios27/fullroot/firmware.sh` and checked against `firmware/wifi/SHA256SUMS`, into `/private/var/hakios/wifi/`; a file missing or wrong stops the root build (until 17 November the step skipped without `WIFI_FW_DIR`, and the root had no Wi-Fi). `WIFI_FW_DIR` still names a directory of your own. None of them is in any repository |
 
 ## How it differs from 16.5
 
-- **Files.** iOS 27 has no small image and no VENDOR reader. The radio's files are read with `vnode_open()` from
+- **Files.** iOS 27 has no small image and no VENDOR reader: a root without these files has no Wi-Fi, whatever the phone's
+  VENDOR holds. The radio's files are read with `vnode_open()` from
   `/private/var/hakios/wifi/` (`wifi_dir=` for another directory) once the root filesystem is mounted. A request waits
   at most `wifi_root_wait=` seconds (120 by default) for it. `mac.info` (the phone's `/efs/wifi/.mac.info`) and `network`
   (two lines: name, passphrase) are read there too, if present. The root build copies them only on request
