@@ -223,7 +223,9 @@ of each step below.
 2. **The kernels are the same.** Every kernel the files reach is built before and after, through `~/s9/agents/bin/buildlock`:
    16.5 `starlte_defconfig`, `star2lte_defconfig` and `crownlte_defconfig`, the iOS 27 STARLTE and FRANKEL kernels.
    `tools/split-objcmp.py kernel BEFORE AFTER` checks that the external symbols defined are the same set and the C
-   strings the same multiset, and lists every local symbol that differs.
+   strings the same multiset, and lists every local symbol that differs. Some local symbols are named after the line
+   they are declared on (`LCK_GRP_DECLARE`, `LCK_MTX_DECLARE` and the other `STARTUP` macros of XNU make
+   `___startup_LOCKS_entry_..._<line>`): a split that moves text above them renames those, and nothing else.
 3. **The functions are the same.** `tools/split-objcmp.py objects BEFORE.o AFTER.o[,...]` disassembles each function of
    the split's objects, takes out addresses (a branch keeps its target's name) and string labels, and compares them one
    by one. A split that keeps one translation unit (a codec header included where the code was) must give the same code
