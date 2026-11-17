@@ -6,3 +6,4 @@ fairplayd
 replicatord
 security.cryptexd
 com.apple.gamed
+com.apple.appledepthd            # 27.2 (24B156) on: the depth camera daemon (no such hardware on the S9). On demand (MachServices only); absent on 24A446, so nothing changes there. Not run on a phone.
