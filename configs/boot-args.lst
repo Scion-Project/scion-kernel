@@ -192,6 +192,7 @@ cp_if_kb	k
 cp_nv	k
 cp_ping	k
 cp_rev	k
+cp_rfs	k
 cp_route	k
 cp_sim	k
 cp_vss	k
