@@ -45,7 +45,7 @@ drivers/soc/exynos/hakios.exynos_m3.c                      907
 drivers/soc/exynos/hakios.exynos_tee.c                    1272
 drivers/storage/hakios.apfs_check.c                       1872
 drivers/storage/ufs/hakios.ufs.c                          3755
-drivers/storage/ufs/hakios.ufshc.c                        4044
+drivers/storage/ufs/hakios.ufshc.c                        3741
 drivers/storage/ufs/hakios.ufshc.lga.h                     817
 drivers/usb/hakios.dwc3.c                                 2294
 drivers/virtio/hakios.virtio.c                            1032
