@@ -168,7 +168,10 @@ Rank by expected user-visible gain per unit of risk. "Built" means compiled, not
 
 1. **Honest fences** (scion-kernel #327, `STARBITE_DRM_SEQ=1` in `mtl2-env`).
    - **State**: built; tested on a Mac against a stand-in for the kernel's queue (2,400 random waits, none ended early).
-     The Metal bundle needs a rebuild with it (`mk-panvk27.sh`, `mk-bundle27.sh`); the Mac mini has no PanVK build tree.
+     The Metal bundle needs a rebuild with it (`mk-panvk27.sh`, `mk-bundle27.sh`, which now makes its own source tree).
+     The PanVK of phone 1's c2 bundle (`cc241e55`, 14 November) carries an earlier version of the same thing behind
+     `STARBITE_DRM_FENCES=1` (its boots print `SBDRM[pid]: async submits on, fences of their own chain off`); the shim now
+     has one implementation and takes either name.
    - **What changes**: a wait waits for its fence's own chain, not for every chain queued at that moment.
    - **Gain**: up to 25 → 38 a second on s3a's content (§3), and touch-to-picture shorter by up to a frame of GPU time (G).
    - **Risk**: a wait that ends too early would let PanVK reuse memory under the GPU. Everything the shim cannot follow exactly

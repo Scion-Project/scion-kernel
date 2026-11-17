@@ -15,6 +15,7 @@
  * tools/ios27/mesa-ios/starbite-drm/test/run.sh builds and runs all three.
  */
 #include "../starbite_drm.c"
+#include "../starbite_diag.c"
 
 #include <assert.h>
 #include <drm-uapi/panfrost_drm.h>
