@@ -100,6 +100,7 @@ BT_TTY	arg	bt_tty	User space	k	hakios.bcm4361_bt.c
 BT_UART_MHZ	arg	bt_uart_mhz	User space	k	hakios.bcm4361_bt.c	UART_BT's clock in MHz, if bt=1 shows the divider or mux not as Android leaves them (default 200)
 BT_VENDOR	arg	bt_vendor	User space	k	hakios.bcm4361_bt.c	never read the patch from the phone's VENDOR partition (default: read it there with ufs=2)
 BT_VENDOR_PART	arg	bt_vendor_part	User space	k	hakios.bcm4361_bt.c	the partition the patch is read from (default VENDOR)
+BT_VSC	arg	bt_vsc	User space	k	hakios.bcm4361_bt.c	
 BT_VSC_OK	arg	bt_vsc_ok	User space	k	hakios.bcm4361_bt.c	
 BUS_LOG	arg	bus_log	User space	k	hakios.exynos_acpm.c	do not log the APM's tables at boot (default: one line per domain, read only)
 BUS_MASK	arg	bus_mask	User space	k	hakios.exynos_acpm.c	

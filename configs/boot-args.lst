@@ -105,6 +105,7 @@ bt_tty	k
 bt_uart_mhz	k
 bt_vendor	k
 bt_vendor_part	k
+bt_vsc	k
 bt_vsc_ok	k
 bus_log	k
 bus_mask	k

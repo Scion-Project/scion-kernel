@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 762 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 763 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1693,7 +1693,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (190)
+# User space (191)
 #
 
 # Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
@@ -1773,6 +1773,9 @@ CONFIG_MODEM_AGAIN=y
 
 # the partition the patch is read from (default VENDOR)
 # CONFIG_BT_VENDOR_PART is not set
+
+# read by hakios.bcm4361_bt.c (kernel)
+# CONFIG_BT_VSC is not set
 
 # read by hakios.bcm4361_bt.c (kernel)
 # CONFIG_BT_VSC_OK is not set
