@@ -71,8 +71,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-
 #include "hakios.audio.h"
+#include "hakios_audio_level.h"      /* the level meter: a test switch, off by default */
 
 /* ---- the AudioServerPlugIn interface (macOS: CoreAudio/AudioServerPlugIn.h, AudioHardwareBase.h) ---- */
 
@@ -952,7 +952,7 @@ start_io(__unused AudioServerPlugInDriverRef driver, AudioObjectID object, __unu
 		d->periods = 0;
 		if (d->output != 0) {
 			written = refused = 0;
-			say("hakios: audio: playing\n");
+			say("hakios: audio: playing%s\n", level_start());
 		}
 		if (d->object == OBJECT_CODEC) {
 			codec_open();
@@ -1075,8 +1075,8 @@ do_io_operation(__unused AudioServerPlugInDriverRef driver, __unused AudioObject
 	} else if (operation == kAudioServerPlugInIOOperationWriteMix && stream == OBJECT_ACTUATOR_OUTPUT) {
 		actuator_write(buffer, frames);
 	} else if (operation == kAudioServerPlugInIOOperationWriteMix && stream == d->output) {
-		/* the kernel takes it all or leaves it: this thread must not wait */
-		if (sink < 0 || write(sink, buffer, (size_t)frames * HAKIOS_AUDIO_FRAME) < 0) {
+		/* the kernel takes it all or leaves it: this thread must not wait (the level meter's dry run: nothing is given) */
+		if (!level_take(buffer, frames) && (sink < 0 || write(sink, buffer, (size_t)frames * HAKIOS_AUDIO_FRAME) < 0)) {
 			refused += frames;
 		}
 		written += frames;

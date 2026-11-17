@@ -31,6 +31,8 @@ What the step does:
   library (launchd drops DYLD_ variables and the 608-byte command line has no room for more `sweetinject`).
 - BlueTool's scripts for the S9 in `/etc/bluetool/` (`N104AP.*.script`: the iOS 27 root's HW model), the phone's own
   Broadcom patch in `/private/var/hakios/bt/` (read by the kernel at `bt=6`; never in git: it is the phone's vendor file).
+- The speaker's level meter (tests, off by default): `log` or `dry` in `/private/var/local/hakios-audio-level` and the
+  plug-in says on the console how loud the samples it is given are; `dry` does not play them (docs/ios27/VOLUME.md).
 - `AUDIO_BT_LOG=1` (tests): each of the three jobs' stderr into `/private/var/local/oslog/<name>.err`, with
   `OS_ACTIVITY_DT_MODE=YES` so their os_log lines go there too (logd is off on this root).
 
