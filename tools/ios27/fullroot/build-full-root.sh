@@ -35,6 +35,8 @@
 # The iOS build: BUILD_VERSION (build-root.sh sets it from the inputs), else IOS27_BUILD, else tools/ios27/builds/DEFAULT; the OS
 #   image's own SystemVersion.plist, the private directory's BUILD (prepare-root-inputs.sh) and a reused cache's DONE must all
 #   name that build, or the build stops before the cache (docs/ios27/UPDATING-IOS.md). The three images' default names: its .conf.
+# One build at a time: a second build with the same work directory (this checkout's work/) or the same OUT is refused while the
+#   first runs (build-lock.sh; a lock left by a build that is gone is taken over).
 # Env: SIZE_GB=32  OUT=out/root-full.img  STRICT=1 (a feature step that fails stops the build)  REUSE_CACHE=1 (use work/cache if its DONE marker exists)  DISABLE_HOGS=1  KEEP_MOUNTED=1
 # DEVICE=frankel (the Pixel 10, Tensor G5; docs/ios27/PIXEL10.md; NOT TESTED: no root has been built or booted for it): its cores
 #   run arm64e and every ARMv8.x instruction the cache uses (Cortex-A520/A725/X4 TRMs: APA3 5, GPA3 1, LSE, FP16, LRCPC2 ...),
@@ -69,6 +71,12 @@ case $cmd in
 build)
     [[ ${EUID} == 0 ]] || { echo "run as root: sudo $0 build" >&2; exit 2; }
     OWNER=${SUDO_USER:?run via sudo}
+    # ---- one build at a time in this work directory and into this image (build-lock.sh): two at once spoil both ----
+    . "$HERE/build-lock.sh"
+    mkdir -p "$W" "$(dirname "$OUT")"
+    build_lock_take "$W/build.lock" "the work directory" || exit 1
+    build_lock_take "$OUT.lock" "the image $OUT" || { build_lock_release "$W/build.lock"; exit 1; }
+    trap 'build_lock_release "$OUT.lock"; build_lock_release "$W/build.lock"' EXIT
     ios27_build_check "$BUILD_VERSION" || exit 1
     B_PRIV=; [[ ! -f $IOS27_PRIVATE/BUILD ]] || read -r B_PRIV < "$IOS27_PRIVATE/BUILD" || true
     ios27_build_same "the private directory ($IOS27_PRIVATE/BUILD)" "$B_PRIV" "this build (BUILD_VERSION)" "$BUILD_VERSION" || exit 1
@@ -88,7 +96,7 @@ build)
     mkdir -p "$SYSMNT" "$OSMNT" "$APPMNT" "$ROOTMNT"
     for m in "$ROOTMNT" "$OSMNT" "$SYSMNT" "$APPMNT"; do detach_if "$m"; done
     attach_src "$OS_DMG" "$OSMNT"; attach_src "$SYS_DMG" "$SYSMNT"; attach_src "$APP_DMG" "$APPMNT"
-    cleanup() { detach_if "${ROOTMNT:-}"; [[ -n ${RDEV:-} ]] && hdiutil detach "$RDEV" >/dev/null 2>&1 || true; detach_if "$OSMNT"; detach_if "$SYSMNT"; detach_if "$APPMNT"; }
+    cleanup() { detach_if "${ROOTMNT:-}"; [[ -n ${RDEV:-} ]] && hdiutil detach "$RDEV" >/dev/null 2>&1 || true; detach_if "$OSMNT"; detach_if "$SYSMNT"; detach_if "$APPMNT"; build_lock_release "$OUT.lock"; build_lock_release "$W/build.lock"; }
     trap cleanup EXIT
     ios27_build_same "the OS image ($OS_DMG)" "$(ios27_build_of_root "$OSMNT")" "this build (BUILD_VERSION)" "$BUILD_VERSION" || exit 1
     if [[ $DEVICE == frankel ]]; then log "frankel: the stock cache, not rewritten"; else
