@@ -361,6 +361,8 @@ at EL2, xnuloader `adt_layer=s9`, no root device, so the kernel idles until it g
   ms either way);
 - the dry run's histograms and the `would` counts filled as described; the run ended in the same "Failed to mount root device"
   panic as any run without a root;
+- a second run with the final commit (`915e18a`, the print buffer doubled) printed all seven cores: after about 40 s armed,
+  20 to 43 calls each, all returned 0 but the one in progress, none failed;
 - without the arguments the same kernel printed no `SWEET C2` line and stopped at "Waiting on ... IOMedia" as before.
 
 What this proves: the code is reached and is safe on the path where PSCI returns; the PSCI call reaches the firmware with these
