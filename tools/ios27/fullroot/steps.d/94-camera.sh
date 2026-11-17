@@ -10,6 +10,9 @@
 # Also: MobileGestalt's cache on /var is removed (it is made again at the next boot), so that an answer of an earlier boot
 # ("no camera") is not kept; and CAMERA_TUNING_DIR (optional): camera-<sensor>.isp colour tunings you made from your own
 # phone's files (tools/camtuning-exynos.py; never in the repository) to /private/var/hakios/camera.
+# The trace (docs/ios27/CAMERA.md, "The trace"; off by default): CAMERA_TRACE=N writes /private/var/hakios/camera/trace (the
+# library's switch, the same as cam_trace=N on the boot line); CAMERA_TRACE_APP=1 also records the library for Camera.app,
+# where it only takes the app's os_log while the trace is on.
 #   ENABLE_CAMERA=0  off.   undo: the library, its record, the tunings this step put there and the cache taken off the root.
 # Idempotent. NOT run on a phone: neither the library nor this step (the capture device itself streamed into Camera.app on
 # iOS 16.5, 3 November 2026).
@@ -37,7 +40,17 @@ feature_apply() {
 	feature_build sh "$FEATURE_SK/tools/ios27/camera/build.sh" "$FEATURE_OUT/cam.dylib" >/dev/null
 	[[ $(lipo -archs "$FEATURE_OUT/cam.dylib") == arm64 ]] || feature_die "cam.dylib is not plain arm64"
 	feature_put "$FEATURE_OUT/cam.dylib" "$R$LIB" 0755
-	feature_inject "$LIB" cameracaptured
+	local programs=cameracaptured
+	[[ ${CAMERA_TRACE_APP:-0} != 1 ]] || programs="cameracaptured Camera"
+	feature_inject "$LIB" $programs
+	if [[ ${CAMERA_TRACE:-0} =~ ^[1-9]$ ]]; then
+		install -d -m 0755 "$R$TUNE"
+		printf '%s\n' "$CAMERA_TRACE" > "$R$TUNE/trace"
+		chmod 0644 "$R$TUNE/trace"
+		feature_say "the camera's trace on (CAMERA_TRACE=$CAMERA_TRACE: $TUNE/trace); the library in: $programs"
+	else
+		rm -f "$R$TUNE/trace"
+	fi
 	if [[ -n ${CAMERA_TUNING_DIR:-} ]]; then
 		local n=0 f
 		for f in "$CAMERA_TUNING_DIR"/camera-*.isp; do
@@ -53,7 +66,7 @@ feature_apply() {
 
 feature_undo() {
 	feature_uninject "$LIB"
-	rm -f "$R$LIB" "$R$TUNE"/camera-*.isp
+	rm -f "$R$LIB" "$R$TUNE"/camera-*.isp "$R$TUNE/trace"
 	rmdir "$R$TUNE" 2>/dev/null || true
 	mg_cache_off
 	feature_say "undone: $LIB, its record and $TUNE's tunings taken off the root"
