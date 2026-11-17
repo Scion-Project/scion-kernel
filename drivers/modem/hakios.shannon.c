@@ -140,8 +140,11 @@
  *   cp_delay=N   seconds after the boot before the modem's driver does anything (30), so that its lines are in the log
  *
  * WHERE IT MAY RUN. The CP's memory is fixed by the boot chain at 0xF0000000. On a tree whose loader puts XNU itself
- * there (the 16.5 line's UEFI does: devices/starlte/docs/modem-plan.md, 1.5) this driver must not load anything: it
- * checks that no page of the 146 MB is XNU's and that the kernel is not in it, and does nothing if either fails.
+ * there this driver must not load anything: it checks that no page of the 146 MB is XNU's and that the kernel is not in
+ * it, and does nothing if either fails. The 16.5 line's UEFI lands the payload there (devices/starlte/docs/modem-plan.md,
+ * 1.5); its loader moves the payload to 0xD0000000 first and keeps the CP's memory out of XNU's RAM
+ * (xnuloader/platforms/starlte.c: payload_home, keep_out), so the check passes there as it does on the ios-27 tree.
+ * Built for the 16.5 kernel (xnu-8796) since 17 November 2026; not yet run on a phone under iOS 16.5.
  */
 #include <kern/clock.h>
 #include <kern/kalloc.h>
@@ -160,7 +163,7 @@
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/hakios.xnu.h>
-#include <sys/hakios.ext4ro.h>
+#include "hakios.ext4ro.h"
 #include <net/kpi_interface.h>
 #include <net/kpi_protocol.h>
 #include <net/if_types.h>

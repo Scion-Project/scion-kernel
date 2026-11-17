@@ -25,5 +25,6 @@ driver SHANNON
 	help    file the image's builder supplies; EFS is never read or written): "low power mode" asked first, the CP's
 	help    messages logged, the software version asked; 5 with a ready SIM "normal" asked, the registration watched
 	help    for two minutes, then low power again (written, not yet run: the test SIM read as locked). Its file
-	help    requests are not answered. Only where the CP's memory is not XNU's (the ios-27 tree; not the 16.5 line's
-	help    UEFI layout). Off unless asked
+	help    requests are not answered. Only where the CP's memory is not XNU's: the ios-27 tree, and the 16.5 line since
+	help    its loader moves the payload out of it and keeps it out of XNU's RAM (xnuloader/platforms/starlte.c). The driver
+	help    checks that itself and does nothing otherwise. Off unless asked
