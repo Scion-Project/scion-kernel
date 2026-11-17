@@ -98,6 +98,7 @@ bt_hcd	k
 bt_hcd_wait	k
 bt_keep	k
 bt_module	k
+bt_otp_wait	k
 bt_scan	k
 bt_trace	k
 bt_tty	k

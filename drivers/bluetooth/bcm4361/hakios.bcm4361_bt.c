@@ -105,6 +105,9 @@
  *   bt_keep=1        leave the chip powered at the end (default: BT_EN and BT_WAKE low once the steps are done or one fails)
  *   bt_hcd=<name>    the patch file's name in fw/ (default bcm4361B2.hcd); without it, the phone's own from VENDOR
  *   bt_module=<m>    murata or semco: which patch (bcm4361B2_<m>.hcd; default: the module Wi-Fi read in OTP, else a guess)
+ *   bt_otp_wait=<s>  seconds to wait for Wi-Fi's reading of the module in OTP when both patches are on the root (120)
+ *                    (xnu-12377: the root build puts both there; then the module's own is taken; 0: Murata's first at
+ *                    once, as before). Only with brcmfmac=2 and up; with one patch on the root that one is taken at once
  *   bt_vendor=0      never read the patch from the phone's VENDOR partition (default: read it there with ufs=2)
  *   bt_vendor_part=<name>  the partition the patch is read from (default VENDOR)
  *   bt_expander_reset=1  at bt=2 and up, take the expander out of reset if it is held there
@@ -727,6 +730,19 @@ root_file(const char *path, uint64_t max, uint8_t **data, uint64_t *size)
 	return e;
 }
 
+/* is there a file at path (the root filesystem mounted)? */
+static bool
+root_has(const char *path)
+{
+	vnode_t vp = NULLVP;
+
+	if (rootvnode == NULLVP || vnode_lookup(path, 0, &vp, vfs_context_kernel()) != 0) {
+		return false;
+	}
+	vnode_put(vp);
+	return true;
+}
+
 static uint8_t *hcd_data;
 static uint64_t hcd_size;
 static char hcd_file[128];
@@ -737,7 +753,7 @@ module_patch(char *file, size_t room, uint64_t *size)
 {
 	char arg[96] = "", module[16] = "", paths[2][128];
 	unsigned npaths = 0;
-	uint32_t wait_s = 180;
+	uint32_t wait_s = 180, otp_wait = 120, wifi_steps = 0;
 	bool guessed = false;
 	int last[2] = { 0, 0 };
 
@@ -747,6 +763,11 @@ module_patch(char *file, size_t room, uint64_t *size)
 		return hcd_data;
 	}
 	PE_parse_boot_argn("bt_hcd_wait", &wait_s, sizeof(wait_s));
+	PE_parse_boot_argn("bt_otp_wait", &otp_wait, sizeof(otp_wait));
+	PE_parse_boot_argn("brcmfmac", &wifi_steps, sizeof(wifi_steps));
+	if (wifi_steps < 2) {
+		otp_wait = 0;           /* nobody reads the chip's OTP in this run */
+	}
 	if (PE_parse_boot_arg_str("bt_hcd", arg, sizeof(arg)) && arg[0] != 0) {
 		snprintf(paths[npaths++], sizeof(paths[0]), "%s%s", arg[0] == '/' ? "" : HCD_DIR, arg);
 	} else if (PE_parse_boot_arg_str("bt_module", module, sizeof(module)) && module[0] != 0) {
@@ -759,6 +780,28 @@ module_patch(char *file, size_t room, uint64_t *size)
 	say("bt: 6: the patch from the root filesystem: %s%s%s (waiting up to %u s for it)\n", paths[0],
 	    npaths > 1 ? ", else " : "", npaths > 1 ? paths[1] : "", wait_s);
 	for (uint32_t waited = 0; ; waited++) {
+		/*
+		 * Both modules' patches on the root and nobody said which: the module's own, as Wi-Fi read it from the chip's OTP
+		 * (brcmfmac=2 and up, after wifi_delay=), waited for up to bt_otp_wait seconds while both are there; then Murata's
+		 * first, as before. One patch on the root is taken at once, as before.
+		 */
+		if (guessed && npaths == 2) {
+			const char *read = hakios_bcm4361_module();
+
+			if (read != NULL && (strcmp(read, "murata") == 0 || strcmp(read, "semco") == 0)) {
+				snprintf(paths[0], sizeof(paths[0]), HCD_DIR "bcm4361B2_%s.hcd", read);
+				npaths = 1;
+				guessed = false;
+				say("bt: 6: the module is %s's, as Wi-Fi read it from the chip's OTP: %s\n", read, paths[0]);
+			} else if (waited < otp_wait && root_has(paths[0]) && root_has(paths[1])) {
+				if (waited % 30 == 0) {
+					say("bt: 6: both patches are on the root: waiting up to %u s for Wi-Fi to read the module from the "
+					    "chip's OTP (bt_otp_wait=, bt_module=)\n", otp_wait);
+				}
+				sleep_ms(1000);
+				continue;
+			}
+		}
 		for (unsigned k = 0; k < npaths; k++) {
 			uint8_t *d = NULL;
 			uint64_t s = 0;

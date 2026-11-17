@@ -93,6 +93,7 @@ BT_HCD	arg	bt_hcd	User space	k	hakios.bcm4361_bt.c	the patch file's name in fw/ 
 BT_HCD_WAIT	arg	bt_hcd_wait	User space	k	hakios.bcm4361_bt.c	
 BT_KEEP	arg	bt_keep	User space	k	hakios.bcm4361_bt.c	leave the chip powered at the end (default: BT_EN and BT_WAKE low once the steps are done or one fails)
 BT_MODULE	arg	bt_module	User space	k	hakios.bcm4361_bt.c	murata or semco: which patch (bcm4361B2_<m>.hcd; default: the module Wi-Fi read in OTP, else a guess)
+BT_OTP_WAIT	arg	bt_otp_wait	User space	k	hakios.bcm4361_bt.c	seconds to wait for Wi-Fi's reading of the module in OTP when both patches are on the root (120)
 BT_SCAN	arg	bt_scan	User space	k	hakios.bcm4361_bt.c	
 BT_TRACE	arg	bt_trace	User space	k	hakios.bcm4361_bt.c	
 BT_TTY	arg	bt_tty	User space	k	hakios.bcm4361_bt.c	
