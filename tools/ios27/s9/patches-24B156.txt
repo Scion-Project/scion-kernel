@@ -1,0 +1,12 @@
+# Single-word patches of the iOS 27.2.1 (24B156, iPhone12,1) shared cache for the S9 build: the 24B156 counterpart of
+# patches-24A446.txt. NOT RUN ON A PHONE, and no root has been built with it. Each word was found again on 17 November 2026 in the
+# builder's own 24B156 restore image by the function the 24A446 line names (its symbol in the cache), and the instruction checked
+# against what the 24A446 patch did (docs/ios27/UPDATING-IOS.md, "24B156: what was found"); prepare-root-inputs.sh checks every
+# EXPECT word against your cache before it uses this list. Numbers read from the image; no Apple code is in this file.
+# INCOMPLETE: the CoreImage word of patches-24A446.txt (a default CIContext without Metal is the software context; Settings symbol
+# icons) was NOT carried over: -[CIContext initWithOptions:] is laid out differently in 24B156 and the equivalent instruction has
+# to be chosen by hand and tried on a phone. Without it some Settings rows have no symbol (docs/ios27/TEXT-DATA.md).
+0x1ab9b2420 d503237f d65f03c0 SystemConfiguration: the wait-for-IOKit-to-quiesce block returns at once (Settings hung in it)
+0x1aab4d00c d503237f d65f03c0 SafariCore: WBSSetUpAccessToAppDataContainerWithIdentifier returns at once (kbd crashed on first use)
+0x184306ce8 36000294 14000014 QuartzCore: render_for_time never takes the 0.1 s (10 Hz) update clamp (tbz w20, #0 now +0x50)
+0x1c64cf0fc 52800044 52800024 PosterFoundation: the poster viability dictionary asks for one resource value, not two (PosterBoard)

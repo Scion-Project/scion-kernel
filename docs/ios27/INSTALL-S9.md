@@ -259,7 +259,9 @@ only (`sweetfg=1 rtc_pmic=1`), Sileo's installs (`persona_lax=1`), Wi-Fi (`wifi_
   line has `sweetatpath=1`. See [CONTROL-CENTRE.md](CONTROL-CENTRE.md).
 - **No crash reports** are written (ReportCrash is not in the root's job set); the console's `CRASH` lines are the record,
   and `tools/ios27/crashlog-symbolicate.py` symbolicates them. [CONTROL-CENTRE.md](CONTROL-CENTRE.md) has the details.
-- The command line and the patches are for build 24A446 only. Another restore image is refused.
+- The command line and the patches are for build 24A446 only. Another restore image is refused. The build the tools use is
+  set in `tools/ios27/builds/` (`DEFAULT` and one `.conf` per build); what moving to a newer iOS involves, and why it has not
+  been done yet, is in [UPDATING-IOS.md](UPDATING-IOS.md).
 
 ## Who made what
 
