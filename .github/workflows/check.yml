@@ -60,6 +60,8 @@ jobs:
         run: python3 tools/ios27/fullroot/pipeline/cache/aot/dsc_header_test.py
       - name: The S9's firmware in the iOS 27 root build is complete and checked or the build stops, and the root says what it has (made-up files)
         run: bash tools/ios27/fullroot/firmware-test.sh
+      - name: One iOS 27 root build at a time per work directory and per image (the lock, in a scratch directory)
+        run: bash tools/ios27/fullroot/build-lock-test.sh
       - name: The backup tool only reads, copies exactly, and proves every copy
         run: python3 tools/backup-partitions-test.py
       - name: Saved var archives use the newest intact slot
