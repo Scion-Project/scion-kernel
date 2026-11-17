@@ -1976,17 +1976,17 @@ set_own_address(void)
 		say("bt: 7: no bt_addr=<a> (the phone's EFS:/bluetooth/bt_addr is not read on this kernel): the chip keeps "
 		    "its default\n");
 		return;
-	}
 #else   /* xnu-8796: read address from EFS partition */
-	if (hakios_partition_file("EFS", "/efs", "/bluetooth/bt_addr", 64, &data, &size) == 0 && data != NULL &&
-	    addr_parse((const char *)data, (size_t)size, want)) {
-		from = "the phone's EFS:/bluetooth/bt_addr";
-	} else {
-		say("bt: 7: no address of the phone's own (EFS:/bluetooth/bt_addr not read, or not an address): the chip keeps "
-		    "its default\n");
-		return;
-	}
+		if (hakios_partition_file("EFS", "/efs", "/bluetooth/bt_addr", 64, &data, &size) == 0 && data != NULL &&
+		    addr_parse((const char *)data, (size_t)size, want)) {
+			from = "the phone's EFS:/bluetooth/bt_addr";
+		} else {
+			say("bt: 7: no address of the phone's own (EFS:/bluetooth/bt_addr not read, or not an address): the chip keeps "
+			    "its default\n");
+			return;
+		}
 #endif   /* __has_include(<vm/vm_kern_xnu.h>) / EFS reader */
+	}
 	addr_text(want, a, sizeof(a));
 	if (!hci(HCI_BCM_WRITE_BD_ADDR, want, 6, ret, &rl, CMD_TIMEOUT_MS, false)) {
 		say("bt: 7: Write_BD_ADDR (0xFC01) %s from %s: not taken; the chip keeps its default\n", a, from);
