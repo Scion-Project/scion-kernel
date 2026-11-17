@@ -15,7 +15,8 @@
  *
  * What this does: -[FigCaptureClientApplicationStateMonitor layoutMonitor:didUpdateLayout:] is replaced (checked first:
  * 4 arguments, returns void). When the monitor is the main display's (+[FigCaptureDisplayLayoutMonitor
- * sharedDisplayLayoutMonitor]) and the layout it gives is nil, the client is given in its place a layout of that display
+ * sharedDisplayLayoutMonitor]) and the layout it gives is nil, or has no foreground application while FrontBoard's own
+ * monitor under it (its FBSDisplayLayoutMonitor) has no layout at all, the client is given in its place a layout of that display
  * with the client's own application as its one foreground application (a FigCaptureDisplayLayout made with its own
  * -_init, -setDisplayType: and -setForegroundApps:). Every layout FrontBoard does publish goes through unchanged, and
  * RunningBoard's state still decides: an application that leaves the screen is still seen as in the background. With no
@@ -78,17 +79,47 @@ layout_with(id monitor, id app)
 	return made;
 }
 
+/*
+ * FrontBoard gave MONITOR (a FigCaptureDisplayLayoutMonitor) nothing: its FBSDisplayLayoutMonitor (_layoutMonitor) has no
+ * current layout. CMCapture then hands its clients an empty FigCaptureDisplayLayout, not nil (phone 1, 22:14).
+ */
+static bool
+frontboard_gave_nothing(id monitor)
+{
+	Ivar ivar = class_getInstanceVariable(object_getClass(monitor), "_layoutMonitor");
+	id fbs = ivar != NULL ? object_getIvar(monitor, ivar) : nil;
+
+	return fbs == nil || (class_respondsToSelector(object_getClass(fbs), sel_registerName("currentLayout")) &&
+	    send(fbs, "currentLayout") == nil);
+}
+
+static long
+foreground_count(id layout)
+{
+	id apps = layout != nil && class_respondsToSelector(object_getClass(layout), sel_registerName("foregroundApps")) ?
+	    send(layout, "foregroundApps") : nil;
+
+	return apps != nil ? (long)CFArrayGetCount((CFArrayRef)apps) : 0;
+}
+
 static void
 w_did_update(id self, SEL sel, id monitor, id layout)
 {
 	static id said[SAID];
 	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+	static int diagnosed;
 	Class monitors = objc_getClass("FigCaptureDisplayLayoutMonitor");
 	id main_display = monitors != Nil ? send((id)monitors, "sharedDisplayLayoutMonitor") : nil;
+	bool is_main = monitor != nil && monitor == main_display;
+	bool nothing = is_main && (layout == nil || (foreground_count(layout) == 0 && frontboard_gave_nothing(monitor)));
 	id app, made;
 
-	if (layout != nil || monitor == nil || monitor != main_display || (app = client_application(self)) == nil ||
-	    (made = layout_with(monitor, app)) == nil) {
+	if (is_main && __atomic_fetch_add(&diagnosed, 1, __ATOMIC_RELAXED) < 3) {
+		say("layout: the main display's layout for a client: %s, %ld foreground app(s), FrontBoard's monitor %s",
+		    layout == nil ? "nil" : "a layout", foreground_count(layout),
+		    frontboard_gave_nothing(monitor) ? "has NO layout" : "has a layout");
+	}
+	if (!nothing || (app = client_application(self)) == nil || (made = layout_with(monitor, app)) == nil) {
 		o_did_update(self, sel, monitor, layout);
 		return;
 	}
