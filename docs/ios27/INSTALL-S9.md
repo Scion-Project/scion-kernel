@@ -273,6 +273,14 @@ hot run), the sensor hub (`shub=6 shub_hid=3`), restart and power off from iOS (
 only (`sweetfg=1 rtc_pmic=1`), Sileo's installs (`persona_lax=1`), Wi-Fi (`wifi_pcie=6 brcmfmac=8`), audio and Bluetooth
 (`abox=8 max98512=3 cs47l93=6 abox_mic=1 abox_rmem=1 bt=7`) and the modem (`cp=7 cp_nv=2 cp_delay=40 cp_rfs=1 cp_if=1`).
 
+Since 18 November 2026 the line also has the cameras (`cam_s9=7 cam_switch=1`: front and rear in one boot), the GPU's
+job interrupt (`sgu_irq=1`, measured on a phone on 17 November), the reading of files compressed as decmpfs type 16
+(`decmpfs_lz4=1`: the app switcher's snapshots) and dyld's `@rpath` for widgets (`sweetatpath=1`). Of these only
+`sgu_irq=1` has run on a phone as written here; the others are on so that they are tested together. Left off on purpose:
+`sweetfb_dpp` (after its probe boot), `sweetc2`, `gov_policy=3`, `ocp_guard=4` and `sgu_depth`. The built-in line is
+now 851 of the command line's 1024 bytes: when the loader's line leaves no room the last ones are left out, and the
+boot log names them (`STARLTE BOOTARGS: WARNING`).
+
 - To turn one off for a run, name it on the command line with 0: `--cmdline 'sbgl=0 sweetspeed=408782847 cp=0 bt=0'`.
 - The kernel side is on; what iOS needs on top of it (the sensors' library, the Wi-Fi firmware and wifid, the audio and
   Bluetooth pieces, the cellular daemon and the status bar's library) the root build of section 5 puts on the root
