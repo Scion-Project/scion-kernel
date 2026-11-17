@@ -13,6 +13,9 @@
 //   PL w c commit e<encoders> enc<us from creation to commit>   and   PL w c done gpu<us from commit to completion>
 // Texture flags: s IOSurface, v view, b over a buffer, P private, S shared, M managed, m memoryless, r render target, w shader write.
 // Load/store: L0 dontcare 1 load 2 clear; S0 dontcare 1 store 2 resolve 3 store+resolve 4 unknown.
+// The bridge column (br<us>/<calls>) is the time from the entry of the encoder's state, draw and dispatch calls to the end of
+// their bridge call, summed: this frontend's and the runtime's own share of the encoder's time (the last column), the rest
+// being the caller's (CoreAnimation's) time between calls.
 // The scissor column (sc) sums, over the draws, the scissor's area (or the target's when none is set), in thousands of pixels: an upper
 // bound of the pixels drawn, i.e. of the overdraw.
 #pragma once
@@ -36,6 +39,7 @@ struct NBPassLog {
  NBPassTex tex[12];unsigned ntex,texOver;
  const void *bound[32];                          // the texture at each index of the logged stage (fragment, or compute), now
  uint64_t began;
+ uint64_t callStart,bridgeUs,calls;              // time inside this frontend and the bridge, from an encoder call's entry to its check
 };
 
 static int gPassLogEvery=-1;   // seconds between windows; 0 off
@@ -88,6 +92,10 @@ static void passLogName(NBPassLog *l,const char *name) {
  if(l->nnames==sizeof l->names/sizeof l->names[0]){l->namesOver++;l->current=-1;return;}
  strlcpy(l->names[l->nnames].name,name,sizeof l->names[0].name);l->current=(int)l->nnames++;
 }
+static inline void passLogEnter(NBPassLog *l) {if(l)l->callStart=passLogNowUs();}
+static inline void passLogLeave(NBPassLog *l) {
+ if(l && l->callStart){l->bridgeUs+=passLogNowUs()-l->callStart;l->calls++;l->callStart=0;}
+}
 static void passLogCount(NBPassLog *l) {if(l && l->current>=0)l->names[l->current].count++;}
 static void passLogTexture(NBPassLog *l,unsigned index,const void *key,uint32_t w,uint32_t h,uint32_t fmt,uint32_t mips,const char *flags) {
  if(!l)return;
@@ -123,7 +131,7 @@ static void passLogEnd(NBPassLog *l) {
  s+=" | t";
  for(unsigned i=0;i<l->ntex;i++){const NBPassTex &x=l->tex[i];snprintf(t,sizeof t," %ux%u f%u m%u %s*%u",x.w,x.h,x.fmt,x.mips,x.flags,x.draws);s+=t;}
  if(l->texOver){snprintf(t,sizeof t," +%u",l->texOver);s+=t;}
- snprintf(t,sizeof t," | %lluus",(unsigned long long)(passLogNowUs()-l->began));s+=t;
+ snprintf(t,sizeof t," | br%llu/%llu | %lluus",(unsigned long long)l->bridgeUs,(unsigned long long)l->calls,(unsigned long long)(passLogNowUs()-l->began));s+=t;
  passLogSay(s);
  delete l;
 }
