@@ -261,6 +261,52 @@ press the shutter, wait 15 s, screenshot; open Photos. Expected lines: `thumbnai
 `trace: stream: set (Back Camera) VideoOutputConfigurations`, `stream: the graph starts the stream`, `PrimaryScaler: the first
 picture given`. If it aborts again, look for the `STR *** Terminating app due to uncaught exception` line.
 
+### The fourth cause: the stream's colour info was empty (18 November, 00:00)
+
+Phone 1 booted dylib `-9` (17 November, 23:47). cameracaptured did not abort any more; Camera.app's session registered,
+copied the device, asked for the back camera's stream and set its outputs, and then failed at once: `Received a session
+runtime error notification: AVFoundationErrorDomain Code=-11800 ... (-12780)`. The app retried about thirty times a second
+(register, copy device, streams asked for, given back), the viewfinder stayed black, the shutter did nothing, and the flip
+button gave the same loop on the front camera. The last thing the stream was asked before each give-back was
+`VideoOutputsColorInfo`, answered `{ }`.
+
+iOS 27.0.1's CMCapture (24A446's shared cache, its logic only): the source node, bringing the stream up to date for a session
+(`-[BWMultiStreamCameraSourceNode allocateOrReuseBufferPoolsFromSourceNode:]`, `_bringStreamUpToDate`,
+`_verifyColorSpacePropertiesForAllOutputs`), reads the stream's `VideoOutputsColorInfo` and, for every output whose colour
+space properties are not 0, wants that output's entry to equal `+[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:]`
+of the node's `_colorSpaceProperties` (a dictionary of colour attachments); anything else returns -12780 and the session
+fails. Apple's ISP plug-in answers the property itself with each output's colour attachments; the graph never sets it.
+
+`tools/ios27/camera/camera_colour.c` (always on in cameracaptured with the kernel's camera, not the trace) wraps
+`allocateOrReuseBufferPoolsFromSourceNode:` to know the node on that thread, and `camera_device.c` asks it for the answer when
+the graph has set none: the node's own attachments for each output. Said once: `colour: the stream's colour info for the source
+node's check: colour space properties N, each output {...}`. The pictures keep `camera_device.c`'s own attachments (BT.601
+matrix, BT.709 primaries and transfer); if the node wants another colour space (P3), the preview's colours are off until
+those follow (a known gap below). **Not run on a phone yet** (dylib `-11`). All names it uses are in 24B156's CMCapture too.
+
+### Where the pictures stop: the flow trace
+
+With `cam_trace=1`, `tools/ios27/camera/camera_flowtrace.c` follows the frames through cameracaptured's graph: which of the
+stream's outputs the source node configures, enables and gives handlers to (`trace: graph: ...`), the first sample each node
+output emits (`trace: flow: <node>'s output <name> emits its first sample: WxH 'fmt' IOSurface, time stamp N ms from now`),
+every 10 seconds how many each has emitted (`trace: flow: emitted so far: ...`), each node's dropped samples with their reason
+(`... DROPS a sample`), and the preview stitcher's and the preview image queue sink's first samples, with the sink's image queue
+(`nil` there: nothing reaches the screen). A black viewfinder is then one of: no `the graph starts the stream` (the session
+stopped before, see the CAMLOG lines); the source node emits but the stitcher or the sink never renders (the node between them
+drops: its reason); the sink renders but the app shows nothing (the image queue, the IOSurfaces' format, or the compositor:
+`native-metal` refusals in backboardd's lines); a time stamp far from 0 ms from now (the queue holds frames for later).
+
+### What the S9's sessions are built without, and what restoring each needs
+
+| Left out | Where | Why | To restore |
+|---|---|---|---|
+| Video thumbnails (the filter and style pickers' live previews) | `camera_refuse.c` | the preview pipeline makes no `videoThumbnailSinkOutput` for the S9's stream; the thumbnail pipeline was built on nil and cameracaptured aborted | find which node output N104's preview pipeline feeds them from (a thumbnail output of the stream, or a scaler node) and offer it |
+| The Live Photo movie | `camera_refuse.c` | the movie file sink's scaler was built on a nil video capture output: aborted | a video capture output for Photo mode (the source pipeline's), and the sound around the shutter (no audio server on this root) |
+| Formats behind a front-end scaler (1080p30, 720p30, 1920 x 1440) | `camera_formats.c` | cameracaptured threw sizing an output whose pixel format it did not know (with `IntermediateTap` missing, abort 1 above) | offer `Video-FullSensor-FES-30` again now that `IntermediateTap` is listed, and check the outputs' pixel formats |
+| `IntermediateTap` frames | `camera_formats.c`, `camera_device.c` | listed (BGRA) so the graph can weigh it, but no frame is made for it | deliver it when the graph enables it (the flow trace says whether it does) |
+| P3 colour on the pictures | `camera_device.c` | the frames carry BT.709 attachments whatever the node's colour space | set each picture's attachments from the node's `pixelBufferAttachmentsForColorSpaceProperties:` and convert the colours |
+| SIFR (the iPhone sensor's second exposure) | `camera_formats.c` | the S9's sensors have none; the formats say SIFR only so that N104's names match | nothing to restore |
+
 ### The trace
 
 `cam.dylib` has a trace, off by default. It is on with `cam_trace=1` on the boot image's command line, or with the file
