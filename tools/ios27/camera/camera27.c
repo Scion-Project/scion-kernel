@@ -206,6 +206,7 @@ emit_sample_buffer(id self, SEL selector, void *sample_buffer)
 		}
 		return;
 	}
+	scioncam_flow_emit(self, sample_buffer);
 	((void (*)(id, SEL, void *))original_emit_sample_buffer)(self, selector, sample_buffer);
 }
 
@@ -308,6 +309,7 @@ image_added(const struct mach_header *header, intptr_t slide)
 	if (trace_level > 0) {
 		scioncam_trace_vendor();
 		scioncam_trace_state();
+		scioncam_trace_flow();
 	}
 }
 
