@@ -1088,6 +1088,17 @@ void avfboot_main(uint64_t fdt_pa)
 	uart_puts("\n\n");
 
 	stage = "xnu";
+	/*
+	 * FP/SIMD on before the kernel runs, on whichever core it starts (here or in avfboot_hop).
+	 * XNU's start.s turns it on itself (CPACR_EL1.FPEN in common_start, MMU on), and its first FP
+	 * instruction (cpu_data_init(), from arm_init()) should then run. On the Pixel 7 (pKVM)
+	 * it took an "FP/SIMD access trapped" exception instead (ESR 0x1fe00000) with CPACR_EL1
+	 * reading 0x300000 in the vector. With no thread pointer yet, sleh_synchronous() faulted on it,
+	 * and so on until the exception stack ran into the interrupt stack: the vCPU spun at 100%,
+	 * nothing on the console. Half the boots at first, all of them later the same day. With FPEN
+	 * set here, before the jump, the same kernel boots every time.
+	 */
+	__asm__ volatile("msr cpacr_el1, %0" : : "r"(3ULL << 20));
 	__asm__ volatile("dsb sy; ic iallu; dsb sy; isb" ::: "memory");
 	if (m.mpidr[0] != m.self) {
 		/* the kernel starts on the big core (see "fdt: cpus"); this one switches itself off */
