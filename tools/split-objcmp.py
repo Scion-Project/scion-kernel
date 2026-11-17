@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: MIT-0
 """Two builds of the kernel compared, before and after a split (docs/architecture.md, "How a split is proven").
 
-usage: tools/split-objcmp.py kernel BEFORE AFTER
-       tools/split-objcmp.py objects BEFORE.o[,BEFORE2.o...] AFTER.o[,AFTER2.o...] [--objdump PATH]
+usage: tools/split-objcmp.py kernel BEFORE AFTER [--prefix OLD=NEW]...
+       tools/split-objcmp.py objects BEFORE.o[,BEFORE2.o...] AFTER.o[,AFTER2.o...] [--objdump PATH] [--prefix OLD=NEW]...
+
+--prefix OLD=NEW  a string of BEFORE that begins with OLD is compared as if it began with NEW: the build tree's path,
+         which assertions and panics carry in __FILE__, when the two builds were made in different directories.
 
 kernel   two linked kernels (Mach-O): their external symbols, by name, must be the same set; every symbol (local ones
          too) is listed where the two differ; the C strings (every __cstring section) must be the same multiset.
@@ -63,18 +66,26 @@ def macho(path):
     return sections, symbols
 
 
-def cstrings(sections):
+PREFIXES = []
+
+
+def cstrings(sections, before=False):
     c = collections.Counter()
     for (seg, sect), b in sections.items():
         if sect == "__cstring":
             for s in b.split(b"\0"):
                 if s:
+                    if before:
+                        for old, new in PREFIXES:
+                            if s.startswith(old):
+                                s = new + s[len(old):]
+                                break
                     c[s] += 1
     return c
 
 
 def compare_strings(before, after, label):
-    a, b = cstrings(before), cstrings(after)
+    a, b = cstrings(before, True), cstrings(after)
     gone, new = a - b, b - a
     if not gone and not new:
         print(f"{label}: C strings: the same ({sum(a.values())})")
@@ -200,6 +211,11 @@ def main():
     if "--objdump" in args:
         i = args.index("--objdump")
         objdump = args[i + 1]
+        del args[i:i + 2]
+    while "--prefix" in args:
+        i = args.index("--prefix")
+        old, _, new = args[i + 1].partition("=")
+        PREFIXES.append((old.encode(), new.encode()))
         del args[i:i + 2]
     if len(args) == 3 and args[0] == "kernel":
         bad = cmd_kernel(args[1], args[2])
