@@ -7,6 +7,7 @@
 #                   (adb pull /dev/block/by-name/RECOVERY: tools/ios27/s9/flash.sh pull-template), or the TWRP .img you installed.
 #                   Its header, DTBH (Samsung's device tree for S-Boot) and nothing else are kept.
 #   [--cmdline S | --cmdline-file F]   default tools/ios27/cmdline/starlte-rc.txt (the rest is built into the kernel)
+#                   sweetepoch=<now> is added to it unless it names one (the clock's floor)
 #   [--loader I]    default xnuloader/sboot/out/xnu_boot.Image (tools/ios27/s9/build-loader.sh)
 #   [--out O]       default out/xnu-boot-ios27.img (out/ is not in git; the image holds your IPSW's device identity: never share it)
 # What it does (the steps the project's test images are made with): strip -x copy of the kernel; the S9's Apple device tree
@@ -24,7 +25,7 @@ while [ $# -gt 0 ]; do
 	--kernel) KERNEL=$2; shift ;; --donor-adt) DONOR=$2; shift ;; --template) TEMPLATE=$2; shift ;;
 	--cmdline) LINE=$2; LINEFILE=; shift ;; --cmdline-file) LINEFILE=$2; shift ;;
 	--loader) LOADER=$2; shift ;; --out) OUT=$2; shift ;;
-	-h | --help) sed -n '3,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "make-boot-image: unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -36,6 +37,9 @@ die() { echo "make-boot-image: $*" >&2; exit 1; }
 [ -f "$LOADER" ] || die "no loader at $LOADER (tools/ios27/s9/build-loader.sh)"
 if [ -n "$LINEFILE" ]; then [ -f "$LINEFILE" ] || die "no command line file $LINEFILE"; LINE=$(cat "$LINEFILE"); fi
 case "$LINE" in *$'\n'*) die "the command line has more than one line" ;; esac
+# the calendar's floor: the time this image was made, unless the line has its own (the kernel's clock starts there until the
+# PMIC's clock or the network says better; without it every boot starts in 1970)
+case " $LINE " in *" sweetepoch="*) ;; *) LINE="$LINE sweetepoch=$(date +%s)" ;; esac
 n=$(printf '%s' "$LINE" | wc -c | tr -d ' ')
 [ "$n" -le 607 ] || die "the command line is $n bytes; the payload holds 607 (it would be cut)"
 mkdir -p "$(dirname "$OUT")"
