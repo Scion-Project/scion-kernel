@@ -308,6 +308,14 @@ image_added(const struct mach_header *header, intptr_t slide)
 	}
 }
 
+/* in Camera.app, with the trace: AVFoundation's cameras said (camera_apptrace.c) once AVFCapture is there */
+static void
+app_image_added(const struct mach_header *header, intptr_t slide)
+{
+	(void)header, (void)slide;
+	scioncam_trace_app();
+}
+
 /* the trace's start in this program: its os_log taken, and said */
 static void
 trace_start(const char *name)
@@ -328,6 +336,7 @@ scion_camera_init(void)
 	if (name != NULL && strcmp(name, APP) == 0) {
 		if ((trace_level = scioncam_trace_level()) > 0) {
 			trace_start(name);
+			_dyld_register_func_for_add_image(app_image_added);
 		}
 		return;
 	}

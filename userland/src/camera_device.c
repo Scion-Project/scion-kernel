@@ -54,6 +54,9 @@
 #include <unistd.h>
 #include "camera_isp.h"
 #include "camera_say.h"
+#ifdef HAKIOS_CAMERA_N104
+#include "camera_formats.h"     /* tools/ios27/camera: the streams' formats on iOS 27 */
+#endif
 
 #define say hakios_camera_say
 #define say_value hakios_camera_say_value
@@ -386,12 +389,7 @@ static const struct camera {
 	float           fallback_zoom;  /* ... zoomed this much more, so that the picture is the same part of the scene */
 } cameras[3] = {
 #ifdef HAKIOS_CAMERA_N104
-	/*
-	 * iOS 27, whose root is the iPhone 11's (N104): CMCapture there has only N104/AVCaptureSession.plist, and its
-	 * FigCaptureStreamFormats "Photo" and "Video-60" (back) and "Photo" and "Video-30" (front) have these sensor sizes and
-	 * frame rates (read from iOS 27.0.1's plist, 17 November 2026; the front "Photo" names no frame rate, 30 is ours).
-	 * The lenses' numbers are the iPhone X's as below: nothing on iOS 27 has been seen to read them.
-	 */
+	/* iOS 27 (N104's plist): the streams offer tools/ios27/camera/camera_formats.c's formats; the lenses are the iPhone X's */
 	{ 1, "Back Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:0", false, 4.0, 1.8, 1.22, 65.0,
 	  { { 4224, 3168, 60 }, { 4224, 2384, 60 } }, 0, 1 },  /* "Photo", "Video-60" */
 	{ 2, "Front Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:1", false, 2.87, 2.2, 1.0, 70.0,
@@ -1773,10 +1771,12 @@ stream_create(CFAllocatorRef allocator, const struct camera *camera, CFStringRef
 	CFDictionaryRef f[2] = { format(camera->formats[0][0], camera->formats[0][1], camera->formats[0][2], false, camera->fov),
 		format(camera->formats[1][0], camera->formats[1][1], camera->formats[1][2], false, camera->fov) };
 
-	s->formats = CFArrayCreate(NULL, (const void **)f, 2, &kCFTypeArrayCallBacks);
+#ifdef HAKIOS_CAMERA_N104
+	s->formats = scioncam_n104_formats(camera->sensor, camera->name, camera->fov, format);
+#endif
+	s->formats = s->formats != NULL ? s->formats : CFArrayCreate(NULL, (const void **)f, 2, &kCFTypeArrayCallBacks);
 	s->supported = supported(stream_props, sizeof(stream_props) / sizeof(stream_props[0]));
-	CFRelease(f[0]);
-	CFRelease(f[1]);
+	CFRelease(f[0]), CFRelease(f[1]);
 	return o;
 }
 

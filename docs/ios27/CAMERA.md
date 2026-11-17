@@ -37,7 +37,7 @@ Nothing here writes to the camera's lens memory, and nothing touches the iris ca
 | Who reads it | mediaserverd, the capture stack's host: `libhakios.media.dylib` (`inject_media.c` + `camera_device.c` + `camera_isp.c`), inserted by the kernel | **cameracaptured** (`/usr/libexec/cameracaptured`, user mobile): iOS 27 has no mediaserverd. `cam.dylib` (`tools/ios27/camera/camera27.c` + the same `camera_device.c` and `camera_isp.c`), inserted by the kernel (`sweetinject=` from the root build's record) |
 | How the capture stack gets the device | `+[BWFigCaptureDeviceVendor sharedCaptureDeviceVendor]` replaced: with a camera, a vendor made by `-initWithDeviceCreateFunction:` with `hakios_camera_device_create` | the vendor is made by `+[BWFigCaptureDeviceVendor sharedCaptureDeviceVendorWithDefaultDeviceCreateFunction:]`, which, given no function, takes `FigCaptureGetCaptureDeviceCreateFunction()`'s: Apple's camera driver found in IOKit (`AppleH10CamIn` on the iPhone 11) and the ISP plug-in's create function (`H10ISPCaptureDeviceCreate`, `/System/Library/MediaCapture/H10ISP.mediacapture`, in the shared cache). The S9 has neither: no device. `cam.dylib` gives that class method `hakios_camera_device_create` when it is given none |
 | The device's interface | CoreMedia derived objects: base class v1; device class v3 (ProcessingSessionCreate, RequestStreams, RelinquishStreams, PerformPearlCalibration); stream class v2 (Start, Stop, AddAttachmentsToSampleBuffer); properties by name; frames to `VideoOutputHandlers`' `PixelBufferHandler` blocks | **the same shapes** in iOS 27.0.1's `kH10ISPCaptureDeviceVTable` and `kH10ISPCaptureStreamVTable`, the same create function's arguments (allocator, options, out); every property name `camera_device.c` uses is a string of iOS 27's CMCaptureCore, CMCaptureDevice or CMCapture (one, `UnlockAWBNow`, is not: it is answered if asked, and nothing asks it) |
-| Formats | named as the iPhone X's (`D22/AVCaptureSession.plist`: back "Photo" 4032 x 3024, "Video-60" 4224 x 2376; front 3088 x 2320, 3840 x 2160) | iOS 27's CMCapture has only the iPhone 11's `N104/AVCaptureSession.plist`: back "Photo" 4224 x 3168 at 60, "Video-60" 4224 x 2384; front "Photo" 4032 x 3024, "Video-30" 4032 x 2272 (`HAKIOS_CAMERA_N104` in `camera_device.c`) |
+| Formats | named as the iPhone X's (`D22/AVCaptureSession.plist`: back "Photo" 4032 x 3024, "Video-60" 4224 x 2376; front 3088 x 2320, 3840 x 2160) | iOS 27's CMCapture has only the iPhone 11's `N104/AVCaptureSession.plist`: back "Photo" 4224 x 3168 at 60, "Video-60" 4224 x 2384; front "Photo" 4032 x 3024, "Video-30" 4032 x 2272 (`HAKIOS_CAMERA_N104` in `camera_device.c`); matched by more than size: see "The second cause" below, `tools/ios27/camera/camera_formats.c` |
 | Refusals of hardware the phone lacks | portrait prewarm skipped, no-audio 'nope' taken as started, video stabilization 0, quality prioritization at most 1, GNR passed by, NULL buffers not emitted, VCPHEVC's software HEVC encoder registered; each checked against an address of 20F66's shared cache | the same methods, the same names and arguments in iOS 27.0.1, checked by their number of arguments and return type (addresses of 16.5 mean nothing here); the Metal device's removal and the flashlight's own vendor (16.5 addresses) are not carried over |
 | Its log | mediaserverd's standard error | the console (the kernel's log): `hakios: camera: ...` (the device) and `SCIONCAM[pid]: ...` (the library) |
 | Why the Camera app is on the home screen | `Camera.app`'s `SBAppTags` = `still-camera`; MobileGestalt answers it from `IODeviceTree:/arm-io/isp` (`camera-rear`), which the loader made with `cam=5` | the same tag; iOS 27's libMobileGestalt answers `still-camera` from `/arm-io/isp`'s `camera-front` or `camera-rear`, `front-facing-camera` from `camera-front`, `rear-facing-camera` from `camera-rear`. The S9's iOS 27 tree has no isp node, so the app is hidden. `make-boot-image.sh` now adds it (`tools/ios27/camera/adt-isp-node.py`), only for a boot that has the camera |
@@ -157,6 +157,34 @@ Neither has been tried on a phone yet.
 Also in that log: `Attempting to use an unsupported session preset AVCaptureSessionPresetPhoto on device ... Front Camera`.
 It may only follow from the failed input, or the device's formats may not match N104's presets. The traced boot with the
 corrected `sweetspeed` decides it.
+
+### The second cause: the cameras had no formats (17 November, 20:45)
+
+The third traced boot had `sweetspeed=442337279`. tccd then allowed the camera (`kTCCServiceCamera ... AuthRight: Allowed`)
+and the app went on to configure its session, and stopped one step later, the same on the front and the back camera (and
+on a later boot with the root's audio daemons running, so audio is not it):
+
+    Attempting to use an unsupported session preset AVCaptureSessionPresetPhoto on device <... [Front Camera] ...>
+    Failed to add input <AVCaptureDeviceInput ... [Front Camera]> to session <AVCaptureSession ... [AVCaptureSessionPresetHigh]>
+    CAMModeAndDeviceCommand configuration failed! (... CAMModeAndDeviceCommandCannotCaptureErrorDomain Code=-32200 ...)
+
+The first line is CameraUI's (`-[CAMModeAndDeviceCommand executeWithContext:]`): the device said it takes no Photo preset.
+iOS 27's capture stack makes a camera's AVCaptureDevice formats from N104's `AVCaptureSession.plist`: each format there
+names a stream format of the plist's `FigCaptureStreamFormats` ("12MP" names "Photo", "1080p30" names
+"Video-FullSensor-FES-30"), and CMCapture looks for that stream format in the stream's `SupportedFormatsArray`
+(`csu_resolveFormatIndexForNamedStreamFormat`, 24A446's shared cache: its logic only). It compares the sensor size, binning,
+sensor HDR, the front-end scaler's output size, `SIFREnabled` and the maximum frame rate. N104's "Photo", "Video-60" (back)
+and "Video-30" (front) have `SIFREnabled`; `camera_device.c`'s formats did not say it. So no stream format was found, every
+AVCaptureDevice format was dropped, and the cameras had no formats and no presets.
+
+`tools/ios27/camera/camera_formats.c` now gives the streams N104's formats on iOS 27: back "Photo" (4224 x 3168, 60),
+"Video-60" (4224 x 2384), "Video-FullSensor-FES-30" (4224 x 3168, scaler 2304 x 1728, also 1920 x 1440's); front "Photo"
+(4032 x 3024), "Video-30" (4032 x 2272), "Video-FullSensor-FES-30" (scaler 2112 x 1584) and "Photo"'s companion without
+SIFR. The sizes are the plist's; the pictures are scaled from the S9's sensors as before, at 30 frames a second. SIFR is the
+iPhone sensor's second, short exposure: the S9 has none and none is made. iOS 16.5's formats are unchanged. **Not run on a
+phone yet.** With the trace on and the library in the app, Camera.app says each camera's formats as AVFoundation has them
+and its answer for each preset: `trace: app: Front Camera has N format(s)`, `trace: app: ... takes AVCaptureSessionPresetPhoto:
+yes`. `NONE` there means cameracaptured still found none of the plist's formats.
 
 ### The trace
 
