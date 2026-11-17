@@ -70,6 +70,38 @@ put_number(CFMutableDictionaryRef d, const char *key, int value)
 	CFRelease(k);
 }
 
+/*
+ * The IntermediateTap output, listed so that iOS 27's graph can weigh it: BWMultiStreamCameraSourceNode compares the
+ * bandwidth of PrimaryScaler with IntermediateTap (for video) and of IntermediateTap with SecondaryScaler (for the
+ * preview) from each output's SupportedPixelFormats (_bytesPerOutputBufferForOutputConfiguration:outputID:). With no
+ * IntermediateTap there the list is empty, its pixel format 0, and cameracaptured aborts: "Unknown pixel format ()"
+ * (phone 1, 17 November 23:05, at the shutter-less first configuration). It is offered in BGRA only, at the sensor's
+ * size: four bytes a pixel against the scalers' one and a half, so the graph keeps the scalers, which camera_device.c
+ * feeds; no frame is made for it.
+ */
+static void
+add_intermediate_tap(CFMutableDictionaryRef format, int width, int height)
+{
+	CFDictionaryRef outputs = CFDictionaryGetValue(format, CFSTR("SupportedOutputs"));
+	CFMutableDictionaryRef all = outputs != NULL ? CFDictionaryCreateMutableCopy(NULL, 0, outputs) :
+	    CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFMutableDictionaryRef tap = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
+	    &kCFTypeDictionaryValueCallBacks);
+	int bgra = 0x42475241;  /* 'BGRA' */
+	CFNumberRef pf = CFNumberCreate(NULL, kCFNumberIntType, &bgra);
+	CFArrayRef pfs = CFArrayCreate(NULL, (const void **)&pf, 1, &kCFTypeArrayCallBacks);
+
+	CFDictionarySetValue(tap, CFSTR("SupportedPixelFormats"), pfs);
+	put_number(tap, "NativeWidth", width);
+	put_number(tap, "NativeHeight", height);
+	CFDictionarySetValue(all, CFSTR("IntermediateTap"), tap);
+	CFDictionarySetValue(format, CFSTR("SupportedOutputs"), all);
+	CFRelease(pfs);
+	CFRelease(pf);
+	CFRelease(tap);
+	CFRelease(all);
+}
+
 CFArrayRef
 scioncam_n104_formats(uint32_t sensor, const char *camera, double fov, scioncam_format_fn make)
 {
@@ -100,6 +132,7 @@ scioncam_n104_formats(uint32_t sensor, const char *camera, double fov, scioncam_
 
 		CFRelease(base);
 		CFDictionarySetValue(f, CFSTR("SIFREnabled"), e->sifr ? kCFBooleanTrue : kCFBooleanFalse);
+		add_intermediate_tap(f, e->width, e->height);
 		if (e->fes_width > 0) {
 			put_number(f, "FrontEndScalerOutputWidth", e->fes_width);
 			put_number(f, "FrontEndScalerOutputHeight", e->fes_height);
