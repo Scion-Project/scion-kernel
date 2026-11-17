@@ -86,6 +86,7 @@ BRCMFMAC_TCM_IDX	arg	brcmfmac_tcm_idx	Wi-Fi	k	lx_brcmf.c	the rings' indices stay
 BRIGHTNESS_BRIDGE	arg	brightness_bridge	User space	u	inject_sb.c	the brightness the user sets (Control Center's slider, Settings) is taken to the panel
 BT	arg	bt	User space	k	hakios.bcm4361_bt.c,hakios.bt.c	
 BT_ADDR	hex	bt_addr	User space	k	hakios.bcm4361_bt.c	
+BT_ADDR_EFS	arg	bt_addr_efs	User space	k	hakios.bcm4361_bt.c	the text of EFS:/bluetooth/bt_addr (hakios.ext4ro.h: no write path; EFS is not mounted)
 BT_AGAIN	arg	bt_again	User space	k	hakios.bt.c	the second look this many seconds later (0: no second look; 30)
 BT_BAUD	arg	bt_baud	User space	k	hakios.bcm4361_bt.c	
 BT_EXPANDER_RESET	arg	bt_expander_reset	User space	k	hakios.bcm4361_bt.c	at bt=2 and up, take the expander out of reset if it is held there

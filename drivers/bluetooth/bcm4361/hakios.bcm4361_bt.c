@@ -96,6 +96,9 @@
  *   bt_addr=<a>      at bt=7, the chip's address, "xx:xx:xx:xx:xx:xx" (default: the phone's own, the text of
  *                    /bluetooth/bt_addr in its EFS partition, read only, as Samsung's Android gives it to the chip;
  *                    bt_addr=0: the chip keeps Broadcom's default 43:61:b2:...)
+ *   bt_addr_efs=1    xnu-12377: the phone's own address from EFS:/bluetooth/bt_addr as above (read only, through the
+ *                    modem's ext4 reader), when no bt_addr= is given; without it the chip keeps Broadcom's default, which
+ *                    every S9 then shares. Off by default; not yet run on a phone
  *   bt_vsc=1         at bt=7, Apple's vendor commands this chip does not know answered for iOS's bluetoothd as the table of
  *                    hakios.bt_vsc.h says (a whole reply, true of this chip; nothing but vendor commands is touched);
  *                    "log": the chip's rejections of vendor commands said only. Off by default; not yet run on a phone
@@ -153,6 +156,7 @@
 #include <sys/vnode.h>
 #include <sys/vnode_internal.h>
 #include <kern/kalloc.h>
+#include "hakios.ext4ro.h"
 #endif
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
@@ -1964,6 +1968,40 @@ addr_parse(const char *t, size_t n, uint8_t out[6])
  */
 #define HCI_BCM_WRITE_BD_ADDR   0xFC01
 
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: EFS through the modem's read-only ext4 reader */
+static int
+efs_read(__unused void *ctx, uint64_t off, void *dst, uint32_t len)
+{
+	return hakios_ufs_read_partition("EFS", off, dst, len, NULL);
+}
+
+/* bt_addr_efs=1: the text of EFS:/bluetooth/bt_addr (hakios.ext4ro.h: no write path; EFS is not mounted). Not yet run */
+static bool
+efs_addr(uint8_t want[6])
+{
+	struct ext4ro fs = { .read = efs_read, .ctx = NULL };
+	uint8_t text[64];
+	uint64_t got = 0;
+	bool ok = false;
+
+	if (ext4ro_open(&fs) != 0 || fs.block_size == 0 || fs.block_size > 65536) {
+		return false;
+	}
+	fs.blk = kalloc_data(fs.block_size, Z_WAITOK);
+	fs.blk2 = kalloc_data(fs.block_size, Z_WAITOK);
+	if (fs.blk != NULL && fs.blk2 != NULL && ext4ro_read_file(&fs, "/bluetooth/bt_addr", text, sizeof(text), &got) == 0) {
+		ok = addr_parse((const char *)text, (size_t)got, want);
+	}
+	if (fs.blk != NULL) {
+		kfree_data(fs.blk, fs.block_size);
+	}
+	if (fs.blk2 != NULL) {
+		kfree_data(fs.blk2, fs.block_size);
+	}
+	return ok;
+}
+#endif
+
 static void
 set_own_address(void)
 {
@@ -1986,11 +2024,15 @@ set_own_address(void)
 		}
 		from = "bt_addr=";
 	} else {
-#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: no EFS reader in this tree */
-		/* Starbite port: no EFS reader in this tree */
-		say("bt: 7: no bt_addr=<a> (the phone's EFS:/bluetooth/bt_addr is not read on this kernel): the chip keeps "
-		    "its default\n");
-		return;
+#if __has_include(<vm/vm_kern_xnu.h>)   /* xnu-12377: EFS read only with bt_addr_efs=1 (efs_addr() below) */
+		uint32_t efs = 0;
+
+		if (!PE_parse_boot_argn("bt_addr_efs", &efs, sizeof(efs)) || efs == 0 || !efs_addr(want)) {
+			say("bt: 7: no bt_addr=<a>%s: the chip keeps its default\n", efs ? ", and EFS:/bluetooth/bt_addr not read or "
+			    "not an address" : " (bt_addr_efs=1 reads the phone's own from EFS:/bluetooth/bt_addr)");
+			return;
+		}
+		from = "the phone's EFS:/bluetooth/bt_addr (bt_addr_efs=1)";
 #else   /* xnu-8796: read address from EFS partition */
 		if (hakios_partition_file("EFS", "/efs", "/bluetooth/bt_addr", 64, &data, &size) == 0 && data != NULL &&
 		    addr_parse((const char *)data, (size_t)size, want)) {
