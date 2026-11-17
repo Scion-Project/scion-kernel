@@ -44,8 +44,9 @@
  *                        Samsung's sensor HAL and resume path do; a hub that thinks the AP asleep keeps parts down)
  *   shub_mag=N           the magnetometer's PDC matrix of the S9+'s board (Samsung's ssp-mag-array): 1 the SM-G965F
  *                        (eur_open_26), 2 the Korean SM-G965N (kor_26); 0 (default): none sent
- *   shub_cold=0          leave LDO37 on at a warm start (default 1: off for 100 ms, so a hub that stopped answering
- *                        starts again from cold)
+ *   shub_cold=0          leave LDO37 on at a warm start (default 1 on the S9+: off for 100 ms, so a hub that stopped
+ *                        answering starts again from cold); shub_cold=1 does the same on another phone, where the
+ *                        default is 0 (the S9 has not run it)
  *   shub_keep=0          power the hub off again (NSTDBY low) when the steps end or one fails. Default 1: leave it
  *            running, which the sensors need.
  *   shub_log=1           log the first bytes of every SPI frame (very loud). The first 40 frames are always logged.
@@ -229,7 +230,8 @@ static struct hakios_exynos_spi bus = {
 
 static vm_offset_t pmu, cmu_top, cmu_chub, gpio_chub, alive, peric0;
 static uint32_t steps, keep = 1, log_frames, div_ratio = 15, chub_on_ok;
-static uint32_t cold_start = 1;                 /* shub_cold: LDO37 off and on at a warm start */
+static uint32_t cold_start;                     /* shub_cold: LDO37 off and on at a warm start (hakios_ssp_init(): 1 on
+                                                 * the S9+, where it was run; 0 elsewhere unless asked) */
 static uint32_t ap_awake = 1;                   /* shub_ap_awake: WAKEUP and RESUME after the setup */
 static uint32_t mag_board;                      /* shub_mag: 1 G965F, 2 G965N: which PDC matrix */
 static uint32_t want_sensors = 0x2b3, period_ms = 20, req_rpc = SHUB_RPC_SENSOR_REQ, req_len = 1;
@@ -2635,6 +2637,7 @@ hakios_ssp_init(void)
 		n = 6;
 	}
 	PE_parse_boot_argn("shub_keep", &keep, sizeof(keep));
+	cold_start = strcmp(HAKIOS_DEVICE, "star2lte") == 0;
 	PE_parse_boot_argn("shub_cold", &cold_start, sizeof(cold_start));
 	PE_parse_boot_argn("shub_ap_awake", &ap_awake, sizeof(ap_awake));
 	PE_parse_boot_argn("shub_mag", &mag_board, sizeof(mag_board));

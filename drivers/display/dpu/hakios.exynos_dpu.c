@@ -38,7 +38,8 @@
  *   fb_planes   (with fb_dpp and fb_zc; MiniIOMobileFramebuffer.cpp's boot-arg, on by default) Two layers on two windows:
  *               the window server's surface on the boot loader's window through VGF0, blended by its alpha, over a
  *               layer CoreAnimation detached on window 4 through VGF1 (hakios_scanout_planes(), below), instead of the
- *               processor blending them.
+ *               processor blending them. On the S9+ (star2lte) only: on any other phone hakios_scanout_planes()
+ *               refuses, and the layers are blended on the processor as before.
  *
  * The scaler's coefficients are not Samsung's. They are Catmull-Rom (a cubic through the four nearest pixels), computed
  * at start for each of the nine phases the registers take. The other seven of the hardware's sixteen phases are mirrors
@@ -83,6 +84,12 @@
 #include <sys/hakios.exynos_soc.h>
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
+
+/* The phone this kernel is configured for (sys/hakios.exynos_soc.h has the generated configuration's); the ios-27 tree's
+ * one machine with this display is the Galaxy S9 */
+#ifndef HAKIOS_DEVICE
+#define HAKIOS_DEVICE           "starlte"
+#endif
 extern void IOSleep(unsigned milliseconds);
 
 /* the display driver's side (MiniIOMobileFramebuffer.cpp); stand-ins in drivers/core/hakios.stubs.c */
@@ -809,6 +816,15 @@ hakios_scanout_planes(uint64_t upper, uint32_t upper_rowbytes, uint64_t lower, u
 	uint32_t img, sw, sh, pw, ph, px0, py0, px1, py1, dw, dh;
 
 	if (planes < 0) {
+		return -2;
+	}
+	/*
+	 * Only on the S9+ (star2lte), where it was run (scion-kernel docs/metal.md, build 67). Any other phone answers "not at
+	 * all", and MiniIOMobileFramebuffer blends the two layers on the processor as before: a second DECON window has not
+	 * been run on the S9 or the Note9.
+	 */
+	if (strcmp(HAKIOS_DEVICE, "star2lte") != 0) {
+		planes = -1;
 		return -2;
 	}
 	if (mode != 2 || channel_type != IDMA_VGF0) {
