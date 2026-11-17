@@ -313,6 +313,8 @@ boot log names them (`STARLTE BOOTARGS: WARNING`).
   The likely cause of the first is a daemon the root build leaves out (`siriactionsd`); `CC_CONTROLS=1` keeps it, untested.
   `chronod` aborts once about 20 seconds after boot and comes back. Books' and Podcasts' widgets die in dyld unless the
   line has `sweetatpath=1`. See [CONTROL-CENTRE.md](CONTROL-CENTRE.md).
+- **Volume:** the buttons change the volume and show the HUD only on a root with the audio step (audiomxd); Control
+  Centre's volume slider does not move, and Settings' Wi-Fi row shows no network name. See [VOLUME.md](VOLUME.md).
 - **No crash reports** are written (ReportCrash is not in the root's job set); the console's `CRASH` lines are the record,
   and `tools/ios27/crashlog-symbolicate.py` symbolicates them. [CONTROL-CENTRE.md](CONTROL-CENTRE.md) has the details.
 - The command line and the patches are for build 24A446 only. Another restore image is refused. The build the tools use is
