@@ -55,6 +55,20 @@ starts with `activeCategoryName` Audio/Video and `activeAudioRoute` Speaker (its
   act on. Why audiomxd's volume client has no route configuration is not known. Its os_log (`AUDIO_BT_LOG=1`) is the next
   thing to read.
 
+  In the 24A446 cache, the client's route configuration comes from MediaExperience's volume snapshot.
+  `-[MXVolumeClient updateClientParametersFromSnapshot:]` copies the snapshot's `currentRouteConfiguration`. When there is
+  none, a Control Centre client is left without one, and MediaExperience notes it as a bug ("No current route
+  configuration available for Control Center client initialization"). The snapshot is made by `-[MXSessionManager
+  copyCurrentVolumeSnapshotWithoutUpdatingCache]`, which calls `updateRouteConfig:subRouteConfigs:routingContext:
+  volumeButtonClientSession:`. That function builds the configuration from the endpoints picked in the system audio
+  routing context (`FigRoutingManagerContextUtilities_CopyPickedEndpoints`), falls back to the current routes
+  (`CMSMUtility_CopyCurrentRoutesInfo`), and falls back again to "built-in speaker". audiomxd's os_log says which branch
+  it took. Lines to grep in `audiomxd.err`: `-MXSessionManager-` together with `Updating route config for routing
+  context`, `Using system audio context routing`, `Single endpoint configuration`, `No current routes info available`,
+  `updateRouteConfig returned error` and `Current volume snapshot:`. A volume change through the buttons posts a new
+  snapshot (`postNotificationToAVVolumeClientsIfNeeded`). So the slider may come alive after the first press: test 3
+  below drags it before and after one.
+
 ## Where the volume is applied
 
 VirtualAudio keeps the iPhone's speaker in software volume mode. It sets the HAL plug-in's volume control once, to the
@@ -87,7 +101,8 @@ A volume step moves both numbers by the step. Without the file nothing changes.
    runs of `hakios-audio-level` lines, the second clearly higher (by however many dB the slider moved). For the
    buttons (media volume): play anything with sound (a video in Photos or Safari) with `dry` on, and press volume down twice. Expected: the levels drop by two steps
    while it plays, with `Accepted` lines in SpringBoard.log. Remove the file afterwards.
-3. **Control Centre.** Open Control Centre and drag the volume slider. Expected today: it does not move, and
+3. **Control Centre.** Open Control Centre and drag the volume slider; then close it, press a volume key once, and try
+   again. Expected today: it does not move, and
    SpringBoard logs `volume control not available` (the open item above). With `AUDIO_BT_LOG=1`, send
    `grep -i -E "volume|endpoint|output ?device|route" audiomxd.err`.
 
@@ -105,4 +120,7 @@ radio does (`wifi_delay=` 60 s) and logs "WiFi device not found ... until a devi
 To find out, capture Preferences' os_log: add `Preferences` to m.dylib's sweetinject group (as was done for Sileo) and
 to `oslog-clients`, open Settings with Wi-Fi joined, and grep `Preferences.log` for `infraScanResult`, `network changed
 to`, `no change to network`, `updating state`, `interface is unavailable` (WiFiKit's lines). A nil `infraScanResult`
-confirms the empty `currentScanResult`. The next step would then be wifid's side.
+confirms the empty `currentScanResult`. For wifid's side, build the root with `WIFI_LOG=1`
+(`tools/ios27/wifi/62-wifid-loadable.sh`, through the Wi-Fi root step). wifid's stderr and os_log then go to
+`/private/var/local/oslog/wifid.err`. Grep it for `Current network`, `No current network`, `Cached current network is NULL`
+and `Link up event with no current network`. The file names the joined network, so it stays private.
