@@ -33,13 +33,18 @@ static BOOL (*o_supports)(id, SEL, id);
 static void
 text_of(id object, char *out, size_t cap)
 {
-	CFStringRef d = object != nil ? CFCopyDescription((CFTypeRef)object) : NULL;
+	CFStringRef d = object == nil ? NULL : CFGetTypeID((CFTypeRef)object) == CFStringGetTypeID() ?
+	    CFRetain((CFStringRef)object) : CFCopyDescription((CFTypeRef)object);
+	CFIndex used = 0;
 
-	if (d == NULL || !CFStringGetCString(d, out, (CFIndex)cap, kCFStringEncodingUTF8)) {
-		snprintf(out, cap, "%s", object != nil ? "?" : "nil");
-	}
-	if (d != NULL) {
+	if (d != NULL) {        /* cut at CAP, not refused */
+		CFStringGetBytes(d, CFRangeMake(0, CFStringGetLength(d)), kCFStringEncodingUTF8, '?', false, (UInt8 *)out,
+		    (CFIndex)cap - 1, &used);
 		CFRelease(d);
+	}
+	out[used] = '\0';
+	if (used == 0) {
+		snprintf(out, cap, "%s", object != nil ? "?" : "nil");
 	}
 }
 
@@ -69,7 +74,7 @@ say_formats(id device, const char *camera)
 	}
 	id formats = ((id (*)(id, SEL))objc_msgSend)(device, sel_registerName("formats"));
 	long n = formats != nil ? (long)CFArrayGetCount((CFArrayRef)formats) : 0;
-	char text[300];
+	char text[400];
 
 	say("trace: app: %s has %ld format(s)%s", camera, n, n == 0 ? ": NONE (cameracaptured found none of N104's stream "
 	    "formats among the streams' SupportedFormatsArray)" : "");
