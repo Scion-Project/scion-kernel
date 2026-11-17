@@ -7,9 +7,12 @@
 # tools/ios27/audio-bt/60-audio-bt.sh puts them on the root with BlueTool's scripts, the phone's Bluetooth patch and the jobs
 # com.apple.audiomxd, com.apple.bluetoothd, com.apple.BlueTool back in launchd.plist (20-launchd.sh takes the first two out).
 # No library of it is inserted through sweetinject= (bluetoothd and BlueTool start through hakios-inject).
-#   HCD             the phone's own Bluetooth patch (bcm4361B2_semco.hcd or bcm4361B2_murata.hcd, from its VENDOR
-#                   partition; never in a repository). Without it the step skips and the root is built without audio and
-#                   Bluetooth (bluetoothd would restart for ever on a chip without its patch).
+#   HCD             default: the device's firmware/bt, both modules' patches (bcm4361B2_murata.hcd, bcm4361B2_semco.hcd),
+#                   fetched and checked by ../firmware.sh (FIRMWARE_FROM=DIR, FIRMWARE_OFFLINE=1); the kernel takes the
+#                   module's own (the chip's OTP, as the Wi-Fi reads it; bt_module= says it). Or one patch of your own, or a
+#                   directory of them. Never in a repository. A patch missing or not matching its sum STOPS the build
+#                   (until 17 November 2026 the step skipped without HCD and the root was built without audio and Bluetooth,
+#                   with one line saying so).
 #   OS_MNT          the IPSW's OS image mounted: the root build gives it; by hand, needed only if the root lacks
 #                   /System/Library/Audio or the jobs.
 #   ENABLE_AUDIO_BT=0 off.   undo: everything taken off again, the jobs back where they were.
@@ -21,8 +24,14 @@ feature_setup 92-audio-bt AUDIO_BT
 AB=$FEATURE_SK/tools/ios27/audio-bt
 
 feature_inputs() {
-	[[ -n ${HCD:-} ]] || feature_skip "set HCD to your phone's own Bluetooth patch (bcm4361B2_semco.hcd or bcm4361B2_murata.hcd from its VENDOR partition)"
-	[[ -f $HCD ]] || feature_skip "HCD=$HCD is not a file"
+	if [[ -z ${HCD:-} ]]; then
+		feature_firmware bt "Bluetooth patches"
+		HCD=$FIRMWARE_DIR/bt
+		HCD_SUMS=${HCD_SUMS:-$FIRMWARE_DIR/bt/SHA256SUMS}
+		fw_check_kind "$HCD" "$HCD_SUMS" || feature_die "$HCD does not hold what $HCD_SUMS names (above): the build stops"
+		export HCD HCD_SUMS
+	fi
+	[[ -f $HCD || -d $HCD ]] || feature_die "HCD=$HCD is neither a file nor a directory"
 	if [[ ! -d $R/System/Library/Audio/Plug-Ins/HAL/BTAudioHALPlugin.driver && ! -d ${OS_MNT:-/nonexistent}/System/Library/Audio ]]; then
 		feature_skip "the root has no /System/Library/Audio: set OS_MNT to the IPSW's OS image, mounted"
 	fi
@@ -33,7 +42,7 @@ feature_inputs() {
 feature_apply() {
 	feature_build env OUT="$FEATURE_OUT" PY="${PY:-python3}" bash "$AB/build.sh" >/dev/null
 	AUDIO_BT=1 FILES=$FEATURE_OUT bash "$AB/60-audio-bt.sh" "$R"
-	feature_say "HakiosAudio.driver, hakios-inject, the Bluetooth libraries and BlueTool's scripts built and installed, $(basename "$HCD") in /private/var/hakios/bt, audiomxd, bluetoothd and BlueTool in launchd.plist"
+	feature_say "HakiosAudio.driver, hakios-inject, the Bluetooth libraries and BlueTool's scripts built and installed, $([[ -d $HCD ]] && echo "the patches of $HCD" || basename "$HCD") in /private/var/hakios/bt, audiomxd, bluetoothd and BlueTool in launchd.plist"
 }
 
 feature_undo() {

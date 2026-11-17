@@ -191,13 +191,22 @@ Rank by expected user-visible gain per unit of risk. "Built" means compiled, not
    - **Gain**: part of the §3 range.
    - **Risk**: low. This is what Linux's Panfrost does on this GPU, and only the flush at a chain's start is left out, when one has happened since its submit.
    - **Verify**: the per-chain time against E2.
-5. **The present by the DPP, then zero-copy.**
-   - **State**: not built on iOS 27. 16.5 runs both by default (`fb_dpp=1 fb_zc=1`). The scan-out service (`hakios.exynos_dpu.c`) is in the iOS 27 tree with no caller.
-   - **Gain**: -1.1 or -2.0 to -2.4 ms a frame of GPU time, and about 0.7 GB/s less DRAM reading by the DECON (17.0 → 5.6 MB a refresh). No tearing.
-   - **Risk**: medium to high. A wrong descriptor faults the GPU and the present falls back to the CPU copy (48 ms a frame), and the carve-out must not overlap the extra RAM (`hakios.exynos9810_mem.h`).
-   - **Verify**: `STARLTE GPU PRESENT: ... average N us`, the gaps, and a photograph of the screen for tearing.
-   - **Cost**: a blob variant for an unscaled 828×1702 copy (`tools/ios27/gpu/starlte-g72-tri.c`), a mode-2 attach and a
-     flip per swap in `SweetFramebuffer.cpp`. About a day, then phone time.
+5. **The present by the DPP, then zero-copy** ([PRESENT.md](PRESENT.md)).
+   - **State**: stage A, the present by the DPP (`sweetfb_dpp=1`), built on the fork branch `agent/scion-present/present`,
+     off by default, not run on a phone. Stage B, zero-copy, designed, not built: what iOS 27's CoreAnimation waits on
+     before it draws into a swap surface again is not known, and stage A's boot counts what it needs (SwapWait's
+     arguments, the swap surfaces in turn).
+   - **What changes (A)**: the present job copies the 828x1702 frame one for one into one of three buffers of the
+     display's carve-out (0xD8000000 up) instead of scaling it into the panel's; VGF0's DPP scales it; flips at the
+     DECON's refresh, never into the buffer it reads (today's present can tear).
+   - **Gain**: A: the job reads 5.6 MB and writes 5.6 instead of 17.0 (11.3 MB against 22.7) and shades a third of the
+     pixels: about 2.0 -> 1.1 ms, **-0.8 to -1.2 ms** a frame; B: the whole 1.93 to 2.10 ms. Both: the DECON reads 5.7 MB a
+     refresh instead of 17.0 (0.68 GB/s less). No tearing.
+   - **Risk**: the DECON on the iOS 27 boot chain has never been read (`dpu_probe=1` is the first boot of the test); a
+     wrong descriptor faults the copy job. Every failure goes back to today's present by itself (the table in
+     PRESENT.md), and `sysctl kern.hakios.sweetfb_dpp=0` on the USB console goes back at once.
+   - **Verify**: PRESENT.md §4: `A5XELTE FB dpp:` and `STARLTE GPU PRESENT: dpp copy: average N us` against today's
+     present, the gaps, and a photograph of the screen.
 6. **The memory bus** (`perfmap=1`, this page's fork branch).
    - **State**: built, not run.
    - **What it does**: reads PLL_MIF and the APM's MIF, INT and G3D tables.
@@ -264,7 +273,7 @@ screen first, then the same 300 s of console swipes. Record the temperatures eve
 
 ## 6. Not done here
 
-- The present by the DPP and zero-copy (§4 item 5): designed in `LIQUID-GLASS.md`, not built.
+- Zero-copy (§4 item 5, stage B): designed in [PRESENT.md](PRESENT.md), not built; the present by the DPP (stage A) is built, not run.
 - A change of the memory bus's rate (§4 item 6).
 - The Metal bundle with #327 (no PanVK build tree on the Mac mini).
 - Reading SpringBoard's threads with the profiler (`sweetspeed&16384` and `tools/ios27/perf/prof.py`): §2.3's 16 ms of

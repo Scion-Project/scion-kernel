@@ -21,8 +21,14 @@
 #   60 sileo        the package manager (ENABLE_SILEO=0: out)
 #   90 sensors  91 wifi  92 audio-bt  93 modem  94 camera   what iOS needs to see the S9's hardware the kernel turns on by default, each
 #                   built from this checkout with the builder's Xcode (DEVELOPER_DIR), each skipped with one line when an input
-#                   only the builder has is missing (WIFI_FW_DIR, HCD), ENABLE_SENSORS/WIFI/AUDIO_BT/MODEM/CAMERA=0 to leave one out;
+#                   only the builder has is missing (an Xcode), ENABLE_SENSORS/WIFI/AUDIO_BT/MODEM/CAMERA=0 to leave one out;
 #                   a feature that fails is undone and the build goes on (STRICT=1: it stops). feature.sh has the rules.
+# The S9's vendor firmware (firmware.sh), FIRST, before anything is copied: devices/starlte/tools/fetch-firmware.sh makes
+#   devices/starlte/firmware/ complete (FIRMWARE_FROM=DIR: your own copy, else the public trees it pins; FIRMWARE_OFFLINE=1)
+#   and every file is checked against its sum; a file missing or wrong stops the build. 91 puts the Wi-Fi's on the root, 92 both
+#   Bluetooth patches, make-boot-image.sh the sensor hub's into the boot image. At the end one line per kind says what the
+#   root has; a kind a feature that is on needs and the root lacks makes the offline checks FAIL. ENABLE_WIFI=0
+#   ENABLE_AUDIO_BT=0 build without both (and without the firmware).
 # After the steps, OUT.inject: the libraries the root has for the kernel to insert (inject-record.sh), which
 # tools/ios27/s9/make-boot-image.sh puts into the boot image's sweetinject= (docs/ios27/INSTALL-S9.md).
 # NOT applied (owner wants the real iOS 27): the 86 "speed" daemon trims, Spotlight/Siri/photos/ML/intelligence off-switches.
@@ -67,6 +73,12 @@ build)
     B_PRIV=; [[ ! -f $IOS27_PRIVATE/BUILD ]] || read -r B_PRIV < "$IOS27_PRIVATE/BUILD" || true
     ios27_build_same "the private directory ($IOS27_PRIVATE/BUILD)" "$B_PRIV" "this build (BUILD_VERSION)" "$BUILD_VERSION" || exit 1
     for f in "$OS_DMG" "$SYS_DMG" "$APP_DMG"; do [[ -f $f ]] || { echo "missing $f" >&2; exit 1; }; done
+    # ---- 0. the S9's vendor firmware, before anything is copied: complete and checked, or no build (firmware.sh) ----
+    . "$HERE/firmware.sh"
+    if [[ $DEVICE == starlte && ( ${ENABLE_WIFI:-1} != 0 || ${ENABLE_AUDIO_BT:-1} != 0 ) ]]; then
+        log "firmware (firmware.sh)"
+        fw_prepare || { echo "the S9's firmware is not complete (above): no root is built without it" >&2; exit 1; }
+    fi
     free_gb=$(df -g "$HERE" | awk 'NR==2 {print $4}'); need=${MIN_FREE_GB:-62}
     (( free_gb >= need )) || { echo "only $free_gb GB free, need >= $need (keeps 40 GB free after the ~22 GB root + 6 GB cache)" >&2; exit 1; }
     mkdir -p "$W" "$(dirname "$OUT")"; chown "$OWNER" "$W" "$(dirname "$OUT")"
@@ -111,12 +123,15 @@ build)
     bash "$HERE/inject-record.sh" "$ROOTMNT" "$W/inject.record"
     sync
     log "offline checks"; chk=0; bash "$HERE/check-root.sh" "$ROOTMNT" | tee "$W/check-root.log" || true; grep -q "ALL HARD CHECKS PASSED" "$W/check-root.log" || chk=1
+    fwok=0; [[ $DEVICE != starlte ]] || { fw_summary "$ROOTMNT" > "$W/firmware.log" || { fwok=1; chk=1; }; }
     df -h "$ROOTMNT"; sync
     umount "$ROOTMNT"; log "fsck_hfs"; fsck_hfs -n -f "/dev/r${RDEV#/dev/}" 2>&1 | tail -4 | tee -a "$W/check-root.log"
     hdiutil detach "$RDEV" >/dev/null; RDEV=
     chown "$OWNER" "$OUT"; chmod 644 "$OUT"; ls -ls "$OUT"; shasum -a 256 "$OUT" | tee "$OUT.sha256"
     mv -f "$W/inject.record" "$OUT.inject"; chown "$OWNER" "$OUT.inject"; chmod 644 "$OUT.inject"
     log "sweetinject record $OUT.inject (make-boot-image.sh reads it): $(grep -v '^#' "$OUT.inject" | tr '\n' ';')"
+    [[ ! -s $W/firmware.log ]] || { cat "$W/firmware.log"; cat "$W/firmware.log" >> "$W/check-root.log"; }
+    [[ $fwok == 0 ]] || log "a feature that is on has no firmware on the root (firmware: ... ABSENT above)"
     log "BUILD-DONE $OUT (offline checks: $([[ $chk == 0 ]] && echo passed || echo FAILED))"; exit $chk
     ;;
 verify)
