@@ -20,7 +20,7 @@ both show the camera of that boot (below, "One camera per boot").
 2. The boot image, made again after the root, with the kernel's camera asked for:
 
        tools/ios27/s9/make-boot-image.sh --kernel hakios-kernel --donor-adt inputs/n104ap.adt --template inputs/recovery.img \
-           --cmdline 'sbgl=0 sweetspeed=408782847 cam_s9=7'              # the rear camera: ... cam_s9=7 cam_rear=1
+           --cmdline 'sbgl=0 sweetspeed=442337279 cam_s9=7'              # the rear camera: ... cam_s9=7 cam_rear=1
 
    With `cam_s9=7` on the line and the record naming `cam.dylib`, the device tree gets `/arm-io/isp` and iOS shows the
    Camera app (`--camera-node auto`, the default; `yes` or `no` to force it). Without either, the tree is as before and the
@@ -78,7 +78,7 @@ side changes: `camera_device.c` already asks for its stream's sensor when a stre
 ## The phone test
 
 Boot arguments: the root with `94-camera` (check the build's line `94-camera: /usr/lib/cam.dylib built ...` and
-`make-boot-image: ... adt-isp-node: /arm-io/isp with camera-front and camera-rear`), `--cmdline 'sbgl=0 sweetspeed=408782847
+`make-boot-image: ... adt-isp-node: /arm-io/isp with camera-front and camera-rear`), `--cmdline 'sbgl=0 sweetspeed=442337279
 cam_s9=7'`. In the console log, in order:
 
 | Stage | Look for | If not |
@@ -139,6 +139,25 @@ Mac):
   TCC refused the client (`FigCaptureTCCAccessCheckAuditToken`). Its arguments are not in the console because logd is off
   on this root and os_log goes nowhere. The trace below takes it.
 
+### The cause, found by the trace (17 November, 20:35)
+
+A second boot of phone 1 had `cam_trace=1` and the library also in Camera.app. Its log names the stop. The app connects
+to cameracaptured's capture source and capture session servers. Then tccd answers the camera's access request with
+`kTCCErrorDomain Code=6 "server error: Failed to issue Sandbox Extension for kTCCServiceCamera"`. The app's
+`AVCaptureDeviceInput` then fails (`AVFoundationErrorDomain Code=-11852 "Cannot use Front Camera"`, not authorized), its
+mode-and-device command fails (`-32200`, cannot capture), and no session ever asks the vendor for the camera.
+
+tccd needs a sandbox extension to hand the app with its answer. The fork's sandbox stand-in issues one only when the
+boot line's `sweetspeed` has the bit `0x2000000` (`bsd/kern/sweet_amfi.c`, `SWEET_SPEED_SBX_EXT`); without it the issue
+call answers ENOENT. Both camera boots of 17 November used `sweetspeed=408782847` (`0x185d87ff`), which lacks that bit.
+**The camera needs `sweetspeed` with `0x2000000`**: `sweetspeed=442337279` is the value above with it. The microphone's
+request fails the same way (Live Photos), and this root has no audio server anyway, so the app's audio input still fails.
+Neither has been tried on a phone yet.
+
+Also in that log: `Attempting to use an unsupported session preset AVCaptureSessionPresetPhoto on device ... Front Camera`.
+It may only follow from the failed input, or the device's formats may not match N104's presets. The traced boot with the
+corrected `sweetspeed` decides it.
+
 ### The trace
 
 `cam.dylib` has a trace, off by default. It is on with `cam_trace=1` on the boot image's command line, or with the file
@@ -166,7 +185,8 @@ Without the switch the library does what it did before, and `camera_device.c` on
 
 1. Root: this branch's `cam.dylib` (`tools/ios27/camera/build.sh`) in `/usr/lib/cam.dylib`. Better, the root step with
    `CAMERA_TRACE_APP=1`, or the record edited as above, and the boot image made again.
-2. Boot line: as on 17 November, plus `cam_trace=1`: `--cmdline 'sbgl=0 sweetspeed=408782847 cam_s9=7 cam_trace=1'`.
+2. Boot line: `sweetspeed` with the sandbox extensions' bit, and `cam_trace=1`: `--cmdline 'sbgl=0 sweetspeed=442337279
+   cam_s9=7 cam_trace=1'` (408782847, the line of 17 November, lacks `0x2000000`: see "The cause" above).
 3. Wait about 60 seconds after SpringBoard is up. Tap the Camera icon once. Wait 30 seconds. Take a screenshot.
    Optionally, tap the flip button and wait 10 seconds.
 4. The lines expected, in order, and what a missing one means:
