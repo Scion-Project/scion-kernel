@@ -2,22 +2,31 @@
 
 English · [中文](README.zh.md) · [Українська](README.uk.md)
 
-**Scion runs iOS 16.5 on Android phones, on Apple's open-source XNU kernel and our own drivers, with no emulator on the Galaxy S9.**
+**Scion runs Apple's open-source XNU kernel on Android phones, with our own drivers: iOS 16.5 and iOS 27 on the Galaxy S9, with no emulator, from one kernel tree.**
 This is an experiment, not a finished ROM: you build it yourself from your own copy of iOS, and nothing of Apple's is in these repositories.
+
+This repository holds the shared drivers, the loader, the tools and the documentation for both lines: it builds the iOS 16.5
+kernel (xnu-8796) and is the recipe for the iOS 27 one, whose source is the fork [Scion-Project/xnu](https://github.com/Scion-Project/xnu)
+(`scion/xnu-12377`, where the Galaxy S9 and the Pixel 10 are two machine configurations of one tree; [docs/two-bases.md](docs/two-bases.md)).
+The aim is one kernel tree for every phone Scion runs on, on the phones themselves, with Android kept beside it; choosing iOS or
+Android at power-on is designed for the S9 and not yet run ([docs/dual-boot-s9.md](docs/dual-boot-s9.md)).
 Website: **[scion-project.github.io](https://scion-project.github.io)**.
 
 Scion is built on [HakiOS](https://github.com/oosexgang/hakios-xnu-kernel), and this repository is a fork of it.
 
 ## Phones
 
-| Phone | State | What to expect |
-|---|---|---|
-| **Galaxy S9** (SM-G960F, Exynos) | **Works** | iOS on all eight cores: touch, GPU, Wi-Fi, speakers, microphone, front camera, Bluetooth, sensors, vibration, battery. Tested on only a few phones so far |
-| **Galaxy S9+** (SM-G965F, Exynos) | **Unproven** | Nobody has run it. The installer does a 2-minute first run that only collects a log, then returns to TWRP. The screen may stay black |
-| **Galaxy Note9** (SM-N960F, Exynos) | **Unproven** | The same first run as the S9+ |
-| **Pixel 10** | **Virtual machine, in progress** | iOS 16.5 in a VM on the phone's own hypervisor, through the [Scion app](https://github.com/Scion-Project/scion). It reaches the home screen; touch was still being fixed at its last status. It has no ready-made install for other owners yet |
+Each state below is one of three: **seen on a phone**, **built, not yet run**, **not built**.
 
-Snapdragon and Korean (`N`) models are not supported, and the installer refuses them.
+| Phone | iOS 16.5 | iOS 27 |
+|---|---|---|
+| **Galaxy S9** (SM-G960F, Exynos) | **Seen on a phone.** All eight cores: touch, GPU, Wi-Fi, speakers, microphone, front camera, Bluetooth, sensors, vibration, battery. Tested on only a few phones so far. The modem: built in since 17 November, **not yet run** under 16.5 | **Seen on a phone**: the home screen, eight cores, touch, the GPU (OpenGL ES, or Metal with Liquid Glass), storage. On their own branches: the modem registered with a SIM, Wi-Fi joined from iOS, rotation, Sileo. Everything on by default since 17 November: **built, not yet run** together ([docs/ios27/INSTALL-S9.md](docs/ios27/INSTALL-S9.md)) |
+| **Galaxy S9+** (SM-G965F, Exynos) | **Seen on a phone**: run by Anan Jaser on his own phone (an SM-G965N) from his own build (see [Contributors](#contributors)). The installer's S9+ image: **not yet run**; its first run collects a log for 2 minutes, then returns to TWRP | Not tried |
+| **Galaxy Note9** (SM-N960F, Exynos) | **Built, not yet run.** The same first run as the S9+ | Not tried |
+| **Pixel 10** | In a VM on the phone's own hypervisor, through the [Scion app](https://github.com/Scion-Project/scion): **seen on a phone**, the home screen; touch was still being fixed at its last status, and there is no ready-made install for other owners. On the bare metal: **built, not yet run** (QEMU only) | On the bare metal, machine configuration FRANKEL of the S9's tree: **built, not yet run**; in QEMU iOS 27's `launchd` runs its boot tasks and stops at `mount-phase-1` ([docs/ios27/PIXEL10.md](docs/ios27/PIXEL10.md)) |
+
+Snapdragon models are not supported. The installer refuses the Korean (`N`) models unless it is built with `-N`, since their
+boards' device trees were never read; the S9+ that has run is a Korean model, from its owner's own build.
 
 ## Install on a Galaxy S9
 
@@ -34,10 +43,19 @@ You need an unlocked bootloader, TWRP, a computer with about 20 GB free, and you
 To leave iOS, hold five fingers on the screen for 1.5 seconds; the phone restarts into TWRP and keeps the log. Restore your Boot and System backups to go back to Android.
 The installer's [README](https://github.com/Scion-Project/scion-installer#readme) and [step-by-step notes](https://github.com/Scion-Project/scion-installer/blob/main/universal/TESTING.txt) have the detail.
 
+## iOS 27 on a Galaxy S9
+
+There is no installer for iOS 27. You build the kernel, the boot image and the root yourself, from this repository and your
+own iPhone 11 restore image, and write them from TWRP; it erases Android's data and it can hang.
+[iOS 27 on a Galaxy S9: build it and install it yourself](docs/ios27/INSTALL-S9.md) has the steps, what works, the known
+problems and how to get back.
+
 ## Known issues
 
 - **Unexpected restarts:** one tester has reported the phone rebooting by itself. The cause isn't known yet, so please send a log if it happens to you.
-- **No mobile network:** no cellular data, calls or SMS. Use Wi-Fi.
+- **No calls or SMS.** On iOS 16.5 the modem is in this repository's kernel since 17 November and has not yet been run; the
+  installer's pinned kernel (10 November) does not have it. Use Wi-Fi.
+- **iOS 27 can hang hard** some minutes into a session, and is slow in places ([its known problems](docs/ios27/INSTALL-S9.md#known-problems)).
 - **No rear cameras:** only the front camera works. Headphones don't work either.
 - **No App Store or Apple services:** no Apple ID, iCloud, App Store or iMessage, and that won't change. Sileo is included, but refreshing sources and installing packages haven't been tested.
 - **Settings may not survive a restart:** if USERDATA still holds Android's data, `/private/var` lives in memory and is emptied at every boot. Keeping it needs a separate installer that formats USERDATA, which erases Android's data.
@@ -88,13 +106,13 @@ apps describe what happens when you add layer 2 below yourself.
 ### Galaxy S9 (`starlte`, SM-G960F, Exynos 9810)
 
 This repository is Scion-Project's fork of HakiOS. Its main addition is the Galaxy S9 port, which boots the iOS 16.5 user space
-you build from your own IPSW. The device repository is [scion-starlte](https://github.com/Scion-Project/scion-starlte), and the
+you build from your own IPSW, and, through the fork Scion-Project/xnu, the iOS 27 one ([docs/ios27/](docs/ios27/INSTALL-S9.md)). The device repository is [scion-starlte](https://github.com/Scion-Project/scion-starlte), and the
 TWRP installer comes from [scion-installer](https://github.com/Scion-Project/scion-installer).
 [scion-starlte's README](https://github.com/Scion-Project/scion-starlte#readme) says what has been seen on the phone and how to
 build and install by hand, with each part's boot-arguments. [docs/devices/starlte.md](docs/devices/starlte.md) is generated from
 the device's own `device.conf` at the revision `devices/manifest.conf` pins.
 
-### Galaxy S9+ (`star2lte`, SM-G965F) and Galaxy Note9 (`crownlte`, SM-N960F): written, never run
+### Galaxy S9+ (`star2lte`, SM-G965F): run by a contributor. Galaxy Note9 (`crownlte`, SM-N960F): never run
 
 The same SoC and, by Samsung's device trees, the same board as the S9's for everything the drivers touch, so they share the
 S9's drivers and the loader's S9 platform under their own names (`loader_platform=`, written by their image scripts).
@@ -144,7 +162,7 @@ make phone SECS=600      # a 10-minute session on the phone, in RAM
 | [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | the firmware that starts the loader: Mu-Silicium with HakiOS's boot path, banner and name, and HakiOS's U-Boot (`u-boot/`) |
 | [hakios-metal](https://github.com/oosexgang/hakios-metal) | Metal's command model on the Adreno, through the kernel's GPU driver |
 | [scion-starlte](https://github.com/Scion-Project/scion-starlte) | Galaxy S9 (Scion fork): its defconfig, status, UEFI platform and prebuilt UEFI, image script, and its SoC's layer (`soc/`: the Exynos 9810) |
-| [scion-star2lte](https://github.com/Scion-Project/scion-star2lte), [scion-crownlte](https://github.com/Scion-Project/scion-crownlte) | Galaxy S9+ and Note9: their defconfigs, status (nothing seen), image script, and the same `soc/` as the S9's; no UEFI yet |
+| [scion-star2lte](https://github.com/Scion-Project/scion-star2lte), [scion-crownlte](https://github.com/Scion-Project/scion-crownlte) | Galaxy S9+ and Note9: their defconfigs, status (the S9+'s as seen on a contributor's phone; nothing seen on a Note9), image script, and the same `soc/` as the S9's; no UEFI yet |
 | [scion-installer](https://github.com/Scion-Project/scion-installer) | Scion fork: the S9's TWRP installer (boot image to `BOOT`, the system image you build to `SYSTEM`) |
 
 `devices/manifest.conf` in the common repository names each one and the revision it is at (in this fork, the Scion-Project forks of them); `tools/hakios-device.py sync` clones them
