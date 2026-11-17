@@ -216,7 +216,12 @@ from your own device.
   calibration, its firmware set in the build. For both phones: the APM's DVFS tables read out and used for the processor,
   the Mali and the buses, the speakers' tone, Location Services and its tools, the GNSS bring-up of the BCM4775
   (`docs/gnss.md`, `/dev/hakios-gnss`, `gnsstool`), a kept data volume that survives a reset, and a long list of fixes to
-  the build and the user space. His commits are in the history under his name. Thank you, Anan.
+  the build and the user space. Since then: the GNSS receiver for iOS (`gnssd`, locationd's GNSS through it, the GPS app,
+  `docs/gnssd.md`), Metal on the Mali through PanVK and metal2vulkan (`docs/metal.md`: the window server and real
+  applications on it, HakiosMali's host memory and cache requests, the PanVK and metal2vulkan patches), the display's
+  layers composited as the iPhone's are and on two DECON windows (`fb_planes`), CoreTelephony's server for a phone with no
+  SIM (`telephonyd`), the sensor hub's rates set by its clients and its board setup, and what the system image keeps
+  (`docs/system-selection.md`). His commits are in the history under his name. Thank you, Anan.
 - **Nils** ([@dwaris](https://github.com/dwaris)), a Galaxy S9+ owner and one of the installer's testers. Two fixes for the
   speakers found on his own phone: the first sound no longer lost when the stream starts before the amplifiers' driver has
   registered, and the MAX98512's enable given a moment before it is read back, with a pause between a bus transfer's
