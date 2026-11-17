@@ -193,6 +193,7 @@ cp_if_kb	k
 cp_nv	k
 cp_ping	k
 cp_rev	k
+cp_rfs	k
 cp_route	k
 cp_sim	k
 cp_vss	k
@@ -223,6 +224,7 @@ cs_relax_platform_task_ports	k
 ddr	k
 ddr_rest	k
 ddr_vote	k
+devsh	k
 display_probe	k
 early_log	k
 epoch	k

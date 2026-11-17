@@ -183,6 +183,7 @@ CP_IF_KB	arg	cp_if_kb	User space	k	hakios.shannon.c	with cp_if=1: at most N KB t
 CP_NV	arg	cp_nv	User space	k	hakios.shannon.c	the phone's own NV data, a file nv_data.bin the image's builder put beside the kernel, is given to the modem (none: zeros, and no stage 4)
 CP_PING	arg	cp_ping	User space	k	hakios.shannon.c	the address stage 7 sends its one echo request to (none: the context's first DNS server)
 CP_REV	arg	cp_rev	User space	k	hakios.shannon.c	the board's revision told to the modem (26, this phone's)
+CP_RFS	arg	cp_rfs	User space	k	hakios.shannon.c	an OPEN FILE answered from RAM: the file is not there
 CP_ROUTE	arg	cp_route	User space	k	hakios.shannon.c	with cp_if=1: an IPv4 default route through pdp_ip0 (only when there is none yet: Wi-Fi's wins)
 CP_SIM	arg	cp_sim	User space	k	hakios.shannon.c	in low power mode, once the SIM is ready, one read of its administrative data file (EF_AD, 4 bytes: no identity) is asked, to see if the modem takes
 CP_VSS	arg	cp_vss	User space	k	hakios.shannon.c	the image's VSS part (the voice processor's) is not copied
@@ -211,6 +212,7 @@ CS_RELAX_PLATFORM_TASK_PORTS	arg	cs_relax_platform_task_ports	User space	k	1002-
 DDR	arg	ddr	CPU, memory and boot	k	hakios.cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
 DDR_REST	arg	ddr_rest	CPU, memory and boot	k	hakios.cpufreq.c	
 DDR_VOTE	arg	ddr_vote	CPU, memory and boot	k	hakios.cpufreq.c	
+DEVSH	arg	devsh	USB	k	hakios.dwc3.c	
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
 EARLY_LOG	arg	early_log	CPU, memory and boot	k	loader_return.c	right after ml_parse_cpu_topology(), what the kernel will match each processor's MPIDR against
 ESSLOG	arg	esslog	CPU, memory and boot	k	loader_return.c	

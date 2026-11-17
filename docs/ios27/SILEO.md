@@ -120,6 +120,34 @@ What the package manager adds to that picture, and what was done so that it does
   and the test repository. A flat repository needs a `Release` file for Sileo (apt does without one).
 - The plain bootstrap has no `awk`; the self-test uses `grep` and `cut` instead.
 
+## Things a user trips over (night of 13-14 Nov 2026)
+
+Found from the phone's logs and its root image; the fixes are made, but what is marked "not tested" has not run on a phone.
+
+- **An app built against the iOS 27 SDK without scenes dies at launch.** Puzzles (`com.scion.app.puzzles` 1.3.2-scion1) got
+  its icon and died with SIGTRAP the moment it was opened. The kernel's crash record has UIKit's message in `x0`:
+  "Application failed to launch: UIScene life cycle is required for apps built with this SDK". iOS 27's UIKit asks this of
+  every app whose `LC_BUILD_VERSION` says SDK 27 or later. Puzzles had been linked against Xcode's 27.2 SDK instead of the
+  recipe's 16.5. This is iOS's rule, not the port's, and it applies to anything a package brings: an app delegate with no
+  `UIApplicationSceneManifest` needs a binary that says an older SDK. The recipe now links with
+  `-Wl,-platform_version,ios,14.0,16.5` (scion-installer PR 29); 1.3.2-scion2 is that build. On a phone: not tested yet.
+- **`dpkg --audit` was not clean (172 lines).** `tools/mk-jb.sh` unpacks Sileo (and ElleKit) by hand and wrote only their
+  status entries, so dpkg had no file list for Sileo. It warns "files list file for package 'org.coolstar.sileo' missing"
+  at every install, and an upgrade or removal of Sileo would not know its files. The 164 packages that `usr/libexec/firmware`
+  makes (`firmware`, `cy+*`, `gsc.*`) have file lists that name no file and no sums file. `tools/ios27/sileo/dpkg-info.py` now
+  writes the list, the sums and the scripts from the package itself, and `prep.sh` gives an empty sums file to a list that
+  names no file. Checked by running `mk-jb.sh` on the Mac; on a phone: not tested yet.
+- **Sileo's lists are apt's.** Sileo 2.5.1 keeps its repository cache in `/var/jb/var/lib/apt/lists`, the same directory
+  and the same file names as apt. So after an `apt-get update`, Sileo shows the packages it reads from apt's `Packages` file
+  even when its own refresh never finished. The repository is then called "Untitled Repo" (Sileo takes the name from a
+  `Release` file, and apt keeps `InRelease`). The phone showed exactly that: Procursus' `Packages` was apt's (dated by the
+  server, 27 Jul) and no `Release` of Sileo's. "Untitled Repo" therefore means that Sileo's own refresh failed, not that the
+  repository is broken. `sileolists/` is something else: the reduced index Sileo writes for apt's dependency check.
+- **Every package install runs `uicache -a`** (uikittools' trigger on `/var/jb/Applications`). On this port that prints
+  "Unable to register" once for each of iOS's own applications (about 200 lines), and it is slow. It does no harm.
+- **file: repositories cannot work in Sileo.** Sileo's downloader (Evander) treats any answer that is not HTTP as an error
+  (status 522), so a repository has to be http(s).
+
 ## The self-test
 
 The port has no shell to ask. `SILEO_SELFTEST=1` with the step (a test root, never a release; `check-root.sh` says so)

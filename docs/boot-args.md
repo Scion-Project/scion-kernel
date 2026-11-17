@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **689 arguments**: 597 read by the kernel, 24 by the loader, 85 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **691 arguments**: 599 read by the kernel, 24 by the loader, 85 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -481,10 +481,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `virtio_net_ssid` | K | `hakios.virtio_net.c` | `CONFIG_VIRTIO_NET_SSID` |  |
 | `virtio_net_wifi` | K | `hakios.virtio_net.c` | `CONFIG_VIRTIO_NET_WIFI` |  |
 
-## USB (9)
+## USB (10)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `devsh` | K | `hakios.dwc3.c` | `CONFIG_DEVSH` |  |
 | `usb_gadget` | K | `hakios.dwc3.c` | `CONFIG_USB_GADGET` |  |
 | `usb_gadget_clk` | K | `hakios.dwc3.c` | `CONFIG_USB_GADGET_CLK` |  |
 | `usb_gadget_crlf` | K | `hakios.dwc3.c` | `CONFIG_USB_GADGET_CRLF` |  |
@@ -594,7 +595,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (183)
+## User space (184)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -669,6 +670,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cp_nv` | K | `hakios.shannon.c` | `CONFIG_CP_NV` |  |
 | `cp_ping` | K | `hakios.shannon.c` | `CONFIG_CP_PING` |  |
 | `cp_rev` | K | `hakios.shannon.c` | `CONFIG_CP_REV` |  |
+| `cp_rfs` | K | `hakios.shannon.c` | `CONFIG_CP_RFS` |  |
 | `cp_route` | K | `hakios.shannon.c` | `CONFIG_CP_ROUTE` |  |
 | `cp_sim` | K | `hakios.shannon.c` | `CONFIG_CP_SIM` |  |
 | `cp_vss` | K | `hakios.shannon.c` | `CONFIG_CP_VSS` |  |
