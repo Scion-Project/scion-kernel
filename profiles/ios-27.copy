@@ -38,3 +38,11 @@ drivers/storage/ufs/hakios.ufshc.c bsd/dev/hakios.ufshc.c
 drivers/storage/ufs/hakios.ufshc.h bsd/dev/hakios.ufshc.h
 drivers/storage/ufs/hakios.ufshc.lga.h bsd/dev/hakios.ufshc.lga.h
 drivers/display/dpu/hakios.lga_dpu.c bsd/dev/hakios.lga_dpu.c
+drivers/audio/abox/hakios.exynos_abox.c bsd/dev/hakios.exynos_abox.c
+drivers/audio/codec/hakios.max98512.c bsd/dev/hakios.max98512.c
+drivers/audio/codec/hakios.cs47l93.c bsd/dev/hakios.cs47l93.c
+drivers/audio/hakios.audio.c bsd/dev/hakios.audio.c
+drivers/audio/hakios.guard.c bsd/dev/hakios.guard.c
+drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c bsd/dev/hakios.bcm4361_bt.c
+drivers/bluetooth/bcm4361/hakios.bcm_hci.h bsd/dev/hakios.bcm_hci.h
+drivers/bluetooth/bcm4361/hakios.bt_node.cpp iokit/Kernel/hakios.bt_node.cpp
