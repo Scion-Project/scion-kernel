@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 756 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 757 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -200,7 +200,7 @@ CONFIG_HAKIOS_EXYNOS_PCIE=y
 CONFIG_HAKIOS_BRCMFMAC=y
 
 #
-# CPU, memory and boot (23)
+# CPU, memory and boot (24)
 #
 
 # CPU cores the kernel uses, 1 to 8; one if not set
@@ -235,6 +235,9 @@ CONFIG_HAKIOS_BRCMFMAC=y
 
 # read by loader_return.c (kernel)
 # CONFIG_ESSLOG is not set
+
+# read by the patch to Apple's files (kernel)
+# CONFIG_FB_PLANES is not set
 
 # read by GenericARMPE.cpp (kernel)
 # CONFIG_MACHINE_NAME is not set

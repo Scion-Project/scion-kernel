@@ -245,6 +245,7 @@ fb_hz	k
 fb_intf	k
 fb_measure	k
 fb_native	k
+fb_planes	k
 fb_pri	k
 fb_psr	k
 fb_queue	k

@@ -232,6 +232,7 @@ FB_HZ	arg	fb_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp
 FB_INTF	arg	fb_intf	GPU and display	k	MiniIOMobileFramebuffer.cpp	the registers of the display interface the panel is on, for a port
 FB_MEASURE	arg	fb_measure	GPU and display	k	MiniIOMobileFramebuffer.cpp	how often the panel is really refreshed
 FB_NATIVE	arg	fb_native	GPU and display	k	MiniIOMobileFramebuffer.cpp	the iPhone's 1125 x 2436 on every panel, as before (the picture stretched to the panel's shape)
+FB_PLANES	arg	fb_planes	CPU, memory and boot	k	(patch)	
 FB_PRI	arg	fb_pri	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_PSR	arg	fb_psr	User space	k	hakios.exynos_dpu.c	
 FB_QUEUE	arg	fb_queue	GPU and display	k	MiniIOMobileFramebuffer.cpp	
