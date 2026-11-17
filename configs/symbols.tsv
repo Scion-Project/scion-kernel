@@ -159,6 +159,7 @@ CAM_S9_REAR_TURN	arg	cam_s9_rear_turn	User space	k	hakios.exynos_camera_star2.c	
 CAM_S9_SAT	arg	cam_s9_sat	Cameras	k	hakios.exynos_camera.c,hakios.exynos_camera_star2.c	camshot's colour saturation in per cent (default 140; 100: none; at most 300)
 CAM_S9_SELFREAD	arg	cam_s9_selfread	Cameras	k	hakios.exynos_camera.c	
 CAM_S9_SELFREAD_FOCUS	arg	cam_s9_selfread_focus	Cameras	k	hakios.exynos_camera.c	the reader also writes HAKIOS_CAMERA_FOCUS, as a capture device would (cam_af=4): after its
+CAM_S9_SELFREAD_SWITCH	arg	cam_s9_selfread_switch	Cameras	k	hakios.exynos_camera.c	with cam_switch=1: the reader writes HAKIOS_CAMERA_SENSOR for the other camera after every
 CAM_S9_SELFREAD_X	arg	cam_s9_selfread_x	Cameras	k	hakios.exynos_camera.c	
 CAM_S9_SELFREAD_Y	arg	cam_s9_selfread_y	Cameras	k	hakios.exynos_camera.c	
 CAM_S9_STRIDE	arg	cam_s9_stride	Cameras	k	hakios.exynos_camera.c,hakios.exynos_camera_star2.c	camshot's bytes a line of the frame (default 3264: the WDMA's RAW10 is a pixel in 16 bits)
@@ -169,6 +170,7 @@ CAM_S9_TELE_TURN	arg	cam_s9_tele_turn	User space	k	hakios.exynos_camera_star2.c	
 CAM_SENSOR	arg	cam_sensor	Cameras	k	hakios.camera.c	
 CAM_SETTLE	arg	cam_settle	Cameras	k	hakios.camera.c	
 CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c	
+CAM_SWITCH	arg	cam_switch	Cameras	k	hakios.exynos_camera.c	with 7: both cameras in one run, one streaming at a time, switched by the reader's SENSOR command
 CAM_VBLANK	arg	cam_vblank	Cameras	k	hakios.camera.c	
 CAMTL	arg	camtl	User space	u	inject.c	
 CC_FADE	arg	cc_fade	User space	u	inject_sb.c	

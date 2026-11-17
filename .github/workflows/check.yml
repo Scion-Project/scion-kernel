@@ -86,6 +86,8 @@ jobs:
         run: sh tools/bcm-bt-parsers-test.sh
       - name: The Galaxy S9's sensor hub's SPI frames, packets, CRC-8, RPCs, firmware records and SSP hold together (sanitizers)
         run: sh tools/bcm-shub-test.sh
+      - name: The Galaxy S9's camera switch (front and rear in one boot) keeps its rules over hostile timings (sanitizers)
+        run: sh tools/exynos-camera-switch-test.sh
       - name: The commits of the fork of XNU that the profiles pin can be fetched
         run: |
           for p in ios-16.5 ios-26 ios-27; do python3 tools/xnu-tree.py path "$p"; done
