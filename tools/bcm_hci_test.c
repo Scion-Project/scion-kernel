@@ -342,12 +342,242 @@ expander(void)
 	}
 }
 
+/*
+ * Hostile input: the chip relays what radio peers send, so every length is taken as an attacker's.
+ *   - an ACL packet of each of the largest lengths (0xFFFB to 0xFFFF) is dropped whole, counted once, and the event
+ *     after it comes out: the packet's size, 4 + length, does not fit 16 bits;
+ *   - Command Complete and Command Status of every length 0 to 255, held in a buffer of exactly 2 + length bytes, are
+ *     either refused or read within their length when the driver's own rule is followed (hci(): the return parameters
+ *     are copied only as far as retlen says);
+ *   - 300000 streams made from good packets by a fixed-seed mutator (bytes changed, cut, repeated, lengths raised):
+ *     the receiver never writes outside its event buffer (it sits between two guard arrays, and the sanitizers watch),
+ *     an event handed over is 2 + event[1] bytes, and after any stream a reset and a good event give that event.
+ */
+static uint32_t mut_state = 0x5c10a11u;
+
+static uint32_t
+mut(void)
+{
+	mut_state ^= mut_state << 13;
+	mut_state ^= mut_state >> 17;
+	mut_state ^= mut_state << 5;
+	return mut_state;
+}
+
+static void
+h4_hostile(void)
+{
+	static const uint8_t reset_cc[] = { 0x04, 0x0e, 0x04, 0x01, 0x03, 0x0c, 0x00 };
+	static const uint8_t ver[] = { 0x04, 0x0e, 0x0c, 0x01, 0x01, 0x10, 0x00, 0x06, 0x00, 0x10, 0x06, 0x0f, 0x00, 0x0a, 0x42 };
+	static const uint8_t acl[] = { 0x02, 0x01, 0x20, 0x03, 0x00, 0xde, 0xad, 0xbe };
+	static const uint8_t sco[] = { 0x03, 0x01, 0x00, 0x02, 0x11, 0x22 };
+	static const uint8_t adv[] = { 0x04, 0x3e, 0x0f, 0x02, 0x01, 0x00, 0x01, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x03, 0x02,
+		                       0x09, 0x41, 0xc4 };
+	uint8_t last[260];
+	int junk, skipped, n;
+
+	/* the largest ACL lengths */
+	for (uint32_t len = 0xFFFB; len <= 0xFFFF; len++) {
+		struct h4_rx rx = { 0 };
+		uint8_t hdr[5] = { 0x02, 0x01, 0x20, (uint8_t)len, (uint8_t)(len >> 8) }, zero = 0;
+
+		junk = skipped = 0;
+		n = feed(&rx, hdr, sizeof(hdr), last, &junk, &skipped);
+		for (uint32_t i = 0; i < len; i++) {
+			n += feed(&rx, &zero, 1, last, &junk, &skipped);
+		}
+		CHECK(n == 0 && skipped == 1 && junk == 0 && rx.type == 0, "an ACL packet of %u bytes: dropped once (events %d, "
+		    "skipped %d, junk %d, state %u)", len, n, skipped, junk, rx.type);
+		n = feed(&rx, reset_cc, sizeof(reset_cc), last, &junk, &skipped);
+		CHECK(n == 1 && junk == 0 && last[0] == 0x0e, "the event after an ACL packet of %u bytes (events %d, junk %d)", len,
+		    n, junk);
+	}
+
+	/* events of every length in a buffer of exactly that size */
+	for (unsigned len = 0; len < 256; len++) {
+		for (int code = 0; code < 2; code++) {
+			uint8_t *e = malloc(2 + 4 + len), ret[255], sink = 0;    /* 4 more: Command Complete's `ret` of an event
+			                                                         * with no return parameters points there, unread */
+			uint16_t op;
+			uint8_t st, rl;
+			const uint8_t *r;
+			struct hci_local_version v;
+			char name[64];
+
+			e[0] = code ? HCI_EV_COMMAND_STATUS : HCI_EV_COMMAND_COMPLETE;
+			e[1] = (uint8_t)len;
+			for (unsigned i = 0; i < len; i++) {
+				e[2 + i] = (uint8_t)mut();
+			}
+			if (hci_command_complete(e, &op, &st, &r, &rl)) {
+				CHECK(len >= 3 && (rl == 0 || (size_t)(r - e) + rl <= 2 + len), "length %u: return parameters inside the event",
+				    len);
+				memcpy(ret, r, rl);     /* as hci() copies them */
+				for (unsigned i = 0; i < rl; i++) {
+					sink ^= ret[i];
+				}
+				(void)hci_local_version(ret, rl, &v);
+				hci_local_name(ret, rl, name, sizeof(name));
+				CHECK(strlen(name) < sizeof(name), "length %u: the name ends", len);
+			} else {
+				CHECK(code == 1 || len < 3, "length %u refused", len);
+			}
+			if (hci_command_status(e, &op, &st)) {
+				CHECK(code == 1 && len >= 4, "a Command Status of length %u", len);
+			}
+			(void)sink;
+			free(e);
+		}
+	}
+
+	/* mutated streams */
+	{
+		struct { uint8_t before[64]; struct h4_rx rx; uint8_t after[64]; } g;
+		static const struct { const uint8_t *p; size_t n; } good[] = {
+			{ reset_cc, sizeof(reset_cc) }, { ver, sizeof(ver) }, { acl, sizeof(acl) }, { sco, sizeof(sco) },
+			{ adv, sizeof(adv) },
+		};
+		unsigned long events = 0, bytes = 0;
+
+		memset(&g, 0, sizeof(g));
+		memset(g.before, 0xA5, sizeof(g.before));
+		memset(g.after, 0x5A, sizeof(g.after));
+		for (int round = 0; round < 300000; round++) {
+			uint8_t s[160];
+			size_t k = 0;
+			int parts = 1 + (int)(mut() % 4);
+
+			for (int p = 0; p < parts; p++) {
+				unsigned w = mut() % (sizeof(good) / sizeof(good[0]));
+
+				memcpy(s + k, good[w].p, good[w].n);
+				k += good[w].n;
+			}
+			for (int m = (int)(mut() % 4); m > 0; m--) {
+				size_t at = mut() % k;
+
+				switch (mut() % 5) {
+				case 0: s[at] = (uint8_t)mut(); break;
+				case 1: s[at] = 0xff; break;
+				case 2: s[at] ^= (uint8_t)(1u << (mut() % 8)); break;
+				case 3: k = at + 1; break;                                      /* cut */
+				default: memmove(s + at, s + at + 1, k - at - 1); k = k > 1 ? k - 1 : k; break;  /* a byte lost */
+				}
+			}
+			if (mut() % 8 == 0) {
+				h4_rx_reset(&g.rx);
+			}
+			for (size_t i = 0; i < k; i++) {
+				int r = h4_rx_byte(&g.rx, s[i]);
+
+				bytes++;
+				if (r == H4_RX_EVENT) {
+					events++;
+					if (g.rx.have != 2u + g.rx.event[1] || g.rx.type != 0) {
+						CHECK(false, "an event of %u bytes handed over with %u read", 2u + g.rx.event[1],
+						    (unsigned)g.rx.have);
+					}
+				}
+				if (g.rx.type == H4_EVENT && g.rx.have > sizeof(g.rx.event)) {
+					CHECK(false, "the receiver is %u bytes into an event", (unsigned)g.rx.have);
+				}
+			}
+		}
+		for (size_t i = 0; i < sizeof(g.before); i++) {
+			if (g.before[i] != 0xA5 || g.after[i] != 0x5A) {
+				CHECK(false, "a byte beside the receiver changed");
+				break;
+			}
+		}
+		CHECK(events > 100000 && bytes > 1000000, "the mutated streams still carry events (%lu in %lu bytes)", events, bytes);
+		h4_rx_reset(&g.rx);
+		junk = skipped = 0;
+		n = feed(&g.rx, ver, sizeof(ver), last, &junk, &skipped);
+		CHECK(n == 1 && last[0] == 0x0e && last[1] == 0x0c, "after all of it, a reset and a good event");
+	}
+}
+
+/*
+ * The .hcd reader against mutated files, each in a buffer of exactly its size: bcm_hcd_check() and the sending loop
+ * (patch() of the driver: bcm_hcd_next() until it stops) never read past the end, every record a file is accepted with
+ * lies inside it, and the description found ends within its 64 bytes.
+ */
+static void
+hcd_hostile(void)
+{
+	uint8_t base[256];
+	size_t n = 0;
+	unsigned long good = 0;
+
+	for (int rec = 0; rec < 5; rec++) {
+		uint8_t plen = (uint8_t)(4 + 20 + rec);
+
+		base[n++] = 0x4c; base[n++] = 0xfc; base[n++] = plen;
+		base[n++] = (uint8_t)(rec * 0x20); base[n++] = 0x10; base[n++] = 0x21; base[n++] = 0x00;
+		memcpy(base + n, "BCM4361B2 test patch 0000", (size_t)plen - 4);
+		n += (size_t)plen - 4;
+	}
+	base[n++] = 0x4e; base[n++] = 0xfc; base[n++] = 4;
+	memset(base + n, 0xff, 4); n += 4;
+	{
+		struct bcm_hcd_info info;
+
+		CHECK(bcm_hcd_check(base, n, &info) == BCM_HCD_OK && info.records == 6 && info.writes == 5, "the made-up patch");
+	}
+	for (int round = 0; round < 200000; round++) {
+		size_t size = n;
+		uint8_t tmp[sizeof(base) + 8], *f;
+		struct bcm_hcd_info info;
+		struct bcm_hcd_record r;
+		size_t off = 0, recs = 0;
+		int e, x;
+
+		memcpy(tmp, base, n);
+		for (int m = 1 + (int)(mut() % 3); m > 0; m--) {
+			size_t at = mut() % size;
+
+			switch (mut() % 5) {
+			case 0: tmp[at] = (uint8_t)mut(); break;
+			case 1: tmp[at] = 0xff; break;
+			case 2: tmp[at] ^= (uint8_t)(1u << (mut() % 8)); break;
+			case 3: size = at; break;
+			default: if (size < sizeof(base)) { memmove(tmp + at + 1, tmp + at, size - at); size++; } break;
+			}
+			if (size == 0) {
+				break;
+			}
+		}
+		f = malloc(size ? size : 1);
+		memcpy(f, tmp, size);
+		e = bcm_hcd_check(f, size, &info);
+		CHECK(memchr(info.name, 0, sizeof(info.name)) != NULL, "the description ends");
+		while ((x = bcm_hcd_next(f, size, &off, &r)) == 1) {
+			uint8_t pkt[4 + 255];
+
+			recs++;
+			if (r.param < f + 3 || r.param + r.plen > f + size || off > size) {
+				CHECK(false, "a record outside the file");
+				break;
+			}
+			CHECK(h4_command(pkt, sizeof(pkt), r.opcode, r.param, r.plen) == 4u + r.plen, "a record as a command");
+		}
+		if (e == BCM_HCD_OK) {
+			good++;
+			CHECK(x == 0 && recs == info.records && off == size, "an accepted file is read to its end");
+		}
+		free(f);
+	}
+	CHECK(good > 1000 && good < 199000, "some mutated files are still patches, most are not (%lu)", good);
+}
+
 int
 main(void)
 {
 	h4_out();
 	h4_in();
+	h4_hostile();
 	hcd();
+	hcd_hostile();
 	divisor();
 	expander();
 	printf("bcm_hci_test: %d checks, %d failed\n", checks, failures);

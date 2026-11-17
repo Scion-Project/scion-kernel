@@ -75,8 +75,9 @@ h4_command(uint8_t *out, size_t cap, uint16_t opcode, const uint8_t *param, uint
  */
 struct h4_rx {
 	uint8_t  type;                  /* 0: waiting for a type byte */
-	uint16_t have;                  /* bytes of the packet (after the type) seen */
-	uint16_t need;                  /* bytes the packet has in all, once its header says; 0 before */
+	uint32_t have;                  /* bytes of the packet (after the type) seen */
+	uint32_t need;                  /* bytes the packet has in all, once its header says; 0 before: 32 bits, for an
+	                                 * ACL packet is up to 4 + 65535 bytes */
 	uint8_t  event[2 + 255];        /* an event: code, length, parameters */
 	uint32_t dropped_bytes;         /* not a packet type */
 	uint32_t dropped_packets;       /* ACL and SCO */
@@ -109,7 +110,7 @@ h4_rx_byte(struct h4_rx *rx, uint8_t b)
 	if (rx->type == H4_EVENT) {
 		rx->event[rx->have++] = b;
 		if (rx->have == 2) {
-			rx->need = (uint16_t)(2 + rx->event[1]);
+			rx->need = 2u + rx->event[1];
 		}
 		if (rx->have >= 2 && rx->have == rx->need) {
 			rx->type = 0;
@@ -128,7 +129,7 @@ h4_rx_byte(struct h4_rx *rx, uint8_t b)
 		if (rx->have == hdr) {
 			uint16_t len = rx->type == H4_ACL ? (uint16_t)(rx->event[2] | rx->event[3] << 8) : rx->event[2];
 
-			rx->need = (uint16_t)(hdr + len);
+			rx->need = (uint32_t)hdr + len;
 		}
 	} else {
 		rx->have++;

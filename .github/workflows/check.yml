@@ -80,6 +80,8 @@ jobs:
         run: sh tools/s6e3ha8-gamma-test.sh
       - name: The Galaxy S9's Bluetooth H4 framing, HCI events, .hcd reading and UART divisor hold together (sanitizers)
         run: sh tools/bcm-hci-test.sh
+      - name: The Galaxy S9's Bluetooth driver's own parsers (scan events, bt_vsc_ok, bt_trace) hold against hostile bytes (sanitizers)
+        run: sh tools/bcm-bt-parsers-test.sh
       - name: The Galaxy S9's sensor hub's SPI frames, packets, CRC-8, RPCs, firmware records and SSP hold together (sanitizers)
         run: sh tools/bcm-shub-test.sh
       - name: The commits of the fork of XNU that the profiles pin can be fetched
