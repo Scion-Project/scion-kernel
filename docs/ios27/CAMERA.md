@@ -125,7 +125,8 @@ Mac):
   stays under the default CPU monitor, which matters only to a process that uses the CPU for long. On an iPhone both are
   granted by entitlements cameracaptured has (`com.apple.private.kernel.system-override` and
   `com.apple.private.kernel.override-cpumon`). The fork's sandbox stand-in grants neither (`sweet_sandbox_priv_grant` in
-  `bsd/kern/sweet_amfi.c` grants only `PRIV_WORK_INTERVAL` and `PRIV_DARKBOOT`).
+  `bsd/kern/sweet_amfi.c` grants only `PRIV_WORK_INTERVAL` and `PRIV_DARKBOOT`). The fork's pull request 39 adds
+  `sweet_priv_ent=1` (off by default): with it, a process that holds either entitlement is granted that privilege.
 - **The app's session never asked cameracaptured for the camera.** A session that builds its graph needs the device again (the
   prewarm's was closed), and `the device made` is said at every creation. It also asks for streams, which is said for the
   first three requests (two were used at boot, so the third would have been said). Neither line came. So the stop is before
