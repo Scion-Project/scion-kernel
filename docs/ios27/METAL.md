@@ -4,7 +4,7 @@ iOS 27 on the S9 renders with OpenGL ES through `sbca` ([GPU-PATH.md](GPU-PATH.m
 framework on the Mali-G72, through a Metal plug-in that Starbite wrote for iOS 26 (a Metal 2 frontend, `HotMetal2.mm` and
 `NativeBridgeMetalFrontend.mm`; metal2vulkan's bridge; Mesa's PanVK over the kernel's StarbiteMali). The scripts and tools in
 `tools/ios27/metal/` rebuild that stack for iOS 27.0.1 and test it. Starbite's own part of it is in `tools/ios27/metal2/` (the two frontend files,
-`HotMetal2.mm` and `NativeBridgeMetalFrontend.mm`, `build-m2v-bridge.sh`, the bridge's Rust sources and its patches 0001-0016 and 0100-0102,
+`HotMetal2.mm` and `NativeBridgeMetalFrontend.mm`, `build-m2v-bridge.sh`, the bridge's Rust sources and its patches 0001-0016 and 0100-0103,
 `Info.plist`, `m2vtest.c`; MIT, credited below), so the scripts and the three patches in `tools/ios27/metal/patches/` work from this repository
 as it is. No binary of any kind is in the repository.
 
@@ -64,3 +64,16 @@ What came of the frame rate question is in [LIQUID-GLASS.md](LIQUID-GLASS.md): w
 - The wallpaper (above), and the 12 `NotRepresentable` no-copy buffers.
 - The decmpfs type 16 of nine SplashBoard `*.ktx` snapshots (the kernel registers type 1 only): unrelated to Metal.
 - The scripts were run against Starbite's tree (`SB=`) before `tools/ios27/metal2/` was imported; the import changed their paths only (`tools/metal2` to `tools/ios27/metal2`, the repository as the tree). `bridge.sh` and `mk-bundle27.sh` were not re-run on a phone for it.
+
+## The bridge library the bundles link (recorded 18 Nov 2026)
+
+Every Metal bundle since 12 Nov links `libnative_metal_bridge.a` as built on the Mac mini on 12 Nov 17:45 (metal-perf). The tree
+it was built from had changes that were not in this repository: the render-pass-instance split counters in metal2vulkan's
+runtime (`INSTANCE_SPLITS` in `lib.rs`, counted in `render.rs` where a draw cannot record in the current instance) and, in the
+bridge, the kept runtime messages and the work-counts text (`nmb_take_message`, `nmb_device_work_counts_text`) that the
+plug-in's telemetry (`touch /var/local/mtl2-telemetry`) prints with `new_instance_<reason>=N`. They are now
+`tools/ios27/metal2/bridge/patches/0103-sweet-instance-split-counters.patch` and
+`tools/ios27/metal2/bridge/NativeMetalTelemetry.rs` (include!d by `NativeMetalObjects.rs`; the code is unchanged, only moved
+to a file of its own for the size rule) with the two declarations in `NativeMetalObjects.h`. Checked: metal2vulkan 720ef1ce
+plus patches 0001-0016 and 0100-0103 gives the 12 Nov tree's metal2vulkan sources file for file. The library was not rebuilt
+from the repository for this (a 300 MB Rust build); the counters cost one relaxed atomic add per new instance.

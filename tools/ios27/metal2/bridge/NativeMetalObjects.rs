@@ -210,6 +210,8 @@ fn log_message(message: &DebugMessage) {
     let _ = writeln!(file, "[{} {}] {:?} {}", std::process::id(), std::env::args().next().unwrap_or_default(), message.severity, key);
 }
 
+include!("NativeMetalTelemetry.rs");
+
 fn observe_message(message: &DebugMessage) {
     use std::sync::atomic::Ordering::Relaxed;
     if message.id_name == "metal2vulkan-pipeline-creation" {
@@ -225,6 +227,7 @@ fn observe_message(message: &DebugMessage) {
         return;
     }
     log_message(message);
+    keep_message(message);
     if message.severity >= MessageSeverity::Warning {
         OTHER_MESSAGES[1].fetch_add(1, Relaxed);
         if let Ok(mut last) = LAST_WARNING.lock() {
