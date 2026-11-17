@@ -90,7 +90,9 @@ def main():
     added = +added
 
     classes = collections.OrderedDict((c, []) for c in ("blank", "comment", "include", "guard", "prototype", "CODE"))
-    for p in a.files:
+    # an added line is put down to a new file before an old one: a line both have is the new file's (its head, its
+    # includes), not the old file's, which kept its own
+    for p in sorted(a.files, key=lambda p: bool(old[p])):
         left = collections.Counter(added)
         for i, l in enumerate(new[p], 1):
             if left.get(l, 0) <= 0:
