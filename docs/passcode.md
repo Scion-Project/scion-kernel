@@ -99,17 +99,18 @@ this port does not have yet. Face ID enrolment needs it: see below.
 
 ## Towards Face ID
 
-BiometricKit's enrolment asks for the passcode and takes it as an ACM credential (LocalAuthentication's
-`LAContext` with a passcode credential, coreauthd, AppleCredentialManager). What the iris work will
-need from here:
+There will be no Face ID on this port: see [ios27/BIOMETRICS.md](ios27/BIOMETRICS.md). The iris camera's frames go only to the S9's
+secure world ([iris-camera.md](iris-camera.md)), and nothing is to be presented to iOS as Face ID: without a Secure Enclave it would
+tell iOS and every app that a match a photo can fool, and root can forge, is Secure Enclave biometry. What the key store may still need:
 
-- an `AppleCredentialManager` stand-in in the kernel that accepts a passcode credential, checks it with
-  the key store's verifier (the same PBKDF2 path as selector 0x2a) and satisfies a policy that asks for
-  one; its command protocol is ACMLib's (`LibCall_ACMContextCreate`, `...AddCredentialWithScope`,
-  `...VerifyPolicyEx`, `...GetExternalForm`), to be mapped from SharedUtils;
-- a "biometric unlock" call into the key store for the matcher (unlock without the passcode, after it has
-  been entered once since boot, as iOS requires), refused before the first unlock of a boot;
-- the same rule for Face ID as for the passcode: it opens the screen, it protects no data.
+- an `AppleCredentialManager` stand-in in the kernel that accepts a **passcode** credential, checks it with the key store's verifier
+  (the same PBKDF2 path as selector 0x2a) and satisfies a policy that asks for one; its command protocol is ACMLib's
+  (`LibCall_ACMContextCreate`, `...AddCredentialWithScope`, `...VerifyPolicyEx`, `...GetExternalForm`), to be mapped from SharedUtils.
+  LocalAuthentication's passcode policies need it, whatever happens to biometrics;
+- only if the owner chooses BIOMETRICS.md's option (b), a convenience face unlock of Scion's own: a call into the key store that unlocks
+  the screen without the passcode, refused until the passcode has been entered since boot, after 48 hours, after five failed matches
+  and after a restart, answered only to Scion's daemon. It opens the screen; it protects no data, and it is never reported to iOS as
+  biometry.
 
 ## Testing
 
