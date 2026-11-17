@@ -12,9 +12,10 @@ OUT=${1:-$HERE/cam.dylib}
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 xcrun --sdk iphoneos clang -arch arm64 -isysroot "$SDK" -miphoneos-version-min=16.0 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations \
 	-dynamiclib -install_name /usr/lib/cam.dylib \
-	-DHAKIOS_CAMERA_N104 -DHAKIOS_CAMERA_CONSOLE '-DHAKIOS_CAMERA_FW="/private/var/hakios/camera"' -I"$SRC" \
+	-DHAKIOS_CAMERA_N104 -DHAKIOS_CAMERA_CONSOLE '-DHAKIOS_CAMERA_FW="/private/var/hakios/camera"' -I"$SRC" -I"$HERE" \
 	-framework CoreFoundation -framework CoreMedia -framework CoreVideo -lobjc \
-	-o "$OUT" "$HERE/camera27.c" "$HERE/camera_trace.c" "$HERE/camera_oslog.c" "$SRC/camera_device.c" "$SRC/camera_say.c" "$SRC/camera_isp.c"
+	-o "$OUT" "$HERE/camera27.c" "$HERE/camera_trace.c" "$HERE/camera_oslog.c" "$HERE/camera_formats.c" "$HERE/camera_apptrace.c" "$HERE/camera_statetrace.c" "$HERE/camera_layout.c" \
+	"$SRC/camera_device.c" "$SRC/camera_say.c" "$SRC/camera_isp.c"
 codesign -f -s - "$OUT" 2>/dev/null
 [ "$(lipo -archs "$OUT")" = arm64 ] || { echo "build.sh: $(basename "$OUT") is not plain arm64" >&2; exit 1; }
 shasum -a 256 "$OUT"
