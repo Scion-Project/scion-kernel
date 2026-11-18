@@ -23,6 +23,7 @@
 #include "post.h"
 #include "fastboot.h"
 #include "ramboot.h"
+#include "scion_reentry.h"
 
 void star_intro_splash(void);   /* anim.c */
 uint32_t star_crc32(uintptr_t p, uint64_t n);   /* store.c */
@@ -1554,6 +1555,39 @@ static uintptr_t recovery_loop(volatile uint64_t *log, const char *why)
     }
 }
 
+/*
+ * A later warm restart into Android (warm.c, docs/ios27/WARM-RESTART.md) needs S-Boot's FDT, which XNU's RAM covers
+ * once it runs: kept at SCNR_FDT_SAVE (in no OS's RAM), only when the payload's line has sweetwarm=. Nothing otherwise.
+ */
+static int line_has(const char *line, const char *word)
+{
+    for (unsigned i = 0; i < BOOT_LINE_LENGTH && line[i]; ++i) {
+        if (i && line[i - 1] != ' ')
+            continue;
+        unsigned k = 0;
+        while (word[k] && i + k < BOOT_LINE_LENGTH && line[i + k] == word[k])
+            ++k;
+        if (!word[k])
+            return 1;
+    }
+    return 0;
+}
+
+static void warm_fdt_save(uintptr_t fdt, const char *line)
+{
+    if (!fdt || (fdt & 7) || !line_has(line, "sweetwarm="))
+        return;
+    if (__builtin_bswap32(*(volatile uint32_t *)fdt) != 0xd00dfeedU)
+        return;
+    uint32_t total = __builtin_bswap32(*(volatile uint32_t *)(fdt + 4));
+    if (total < 64 || total > SCNR_FDT_SAVE_END - SCNR_FDT_SAVE - PAGE_SIZE)
+        return;
+    copy_bytes(SCNR_FDT_SAVE + PAGE_SIZE, fdt, total);
+    *(volatile uint64_t *)(SCNR_FDT_SAVE + 8) = total;
+    *(volatile uint64_t *)SCNR_FDT_SAVE = SCNR_FDT_MAGIC;
+    clean_bytes(SCNR_FDT_SAVE, SCNR_FDT_SAVE + PAGE_SIZE + total);
+}
+
 /* Returns the entry PA, or 0 for Download mode. Status stays in the log page at LOG_BASE. */
 uintptr_t star_prepare_xnu(uintptr_t fdt, volatile uint64_t *log, uint64_t el, uint64_t sctlr)
 {
@@ -1583,6 +1617,7 @@ uintptr_t star_prepare_xnu(uintptr_t fdt, volatile uint64_t *log, uint64_t el, u
         return fatal(log, -11, "MMU ALREADY ON");
     boot_info();
     char *cmdline = boot_cmdline;
+    warm_fdt_save(fdt, cmdline);
     log[11] = boot_rd_start;
     log[12] = boot_rd_end;
     /* Rescue mode (the recovery menu's reboot): no POST, no menu. A failure comes back to recovery. */
@@ -1786,4 +1821,46 @@ uintptr_t star_boot_ram(const struct star_ram *r, uintptr_t fdt, const char **wh
     uintptr_t e = ram_start((volatile uint64_t *)LOG_BASE, r, fdt);
     *why = e ? 0 : boot_why;
     return e;
+}
+
+/*
+ * ---- Warm restart (warm.c, scion_reentry.h, docs/ios27/WARM-RESTART.md) ------------------------------------------
+ * What the record names, started as the cold boot would start it, with no menu: BOOT's payload (appended to this
+ * Image, which the kernel put where S-Boot does) through xnu_enter with the payload's line, the record's in its
+ * place, or the payload's with the record's appended; or an Android kernel and ramdisk through ram_start with S-Boot's
+ * FDT as the cold boot kept it (warm_fdt_save). Returns the entry (log[17]: its x0) or 0 (fail() said why).
+ */
+uintptr_t star_warm_start(volatile uint64_t *log, const struct scion_reentry *r);
+uintptr_t star_warm_start(volatile uint64_t *log, const struct scion_reentry *r)
+{
+    static char cmd[BOOT_LINE_LENGTH];
+    boot_why = 0;
+    if (r->method == SCNR_M_ANDROID) {
+        struct star_ram ram;
+        uintptr_t fdt = (uintptr_t)r->fdt_pa;
+        if (fdt != SCNR_FDT_SAVE || *(volatile uint64_t *)fdt != SCNR_FDT_MAGIC)
+            return fail(log, -91, "WARM: NO SAVED S-BOOT FDT");
+        ram.method = M_ANDROID;
+        ram.kernel = (uintptr_t)r->kernel_pa;
+        ram.ramdisk = (uintptr_t)r->ramdisk_pa;
+        ram.dtb = 0;
+        ram.kernel_size = r->kernel_size;
+        ram.ramdisk_size = r->ramdisk_size;
+        ram.dtb_size = 0;
+        ram.cmdline = r->cmdline;
+        return ram_start(log, &ram, fdt + PAGE_SIZE);
+    }
+    boot_fdt = 0;
+    boot_el = 4;
+    boot_info();
+    if (!boot_p)
+        return fail(log, -90, "WARM: NO SWEETXNU PAYLOAD");
+    const char *src = (r->flags & SCNR_F_LINE) ? r->cmdline : boot_p->cmdline;
+    for (unsigned i = 0; i < BOOT_LINE_LENGTH; ++i)
+        cmd[i] = src[i];
+    cmd[BOOT_LINE_LENGTH - 1] = 0;
+    if (!(r->flags & SCNR_F_LINE) && (r->flags & SCNR_F_APPEND))
+        line_append(cmd, BOOT_LINE_LENGTH, r->cmdline);
+    star_fb_text(2, "STARTING XNU");
+    return xnu_enter(log, boot_p, boot_rd_start, boot_rd_end - boot_rd_start, cmd);
 }

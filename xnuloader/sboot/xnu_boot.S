@@ -15,6 +15,12 @@ _start:
     .quad 0, 0, 0
     .byte 0x41, 0x52, 0x4d, 0x64
     .long 0
+    /* base + 0x40: the warm restart's entry (warm.c, scion_reentry.h): x0 = the re-entry record. Then the mark a
+     * kernel looks for before it lets go: "SCNR" and the record's version. */
+    b warm_entry
+    .ascii "SCNR"
+    .long 1
+    .long 0
 
 entry:
     msr daifset, #15
@@ -43,7 +49,8 @@ zero_log:
     str x19, [x13, #24]
     adr x14, _start
     str x14, [x13, #32]
-    adr x14, star_boot_stack_top
+    adrp x14, star_boot_stack_top    /* adrp: .data is more than 1 MiB past the head */
+    add x14, x14, :lo12:star_boot_stack_top
     mov sp, x14
     /* FP/SIMD on for menu v7 (docs/MENU7-PORT.md 2.2): S-Boot's CPACR_EL1 in x22 (callee-saved, kept
      * through the C code) and in log slot 119; it is put back before any OS is entered. */
@@ -57,6 +64,7 @@ zero_log:
     mov x2, x20
     mov x3, x21
     bl star_prepare_xnu
+handoff:
     ldr x13, =0x91fff000
     cbz x0, fail
     mov x16, x0
@@ -107,6 +115,51 @@ fail:
 halt:
     wfe
     b halt
+
+/*
+ * warm_entry: a running kernel starts the loader again (docs/ios27/WARM-RESTART.md): x0 = its scion_reentry, EL1, the
+ * MMU and the data cache off, DAIF masked. The same log page and stack as a cold boot (and FP/SIMD on for the
+ * renderer); star_warm checks the record and the payload and places the OS, or never returns. The handoff after it
+ * is the cold boot's. x22 (put back into CPACR_EL1 before the OS) is the kernel's CPACR: each OS sets up its own.
+ */
+warm_entry:
+    msr daifset, #15
+    mov x19, x0              /* the record */
+    mrs x20, CurrentEL
+    mrs x21, sctlr_el1
+    ldr x13, =0x91fff000
+    mov x14, x13
+    add x15, x13, #4096
+1:  dc ivac, x14
+    add x14, x14, #64
+    cmp x14, x15
+    b.lo 1b
+    dsb sy
+    mov x14, x13
+2:  stp xzr, xzr, [x14], #16
+    cmp x14, x15
+    b.lo 2b
+    ldr x14, =0x31304554524c5453 /* "STRLTE01" */
+    str x14, [x13]
+    str x20, [x13, #8]
+    str x21, [x13, #16]
+    str xzr, [x13, #24]      /* no FDT from S-Boot */
+    adr x14, _start
+    str x14, [x13, #32]
+    adrp x14, star_boot_stack_top    /* adrp: .data is more than 1 MiB past the head */
+    add x14, x14, :lo12:star_boot_stack_top
+    mov sp, x14
+    mrs x22, cpacr_el1
+    str x22, [x13, #952]
+    orr x14, x22, #(3 << 20)
+    msr cpacr_el1, x14
+    isb
+    mov x0, x19
+    mov x1, x13
+    mov x2, x20
+    mov x3, x21
+    bl star_warm
+    b handoff
 
 /*
  * star_dcache_all(op): the whole data cache by set/way, every level up to the LoC: op 0 =

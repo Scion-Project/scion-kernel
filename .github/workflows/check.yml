@@ -118,6 +118,8 @@ jobs:
         run: sh tools/usb-acm-test.sh
       - name: The UFS driver's commands and the whitelist every one passes before it reaches the flash (hakios.ufshc_upiu.h) hold against mutated commands (sanitizers)
         run: sh tools/ufshc-upiu-test.sh
+      - name: The warm restart's re-entry record and the payload's SHA-256 as the loader checks them (xnuloader/sboot/warm_record.c) (sanitizers)
+        run: sh tools/warm-restart-test.sh
       - name: The commits of the fork of XNU that the profiles pin can be fetched
         run: |
           for p in ios-16.5 ios-26 ios-27; do python3 tools/xnu-tree.py path "$p"; done
