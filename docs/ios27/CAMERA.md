@@ -422,6 +422,19 @@ What phone 1 showed with dylib `-28` (18 November, 24B156, rear camera, `cam_tra
   cameracaptured at about 150 MiB resident with 6 to 9 MiB of memory free.
 - Dylib `-29` says, with the trace, each unrecognised selector (`trace: exception: -[Class selector] NOT RECOGNISED: callers ...`,
   from `-/+[NSObject doesNotRecognizeSelector:]`) and an uncaught exception's name and reason (`trace: exception: uncaught ...`).
+- Boot C (`cc-cam29-metal`, dylib `-29`, `cam_metal=1`): `trace: exception: -[__NSCFNumber objectForKey:] NOT RECOGNISED`,
+  uncaught `NSInvalidArgumentException`. The callers, read in 24B156's cache: VideoToolbox's
+  `FigGetAlignmentForIOSurfaceOutputToDisplayService`, from `-[BWImageQueueSinkNode _updateInputRequirements]`, from the image
+  queue sink's init in `_appendImageQueueSinkNodeToPreviewPipelineStage:...`: the last node of the preview. That function
+  finds the display service (`AppleCLCD`, `AppleCLCD2` or `AppleRGBOUT`) and reads its `DisplayPipePlaneBaseAlignment` as a
+  **dictionary** holding `PlaneBaseAlignmentLinear` (and `DisplayPipeStrideRequirements` holding `StrideLinearHorizontal`),
+  64 when either is missing. The fork's `iokit/Kernel/arm/SweetFramebuffer.cpp` publishes `DisplayPipePlaneBaseAlignment`
+  as the number 64. `CFDictionaryGetValue()` on a number sends it `-objectForKey:`, and cameracaptured aborts.
+- Dylib `-30`, with `cam_metal=1`, in cameracaptured only: NSNumber gets an `-objectForKey:` that answers nil (said once,
+  with its callers): VideoToolbox then keeps its default, 64, the value the kernel means. Checked on the build Mac
+  (`CFDictionaryGetValue()` on a number gives NULL with it). The fix where the cause is would be the kernel publishing the
+  property as Apple's display does (`{PlaneBaseAlignmentLinear = 64}`); not done here, because every process reads that
+  property (QuartzCore among them) and it is not the camera's to change. **`-30` not run on a phone** when this was written.
 
 ### SpringBoard's main-display layout (18 November)
 

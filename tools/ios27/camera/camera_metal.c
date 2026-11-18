@@ -167,6 +167,49 @@ point_fopen(const struct mach_header_64 *h, intptr_t slide)
 	return done;
 }
 
+/*
+ * With a device, the preview's image queue sink is made, and its -_updateInputRequirements asks VideoToolbox's
+ * FigGetAlignmentForIOSurfaceOutputToDisplayService (24B156) for the display's plane base alignment: it looks up the
+ * AppleCLCD service's DisplayPipePlaneBaseAlignment and takes PlaneBaseAlignmentLinear OUT OF IT, a dictionary on Apple's
+ * display. The kernel's SweetFramebuffer (the fork's iokit/Kernel/arm/SweetFramebuffer.cpp) publishes that property as the
+ * number 64, CFDictionaryGetValue() on a number sends it -objectForKey:, and cameracaptured aborted on the unrecognised
+ * selector (phone 1, dylib -29, cc-cam29-metal). Here, with cam_metal=1 and in cameracaptured only, NSNumber is given an
+ * -objectForKey: that answers nil (a number has no keys): VideoToolbox then keeps its default of 64, which is the value the
+ * kernel means. Said once, with its callers. The fix where the cause is would be the kernel publishing the property as
+ * Apple's display does, {PlaneBaseAlignmentLinear = 64}; that is not done here (it would change what every process reads).
+ */
+static id
+number_object_for_key(id self, SEL sel, id key)
+{
+	static bool said;
+
+	if (!said) {
+		said = true;
+		hakios_camera_trace_callers("metal: cam_metal=1: a number asked -objectForKey: (the display's "
+		    "DisplayPipePlaneBaseAlignment is a number here, a dictionary on Apple's display): answered nil", NULL);
+		say("metal: cam_metal=1: a number was asked -objectForKey: and answered nil (VideoToolbox's alignment default, 64)");
+	}
+	return nil;
+}
+
+static void
+number_keys(void)
+{
+	static bool done;
+	Class c;
+	SEL s = sel_registerName("objectForKey:");
+
+	if (done || (c = objc_getClass("NSNumber")) == Nil) {
+		return;
+	}
+	done = true;
+	if (class_respondsToSelector(c, s)) {
+		say("metal: cam_metal=1: NSNumber already answers -objectForKey:: left alone");
+	} else if (!class_addMethod(c, s, (IMP)number_object_for_key, "@@:@")) {
+		say("metal: cam_metal=1: NSNumber's -objectForKey: could not be added");
+	}
+}
+
 static void
 metal_image_added(const struct mach_header *header, intptr_t slide)
 {
@@ -174,6 +217,7 @@ metal_image_added(const struct mach_header *header, intptr_t slide)
 	size_t n, m = strlen(PLUGIN);
 	int r;
 
+	number_keys();
 	if (header->magic != MH_MAGIC_64 || dladdr(header, &info) == 0 || info.dli_fname == NULL ||
 	    (n = strlen(info.dli_fname)) < m || strcmp(info.dli_fname + n - m, PLUGIN) != 0) {
 		return;
