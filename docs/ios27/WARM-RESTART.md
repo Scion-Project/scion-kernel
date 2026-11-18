@@ -303,11 +303,18 @@ What a failure looks like, and why each is safe:
 - The new kernel panics early: its panic path (`sweetreboot=` if on the line) or the keys, as for a cold boot.
 - Nothing above writes storage. RAM is the only thing changed.
 
-**Where it stopped, when the console is gone.** After the point of no return the console is stopped, so the kernel
-writes each step as a line in its log's ring (`STARLTE WARM: step 1: the USB console stopped` ... `step 7: the staged
-pages cleaned; TCR_EL1 ... SCTLR_EL1 ...; into the stub`), and right before the jump it puts the header `STARBITE: warm
-restart: XNU's handoff reached the stub (no panic)` and the console's last lines into the pmsg ring (0xFED14000; TWRP:
-`/sys/fs/pstore/pmsg-ramoops-0`). The loader appends `STARBITE: warm: the loader entered at EL1`, `the record is
+**No console output once interrupts are off.** XNU panics on console output with interrupts off ("Console I/O from
+interrupt-disabled context", `osfmk/console/serial_console.c`). The first two tries on the phone (18 Nov) died that
+way, the first through the GPU's stop, which printed. From the moment interrupts go off, the handoff prints nothing:
+`starlte_gpu_quiesce()` returns what it did as text, and the console is suspended (`console_suspend()`, as for sleep)
+just before, so that a line some other driver still prints goes straight out instead of panicking.
+
+**Where it stopped, when the console is gone.** After the point of no return the console is stopped. The kernel
+writes steps 1 to 3 (`STARLTE WARM: step 1: the USB console stopped` ... `step 3: the watchdog armed`) as lines in its
+log's ring; steps 4 to 7 (interrupts off, the GPU with its result, the timers and the GIC, `the staged pages cleaned;
+TCR_EL1 ... SCTLR_EL1 ...; into the stub`) go straight into the pmsg ring (0xFED14000; TWRP:
+`/sys/fs/pstore/pmsg-ramoops-0`). Right before the jump it starts that ring again with the header `STARBITE: warm
+restart: XNU's handoff reached the stub (no panic)` and the console's last lines, then steps 4 to 7 again. The loader appends `STARBITE: warm: the loader entered at EL1`, `the record is
 right`, `the payload's SHA-256 is right`, `the OS placed, entering it`, or `the loader gave up: <why>`. With
 `sweetreboot=` on the line an XNU panic writes `STARBITE: XNU panic (sweetreboot)` with the panic text and the same
 step lines instead, and resets to TWRP at once. So when a warm restart ends in TWRP, read that file first, before
@@ -317,7 +324,7 @@ anything else boots (the next boot's loader and TWRP write the same ring):
 - `the loader gave up: ...`: the loader refused (the reason is on the panel too).
 - `entering it` and still TWRP: the next kernel panicked early.
 The first try on the phone (18 Nov) ended in TWRP about four seconds after `point of no return`, before these lines
-existed; the ring had been overwritten by later boots when it was read.
+existed; the third, with them, read `XNU panic` with the console-output panic above after `step 3`.
 
 **Step 2.** `sweetwarm_smp=1` with the line's usual eight cores: secondaries `CPU_OFF` and the next kernel's `CPU_ON`.
 Look for every `SweetCPU ... PSCI CPU_ON rc=0` in the second boot. Add the GPU's stop.
