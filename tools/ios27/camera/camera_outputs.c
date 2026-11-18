@@ -10,6 +10,15 @@
  * dylib -17 showed the graph configuring IntermediateTap and Depth, which camera_device.c did not keep, and then reading
  * VideoOutputConfigurations back empty and throwing ("output pixel format () doesn't match the pixelBufferPool's pixel
  * format (420f)", -[BWMultiStreamCameraSourceNode allocateOrReuseBufferPoolsFromSourceNode:], 24A446). NOT RUN ON A PHONE.
+ *
+ * The read back. With IntermediateTap kept (dylib -18), phone 1 showed the graph's configurations: StillImage with its
+ * PixelFormat (420f), PrimaryScaler (1504 x 1128) with none, and the same throw for PrimaryScaler. The source node
+ * (24A446) sets a streaming output's PixelFormat from FigCapturePixelFormatWithLeastAverageBandwidth over
+ * -[BWMultiStreamCameraSourceNode _supportedPixelFormatsForOutputID:] (a direct method: out of the runtime's reach), which
+ * came back empty for it, while the output's pool, shared with the other streaming outputs (_shareStreamingBufferPools),
+ * is 420f; allocateOrReuseBufferPoolsFromSourceNode: reads the configurations back from the stream and wants the two to
+ * agree. scioncam_config_read_back() gives a configuration without a PixelFormat back with 420f in it, the format of the
+ * pool and what camera_device.c draws (said once an output). Why the list came back empty is not known yet.
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreVideo/CoreVideo.h>
@@ -106,4 +115,26 @@ scioncam_say_outputs(const char *camera, CFStringRef key, CFDictionaryRef value)
 	c.which = strcmp(k, "VideoOutputConfigurations") == 0 ? 0 : strcmp(k, "VideoOutputsEnabled") == 0 ? 1 : 2;
 	CFDictionaryApplyFunction(value, one, &c);
 	hakios_camera_say("outputs: %s: %s: %s", camera, k, c.line[0] != '\0' ? c.line : "none");
+}
+
+CFDictionaryRef
+scioncam_config_read_back(const char *camera, CFStringRef output, CFDictionaryRef config)
+{
+	static int said;
+	int f420 = 0x34323066;  /* '420f' */
+	char name[48] = "?";
+
+	if (CFDictionaryGetValue(config, CFSTR("PixelFormat")) != NULL) {
+		return CFRetain(config);
+	}
+	CFMutableDictionaryRef c = CFDictionaryCreateMutableCopy(NULL, 0, config);
+	CFNumberRef n = CFNumberCreate(NULL, kCFNumberIntType, &f420);
+
+	CFDictionarySetValue(c, CFSTR("PixelFormat"), n);
+	CFRelease(n);
+	if (said++ < 4) {
+		CFStringGetCString(output, name, sizeof(name), kCFStringEncodingUTF8);
+		hakios_camera_say("outputs: %s: %s's configuration has no PixelFormat: read back as 420f (its pool's)", camera, name);
+	}
+	return c;
 }

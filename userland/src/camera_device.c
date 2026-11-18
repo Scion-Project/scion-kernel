@@ -562,7 +562,14 @@ stream_copy_property(CMBaseObjectRef o, CFStringRef key, CFAllocatorRef allocato
 
 			if (configs) {
 				if (s->out[i].config != NULL) {
+#ifdef HAKIOS_CAMERA_N104
+					CFDictionaryRef c = scioncam_config_read_back(s->camera->name, name, s->out[i].config);
+
+					CFDictionarySetValue(d, name, c);
+					CFRelease(c);
+#else
 					CFDictionarySetValue(d, name, s->out[i].config);
+#endif
 				}
 			} else {
 				CFDictionarySetValue(d, name, s->out[i].enabled ? kCFBooleanTrue : kCFBooleanFalse);

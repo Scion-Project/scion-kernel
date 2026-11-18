@@ -22,5 +22,8 @@ void scioncam_tenbit_widen(CVPixelBufferRef from, CVPixelBufferRef pb);
 /* camera_outputs.c: one line for each output a VideoOutputConfigurations / VideoOutputsEnabled / VideoOutputHandlers set
    names (its pixel format, size and pool), so that the console shows which outputs the graph uses */
 void scioncam_say_outputs(const char *camera, CFStringRef key, CFDictionaryRef value);
+/* camera_outputs.c: an output's configuration as VideoOutputConfigurations is read back (retained): with 420f put in as
+   its PixelFormat when the graph set none */
+CFDictionaryRef scioncam_config_read_back(const char *camera, CFStringRef output, CFDictionaryRef config);
 
 #endif
