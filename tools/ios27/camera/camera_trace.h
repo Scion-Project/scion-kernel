@@ -43,6 +43,11 @@ void scioncam_trace_layout_publisher(void);
 /* Camera.app: wrap -[AVCaptureFigVideoDevice supportsAVCaptureSessionPreset:] to say the cameras' formats (camera_apptrace.c) */
 void scioncam_trace_app(void);
 
+/* cameracaptured: with cam_metal=1, a client of the Metal plug-in (its preview pipeline needs a device); with the trace,
+   +[FigMetalContext metalDevice] and the pipelines' nodes said (camera_metal.c) */
+void scioncam_metal_client(void);
+void scioncam_trace_metal(void);
+
 /* camera_device.c: every call its device and streams get, said (0: as before) */
 extern int hakios_camera_trace;
 

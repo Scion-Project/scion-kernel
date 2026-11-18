@@ -366,12 +366,46 @@ it leads to (`camera_flownext.c`: `trace: flow: ... leads to <class> "<name>"`, 
 - The graph's connections (`camera_connecttrace.c`): the still pipeline asks for and gets all of its own (coordinator, frame
   coordinator, format converter, `BWUBNode` "UB", scaler, Meteor headroom, encoder, still image sink), and the metadata path
   its own. The preview pipeline asks for **none** through `-[BWGraph connectOutput:toInput:pipelineStage:deferredAttach:]`.
-  The next step is to find out what `_buildVideoPreviewSinkPipeline:...` (a direct call from the init) does on the S9, for
+  Why: the seventh cause, below (no Metal device in cameracaptured). Before it was found, the next step was to find out what `_buildVideoPreviewSinkPipeline:...` (a direct call from the init) does on the S9, for
   example a stitcher or image queue sink that it does not make and that it skips without failing.
 - The photograph goes through `BWUBNode` (unified bracketing), whose processing setup returns -16808 on the S9 even with the
   formats' fusion answered NO (`camera_stills.c`). The still pipeline has to be built without UB.
 - 24B156: inserting `cam.dylib` into SpringBoard (the layout publisher trace) stalls SpringBoard at the Apple logo. Insert it
   into cameracaptured and Camera only.
+
+### The seventh cause: cameracaptured has no Metal device (18 November, 24B156)
+
+Read in iOS 27.2.1's CMCapture (24B156's shared cache, its logic only): the first thing
+`-[FigCapturePreviewSinkPipeline _buildVideoPreviewSinkPipeline:...]` needs, before it makes any node, is a Metal device
+(`+[FigMetalContext metalDevice]`, CMImaging's, made once per process), a command queue on it (`newCommandQueue`) and the
+pipeline's two Metal dispatch queues (`_metalCompletionQueue`, `_metalSubmissionQueue`). When any of the four is nil, the
+build makes a debug assertion (`FigDebugAssert3`, silent on a release build) and **returns 0, success**, with no node added
+and no connection asked for. The same path (assertion, then success) follows a failed `addNode:error:` or
+`connectOutput:...` of several of its nodes. The init takes the 0 as success and the pipeline is "made". That is exactly
+what phone 1 showed with dylibs `-21` to `-27`: the build a success, the graph's connections all the still pipeline's and
+the metadata path's, none of the preview's, `Preview(PrimaryScaler)` leading nowhere, a black viewfinder.
+
+cameracaptured has no Metal device on this root. The Metal plug-in (`StarbiteMetal.bundle`, `tools/ios27/metal2/HotMetal2.mm`
+`listed()`) gives one only to the processes named in `/private/var/local/mtl2-clients`, which `80-metal-ca.sh` writes as
+`backboardd` alone. Phone 1's consoles (v1-cam26, d23-cam25, d21-cam24) have `MTL2[pid cameracaptured]: plugin loaded` at
+cameracaptured's start (Metal was asked for a device) and nothing after it (the plug-in's `not listed` line goes to
+`mtl2.log` only). iOS 16.5's mediaserverd built its preview with no Metal device at all (`userland/src/inject_media.c` even
+takes the device out of that process); iOS 27's build does not.
+
+`tools/ios27/camera/camera_metal.c` (dylib `-28`):
+- With `cam_trace=1`: `trace: metal: +[FigMetalContext metalDevice] -> nil` (or the device's name), once and when it
+  changes, and the first 80 nodes the capture pipelines add (`trace: metal: <pipeline> adds <node class> "<name>": yes|NO`,
+  `-[FigCapturePipeline addNode:error:]`). Without a device no `FigCapturePreviewSinkPipeline adds ...` line is expected.
+- With `cam_metal=1` on the boot line (off by default): when the Metal plug-in is loaded into cameracaptured, its import of
+  `fopen()` is pointed at a wrapper that, for the client list only, gives the file's text with `cameracaptured` added (a
+  `-cameracaptured` in the file still wins). Nothing on the phone is written, no other process is touched. Said:
+  `metal: cam_metal=1: the Metal plug-in is loaded: its fopen() of the client list taken`. The same without the switch, at
+  root build time: `METAL_CA_CLIENTS="backboardd cameracaptured"` for `80-metal-ca.sh`. A Metal client wires about 57 MiB
+  of GPU memory when its device is made (LIQUID-GLASS.md), and its first preview compiles CMCapture's shaders through
+  metal2vulkan: whether all of them translate is what the phone test shows.
+
+Checked on the build Mac: the library builds; the `fopen()` redirection, built for macOS around a stand-in plug-in, makes the
+stand-in read the list with `cameracaptured` in it. **Not run on a phone** when this was written.
 
 ### SpringBoard's main-display layout (18 November)
 
