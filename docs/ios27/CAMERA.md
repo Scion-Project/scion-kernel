@@ -309,6 +309,27 @@ The still image output wanting a 10-bit pixel format (`stillImageOutputRequires1
 come in a 10-bit pool ('x420' or the like), which `camera_device.c` does not draw into (`StillImage: ... buffers are not for this
 ISP`): the next gap if the shutter gives nothing.
 
+### The fifth cause: no pixel format for the still image output (18 November)
+
+N104's `AVCaptureSession.plist` says `UsesPacked10BitFirmwareStillImageOutputPixelFormat` for the photo formats of both
+cameras ("12MP", the front camera's "7MP") and for 1080p, 720p and 1920 x 1440: the A13's ISP gives its photographs in a
+packed 10-bit format. iOS 27.0.1's CMCapture (24A446's shared cache, its logic only) then sets the source node's
+`stillImageOutputRequires10BitPixelFormat`, and `-[BWMultiStreamCameraSourceNode _supportedPixelFormatsForOutputID:]`
+keeps, of each output's `SupportedPixelFormats` in the stream's format, the ones whose range, bit depth, 4:2:2-ness and raw-ness
+match what the output wants: for the still image output full range, 10-bit exactly when that flag is set, not 4:2:2, not raw,
+and no more lossy compression than the session allows. The other outputs follow the session's client video format (420f
+for Photo mode). The S9's streams offered 420f, 420v and BGRA, so with the flag the still image output was left with no
+pixel format at all, and the session that builds its pools for every output could not start.
+
+Dylib `-17`: `camera_refuse.c` answers NO to `-[FigCaptureSourceVideoFormat usesPacked10BitFirmwareStillImageOutputPixelFormat]`
+(`still: ... replaced (NO: the still image output takes 420f)`, and at a session `still: the format wants a 10-bit still
+image ... answered NO`): the still image output takes 420f, which `camera_device.c` draws. `cam_still10=1` on the boot line
+keeps the plist's answer; for that case `camera_formats.c` also offers `xf20` (10-bit full range, two planes, each sample 16
+bits with its 10 bits at the top) on the StillImage output, and `camera_tenbit.c` draws the picture in 8 bits into a
+scratch 420f buffer and widens it into the pool (`StillImage: the graph's pool is 10-bit (xf20): ...`). The preview does
+not need 10 bits: its outputs take 420f, a two-plane IOSurface that the Metal bridge samples (`newTextureWithDescriptor:iosurface:plane:`
+with its YCbCr planes, `tools/metal/bridge/NativeMetalObjects.rs`). **Not run on a phone yet.**
+
 ### Where the pictures stop: the flow trace
 
 With `cam_trace=1`, `tools/ios27/camera/camera_flowtrace.c` follows the frames through cameracaptured's graph: which of the
