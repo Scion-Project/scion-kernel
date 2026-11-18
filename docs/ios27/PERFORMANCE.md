@@ -549,3 +549,16 @@ AdrenoMetal's frontend changes since 243d63cf (167 commits) are not reviewed for
 the same image. First see that it renders: the shader cache is cold and none of the correctness patches above is in. Then
 compare the swipe windows' GPU profile and the bridge column of the pass log (µs a draw: 114 to 119 on 24B156 with the old
 runtime). The re-pin becomes the default only after a phone run shows it renders correctly and is not slower.
+
+**First boot of m5 on phone 1** (P6, 18 November 14:34Z, image b272, `edit-m5.sh direct`, log
+`con-xnu-boot-b272-1118-1434`):
+- It came up: the Metal device was made in 6,266 ms (cold shader cache), with no backboardd crash, no GPU fault line and no
+  refused or failed MTL2 line.
+- **The screen is black.** The framebuffer keeps presenting (10 frames a second at rest; the CA swap period's p50 is
+  33.2 ms during the bench), but the frames are empty. The fbt numbers fit that: record to GPU done 5.0 ms, to shown 5.7 ms.
+- **The pass log printed no pass at all** ("PL on" and then not one `PL w` line), where the old runtime prints dozens
+  a window. So either backboardd's render passes do not reach the bridge's encoders, or the pass log's hook does not see
+  them under the new runtime.
+- Not found yet; the bench numbers of that boot (swipes 54 % / 40.6 fps) are of empty frames and mean nothing.
+- Next step: run the host bench (`tools/ios27/metal/host-bench`, KosmicKrisp on the Mac) on the re-pinned bridge built for
+  the host, which shows on the Mac whether a draw reaches its target. Then re-base 0006, 0100 and 0102 first (above).
