@@ -322,6 +322,14 @@ app_image_added(const struct mach_header *header, intptr_t slide)
 	scioncam_trace_app();
 }
 
+/* in SpringBoard, with the trace: FrontBoardServices' layout publisher said (camera_sbtrace.c) */
+static void
+sb_image_added(const struct mach_header *header, intptr_t slide)
+{
+	(void)header, (void)slide;
+	scioncam_trace_layout_publisher();
+}
+
 /* the trace's start in this program: its os_log taken, and said */
 static void
 trace_start(const char *name)
@@ -339,6 +347,14 @@ scion_camera_init(void)
 {
 	const char *name = getprogname();
 
+	if (name != NULL && strcmp(name, "SpringBoard") == 0) {
+		/* only with the trace, where the record names it (94-camera.sh, CAMERA_TRACE_SB=1): the layout publisher traced */
+		if ((trace_level = scioncam_trace_level()) > 0) {
+			say("in SpringBoard: the trace is on (cam_trace=%d): FrontBoard's display layout publisher said", trace_level);
+			_dyld_register_func_for_add_image(sb_image_added);
+		}
+		return;
+	}
 	if (name != NULL && strcmp(name, APP) == 0) {
 		if ((trace_level = scioncam_trace_level()) > 0) {
 			trace_start(name);

@@ -30,6 +30,10 @@ void scioncam_no_thumbnails(void);
    attachments, which its colour space check wants (camera_colour.c) */
 void scioncam_colour_info(void);
 
+/* SpringBoard, with the trace: wrap FBSDisplayLayoutPublisher's element, backlight, suppression and flush methods
+   (camera_sbtrace.c) */
+void scioncam_trace_layout_publisher(void);
+
 /* Camera.app: wrap -[AVCaptureFigVideoDevice supportsAVCaptureSessionPreset:] to say the cameras' formats (camera_apptrace.c) */
 void scioncam_trace_app(void);
 

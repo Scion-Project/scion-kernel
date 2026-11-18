@@ -321,6 +321,21 @@ stopped before, see the CAMLOG lines); the source node emits but the stitcher or
 drops: its reason); the sink renders but the app shows nothing (the image queue, the IOSurfaces' format, or the compositor:
 `native-metal` refusals in backboardd's lines); a time stamp far from 0 ms from now (the queue holds frames for later).
 
+### Why the display layout is empty: the publisher's trace
+
+`camera_layout.c` stands in for FrontBoard's main-display layout in cameracaptured, which on this port names no application and
+says `backlightState = 0`, `backlightLevel = 0` while the screen is on (above). SpringBoard publishes that layout through
+FrontBoardServices' `FBSDisplayLayoutPublisher`: elements added and removed for what is on the screen (`_addElement:forKey:`,
+where `addElement:`, `add:` and `remove:` lead), the backlight's state and level, publishing held by suppression and transition
+assertions with a reason, and `flush`. With the library also inserted into SpringBoard (the root step with `CAMERA_TRACE_SB=1`, or
+`,SpringBoard` added to the boot line's `sweetinject=` entry of `cam.dylib`) and `cam_trace=1`, `tools/ios27/camera/camera_sbtrace.c`
+says each of those calls (the first 40 of a kind, then every 200th): `trace: layout publisher 0x...: add element (N): ...`,
+`backlight state S`, `backlight level L`, `layout SUPPRESSED for "reason"`, `a suppression ends`, `transition "reason"`,
+`flushed (N): <the layout>`. One boot then names the cause: no `add element` at all (SpringBoard's scene layout never reaches the
+publisher), a `SUPPRESSED` with no `suppression ends` (published layouts held empty, the reason says by what), or no `backlight
+state` (the backlight's state, from BacklightServices, never reaches it). Without the trace, or without the record naming
+SpringBoard, the library does nothing in SpringBoard. **Not run on a phone.**
+
 ### What the S9's sessions are built without, and what restoring each needs
 
 | Left out | Where | Why | To restore |
