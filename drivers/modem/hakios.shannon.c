@@ -138,7 +138,7 @@
  *   cp_ds=N      the dual SIM field told to the modem (0)
  *   cp_wait=N    seconds the started modem is watched before it is put back in reset (20; 25 with the link)
  *   cp_delay=N   seconds after the boot before the modem's driver does anything (30), so that its lines are in the log
- *   cp_warm=1    go on when the CP's power domain was started by an earlier kernel of this power-on (a warm restart, the XNU fork's sweetwarm=; RESET_SEQUENCER_STATUS not 0 as found), as this driver did before 18 Nov: its memory read and written. Off: in that case the CP and its memory are left alone and the modem needs a cold boot (one such run panicked: an SError)
+ *   cp_warm=1    go on with a CP that an earlier kernel of this power-on started (after a warm restart), reading and writing its memory as before 18 Nov. Off: such a CP is left alone and the modem needs a cold boot (one such run panicked: an SError)
  *
  * WHERE IT MAY RUN. The CP's memory is fixed by the boot chain at 0xF0000000. On a tree whose loader puts XNU itself
  * there this driver must not load anything: it checks that no page of the 146 MB is XNU's and that the kernel is not in

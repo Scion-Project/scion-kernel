@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 764 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 765 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1693,7 +1693,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (192)
+# User space (193)
 #
 
 # Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
@@ -1944,6 +1944,9 @@ CONFIG_MODEM_AGAIN=y
 
 # seconds the started modem is watched before it is put back in reset (20; 25 with the link)
 # CONFIG_CP_WAIT is not set
+
+# go on with a CP that an earlier kernel of this power-on started (after a warm restart), reading and writing its ...
+# CONFIG_CP_WARM is not set
 
 # run it (0, or none: the fixed rates of cpufreq_lit= and cpufreq_big=)
 # CONFIG_CPUFREQ_GOV is not set
