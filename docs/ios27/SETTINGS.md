@@ -89,3 +89,28 @@ in the order above (the database file, which only `medialibraryd` or a writer ma
   18 Nov).
 - Settings > Bluetooth opens as a blank white page on 24B156 (it drew on 24A446). No Settings abort came with it (boot o272,
   13:35). Not investigated.
+
+## About > Capacity "0 KB" (18 November)
+
+Seen on the 24B156 port: Settings > General > About shows **Capacity: 0 KB** (iPhone Storage asks the same question).
+
+Where the number comes from (24B156's `AboutSettings.bundle`, `-[PSGAboutDataSource _loadValues]`, a single-user device):
+`MGCopyAnswer("DiskUsage")[kMGQDiskUsageTotalDiskCapacity]`, rounded to whole GB and formatted decimal. The root image being HFSX
+instead of APFS is not the cause: Available comes from `NSURLVolumeAvailableCapacityForImportantUsageKey` (statfs), and
+`APFSVolumeGetSpaceInfo` is only called for a multi-user iPad.
+
+libMobileGestalt's `NANDSize()` (strings "`SInt64 NANDSize(void)`", "`IOServiceGetMatchingService() for disk0 failed!`",
+"`kIOMediaSizeKey`") takes TotalDiskCapacity from the IORegistry, not from the file system:
+
+    IOServiceGetMatchingService(kIOMasterPortDefault, IOBSDNameMatching(kIOMasterPortDefault, 0, "disk0"))
+    IORegistryEntryCreateCFProperty(entry, CFSTR("Size"), kCFAllocatorDefault, 0)      -> CFNumber SInt64
+
+The kernel has no IOStorageFamily, so no IOMedia and no `disk0` (`XNU-MICROSD.md` section 10): the lookup fails, NANDSize is -1, the answer
+is 0. (`TotalDataCapacity` and the rest of `DiskUsage` are `statfs("/private/var")` and were not the problem. The MobileGestalt cache
+that `94-camera` removes is not involved either: it only holds what the first boot computed.)
+
+The change is in the kernel, `Scion-Project/xnu` pull request 64: `bsd/dev/herolte_ufs.c` records the LUN's size (the GPT's backup header
+LBA + 1) when it finds the root partition and calls `sweet_media_publish()` (`iokit/Kernel/arm/SweetMedia.cpp`), which attaches a plain
+IOService named `disk0` under the platform expert with `BSD Name` = `disk0`, `Size`, `Whole`, `Writable`, `Removable`. It is not an IOMedia
+(DiskArbitration and IOStorage matching do not see it). A 64 GB S9 should show **64 GB**. The boot log has
+`SWEET MEDIA: disk0 registered, Size <bytes>`. No root step is needed. Built, not yet run on a phone.
