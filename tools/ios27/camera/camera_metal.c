@@ -18,7 +18,11 @@
  *
  * The trace (cam_trace=1): +[FigMetalContext metalDevice]'s answer, once and whenever it changes from nil to a device, and
  * the first 80 nodes added to the capture pipelines (-[FigCapturePipeline addNode:error:]: the pipeline's class, the node's
- * class and name, the result), so that a phone boot shows whether the preview pipeline adds its nodes.
+ * class and name, the result), so that a phone boot shows whether the preview pipeline adds its nodes. Also, because phone 1
+ * with cam_metal=1 (dylib -28, 18 November) saw cameracaptured abort on an Objective-C exception from an unrecognised
+ * selector right after the preview pipeline's "Assistive Overlay" node, with no reason on the console: every unrecognised
+ * selector (-/+[NSObject doesNotRecognizeSelector:]: the receiver's class and the selector, and the callers) and the
+ * reason of an uncaught Objective-C exception (objc_setUncaughtExceptionHandler, chained to the one before) are said.
  *
  * cam_metal=1 on the boot line (off by default; without it this file changes nothing outside the trace): when the Metal
  * plug-in (/System/Library/Extensions/StarbiteMetal.bundle/StarbiteMetal) is loaded into cameracaptured, its import of
@@ -47,6 +51,7 @@
 #include <sys/sysctl.h>
 
 void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1, 2)));    /* camera_say.c */
+void hakios_camera_trace_callers(const char *what, const char *camera);                  /* camera_say.c */
 #define say hakios_camera_say
 
 #define PLUGIN          "/StarbiteMetal.bundle/StarbiteMetal"
@@ -248,6 +253,71 @@ w_add_node(id self, SEL sel, id node, id *error)
 	return ok;
 }
 
+typedef void (*dnr_fn)(id, SEL, SEL);
+static dnr_fn o_dnr_instance, o_dnr_class;
+static int dnr_said;
+
+static void
+say_unrecognised(id self, SEL sel, bool class_side)
+{
+	char what[200];
+
+	if (dnr_said++ >= 40) {
+		return;
+	}
+	snprintf(what, sizeof(what), "exception: %c[%s %s] NOT RECOGNISED", class_side ? '+' : '-',
+	    self != nil ? object_getClassName(self) : "nil", sel != NULL ? sel_getName(sel) : "?");
+	hakios_camera_trace_callers(what, NULL);
+}
+
+static void
+w_dnr_instance(id self, SEL cmd, SEL sel)
+{
+	say_unrecognised(self, sel, false);
+	o_dnr_instance(self, cmd, sel);
+}
+
+static void
+w_dnr_class(id self, SEL cmd, SEL sel)
+{
+	say_unrecognised(self, sel, true);
+	o_dnr_class(self, cmd, sel);
+}
+
+/* libobjc's (objc/objc-exception.h, not in the iPhoneOS SDK's headers; exported by libobjc on iOS) */
+typedef void (*uncaught_fn)(id);
+extern uncaught_fn objc_setUncaughtExceptionHandler(uncaught_fn fn);
+static uncaught_fn o_uncaught;
+
+static void
+w_uncaught(id exception)
+{
+	char name[96], reason[300];
+
+	text_of(call0(exception, "name"), name, sizeof(name));
+	text_of(call0(exception, "reason"), reason, sizeof(reason));
+	say("trace: exception: uncaught %s: %s", name, reason);
+	if (o_uncaught != NULL) {
+		o_uncaught(exception);
+	}
+}
+
+static void
+trace_exceptions(void)
+{
+	Class ns = objc_getClass("NSObject");
+	SEL s = sel_registerName("doesNotRecognizeSelector:");
+	Method mi = ns != Nil ? class_getInstanceMethod(ns, s) : NULL, mc = ns != Nil ? class_getClassMethod(ns, s) : NULL;
+
+	if (mi != NULL && mc != NULL) {
+		o_dnr_instance = (dnr_fn)method_getImplementation(mi);
+		o_dnr_class = (dnr_fn)method_getImplementation(mc);
+		method_setImplementation(mi, (IMP)w_dnr_instance);
+		method_setImplementation(mc, (IMP)w_dnr_class);
+	}
+	o_uncaught = objc_setUncaughtExceptionHandler(w_uncaught);
+}
+
 /* with the flow trace, once CMCapture is there (idempotent) */
 void
 scioncam_trace_metal(void)
@@ -275,7 +345,8 @@ scioncam_trace_metal(void)
 		} else {
 			say("trace: metal: -[FigCapturePipeline addNode:error:] is not as on iOS 27.2.1: not traced");
 		}
-		say("trace: metal: the Metal device and the pipelines' nodes traced");
+		trace_exceptions();
+		say("trace: metal: the Metal device, the pipelines' nodes, unrecognised selectors and uncaught exceptions traced");
 	}
 	pthread_mutex_unlock(&lock);
 }

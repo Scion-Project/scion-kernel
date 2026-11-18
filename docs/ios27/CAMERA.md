@@ -405,7 +405,23 @@ takes the device out of that process); iOS 27's build does not.
   metal2vulkan: whether all of them translate is what the phone test shows.
 
 Checked on the build Mac: the library builds; the `fopen()` redirection, built for macOS around a stand-in plug-in, makes the
-stand-in read the list with `cameracaptured` in it. **Not run on a phone** when this was written.
+stand-in read the list with `cameracaptured` in it.
+
+What phone 1 showed with dylib `-28` (18 November, 24B156, rear camera, `cam_trace=1`):
+- Boot A (`ca-cam28`), without `cam_metal=1`: `trace: metal: +[FigMetalContext metalDevice] -> nil`; the camera source pipeline
+  adds its source node and the still image pipeline its nodes, the preview pipeline none. Black viewfinder. The cause is
+  confirmed.
+- Boot B (`cb-cam28-metal`), with `cam_metal=1`: the plug-in's list taken, `MTL2[pid cameracaptured]: device Mali-G72 MC18`
+  (about 2.8 s), the metal trace's device line (the device's `name` is not a string there, so it printed `-`). At the tap the
+  preview pipeline is built for the first time: `Preview Governor` (BWFrameRateGovernorNode), `Preview Pre-Filter Splitter`,
+  BWPreviewStitcherNode, `Preview Scaler` (BWPixelTransferNode), `Preview Splitter`, BWStreamingFilterNode, `Assistive Overlay`
+  (BWAssistiveOverlayNode), each added and connected. Right after the last connection cameracaptured aborts (signal 6) on an
+  uncaught Objective-C exception thrown from `___forwarding___` (an unrecognised selector), restarted by launchd, and aborts
+  the same way at each of the app's retries. The viewfinder stays black. Also seen: two of CMCapture's compute pipelines
+  refused by metal2vulkan at cameracaptured's start (`adjustEvmPyramidColor`: imageblocks, not implemented), and
+  cameracaptured at about 150 MiB resident with 6 to 9 MiB of memory free.
+- Dylib `-29` says, with the trace, each unrecognised selector (`trace: exception: -[Class selector] NOT RECOGNISED: callers ...`,
+  from `-/+[NSObject doesNotRecognizeSelector:]`) and an uncaught exception's name and reason (`trace: exception: uncaught ...`).
 
 ### SpringBoard's main-display layout (18 November)
 
