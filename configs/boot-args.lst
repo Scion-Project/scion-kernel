@@ -206,6 +206,7 @@ cp_route	k
 cp_sim	k
 cp_vss	k
 cp_wait	k
+cp_warm	k
 cpufreq	k
 cpufreq_gov	k
 cpufreq_gov_big_dual	k

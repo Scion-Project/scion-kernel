@@ -196,6 +196,7 @@ CP_ROUTE	arg	cp_route	User space	k	hakios.shannon.c	with cp_if=1: an IPv4 defaul
 CP_SIM	arg	cp_sim	User space	k	hakios.shannon.c	in low power mode, once the SIM is ready, one read of its administrative data file (EF_AD, 4 bytes: no identity) is asked, to see if the modem takes
 CP_VSS	arg	cp_vss	User space	k	hakios.shannon.c	the image's VSS part (the voice processor's) is not copied
 CP_WAIT	arg	cp_wait	User space	k	hakios.shannon.c	seconds the started modem is watched before it is put back in reset (20; 25 with the link)
+CP_WARM	arg	cp_warm	User space	k	hakios.shannon.c	go on with a CP that an earlier kernel of this power-on started (after a warm restart), reading and writing its memory as before 18 Nov
 CPUFREQ_GOV	arg	cpufreq_gov	User space	k	hakios.exynos_cpufreq.c	run it (0, or none: the fixed rates of cpufreq_lit= and cpufreq_big=)
 CPUFREQ_GOV_BIG_DUAL	arg	cpufreq_gov_big_dual	User space	k	hakios.exynos_cpufreq.c	
 CPUFREQ_GOV_BIG_MAX	arg	cpufreq_gov_big_max	User space	k	hakios.exynos_cpufreq.c	

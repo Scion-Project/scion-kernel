@@ -161,6 +161,7 @@ extern void hakios_wifi_stop(void);
 extern void hakios_wifi_report(bool first);
 extern void hakios_sta_console_scan(void);
 extern void hakios_bt_console(const char *arg);
+extern void hakios_warm_console(const char *arg);    /* the warm restart: the iOS 27 fork's bsd/dev/starlte_warm.c */
 extern void hakios_net_console_ip(void);            /* hakios.net.c */
 extern void hakios_net_console_ping(const char *arg);
 extern void hakios_net_console_dns(const char *arg);
@@ -1679,7 +1680,8 @@ console(char *line)
 		    "and TCP counts), wifi names [off] (DNS questions and answers, TCP connections, as they come), touch X Y "
 		    "[X2 Y2 [MS]] (a tap or a swipe, in thousandths of the screen), button lock|home|up|down (a press), usb [restart | "
 		    "drop MS | unplug MS | muic MS | vbus MS | watch on|off] (the link and the cable), sh LINE (devsh=1: a line for the test "
-		    "root's helper; a trailing backslash continues it), return (end the run)\n");
+		    "root's helper; a trailing backslash continues it), warm [dry | recovery | line L | ARGS] (restart without a reset, "
+		    "sweetwarm=), return (end the run)\n");
 	} else if (strcmp(line, "stat") == 0) {
 		con("usb: %s, %s speed, %llu resets, %llu requests (%llu stalled), %llu bytes sent, %llu received, %u lost, %llu events, "
 		    "%llu shots, %llu restarts\n", usb_state, high_speed ? "high" : "full", n_resets, n_setups, n_stalls, n_in, n_out,
@@ -1744,6 +1746,8 @@ console(char *line)
 		hakios_ufs_summary("asked on the USB console", 1);
 	} else if (strcmp(line, "sh") == 0) {
 		console_devsh(arg);
+	} else if (strcmp(line, "warm") == 0) {
+		hakios_warm_console(arg);       /* a restart without a reset (sweetwarm=); "warm dry" only checks */
 	} else if (strcmp(line, "return") == 0) {
 		con("usb: ending the run: the loader will restart the phone\n");
 		want_return = true;     /* done by tick() once this event is handled and the controller let go */
