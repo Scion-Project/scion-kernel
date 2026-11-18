@@ -62,6 +62,7 @@ configd's InterfaceNamer never reports IOKit quiet on this kernel. SystemConfigu
 `pacibsp` (unslid address `0x1ab5bc514` in the iOS 27.0.1 cache the work used); changing that word to `ret` ends the wait. The real fix is the IOService that
 keeps IOKit busy; it was not found.
 
+**Superseded on 18 November 2026** by `tools/ios27/a64e/fips-seal.py`, which recomputes the self-test's seal for the rewritten code (`docs/ios27/CORECRYPTO.md`).
 **Not published.** An earlier step rewrote libcorecrypto too, which makes its FIPS self-test fail, and the work ran for a while with a locally made stand-in
 for the test's helper. That is a local, optional step the builder took on their own root: this repository has no stand-in, no way to make one and no tool that
 needs one (`a64e-rewrite2.py` skips libcorecrypto unless told not to), and `docs/ios27/EIGHT-CORES.md`'s rewrite skips it too. Root images, the originals of

@@ -216,6 +216,13 @@ have not been booted together.**
 `prepare-root-inputs.sh` makes the build's private directory (`tools/ios27/fullroot/private/`, never in git): instruction tables
 from your cache, the checked patch list, and one script of wardevsa's fetched from his public repository at a fixed commit.
 
+Since 18 November 2026 the pipeline rewrites `libcorecrypto` like every other library and then recomputes its FIPS integrity seal
+(`tools/ios27/a64e/fips-seal.py`, step 5b): the self-test is HMAC-SHA256 with an all-zero key over the library's `__text`, so the
+seal of the rewritten code is made the same way, and only where the stock seal was true (`docs/ios27/CORECRYPTO.md`). Before that the
+library was skipped and its 3,538 pointer-authentication words trapped into the kernel's emulation: on 24B156 they were the
+phone's hottest traps (about 100,000 in ten seconds while the icons re-render after a switch to dark mode). Its two unloaded variants
+(`_noasm`, `_trace`) are still left exactly as Apple built them. The paragraph below describes the builds before that change.
+
 One library is left exactly as Apple built it: `libcorecrypto` (and its two variants). It checks a hash of its own code when it
 starts, so rewriting it makes its self-test fail; the project's own phones run a rewritten copy with a local stand-in for the
 self-test's helper, and neither the stand-in nor a way to make one is published (`docs/ios27/SPEED.md`, "Not published"). Your root
