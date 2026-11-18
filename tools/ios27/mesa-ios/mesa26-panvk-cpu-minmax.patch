@@ -1,0 +1,203 @@
+PanVK (JM), Starbite (iOS): a direct indexed draw's index range found by the CPU when its index buffer is host-mapped
+(STARBITE_PANVK_CPU_MINMAX=1; without it, unchanged), instead of the write-value job and the index search compute job that
+come before the draw's indirect helper; and the indexed/indirect draws and the CPU/GPU range counts for the starbite-drm
+shim's statistics line. docs/ios27/PERFORMANCE.md section 8. NOT run on a phone yet. Applied by
+tools/ios27/metal/mk-panvk27.sh after mesa26-panvk-cpu-desc-copy.
+
+--- a/src/panfrost/vulkan/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/panvk_vX_cmd_draw.c
+@@ -1017,6 +1017,10 @@
+    VK_FROM_HANDLE(panvk_cmd_buffer, cmdbuf, commandBuffer);
+    VK_FROM_HANDLE(panvk_buffer, buf, buffer);
+ 
++#ifdef __APPLE__
++   cmdbuf->state.gfx.ib.sb_buf = buf;
++   cmdbuf->state.gfx.ib.sb_offset = offset;
++#endif
+    if (buf) {
+       cmdbuf->state.gfx.ib.size = panvk_buffer_range(buf, offset, size);
+       assert(cmdbuf->state.gfx.ib.size <= UINT32_MAX);
+--- a/src/panfrost/vulkan/panvk_cmd_draw.h
++++ b/src/panfrost/vulkan/panvk_cmd_draw.h
+@@ -217,6 +217,11 @@
+       uint64_t dev_addr;
+       uint64_t size;
+       uint8_t index_size;
++#ifdef __APPLE__
++      /* Starbite (iOS): the bound buffer and offset (STARBITE_PANVK_CPU_MINMAX=1) */
++      const struct panvk_buffer *sb_buf;
++      uint64_t sb_offset;
++#endif
+    } ib;
+ 
+    struct {
+--- a/src/panfrost/vulkan/panvk_buffer.c
++++ b/src/panfrost/vulkan/panvk_buffer.c
+@@ -89,6 +89,10 @@
+          *bind_status->pResult = VK_SUCCESS;
+ 
+       buffer->vk.device_address = mem->addr.dev + pBindInfos[i].memoryOffset;
++#ifdef __APPLE__
++      buffer->sb_mem = mem;
++      buffer->sb_mem_offset = pBindInfos[i].memoryOffset;
++#endif
+ 
+       panvk_address_binding_report(device, &buffer->vk.base,
+                                    buffer->vk.device_address, buffer->vk.size,
+--- a/src/panfrost/vulkan/panvk_buffer.h
++++ b/src/panfrost/vulkan/panvk_buffer.h
+@@ -12,8 +12,16 @@
+ 
+ struct panvk_priv_bo;
+ 
++struct panvk_device_memory;
++
+ struct panvk_buffer {
+    struct vk_buffer vk;
++#ifdef __APPLE__
++   /* Starbite (iOS): the memory the buffer is bound to and where, for reading a host-mapped index buffer on the CPU
++    * (STARBITE_PANVK_CPU_MINMAX=1, jm/panvk_vX_cmd_draw.c). */
++   struct panvk_device_memory *sb_mem;
++   uint64_t sb_mem_offset;
++#endif
+ };
+ 
+ VK_DEFINE_NONDISP_HANDLE_CASTS(panvk_buffer, vk.base, VkBuffer,
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -13,6 +13,7 @@
+ #include "genxml/gen_macros.h"
+ 
+ #include "panvk_buffer.h"
++#include "panvk_device_memory.h"
+ #include "panvk_cmd_alloc.h"
+ #include "panvk_cmd_buffer.h"
+ #include "panvk_cmd_desc_state.h"
+@@ -43,6 +44,11 @@
+ 
+ struct panvk_draw_data {
+    struct panvk_draw_info info;
++#ifdef __APPLE__
++   /* Starbite (iOS): the index range the CPU found for a direct indexed draw (STARBITE_PANVK_CPU_MINMAX=1) */
++   bool sb_minmax;
++   uint32_t sb_min, sb_max;
++#endif
+    unsigned vertex_range;
+    unsigned padded_vertex_count;
+    struct mali_invocation_packed invocation;
+@@ -1529,6 +1535,12 @@
+    result = prepare_draw(cmdbuf, draw);
+    if (result != VK_SUCCESS)
+       return;
++#ifdef __APPLE__
++   {
++      extern unsigned long long sbdrm_vk_idraws;   /* Starbite (iOS): the shim's statistics line */
++      sbdrm_vk_idraws++;
++   }
++#endif
+ 
+    struct panvk_batch *batch = cmdbuf->cur_batch;
+    const struct vk_vertex_input_state *vi =
+@@ -1558,7 +1570,25 @@
+    struct panvk_precomp_ctx precomp_ctx = panvk_per_arch(precomp_cs)(cmdbuf);
+    uint64_t index_min_max_res_ptr = 0;
+    uint32_t job_before_indirect_helper = copy_desc_job_id;
++#ifdef __APPLE__
++   /* Starbite (iOS): the CPU found the index range (sb_cpu_minmax): written where the search job would write it, and
++    * the indirect helper depends on what it would have depended on before the write-value and search jobs. */
++   if (draw->info.index.index_size && draw->sb_minmax) {
++      struct pan_ptr res = panvk_cmd_alloc_dev_mem(
++         cmdbuf, desc, sizeof(struct libpan_draw_helper_index_min_max_result), 8);
++      if (res.gpu) {
++         struct libpan_draw_helper_index_min_max_result val = {
++            .min = draw->sb_min,
++            .max = draw->sb_max,
++         };
++         memcpy(res.cpu, &val, sizeof(val));
++         index_min_max_res_ptr = res.gpu;
++      }
++   }
++   if (draw->info.index.index_size && !index_min_max_res_ptr) {
++#else
+    if (draw->info.index.index_size) {
++#endif
+       index_min_max_res_ptr =
+          panvk_cmd_alloc_dev_mem(
+             cmdbuf, desc,
+@@ -1797,6 +1827,66 @@
+    panvk_cmd_draw(cmdbuf, &draw);
+ }
+ 
++#ifdef __APPLE__
++/* Starbite (iOS): STARBITE_PANVK_CPU_MINMAX=1 (off by default; NOT run on a phone yet). On this JM GPU a direct indexed draw
++ * goes the indirect way: a write-value job, a compute job that searches its indices for their range, then a helper compute
++ * job (with job prefetch suppressed) that patches the draw's jobs, then the draw, each waiting for the one before. Here
++ * the CPU reads the indices instead, when the command is recorded, if the index buffer's memory is mapped (as Metal's
++ * shared buffers are): only the helper and the draw are left. The range is the search job's (restart indices skipped;
++ * none valid gives the same empty range). Not taken for a buffer that is not mapped, or a range past the bound size.
++ * The indices must be the ones the GPU will read: a buffer written by the GPU before the draw in the same submission
++ * (metal2vulkan's restarted-strip rewrite) would be read stale here; that buffer is device memory, never mapped. */
++extern unsigned long long sbdrm_vk_minmax_cpu, sbdrm_vk_minmax_gpu;
++
++static bool
++sb_cpu_minmax(struct panvk_cmd_buffer *cmdbuf, const struct panvk_draw_info *info, uint32_t first, uint32_t count,
++              uint32_t *min_out, uint32_t *max_out)
++{
++   static int on = -1;
++   if (on < 0) {
++      const char *e = getenv("STARBITE_PANVK_CPU_MINMAX");
++      on = e != NULL && e[0] == '1';
++   }
++   if (!on)
++      return false;
++   const struct panvk_buffer *buf = cmdbuf->state.gfx.ib.sb_buf;
++   const uint32_t size = info->index.index_size;
++   if (buf == NULL || buf->sb_mem == NULL || buf->sb_mem->addr.host == NULL || size == 0 ||
++       ((uint64_t)first + count) * size > info->index.buffer_size) {
++      sbdrm_vk_minmax_gpu++;
++      return false;
++   }
++   const uint8_t *base = (const uint8_t *)buf->sb_mem->addr.host + buf->sb_mem_offset + cmdbuf->state.gfx.ib.sb_offset;
++   const bool restart = info->index.restart_enable;
++   uint32_t lo = (uint32_t)(((uint64_t)1 << (size * 8)) - 1), hi = 0;
++   switch (size) {
++#define SB_MINMAX(type, max_value)                                             \
++   {                                                                           \
++      const type *idx = (const type *)base + first;                            \
++      for (uint32_t i = 0; i < count; i++) {                                   \
++         uint32_t v = idx[i];                                                  \
++         if (restart && v == (max_value))                                      \
++            continue;                                                          \
++         lo = MIN2(lo, v);                                                     \
++         hi = MAX2(hi, v);                                                     \
++      }                                                                        \
++      break;                                                                   \
++   }
++   case 4: SB_MINMAX(uint32_t, UINT32_MAX)
++   case 2: SB_MINMAX(uint16_t, UINT16_MAX)
++   case 1: SB_MINMAX(uint8_t, UINT8_MAX)
++#undef SB_MINMAX
++   default:
++      sbdrm_vk_minmax_gpu++;
++      return false;
++   }
++   *min_out = lo;
++   *max_out = hi;
++   sbdrm_vk_minmax_cpu++;
++   return true;
++}
++#endif
++
+ VKAPI_ATTR void VKAPI_CALL
+ panvk_per_arch(CmdDrawIndexed)(VkCommandBuffer commandBuffer,
+                                uint32_t indexCount, uint32_t instanceCount,
+@@ -1835,6 +1925,9 @@
+          .prim = panvk_get_client_prim(cmdbuf),
+       },
+    };
++#ifdef __APPLE__
++   draw.sb_minmax = sb_cpu_minmax(cmdbuf, &draw.info, firstIndex, indexCount, &draw.sb_min, &draw.sb_max);
++#endif
+ 
+    panvk_cmd_draw_indirect(cmdbuf, &draw);
+ }

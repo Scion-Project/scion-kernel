@@ -12,7 +12,7 @@ SB=${SB:-$(cd "$(dirname "$0")/../../.." && pwd)}
 # The libvulkan_panfrost.dylib of phone 1's c2 bundle (cc241e55..., 14 November) was built from exactly these patches, with the
 # shim of that day, except for the two braces mesa26-panvk-batch-stats.patch restores in panvk_vX_cmd_query.c.
 PATCHES="mesa26-panvk-ios mesa26-panvk-null-vs mesa26-panvk-shader-size-cap mesa26-bifrost-ra-multispill mesa26-panvk-host-images
-	mesa26-panvk-tiler-heap-halves mesa26-panvk-batch-stats mesa26-panvk-cpu-desc-copy"
+	mesa26-panvk-tiler-heap-halves mesa26-panvk-batch-stats mesa26-panvk-cpu-desc-copy mesa26-panvk-cpu-minmax"
 # mesa26-panvk-cpu-desc-copy (18 November): the descriptor copies on the CPU at submission with STARBITE_PANVK_CPU_DESC=1 (off
 # without it), and the draw and copy counters of the shim's statistics line (docs/ios27/PERFORMANCE.md section 7).
 MESA_SHA256=b9436b3e1a8be76fbd4823dc884f90596ab7c6ac5e1867a305e66ffccfb31a92

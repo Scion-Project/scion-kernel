@@ -318,3 +318,46 @@ average and count), the `vk batches ... jobs` and `vk draws` lines, fbt's CoreAn
 the home screen for wrong textures (a wrong copy shows as wrong icons or a GPU fault line). Expected, if the job count is
 the cost: the vertex/tiler time falls by up to two thirds, a few ms of the frame. If it does not fall, the time is in the
 IDVS jobs themselves (tiling), and `STARBITE_PANVK_BINS` (B3) is the next knob.
+
+**Result on phone 1 (18 November, d5's F1 kernel, the same 16 scripted page swipes, logs `con-xnu-boot-f1-1118-1210` B1
+and `-1218` B2, 30 s of swipes each):**
+
+| | B1 (counters only) | B2 (`STARBITE_PANVK_CPU_DESC=1`) |
+|---|---|---|
+| descriptor-copy compute jobs / 30 s | 61,198 | 1,116 (images only); 62,490 copies done on the CPU |
+| PanVK jobs a batch | 47.0 | 34.1 |
+| vertex/tiler chains, average | 1,343 us | 1,311 us |
+| vertex/tiler GPU time / 10 s | 2,067 ms | 2,091 ms |
+| swipes (tester's bench) | 39 % / 36.6 fps | 39 % / 36.7 fps |
+| CoreAnimation swap period p50 (fbt) | 33.5 ms | 33.6 ms |
+
+No wrong texture, no GPU fault. **The copy jobs were not the cost**: a quarter of the jobs went and the vertex/tiler time
+did not move, so they ran beside the draws' critical path. The switch stays off by default.
+
+The same boots also measured the encode split for the first time (the pass log's bridge column): in the home screen's
+main pass, 79 % of an encoder's time is this side's (the frontend, the runtime and PanVK's recording), **82 us a draw**,
+7.1 ms of a 9.0 ms main pass of 87 draws; small passes pay 150 to 300 us each for one or two draws.
+
+## 8. Indexed draws on the GPU's indirect path (18 November; `STARBITE_PANVK_CPU_MINMAX=1`, built, NOT run on a phone)
+
+**What PanVK does with `vkCmdDrawIndexed` on JM** (`jm/panvk_vX_cmd_draw.c`): it is recorded as an indirect draw. Before the
+draw's IDVS job come a write-value job (the search's start values), a compute job that searches the draw's indices for their
+range (`panlib_draw_index_minmax_search_helper`) and a helper compute job that patches the draw's jobs and descriptors from that
+range (`panlib_draw_indexed_indirect_helper`, with the job manager's prefetch suppressed), each waiting for the one before.
+Most of CoreAnimation's draws are indexed (B1: ~1,200 direct draws against ~61,000 descriptor copies in 30 s). A one-draw
+pass costs about 77 us of vertex/tiler chain and the 87-draw main pass about 8.7 ms (sgu_dump, 17 November): about 80 to
+100 us a draw whatever the draw's size, which is what a chain of four dependent jobs a draw would cost, and what B2 did not
+touch (its jobs were not in that chain).
+
+**What `STARBITE_PANVK_CPU_MINMAX=1` does** (`tools/ios27/mesa-ios/mesa26-panvk-cpu-minmax.patch`): for a direct indexed draw
+whose index buffer's memory is mapped (Metal's shared buffers are), the CPU reads the draw's indices when the command is
+recorded and writes their range where the search job would; the write-value and search jobs are not made, and the helper
+depends on what they depended on. The range is the search's (restart indices skipped; none valid gives the same empty
+range). A buffer that is not mapped, or a range past the bound size, keeps the GPU's way. The indices must be those the GPU
+will read: an index buffer the GPU writes earlier in the same submission would be read stale; metal2vulkan's only such
+writer (the restarted-strip rewrite) writes device memory, which is never mapped. Counters on the shim's line: indexed/indirect
+draws, and the ranges found on the CPU and not.
+
+**Expected** if the dependent-job chain is the cost: the chain per indexed draw goes from four jobs to two, the vertex/tiler
+time towards half (about 3 to 4 ms of the 14 ms GPU frame), and PanVK's recording of each draw lighter. Removing the helper
+too (patching the draw's jobs on the CPU, as the CL helper does) would leave one job a draw; it is not built.
