@@ -24,8 +24,11 @@
  * SIFREnabled: so none of them was found, the cameras had no formats, and Camera.app said "unsupported session preset
  * AVCaptureSessionPresetPhoto" and could not add the camera to its session (phone 1, 17 November 2026, front and back).
  *
- * The entries below are N104's stream formats that the app's Photo mode, its video (1080p and 720p at 30, 4K at 30) and
- * 1920 x 1440 use, front and back. The sizes and rates are the plist's: the S9's sensors give 1632 x 1224 (front) and
+ * The entries below are N104's stream formats of the app's Photo mode and of 4K video, front and back. The formats behind
+ * a front-end scaler (FES: "Video-FullSensor-FES-30", which 1080p30, 720p30 and 1920 x 1440 name) are not offered: with
+ * one, Camera.app's Photo mode took 1920 x 1440 and cameracaptured threw an exception sizing an output buffer
+ * (-[BWMultiStreamCameraSourceNode _bytesPerOutputBufferForOutputConfiguration:outputID:], FigCapturePixelFormat-
+ * BytesPerPixel: a pixel format it does not know; phone 1, 17 November 22:49). So 1080p video has no format yet. The sizes and rates are the plist's: the S9's sensors give 1632 x 1224 (front) and
  * 2016 x 1512 (rear) at 30 frames a second, and every picture is scaled from that to what an output asks for, as before
  * (camera_device.c, camera_isp.c). A rate above 30 is only what a format may be asked for: the frames still come at 30.
  * SIFR ("secondary image frame readout") is the iPhone's sensor interleaving a second, shorter exposure; the S9 has none
@@ -51,11 +54,8 @@ static const struct n104_format {
 } n104[] = {
 	{ 1, "Photo", 4224, 3168, 60, true, 0, 0 },                             /* 12MP, 8MP, 5MP: AVCaptureSessionPresetPhoto */
 	{ 1, "Video-60", 4224, 2384, 60, true, 0, 0 },                          /* UHD30, UHD60 */
-	{ 1, "Video-FullSensor-FES-30", 4224, 3168, 30, true, 2304, 1728 },     /* 1080p30 (AVCaptureSessionPresetHigh), 720p30 */
-	{ 1, "Video-4by3-Medium-Resolution", 4224, 3168, 30, true, 2304, 1728 },/* 1920x1440 (the same as the one above) */
 	{ 2, "Photo", 4032, 3024, 30, true, 0, 0 },                             /* 12MP: AVCaptureSessionPresetPhoto */
 	{ 2, "Video-30", 4032, 2272, 30, true, 0, 0 },                          /* UHD30 */
-	{ 2, "Video-FullSensor-FES-30", 4032, 3024, 30, true, 2112, 1584 },     /* 1080p30 (AVCaptureSessionPresetHigh), 720p30, 540p30 */
 	{ 2, "Photo's NonSIFRCompanionFormat", 4032, 3024, 30, false, 0, 0 },
 };
 
@@ -68,6 +68,38 @@ put_number(CFMutableDictionaryRef d, const char *key, int value)
 	CFDictionarySetValue(d, k, n);
 	CFRelease(n);
 	CFRelease(k);
+}
+
+/*
+ * The IntermediateTap output, listed so that iOS 27's graph can weigh it: BWMultiStreamCameraSourceNode compares the
+ * bandwidth of PrimaryScaler with IntermediateTap (for video) and of IntermediateTap with SecondaryScaler (for the
+ * preview) from each output's SupportedPixelFormats (_bytesPerOutputBufferForOutputConfiguration:outputID:). With no
+ * IntermediateTap there the list is empty, its pixel format 0, and cameracaptured aborts: "Unknown pixel format ()"
+ * (phone 1, 17 November 23:05, at the shutter-less first configuration). It is offered in BGRA only, at the sensor's
+ * size: four bytes a pixel against the scalers' one and a half, so the graph keeps the scalers, which camera_device.c
+ * feeds; no frame is made for it.
+ */
+static void
+add_intermediate_tap(CFMutableDictionaryRef format, int width, int height)
+{
+	CFDictionaryRef outputs = CFDictionaryGetValue(format, CFSTR("SupportedOutputs"));
+	CFMutableDictionaryRef all = outputs != NULL ? CFDictionaryCreateMutableCopy(NULL, 0, outputs) :
+	    CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFMutableDictionaryRef tap = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
+	    &kCFTypeDictionaryValueCallBacks);
+	int bgra = 0x42475241;  /* 'BGRA' */
+	CFNumberRef pf = CFNumberCreate(NULL, kCFNumberIntType, &bgra);
+	CFArrayRef pfs = CFArrayCreate(NULL, (const void **)&pf, 1, &kCFTypeArrayCallBacks);
+
+	CFDictionarySetValue(tap, CFSTR("SupportedPixelFormats"), pfs);
+	put_number(tap, "NativeWidth", width);
+	put_number(tap, "NativeHeight", height);
+	CFDictionarySetValue(all, CFSTR("IntermediateTap"), tap);
+	CFDictionarySetValue(format, CFSTR("SupportedOutputs"), all);
+	CFRelease(pfs);
+	CFRelease(pf);
+	CFRelease(tap);
+	CFRelease(all);
 }
 
 CFArrayRef
@@ -100,6 +132,7 @@ scioncam_n104_formats(uint32_t sensor, const char *camera, double fov, scioncam_
 
 		CFRelease(base);
 		CFDictionarySetValue(f, CFSTR("SIFREnabled"), e->sifr ? kCFBooleanTrue : kCFBooleanFalse);
+		add_intermediate_tap(f, e->width, e->height);
 		if (e->fes_width > 0) {
 			put_number(f, "FrontEndScalerOutputWidth", e->fes_width);
 			put_number(f, "FrontEndScalerOutputHeight", e->fes_height);

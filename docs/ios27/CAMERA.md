@@ -235,6 +235,118 @@ screen is still in the background. Said once a client: `hakios: camera: layout: 
 layout: com.apple.camera is taken as its foreground application`. With `cam_trace`, `camera_statetrace.c` also says the
 layouts that do arrive and the monitor's states (`hakios: camera: trace: state: ...`). **Not run on a phone yet.**
 
+### What phone 1 showed after that (17 November, 22:42 to 23:31), and the next test
+
+- FrontBoard does publish a main-display layout, but the layout has no elements, `backlightLevel = 0` and `backlightState = 0`,
+  while the screen is on. CMCapture finds no foreground app in it. `camera_layout.c` takes a client as the foreground app
+  when the main display's layout is nil, or when FrontBoard's own layout names no application at all. With it,
+  cameracaptured said `state: Foregrounded (bksAppState: ForegroundRunning, layout: Fullscreen)`, registered Camera.app,
+  copied the device and asked for its streams, and the kernel's frames flowed. Why SpringBoard publishes an empty layout
+  is open, and it is not the camera's problem: SpringBoard turns the backlight on at boot (`Off->ActiveOn`), yet the layout
+  it hands out never carries it.
+- cameracaptured then aborted three times in turn while building the session's graph (the text comes from `sweetscan=…,cameracaptured`):
+  1. `Unknown pixel format ()`: iOS 27's camera source node weighs the scalers against an `IntermediateTap` output, which
+     our formats did not list. `camera_formats.c` lists one, BGRA only, so the node keeps the scalers.
+  2. `Output can't be nil` in the video thumbnail sink (Camera.app's live filter previews). `camera_refuse.c` builds
+     sessions without video thumbnails.
+  3. `Output can't be nil` in the movie file sink's scaler (Photo mode's Live Photo movie). `camera_refuse.c` answers NO to
+     the Iris sink's movie capture, as iOS 16.5 had Live Photo off.
+- The formats behind a front-end scaler (1080p30, 720p30, 1920 x 1440) are not offered for now. The first abort happened with them,
+  but it was abort 1 above, so they may come back once the preview works.
+
+The next test (dylib `-9` of this branch's `build.sh`, the boot line with `sweetspeed=442337279 cam_s9=7 cam_trace=1
+sweetscan=backboardd,SpringBoard,cameracaptured`): tap Camera, wait 30 s, screenshot; tap the flip button, wait 15 s, screenshot;
+press the shutter, wait 15 s, screenshot; open Photos. Expected lines: `thumbnails: ... replaced`, `live photo: ... replaced (NO)`,
+`layout: FrontBoard gave the main display no layout: com.apple.camera ...`, `state: Foregrounded`, no `CRASH cameracaptured`,
+`trace: stream: set (Back Camera) VideoOutputConfigurations`, `stream: the graph starts the stream`, `PrimaryScaler: the first
+picture given`. If it aborts again, look for the `STR *** Terminating app due to uncaught exception` line.
+
+### The fourth cause: the stream's colour info was empty (18 November, 00:00)
+
+Phone 1 booted dylib `-9` (17 November, 23:47). cameracaptured did not abort any more; Camera.app's session registered,
+copied the device, asked for the back camera's stream and set its outputs, and then failed at once: `Received a session
+runtime error notification: AVFoundationErrorDomain Code=-11800 ... (-12780)`. The app retried about thirty times a second
+(register, copy device, streams asked for, given back), the viewfinder stayed black, the shutter did nothing, and the flip
+button gave the same loop on the front camera. The last thing the stream was asked before each give-back was
+`VideoOutputsColorInfo`, answered `{ }`.
+
+iOS 27.0.1's CMCapture (24A446's shared cache, its logic only): the source node, bringing the stream up to date for a session
+(`-[BWMultiStreamCameraSourceNode allocateOrReuseBufferPoolsFromSourceNode:]`, `_bringStreamUpToDate`,
+`_verifyColorSpacePropertiesForAllOutputs`), reads the stream's `VideoOutputsColorInfo` and, for every output whose colour
+space properties are not 0, wants that output's entry to equal `+[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:]`
+of the node's `_colorSpaceProperties` (a dictionary of colour attachments); anything else returns -12780 and the session
+fails. Apple's ISP plug-in answers the property itself with each output's colour attachments; the graph never sets it.
+
+Two answers were tried on phone 1 the same night, both with the same loop. Dylib `-11`'s wrap of
+`allocateOrReuseBufferPoolsFromSourceNode:` refused itself (the method returns an `OSStatus`, an int, which its check did not
+allow). Dylib `-13` (00:15) answered every output with `pixelBufferAttachmentsForColorSpaceProperties:` of the node's
+`_colorSpaceProperties`, which was **0** (and the attachments of 0 are nil), and the sessions still failed: the output that
+fails has properties that are not the node's. In 24A446 the scalers' properties are the node's, and the still image output's
+come from its own method (firmware still image output, 10-bit, ...); the per-output methods are direct methods, out of the
+Objective-C runtime's reach, so which output and which properties could not be read from outside.
+
+Which output, read from 24A446: the scalers' colour space properties are the node's (0 here: "N/A", not checked); any other
+output's (the still image output's) are, when the still image output is the firmware's and wants a 10-bit pixel format, 1
+("sRGB/601") or 3 ("P3/601", for a wide colour space), else the node's again (`BWColorSpacePropertiesToString`'s table: 0 N/A,
+1 sRGB/601, 2 sRGB/709, 3 P3/601, 4 P3/709, ...). With the node's at 0, the only value that fails is 1: the still image output
+wants sRGB/601.
+
+What the S9's pictures are (`camera_isp.c`): sRGB's curve, BT.601's matrix (420f full range, 420v video range), the sensor's
+colours white-balanced and taken as sRGB's primaries: sRGB/601, which is also the only colour space the streams offer
+(`SupportedColorSpaces`: sRGB). So `tools/ios27/camera/camera_colour.c` (dylib `-15`, always on in cameracaptured with the
+kernel's camera) answers the truth: every output's entry of `VideoOutputsColorInfo` is `pixelBufferAttachmentsForColorSpaceProperties:1`
+(sRGB/601), and every picture `camera_device.c` makes carries those same attachments from the first session on
+(`hakios_camera_frame_colour`; before, BT.601 matrix and BT.709 primaries and transfer). It also wraps the attachments method to
+remember what it was asked for (unchanged) and `allocateOrReuseBufferPoolsFromSourceNode:` to say an update that still fails:
+`colour: the source node's update FAILED (N): node colour space properties P; attachments asked K time(s) in the update, for
+properties ...`, so that one boot shows both sides. A check that asks for 3 would mean the session wants wide colour (P3),
+which the pictures are not: converting them is a known gap below. `cam_colour_any=1` on the boot line (a diagnostic, off by
+default) answers instead with entries that read as whatever attachments the check asked for last on that thread (dylib `-14`
+did only that): a session that then runs while `-15`'s does not would show that the values differ. **Not run on a phone yet.**
+Every name it uses is in 24B156's CMCapture too.
+
+The still image output wanting a 10-bit pixel format (`stillImageOutputRequires10BitPixelFormat`) also means the photograph may
+come in a 10-bit pool ('x420' or the like), which `camera_device.c` does not draw into (`StillImage: ... buffers are not for this
+ISP`): the next gap if the shutter gives nothing.
+
+### Where the pictures stop: the flow trace
+
+With `cam_trace=1`, `tools/ios27/camera/camera_flowtrace.c` follows the frames through cameracaptured's graph: which of the
+stream's outputs the source node configures, enables and gives handlers to (`trace: graph: ...`), the first sample each node
+output emits (`trace: flow: <node>'s output <name> emits its first sample: WxH 'fmt' IOSurface, time stamp N ms from now`),
+every 10 seconds how many each has emitted (`trace: flow: emitted so far: ...`), each node's dropped samples with their reason
+(`... DROPS a sample`), and the preview stitcher's and the preview image queue sink's first samples, with the sink's image queue
+(`nil` there: nothing reaches the screen). A black viewfinder is then one of: no `the graph starts the stream` (the session
+stopped before, see the CAMLOG lines); the source node emits but the stitcher or the sink never renders (the node between them
+drops: its reason); the sink renders but the app shows nothing (the image queue, the IOSurfaces' format, or the compositor:
+`native-metal` refusals in backboardd's lines); a time stamp far from 0 ms from now (the queue holds frames for later).
+
+### Why the display layout is empty: the publisher's trace
+
+`camera_layout.c` stands in for FrontBoard's main-display layout in cameracaptured, which on this port names no application and
+says `backlightState = 0`, `backlightLevel = 0` while the screen is on (above). SpringBoard publishes that layout through
+FrontBoardServices' `FBSDisplayLayoutPublisher`: elements added and removed for what is on the screen (`_addElement:forKey:`,
+where `addElement:`, `add:` and `remove:` lead), the backlight's state and level, publishing held by suppression and transition
+assertions with a reason, and `flush`. With the library also inserted into SpringBoard (the root step with `CAMERA_TRACE_SB=1`, or
+`,SpringBoard` added to the boot line's `sweetinject=` entry of `cam.dylib`) and `cam_trace=1`, `tools/ios27/camera/camera_sbtrace.c`
+says each of those calls (the first 40 of a kind, then every 200th): `trace: layout publisher 0x...: add element (N): ...`,
+`backlight state S`, `backlight level L`, `layout SUPPRESSED for "reason"`, `a suppression ends`, `transition "reason"`,
+`flushed (N): <the layout>`. One boot then names the cause: no `add element` at all (SpringBoard's scene layout never reaches the
+publisher), a `SUPPRESSED` with no `suppression ends` (published layouts held empty, the reason says by what), or no `backlight
+state` (the backlight's state, from BacklightServices, never reaches it). Without the trace, or without the record naming
+SpringBoard, the library does nothing in SpringBoard. **Not run on a phone.**
+
+### What the S9's sessions are built without, and what restoring each needs
+
+| Left out | Where | Why | To restore |
+|---|---|---|---|
+| Video thumbnails (the filter and style pickers' live previews) | `camera_refuse.c` | the preview pipeline makes no `videoThumbnailSinkOutput` for the S9's stream; the thumbnail pipeline was built on nil and cameracaptured aborted | find which node output N104's preview pipeline feeds them from (a thumbnail output of the stream, or a scaler node) and offer it |
+| The Live Photo movie | `camera_refuse.c` | the movie file sink's scaler was built on a nil video capture output: aborted | a video capture output for Photo mode (the source pipeline's), and the sound around the shutter (no audio server on this root) |
+| Formats behind a front-end scaler (1080p30, 720p30, 1920 x 1440) | `camera_formats.c` | cameracaptured threw sizing an output whose pixel format it did not know (with `IntermediateTap` missing, abort 1 above) | offer `Video-FullSensor-FES-30` again now that `IntermediateTap` is listed, and check the outputs' pixel formats |
+| `IntermediateTap` frames | `camera_formats.c`, `camera_device.c` | listed (BGRA) so the graph can weigh it, but no frame is made for it | deliver it when the graph enables it (the flow trace says whether it does) |
+| The outputs' real colour info | `camera_colour.c`, `camera_device.c` | the stream's `VideoOutputsColorInfo` answers whatever the graph's check asks for, and the frames carry BT.709 attachments whatever the output's colour space | answer each output's own colour space (as Apple's ISP plug-in does) and convert the pictures' colours to it |
+| SIFR (the iPhone sensor's second exposure) | `camera_formats.c` | the S9's sensors have none; the formats say SIFR only so that N104's names match | nothing to restore |
+
 ### The trace
 
 `cam.dylib` has a trace, off by default. It is on with `cam_trace=1` on the boot image's command line, or with the file
