@@ -23,7 +23,7 @@ point are at the end.
 | Home screen and lock screen wallpaper black | both | no poster ([METAL.md](METAL.md), [GPU-PATH.md](GPU-PATH.md)); with the stop-gap image installed both are drawn | certain | nothing new |
 | Blur black (Control Centre, dock, folders) | Metal, without `SWEET_MTL2_DEXR=1` | metal2vulkan refuses CoreAnimation's variable-blur downsample, which samples an extended-range texture through a mip-filtered sampler | certain | none new: `SWEET_MTL2_DEXR=1` (on in the root build) is the answer and is drawn on 17 November |
 | Lock screen clock an empty box | Metal, earlier configurations | the clock's glass goes through the same blur | guess | not reproduced on 17 November: the clock is drawn |
-| No-copy buffers refused, 10 to 30 a boot in backboardd | Metal | the kernel's IMPORT_HOST cannot wire the memory, PanVK's import fails, metal2vulkan answers `NotRepresentable` | refusal: certain; what is lost with it: not known | `frontend-nocopy-diag.diff` (a line describing the memory) |
+| No-copy buffers refused, 10 to 30 a boot in backboardd | Metal | the kernel's StarbiteMali importHost cannot wire CoreAnimation's read-only shared memory for writing or reading; PanVK's vkAllocateMemory then returns `VK_ERROR_INVALID_EXTERNAL_HANDLE`, which metal2vulkan reports as `NotRepresentable` | refusal and cause: certain; not the cause of the switcher's black cards | `frontend-nocopy-readonly.diff` (PR 386, merged): read-only ranges are copied, not refused |
 | A start-up command buffer refused at `generateMipmapsForTexture` | Metal | metal2vulkan has no mipmap generation | certain | nothing: seen once a boot, on CoreAnimation's start-up textures, with no visible effect known |
 
 ### The app switcher's background
@@ -140,17 +140,24 @@ time); that it came from the same refusal is a guess, which E3 tests.
 
 ### No-copy buffers
 
-Every Metal boot logs 10 to 30 `no-copy buffer refused: ... HostMemory, needs: NotRepresentable` in backboardd (1,791 lines in
+Every Metal boot logged 10 to 30 `no-copy buffer refused: ... HostMemory, needs: NotRepresentable` in backboardd (1,791 lines in
 60 logs). metal2vulkan imports the caller's pages through `VK_EXT_external_memory_host`, which PanVK implements with
 StarbiteMali's IMPORT_HOST (`iokit/Kernel/arm/StarbiteMali.cpp`, `importHost()`: wire for writing, else for reading, else
-refuse). The answer `NotRepresentable` comes back when the import is refused, so these are ranges the kernel could wire
-neither way ([GPU-PATH.md](GPU-PATH.md) saw the same for some of backboardd's image memory, for which `SweetSurface.cpp`
-copies instead). The texture shapes made just before them are small RGBA8 images (19 x 46, 28 x 68, 31 x 23). What
-CoreAnimation does with a nil buffer (a copy of its own, or nothing drawn) is not known, and no picture so far shows
-something missing that these explain. `frontend-nocopy-diag.diff` adds one line for each of the first 16 refusals with
-the VM region the pointer lies in (protection, maximum protection, sharing mode, the region's tag), so that the next boot
-says what memory it is. No fix was made: copying the bytes would make a buffer that no longer aliases the caller's memory,
-which is wrong for any caller that writes it afterwards.
+refuse). What the refusals were, as found on 18 November:
+
+- Not the length. PR 383 rounded the length and was closed: it was a no-op, since metal2vulkan's `import_window()` already
+  rounds to 16 KiB.
+- Not metal2vulkan's `refuse_unwritable`: that is an empty stub on iOS.
+- The kernel. `importHost()` cannot wire CoreAnimation's read-only shared memory (VM tag 51, protection 1/1, share mode 5)
+  either for writing or for reading. PanVK's `vkAllocateMemory` then returns `VK_ERROR_INVALID_EXTERNAL_HANDLE`, which
+  metal2vulkan reports as `NotRepresentable`.
+
+The fix is PR 386 (merged). `frontend-nocopy-readonly.diff` copies read-only, never-writable ranges into a buffer instead of
+refusing them. Only those ranges are copied, so the copy cannot diverge from a write by the caller. `SWEET_MTL2_NOCOPY_RO=0`
+turns it off. On phone 1: 0 refusals, 8 copies at unlock.
+
+The black app-switcher cards are not caused by these refusals: the switcher is still black with 0 refusals. Their cause is
+still open (see the first table).
 
 ## The refusals, all logs
 
@@ -159,7 +166,7 @@ the first 64 problem lines of a process, so the counts are a floor):
 
 | Refusal | Lines | Logs | Feature that uses it | Status |
 |---|---|---|---|---|
-| no-copy buffer: `HostMemory`, `NotRepresentable` | 1,791 (and about 14,600 more in the trace lines of five stress runs) | 60 | images given to the render server as memory (likely) | diagnostic added |
+| no-copy buffer: `HostMemory`, `NotRepresentable` | 1,791 (and about 14,600 more in the trace lines of five stress runs) | 60 | images given to the render server as memory (likely) | fixed (PR 386); not the switcher cause |
 | texture over IOSurface: `BufferTexture(RowPitch ...)` | 180 | 3 | the display surfaces asked for turned (landscape) | fixed 12 November ([METAL-ROTATION.md](METAL-ROTATION.md)) |
 | `variable_blur_clamp_downsample_frag_lph`: `Format`, `NotImplemented` | 54 | 3 | the blur of every material | answered by `SWEET_MTL2_DEXR=1` |
 | `setRenderPipelineState`: `AttachmentFormat(Color(0))` | 46 | 10 | drawing into BGR10_XR surfaces: the switcher's reduced background (likely), full-size ones on 10 and 12 November | `frontend-dexr-surfaces.diff` |
@@ -173,7 +180,8 @@ the first 64 problem lines of a process, so the counts are a floor):
   integers): blur black. `SWEET_MTL2_DEXR=1` holds device-memory ones as RGBA16Float; a surface-backed one cannot be held
   so, and is drawn into through a pipeline of its own format (`frontend-dexr-surfaces.diff`); sampled with mipmaps it would
   still be refused (not seen).
-- **Host-memory import that the kernel cannot wire**: a nil no-copy buffer (cost above, not known).
+- **Host-memory import that the kernel cannot wire**: a nil no-copy buffer. Read-only ranges are now copied (PR 386, see
+  No-copy buffers); writable ones that cannot be wired are still refused.
 - **Mipmap generation** (`generateMipmapsForTexture`): the command buffer is refused; seen only at start-up.
 - **Device-side**: PanVK on the Mali-G72 (Bifrost v6) is marked broken upstream and is opened with
   `PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1` and `MESA_VK_VERSION_OVERRIDE=1.2` (`HotMetal2.mm`). Mesa 26.2.6's PanVK reports for
@@ -195,7 +203,7 @@ the chains that could reach it. For the paths studied here, nothing has the GPU 
 - blur and glass work in device memory of the plug-in's own;
 - RenderBox's drawables (`newTextureWithBytesNoCopy`) are render targets over memory their caller allocated writable, which
   wires for writing as before;
-- the no-copy buffers refused above are refused before and after the change alike.
+- the no-copy buffers refused above were the read-only ones; PR 386 copies those instead of refusing them (No-copy buffers).
 
 The one case the PR itself names is a range that spans writable and read-only pages: it is mapped read-only as a whole.
 None was identified here; the PR's line `STARLTE GPU USER: a chain wrote GPU address ..., in N pages NAME[PID] imported
@@ -232,6 +240,6 @@ either ([LIQUID-GLASS.md](LIQUID-GLASS.md) says so). The bridge library of that 
 
 - The switcher's white cards: the type 16 decompressor is built and tested on a Mac, not yet on a phone (E6).
 - A real wallpaper needs a poster: the wallpaper picker ([UI-NIGHT-1114.md](UI-NIGHT-1114.md)) is the way to one.
-- What the no-copy refusals cost (the diagnostic line, then a picture).
+- What the no-copy copies cost, if anything (8 copies at unlock on phone 1; no picture yet shows a difference).
 - Mipmap generation in the plug-in (none needed so far).
 - Nothing on this page was run on a phone.
