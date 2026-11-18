@@ -20,7 +20,8 @@
  * How. Each accelerometer sample in g and iOS's sign (at rest -1 g on the axis that points up), low-passed; the axis
  * that holds more than 0.75 g names the orientation, and a new one counts after it has held for 300 ms:
  *   y down  1 portrait             y up  2 portrait upside down
- *   x down  3 landscape left       x up  4 landscape right      (UIDeviceOrientation's numbers)
+ *   x < 0   4 right edge up, top to the left  (SpringBoard's landscapeLeft (4))
+ *   x > 0   3 right edge down, top to the right (SpringBoard's landscapeRight (3)); the two were swapped until this fix
  *   z down  5 face up              z up  6 face down
  * What it finds and what backboardd asks is written as lines of text to the device, which the kernel logs.
  *
@@ -236,7 +237,7 @@ orientation_from(double x, double y, double z, uint64_t now_us)
 	if (ay >= ax && ay >= az && ay > GRAVITY_MIN) {
 		o = fy < 0 ? 1 : 2;
 	} else if (ax >= ay && ax >= az && ax > GRAVITY_MIN) {
-		o = fx < 0 ? 3 : 4;
+		o = fx < 0 ? 4 : 3;  /* x > 0: the right edge down, top to the right = 3 (SpringBoard's landscapeRight); see the table above */
 	} else if (az > GRAVITY_MIN) {
 		o = fz < 0 ? 5 : 6;
 	}
