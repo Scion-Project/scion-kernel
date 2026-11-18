@@ -96,12 +96,23 @@ rebuilt for this. That direction stays a (vibrating) reset. iOS into TWRP is des
    `sweetwarm_smp=1`; refuse with `fb_flip=`, `fb_dpp=` or `sweetfb_dpp=` (the DECON would not be on the boot framebuffer); check that TTBR0
    can map the stub (4 KiB granule, T0SZ 25-33). Read BOOT's header and kernel slot through the UFS driver's
    `hakios_ufs_read_partition` (read only; BOOT and RECOVERY added to its two names) into wired memory; check the slot:
-   an arm64 Image whose bytes at +0x44 are `SCNR` and version 1 (a loader with the warm entry), its `image_size`, the
+   an arm64 Image whose bytes at +0x44 are `SCNR` and version 1 (a loader with the warm entry), the sizes (below), the
    SWEETXNU payload after it as the loader's `payload_bad` would check it, and the next kernel's span (from
-   `phys_base`, `kernel_end - virt_base`, the ADT and `boot_args`). SHA-256 of the payload (libkern's). Build the copy
+   `phys_base`, `kernel_end - virt_base`, the ADT and `boot_args`). SHA-256 of the payload, from where it starts to the
+   end of the slot (libkern's). Build the copy
    list: every staged 4 KiB page's physical address and its destination; a staged page that lies where something is
    copied to is replaced by one that does not (so the copy never reads what it already overwrote). Any failure: one line,
    the memory freed, the system runs on. `warm dry` stops here.
+   **The sizes** (`warm_slot()`; `tools/warm_slot.c` is the same function for the host test). S-Boot loads the BOOT
+   header's `kernel_size` bytes of the kernel slot to 0x80080000. The arm64 Image header's `image_size` is only how much
+   room it keeps there, and `tools/ios27/starlte-pack-boot.py` pads it on purpose: the larger of the slot + 64 KiB and
+   the template's (the TWRP kernel's 0x2842000, about 42 MB), so it is always larger than the slot. What is read
+   again, hashed, copied (whole pages: the rest of the last page is the staging buffer's zeroes) and named in the
+   record's `image_size` is therefore `kernel_size`; it must fit below 0x84000000. The header's `image_size` decides
+   nothing here: it is only checked to be at least the slot and to end below the loader's `RAM_BASE` (0x92000000),
+   which is what the loader's `boot_payload` needs of it on a cold boot too (it looks for the payload in
+   `[_image_end, base + image_size)`). The first build checked `image_size <= round_page(kernel_size)` instead and so
+   refused every image the packer makes (the phone's `warm dry`, 18 Nov: "the loader's image_size does not fit").
 2. **Write the handoff area** (0x91060000, mapped at boot as device memory): the record, the stub, an L1 and an L2 table
    that map the 2 MiB around the stub to itself (read-only, executable, like 16.5's `loader_return.c`), the copy list.
 3. **Point of no return.** The log flushed to UFS; the drivers stopped (below), the USB console last but the storage;
@@ -246,7 +257,10 @@ FDT at 0x91100000 (for step 3).
 - `tools/warm-restart-test.sh` (CI): the CRC-32 and SHA-256 against published values (including the one-million-`a`
   vector and a two-block tail), a record built as the kernel builds it, and every refusal (CRC, version, place, size,
   unterminated line, no direct start, Android parts missing, unknown method), under the address and
-  undefined-behaviour sanitizers.
+  undefined-behaviour sanitizers; the slot's sizes (`tools/warm_slot.c`: a header `image_size` larger than the slot
+  taken, smaller or past `RAM_BASE` refused, a slot too large, no mark, no payload); and a BOOT image made by the real
+  packer from a made-up template with the TWRP kernel's header shape and a 20 MB slot, taken end to end: the slot
+  re-staged in whole pages, the record, the loader's checks of it and of the payload's SHA-256.
 - Builds: the loader (`tools/ios27/s9/build-loader.sh`), STARLTE and FRANKEL (the warm restart is STARLTE's; FRANKEL
   answers the console's `warm` with a line), the 16.5 kernel (the console's new command has a stub in
   `drivers/core/hakios.stubs.c`).
@@ -260,9 +274,11 @@ FDT at 0x91100000 (for step 3).
 
 **Step 0 (no handoff, any time, no risk).** Boot a line with `sweetwarm=1` (with this kernel and this loader in BOOT).
 Expect `STARLTE WARM: sweetwarm=1: the console's "warm" (handoff area 0x..., S-Boot FDT kept)`. Then on the console
-`warm dry` (or `sysctl kern.sweetwarm_dry=1`): expect `STARLTE WARM: dry run: BOOT read and checked, N pages listed,
-payload at +0x..., SHA-256 xxxxxxxx..., the next kernel at 0x..., line "... sweetwarmed=1": nothing stopped, running on`.
-Compare the SHA-256's first bytes with `tail -c +$((off+1))` of the image's kernel slot on the Mac if wanted. A
+`warm dry` (or `sysctl kern.sweetwarm_dry=1`): expect `STARLTE WARM: dry run: BOOT read and checked: kernel slot N
+bytes (kernel_size; Image header image_size 0x2842000 not used for the copy), N pages listed (0x80080000..0x...),
+payload at +0x..., N bytes hashed, SHA-256 xxxxxxxx..., the next kernel at 0x..., line "... sweetwarmed=1": nothing
+stopped, running on`. Compare the SHA-256's first bytes with the SHA-256 of the image's kernel slot from the payload's
+offset to its end on the Mac if wanted. A
 `not started: ...` line says what is missing.
 
 **Step 1 (the principle; daytime, owner present).** BOOT made with this loader and a kernel of this branch, line with
