@@ -311,6 +311,7 @@ image_added(const struct mach_header *header, intptr_t slide)
 		scioncam_trace_vendor();
 		scioncam_trace_state();
 		scioncam_trace_flow();
+		scioncam_trace_metal();         /* camera_metal.c */
 	}
 }
 
@@ -376,5 +377,6 @@ scion_camera_init(void)
 		trace_start(name);
 	}
 	register_hevc_encoder();
+	scioncam_metal_client();                /* camera_metal.c: cam_metal=1 only */
 	_dyld_register_func_for_add_image(image_added);
 }
