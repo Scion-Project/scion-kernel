@@ -51,6 +51,9 @@ pub extern "C" fn nmb_device_work_counts_text(device: *const NmbDevice, out: *mu
                 text.push_str(value);
             }
         }
+        // (patch 0103's new_instance_* counters: not in the re-pinned runtime, M2V_REPIN=1)
+        #[cfg(not(m2v_repin))]
+        {
         use std::sync::atomic::Ordering::Relaxed;
         let names = ["stand_in", "storage", "locations", "reformats", "shadow", "shader_tests", "views", "dispatched", "barrier", "ordered", "all", "with_draws"];
         for (name, count) in names.iter().zip(metal2vulkan_runtime::INSTANCE_SPLITS.iter()) {
@@ -58,6 +61,7 @@ pub extern "C" fn nmb_device_work_counts_text(device: *const NmbDevice, out: *mu
             if count != 0 {
                 text.push_str(&format!(" new_instance_{name}={count}"));
             }
+        }
         }
         Ok(copy_out(&text, out, size))
     })

@@ -473,7 +473,79 @@ Built: the patch series reproduces the built tree from Mesa 26.2.6's tarball. Bu
 `__text` identical to m3's 7c953578) and libvulkan_panfrost 22bd0c44…. Risk: a wrong range or offset is a wrong or missing
 icon, not a fault. The range is section 8's, which rendered correctly on the phone.
 
-**The phone test** (requested from the tester, one boot each, the F1 image and line, the same scripted swipes, bundle m4
-by `edit-m4.sh`): a fresh baseline first if the phone is on 27.2.1; then `bins` (`STARBITE_PANVK_BINS=aa`: is tiling the
-vertex/tiler time?), `direct`, and `both`. Read `fbt-regimes.py`'s busy-run GPU time a swap and busy-swap period, the 10 s
-profile's vertex/tiler average, the swipe fps and the home screen.
+**On phone 1 (18 November).** The phone had just moved to iOS 27.2.1 (24B156). The F1 image does not boot it, so all three
+boots used the tester's `b272` image (2390a6aa: the 24B156 owner image, kernel m1118g 97991e68, with the scripted bench,
+`sgu_prof=1 sweetfb_trace=70 sweetfb_prof=1 smpburst=SpringBoard`). They differ only in `edit-m4.sh`'s mode. Logs
+`con-xnu-boot-b272-1118-…`:
+
+| boot | mode | result |
+|---|---|---|
+| P0 `-1354` | `base` (switches off) | renders. Tester's bench: swipes 89 % / 52.4 fps, scroll 21 % / 23.9 (on 24B156 the scripted in-app drag opens News), 81 C, background churn. The trace ring fell in the News drag: swap p50 70.0 ms |
+| P1 `-1403` | `bins` (`STARBITE_PANVK_BINS=aa`) | **stuck after the third frame** (Apple logo, no fault line, no frames in the bench windows). As set, the switch is unusable; it measured nothing about tiling |
+| P2 `-1410` | `direct` | **renders correctly**: all icons, widgets, glass dock (screenshot). One `async chain … FAILED … js_status=0x58` line during the swipes; the same line (JS1, gpu=0x600, 0x58) is in six older boots without this change (e0-old, s3a, nw2, cand3sb, bt2e, bt2), so it is not this change's. Bench: swipes 42 % / 37.4 fps, scroll 95 % / 57.0; swap p50 33.1 ms |
+
+The bench numbers of P0 and P2 do not compare: the script's phases fell differently against its windows (P0's
+"scroll" ran in News at 81 C). The GPU queue's 10 s profile does compare, window by window, where the content is the same:
+
+| window (same content in both) | P0 `base` | P2 `direct` |
+|---|---|---|
+| first swipe window: fragment chains, avg | 1,086 × 4,023 us | 1,065 × 3,819 us |
+| same window: **vertex/tiler chains, avg** | 3,547 × **932 us** (816 chains ≥ 1.6 ms) | 3,400 × **416 us** (51 chains ≥ 1.6 ms) |
+| second swipe window: vertex/tiler | 2,568 × 948 us | 2,185 × 403 us |
+| the idle screen (400 chains / 10 s, identical) | 951 us a chain | 565 us a chain |
+| all windows with > 500 v/t chains: v/t GPU ms per 10 s | 1,495 | 891 |
+| PanVK jobs a batch | 20.0 | 15.4 |
+
+**The helper was the vertex/tiler cost.** On the same frames the vertex/tiler chains take 55 % less time and the GPU 30 to
+37 % less in the swipe windows. That is the first change of this series that moves the GPU. The trace's busy swaps in P2
+were held 0 ms at the median, against 14 to 19 ms on every earlier boot: the GPU was no longer saturated in that ring.
+What the swipe fps gains is NOT measured yet. The repeat pair (`base`, then `direct`, back to back) is requested from the
+tester. Until then `STARBITE_PANVK_CPU_DIRECT` stays off by default.
+
+## 10. Re-pinning the bridge to upstream metal2vulkan (18 November; `M2V_REPIN=1`, opt-in, built)
+
+**How far behind.** The iOS 27 bridge (`tools/ios27/metal2/build-m2v-bridge.sh`) pins metal2vulkan at `720ef1ce`
+(14 October 2026). It carries our 20 patches (`bridge/patches/0001`–`0016`, `0100`–`0103`). UniXNU qualified `46e7cc96`
+(`development`, 17 November) with AdrenoMetal's consumer patches `0063` and `0064` (UniXNU's
+`scripts/build-adreno-metal-bridge.py` applies exactly those two). `46e7cc96` is **6,158 commits** ahead of `720ef1ce`, and
+`720ef1ce` is its ancestor. Since mid-October upstream's runtime has gained what our 0010–0014 did by hand and more:
+- kept and carried draws (a queue holds the carries of its latest commits);
+- a replayed draw walks its plan's heap members and resident uses once, not at each draw;
+- one state lock per encoder open and one per end;
+- render encoders over one target continue one render-pass instance, and record into the VkCommandBuffer of the encoders
+  before them;
+- a rebind rework;
+- the copy engine for buffer copies;
+- AdrenoMetal 0063: uniform descriptor capacity, queue fairness, copy barriers.
+
+Several of these cut CPU per draw. "Continue one render-pass instance" may also cut GPU chains, but that is not measured.
+
+**What is built** (`M2V_REPIN=1 build-m2v-bridge.sh`, its own source and output directories, default unchanged):
+- metal2vulkan `46e7cc96` + AdrenoMetal `0063`, `0064` (unchanged, from AdrenoMetal `cc0a4e8`) + `0105` (ours:
+  0064's `read_pages` on iOS too; without it the runtime does not build for `aarch64-apple-ios`). The list and the
+  licences are in `bridge/patches-46e7cc96/README.md`, NOTICE and THIRD_PARTY_LICENSES.md.
+- The bridge's sources (`NativeMetalBridge.rs`, `NativeMetalObjects.rs`, `NativeMetalTelemetry.rs`) build against both
+  runtimes. Six places follow the new API under `#[cfg(m2v_repin)]`:
+  - no `metal_level`;
+  - `HostPageTexturePolicy::InPlaceWrites` (upstream's form of our 0008/0016/0101, and what AdrenoMetal sets) in place of
+    `padded_reads` and `refuse_rebinds`;
+  - the linear-alignment query on the device;
+  - an infallible `SharedEventListener::new`;
+  - no 0103 counters.
+- `mk-bundle27.sh` takes `BRIDGE=<path>`. Bundle m5 is that bridge with m4's PanVK: StarbiteMetal abc1995e…, 33 MB
+  against 21.6 MB.
+
+**What is not done.** None of our 20 patches is carried. 0002 is already upstream. The other 19 conflict when
+cherry-picked onto 46e7cc96 + 0063 + 0064, because upstream moved the code (`render/bound.rs`, `render/executions.rs`,
+the rebinds, the linear plan). Each must be checked against 46e7cc96 and re-based only where upstream does not already do
+the same. The order, by risk:
+1. The correctness patches: 0006 (draws without a pipeline: backboardd died on one on 12 November), 0007/0015 (two-plane
+   surfaces: the camera), 0100 (8 MiB memory blocks), 0102 (linked specialized names), 0001.
+2. Start-up: 0003, 0005.
+3. Per-draw CPU: 0009–0012 and 0014, only where the host bench (`tools/ios27/metal/host-bench`) shows upstream slower.
+AdrenoMetal's frontend changes since 243d63cf (167 commits) are not reviewed for our frontend either.
+
+**The phone test** (requested): bundle m5 with `STARBITE_PANVK_CPU_DIRECT=1` (`edit-m5.sh direct`) against m4 `direct` on
+the same image. First see that it renders: the shader cache is cold and none of the correctness patches above is in. Then
+compare the swipe windows' GPU profile and the bridge column of the pass log (µs a draw: 114 to 119 on 24B156 with the old
+runtime). The re-pin becomes the default only after a phone run shows it renders correctly and is not slower.

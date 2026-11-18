@@ -11,12 +11,22 @@ cd "$(dirname "$0")/../../.."
 ROOT=$PWD
 SRC=$ROOT/build/m2v/metal2vulkan
 OUT=$ROOT/build/m2v-bridge
+PIN=720ef1ce PATCHES=$ROOT/tools/ios27/metal2/bridge/patches
+# M2V_REPIN=1 (opt-in, NOT the default; 18 November): metal2vulkan's development branch at 46e7cc96, the revision UniXNU
+# qualified, with AdrenoMetal's consumer patches 0063 and 0064 (as UniXNU's scripts/build-adreno-metal-bridge.py applies them)
+# and ours in bridge/patches-46e7cc96/ (see its README); the bridge's sources are compiled with --cfg m2v_repin for the
+# runtime's API there. Its own source and output directories, so both builds can sit side by side.
+if [ "${M2V_REPIN:-0}" = 1 ]; then
+	SRC=$ROOT/build/m2v/metal2vulkan-46e7cc96 OUT=$ROOT/build/m2v-bridge-repin
+	PIN=46e7cc96a284150bdf19b4a6a7890b0a8bc0ef71 PATCHES=$ROOT/tools/ios27/metal2/bridge/patches-46e7cc96
+	export RUSTFLAGS="${RUSTFLAGS:-} --cfg m2v_repin"
+fi
 target=${1:-ios}
 mkdir -p "$OUT"
 if [ ! -d "$SRC" ]; then
 	git clone -q https://github.com/steelbrain/metal2vulkan "$SRC"
-	git -C "$SRC" checkout -q 720ef1ce
-	for p in "$ROOT"/tools/ios27/metal2/bridge/patches/*.patch; do git -C "$SRC" apply "$p"; done
+	git -C "$SRC" checkout -q $PIN
+	for p in "$PATCHES"/*.patch; do git -C "$SRC" apply "$p"; done
 fi
 LLVM_AS=${LLVM_AS:-/opt/homebrew/opt/llvm/bin/llvm-as}
 "$LLVM_AS" -o "$OUT/runtime_examples.air" "$SRC/crates/metal2vulkan-validation/fixtures/public/examples/runtime_examples.ll"
