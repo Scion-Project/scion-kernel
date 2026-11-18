@@ -78,8 +78,14 @@ in the order above (the database file, which only `medialibraryd` or a writer ma
 ## Also seen on 24B156, separate
 
 - About 30 to 70 app-extension aborts a boot (SettingsImportExtension, the Spotlight index extensions of Music, TV, Books,
-  Home, Tips, SupportFlow, Contacts): their frames are `objc_exception_throw` from PlugInKit's `checkEnvironment:` + 344, a
-  different exception from the one above (PlugInKit refuses the extension's environment after a failed system call). Not
-  investigated further; they do not take Settings down.
+  Home, Tips, SupportFlow, Contacts, Notes, Phone, Podcasts, Voice Memos): `-[PKService checkEnvironment:]` (PlugInKit) puts
+  "?" in a 1 KiB buffer, calls `sandbox_container_path_for_pid(getpid())` and raises NSInternalInconsistencyException (with
+  errno) unless the call succeeds with a path longer than one byte (+344 is the return from the raise). The kernel's Sandbox
+  stand-in (`bsd/kern/sweet_amfi.c`) answered ENOENT to every operation 4. Fixed in the kernel (Scion-Project/xnu,
+  `agent/crash-sweep/sbx-container`): operation 4 answers the `CFFIXED_USER_HOME` that pkd/RunningBoard put in the process's
+  environment (the container containermanagerd gave them), ENOENT without it as before.
+- `com.apple.medialibraryd` is no longer trimmed (`lists/daemons-bp.keys`, `speed/trim-s1.list`): with it back and
+  `45-media-library.sh`, Settings > General > About no longer aborts and atc went from 15 aborts a boot to 0 (phone 1, root S2,
+  18 Nov).
 - Settings > Bluetooth opens as a blank white page on 24B156 (it drew on 24A446). No Settings abort came with it (boot o272,
   13:35). Not investigated.

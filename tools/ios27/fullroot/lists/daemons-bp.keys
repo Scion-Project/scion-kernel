@@ -1,4 +1,4 @@
-# launchd.plist job keys the owner build "bp" removes (hardware, crash loops, the 86 speed trims, logd/sharingd/fileindexerd/PerfPower*/modelcatalogd/modelmanagerd/axassetsd,
+# launchd.plist job keys the owner build "bp" removes (hardware, crash loops, the 85 speed trims (medialibraryd is kept: atc and Settings need it, docs/ios27/SETTINGS.md), logd/sharingd/fileindexerd/PerfPower*/modelcatalogd/modelmanagerd/axassetsd,
 # iOS 26-era hog list). DAEMON_SET=bp. One key per line (key = the job plist path; labels are not unique).
 /System/Library/LaunchAngels/com.apple.systemvoiceassistant.plist
 /System/Library/LaunchDaemons/com.apple.CommCenter-noncellular.plist
@@ -66,7 +66,6 @@
 /System/Library/LaunchDaemons/com.apple.logd.plist
 /System/Library/LaunchDaemons/com.apple.mediaanalysisd.plist
 /System/Library/LaunchDaemons/com.apple.mediaanalysisd.service.plist
-/System/Library/LaunchDaemons/com.apple.medialibraryd.plist
 /System/Library/LaunchDaemons/com.apple.mediastream.mstreamd.plist
 /System/Library/LaunchDaemons/com.apple.mlhostd.plist
 /System/Library/LaunchDaemons/com.apple.mobile.softwareupdated.plist

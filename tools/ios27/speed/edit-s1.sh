@@ -1,6 +1,6 @@
 #!/bin/bash
 # edit-s1.sh IMG [LIST] : attach an iOS 27 root image of the S9 (a raw HFS+/APFS image of the root volume, on the Mac), move the launchd jobs
-# of LIST (default trim-s1.list: 86 daemons the S9 gains nothing from) into launchd-disabled.plist, detach.
+# of LIST (default trim-s1.list: 85 daemons the S9 gains nothing from) into launchd-disabled.plist, detach.
 #   MNT=<mount point> tools/ios27/speed/edit-s1.sh ROOT.img
 set -eu
 H=$(cd "$(dirname "$0")" && pwd); IMG=${1:?usage: edit-s1.sh IMG [LIST]}; LIST=${2:-$H/trim-s1.list}
