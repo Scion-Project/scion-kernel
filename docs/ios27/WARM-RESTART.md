@@ -45,7 +45,8 @@ hard points, each with a step of its own below:
    here). Step 1 avoids the question with `cpus=1`; step 2 is `sweetwarm_smp=1`.
 2. **Devices that write memory on their own** after the kernel lets go: the USB controller, the UFS host, Wi-Fi's PCIe,
    the audio box, the modem, the cameras, the GPU, the display. Each has a stop already used by the console's `return`
-   except the GPU (idle is assumed in step 1) and the display (kept scanning the boot framebuffer, which stays valid).
+   except the GPU (a new stop: the driver's own soft reset) and the display (kept scanning the boot framebuffer, which
+   stays valid).
 3. **Caches across clusters** after a non-coherent copy (MMU off): handled by cleaning and invalidating by address the
    ranges the stub and the loader write (broadcast to every cluster) and by set/way on the boot core.
 4. **What the next kernel finds** that S-Boot would not have left: a UFS host already taken over, DECON in the state XNU
@@ -92,7 +93,7 @@ rebuilt for this. That direction stays a (vibrating) reset. iOS into TWRP is des
 ### The kernel's side (`bsd/dev/starlte_warm.c`, new)
 
 1. **Prepare (can be undone).** On the boot processor (bound to it): refuse unless one processor runs or
-   `sweetwarm_smp=1`; refuse with `fb_flip=`/`fb_dpp=` (the DECON would not be on the boot framebuffer); check that TTBR0
+   `sweetwarm_smp=1`; refuse with `fb_flip=`, `fb_dpp=` or `sweetfb_dpp=` (the DECON would not be on the boot framebuffer); check that TTBR0
    can map the stub (4 KiB granule, T0SZ 25-33). Read BOOT's header and kernel slot through the UFS driver's
    `hakios_ufs_read_partition` (read only; BOOT and RECOVERY added to its two names) into wired memory; check the slot:
    an arm64 Image whose bytes at +0x44 are `SCNR` and version 1 (a loader with the warm entry), its `image_size`, the
@@ -198,7 +199,8 @@ FDT at 0x91100000 (for step 3).
 | ABOX, amplifiers, codec | ABOX DMA | `hakios_max98512_quiesce`, `hakios_cs47l93_quiesce`, `hakios_exynos_abox_quiesce` (the console's `return` order) |
 | Cameras | yes (when streaming) | `hakios_exynos_camera_quiesce` |
 | Modem (Shannon) | shared memory | `hakios_shannon_quiesce` (back in reset, if `cp=` started it) |
-| GPU (Mali) | yes, through its own MMU and page tables in XNU's RAM | **not stopped in step 1** (`starlte_gpu.c` has `sg_cores_off`/`sg_soft_reset`, static): idle is assumed at a console `warm`; step 2 adds a stop |
+| GPU (Mali) | yes, through its own MMU and page tables in XNU's RAM | `starlte_gpu_quiesce` (new, `starlte_gpu.c`): the driver's own soft reset (every job and the MMU's state gone) and its cores off, with interrupts off after the point of no return, so no thread can start a job again |
+| Bluetooth (BCM4361, UART) | not known to DMA into RAM | left; the next kernel's `bt=` driver resets the chip (a phone question) |
 | Display (DECON, panel) | reads 0xcc000000 every refresh | kept: the buffer is in no OS's RAM; `fb_flip`/`fb_dpp` refuse the warm restart; the loader's text and the next kernel's frames go there as after S-Boot |
 | Sensor hub (SPI, its own MCU) | no DMA into RAM known | left running; the next kernel's `shub=` driver loads its firmware again (a phone question) |
 | GIC, timers | interrupts | emptied and off |
@@ -298,8 +300,9 @@ Mac's tools, then `warm` (the new BOOT is read at that moment: no reset needed t
 - R1 The next kernel's drivers assume S-Boot's state: the UFS host (link up, already configured by XNU), DECON (left as
   XNU set it), the touch controller, the sensor hub, the PMIC rails XNU turned on. Each failure shows as that device
   missing in the second boot, not as a hang (most of them).
-- R2 A device not stopped writes into the next kernel's memory (the GPU above all): random corruption in the second
-  boot. Step 1 keeps the system idle; the second boot's SHA-256 check covers the payload only up to the loader.
+- R2 A device not stopped writes into the next kernel's memory: random corruption in the second boot. The GPU's soft
+  reset is new on this path (the driver does it at its start); a GPU whose power domain is off when it is touched could
+  hang the bus (the watchdog then resets). The loader's SHA-256 check covers the payload only up to the loader.
 - R3 The copy with the MMU off runs at device-memory speed: up to a few seconds for 57 MiB (unmeasured); the watchdog
   allows 60 s.
 - R4 `CPU_OFF` on this firmware from XNU (step 2) and the cluster L3 of the M3s.
