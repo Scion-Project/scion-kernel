@@ -77,3 +77,20 @@ plug-in's telemetry (`touch /var/local/mtl2-telemetry`) prints with `new_instanc
 to a file of its own for the size rule) with the two declarations in `NativeMetalObjects.h`. Checked: metal2vulkan 720ef1ce
 plus patches 0001-0016 and 0100-0103 gives the 12 Nov tree's metal2vulkan sources file for file. The library was not rebuilt
 from the repository for this (a 300 MB Rust build); the counters cost one relaxed atomic add per new instance.
+
+## The bridge's CPU cost on the Mac (`tools/ios27/metal/host-bench`, 18 Nov 2026)
+
+The phone shows a frame's encode time but no profile of it inside the bridge (the kernel's profiler prints only the hottest
+program counters, which leaves out code as spread out as the runtime's). `tools/ios27/metal/host-bench/build.sh` builds
+Mesa's KosmicKrisp (Vulkan over Metal) for the Mac from the same Mesa tree, a shim that lets metal2vulkan open it as its
+loader, and `bench`: the bridge's C API (the host build of `build-m2v-bridge.sh`) driving a pass of CoreAnimation's main pass
+shape (828x1702 BGRA8 loaded and stored, RGBA16F and R32F memoryless; N draws with vertex bytes, a vertex buffer, a scissor,
+optionally a texture and fragment bytes, a pipeline change every K draws), one frame at a time. `sample <pid>` gives the
+profile. The driver's own cost is KosmicKrisp's, not PanVK's; the runtime's is the phone's, at the M1's speed.
+
+First numbers (M1, 100 draws, 16 pipelines changed every draw): 3.5 us a draw; 7.1 us with a texture bound a draw. In a
+profile of the textured case the per-draw path is spread over the runtime (`draw_resident`, `settle_draw`, `Recording::record`,
+`instantiate_into`, `Bound::dynamic`, none above about 10 %); at the pass's end `clear_reach::DrawnArea::tiles` took about two
+thirds of `end_pass` for scissors that differ every draw (it marks the bin grid one tile at a time; a draw whose scissor
+covers the whole pass skips it, as most of CoreAnimation's main-pass draws should). The M1 runs this single-threaded code
+several times faster than the S9's M3 at 1794 MHz.
