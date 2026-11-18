@@ -3,7 +3,7 @@
 previously moved to launchd-disabled.plist is put back first, then the chosen set is moved out again).
   1. hardware list (daemons-hw.list): jobs removed from launchd.plist, kept in launchd-disabled.plist (restorable)
   2. --set min : crash-loop list (daemons-crashloop.list) [+ daemons-hogs.list with --hogs], by exact Label
-     --set bp  : exactly the job set of the owner build "bp" (daemons-bp.keys: hardware + crash loops + the 84 speed trims + CPU hogs)
+     --set bp  : the default: daemons-bp.keys, the hardware-less jobs only (until 18 Nov 2026 also crash loops, the 84 speed trims and CPU hogs)
      --keep   : jobs (exact Label, or exact job key) left in launchd.plist although 1. or 2. would move them out; empty by
                 default (no change). For a test of what a removed daemon does, e.g. com.apple.siriactionsd for Control Centre's
                 controls (docs/ios27/CONTROL-CENTRE.md); a keep that matches no job is said.

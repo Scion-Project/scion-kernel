@@ -6,4 +6,4 @@ com.apple.dhcp6d true
 com.apple.magicswitchd.companion true
 com.apple.security.otpaird true
 com.apple.ftp-proxy-embedded false
-com.apple.rapportd true
+com.apple.rapportd false   # back on 18 Nov 2026 (fix, not trim: 137 % CPU on owner builds is a task)

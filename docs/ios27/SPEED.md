@@ -13,6 +13,11 @@ kernel itself was built (the iOS-target STARLTE kernel, as for #255) and not boo
 boot below with `sweetspeed=31` added (it now has `sweetspeed=2047`, with the night run's bits of `NIGHT.md`, and `sweettrace=0`, the default, is out for room) (and `a5fb_noconsole=1` taken out: the STARLTE framebuffer driver reads `sweetfb_noconsole` only, and the line is limited
 to 607 bytes).
 
+> **18 November 2026: the daemon trim below is withdrawn.** Trimming daemons is no longer the approach ("keep iOS as intact and clean as
+> possible, we want to fix services, not remove them"). `trim-s1.list` now holds only the three hardware-less jobs it had (aned, watchdogd,
+> securityresearchdeviceinit); the full root's policy is in [FULLROOT.md](FULLROOT.md#daemon-policy). Speed comes from fixing what a daemon
+> trips over (A64E/PAC traps, crash loops, missing hardware answers), not from removing it. The s1w row is kept as history.
+
 ## The boots
 
 One change set each, one root each. "Display" is the time from the reboot command to the first frame.
@@ -54,7 +59,7 @@ All of it is on your own root, with tools that read nothing of Apple's except th
 |---|---|
 | `a64e-rewrite2.py` | `tools/ios27/a64e/a64e-rewrite.py` plus the `PACGA` and `LDRAA/LDRAB` with writeback rewrites. It leaves libcorecrypto alone (the default of `--skip`) |
 | `edit-s4.sh` | attaches a raw root image and runs it over the cache |
-| `trim-s1.list`, `edit-s1.py`, `edit-s1.sh` | the 86 launchd jobs that the S9 does without (Siri, Spotlight indexing, intelligence and analysis daemons, Photos analysis, Music, Health, iCloud sync, SensorKit...) moved into `launchd-disabled.plist`; `backboardd` taken out of `mtl2-clients` |
+| `trim-s1.list`, `edit-s1.py`, `edit-s1.sh` | was: the 86 launchd jobs the s1w boot did without (Siri, Spotlight, intelligence, Photos analysis, Music, Health, iCloud...); now only the hardware-less aned, watchdogd and securityresearchdeviceinit, moved into `launchd-disabled.plist`; `backboardd` taken out of `mtl2-clients` |
 | `cachepatch.py`, `edit-s6.sh` | patches one word of the cache at an address, only if it is the expected one: the Settings freeze patch |
 
 **The Settings freeze.** Preferences' main thread blocks in `SCNetworkInterfaceCopyAll`, in `__wait_for_IOKit_to_quiesce`, in `SCDynamicStoreNotifyWait`:
