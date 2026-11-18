@@ -6,7 +6,8 @@ set -e
 W=${W:-$PWD/build/metal27}; SB=${SB:-$(cd "$(dirname "$0")/../../.." && pwd)}; cd "$SB"
 : "${DEVELOPER_DIR:?set DEVELOPER_DIR to an Xcode}"; export DEVELOPER_DIR
 CC="xcrun --sdk iphoneos clang -arch arm64 -mios-version-min=16.0"
-BRIDGE=$SB/build/m2v-bridge/ios/libnative_metal_bridge.a
+# BRIDGE=<path> names another bridge library (the re-pinned one: build/m2v-bridge-repin/ios/libnative_metal_bridge.a)
+BRIDGE=${BRIDGE:-$SB/build/m2v-bridge/ios/libnative_metal_bridge.a}
 PANVK=$W/build/mesa/build-vk26/src/panfrost/vulkan/libvulkan_panfrost.dylib
 B=$W/stage/StarbiteMetal.bundle
 rm -rf "$B" && mkdir -p "$B" $W/sym $W/stage

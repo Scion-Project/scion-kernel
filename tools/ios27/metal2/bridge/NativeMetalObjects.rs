@@ -20,7 +20,7 @@ use metal2vulkan_runtime::{
     BinaryArchive, BinaryArchiveDescriptor, BlitCommandEncoder, FamilyRow, FeatureRow, FunctionDescriptor as RuntimeFunctionDescriptor,
     GpuFamily, RowState, BlitOption, Buffer, ClearColor, CommandBuffer, CommandQueue, ComputeCommandEncoder, ComputePipelineState,
     DebugMessage, DepthStencilState, Device, DeviceOptions, MessageSeverity, MessageSink, Event, EventRef, Fence, Function, Heap,
-    HeapDescriptor, HeapType, HostMemory, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, MetalLevel, Origin, PipelineOption,
+    HeapDescriptor, HeapType, HostMemory, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption,
     PipelineOptions, PurgeableState, PrivateCount, PrivateFlag, PrivateProperties, MAX_COLOR_ATTACHMENTS, Region, RenderCommandEncoder,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, SamplerState, ScissorRect, SharedEvent, SharedEventListener, Size,
     StoreAction, SurfaceYCbCrMatrix, Texture, TextureDescriptor, Viewport, VisibilityResultMode,
@@ -166,11 +166,21 @@ pub unsafe extern "C" fn nmb_device_open(loader: *const c_char, cache: *const c_
         let (loader, cache) = unsafe { (CStr::from_ptr(loader), CStr::from_ptr(cache)) };
         let mut options = DeviceOptions::default();
         options.loader = Some(PathBuf::from(loader.to_string_lossy().into_owned()));
-        options.metal_level = Some(MetalLevel::NEWEST);
-        // Render padded IOSurface rows in place when recorded 16x4 GMEM tile-store bounds fit (`0008` + `0016`),
-        // and skip encoder replay-call logging since this frontend never calls `rebind_bytes_no_copy` (`0013`).
-        options.policy.padded_reads = metal2vulkan::device::PaddedReadsPolicy::AliasWrites;
-        options.refuse_rebinds = true;
+        #[cfg(not(m2v_repin))]
+        {
+            options.metal_level = Some(metal2vulkan_runtime::MetalLevel::NEWEST);
+            // Render padded IOSurface rows in place when recorded 16x4 GMEM tile-store bounds fit (`0008` + `0016`),
+            // and skip encoder replay-call logging since this frontend never calls `rebind_bytes_no_copy` (`0013`).
+            options.policy.padded_reads = metal2vulkan::device::PaddedReadsPolicy::AliasWrites;
+            options.refuse_rebinds = true;
+        }
+        // The re-pinned runtime (metal2vulkan 46e7cc96 with AdrenoMetal's 0063/0064, M2V_REPIN=1): imported surfaces and
+        // padded buffers in place, written ones too where their tile stores stay within their rows, which is upstream's form
+        // of our patches 0008/0016/0101 (AdrenoMetal sets the same); it has no Metal level to choose and no rebind refusal.
+        #[cfg(m2v_repin)]
+        {
+            options.policy.host_page_textures = metal2vulkan::device::HostPageTexturePolicy::InPlaceWrites;
+        }
         options.shader_cache = metal2vulkan_runtime::ShaderCacheOptions::in_directory(cache.to_string_lossy().into_owned());
         options.messages = Some(MessageSink::new(observe_message));
         Ok(boxed(NmbDevice(Device::system_default_with(&options).map_err(e("device"))?, std::sync::OnceLock::new(), std::sync::Mutex::new(()))))
@@ -493,9 +503,14 @@ fn device_answer(device: &NmbDevice, selector: &str, arg: u64) -> Result<u64, St
         }
         "supportsYCBCRFormats12" => format_supported(PixelFormat::YCBCR124202P) as u64,
         "supportsYCBCRPackedFormats12" => format_supported(PixelFormat::YCBCR124202PPACKED) as u64,
-        "minimumLinearTextureAlignmentForPixelFormat:" => p
-            .minimum_linear_texture_alignment_for_pixel_format(raw::<PixelFormat>(arg, "pixel format")?)
-            .map_err(e("minimum linear texture alignment"))?,
+        "minimumLinearTextureAlignmentForPixelFormat:" => {
+            #[cfg(not(m2v_repin))]
+            let q = p;
+            #[cfg(m2v_repin)]
+            let q = d; // (46e7cc96: a query of the device, not of its properties)
+            q.minimum_linear_texture_alignment_for_pixel_format(raw::<PixelFormat>(arg, "pixel format")?)
+                .map_err(e("minimum linear texture alignment"))?
+        }
         "supportsTextureSampleCount:" => gap(p.supports_texture_sample_count(arg))?,
         "supportsVertexAmplificationCount:" => p.supports_vertex_amplification_count(arg).unwrap_or(arg == 1) as u64,
         "supportsRasterizationRateMapWithLayerCount:" => gap(p.supports_rasterization_rate_map_with_layer_count(arg))?,
@@ -532,8 +547,11 @@ pub unsafe extern "C" fn nmb_device_answer(device: *const NmbDevice, selector: *
 pub extern "C" fn nmb_device_linear_bytes_per_row(device: *const NmbDevice, format: u64, width: u64) -> u64 {
     guard(0, || {
         let d = &get(device)?.0;
-        let alignment = d
-            .properties()
+        #[cfg(not(m2v_repin))]
+        let q = d.properties();
+        #[cfg(m2v_repin)]
+        let q = d; // (46e7cc96: a query of the device, not of its properties)
+        let alignment = q
             .minimum_linear_texture_alignment_for_pixel_format(raw::<PixelFormat>(format, "pixel format")?)
             .map_err(e("linear texture"))?;
         let info = d.pixel_format_info(format);
@@ -1841,7 +1859,11 @@ fn shared<'a>(event: *const NmbEvent) -> Result<&'a SharedEvent, String> {
 /// forwards to it).
 fn listener() -> Result<&'static SharedEventListener, String> {
     static LISTENER: std::sync::OnceLock<Result<SharedEventListener, String>> = std::sync::OnceLock::new();
-    LISTENER.get_or_init(|| SharedEventListener::new().map_err(e("listener"))).as_ref().map_err(|why| why.clone())
+    #[cfg(not(m2v_repin))]
+    let make = || SharedEventListener::new().map_err(e("listener"));
+    #[cfg(m2v_repin)]
+    let make = || Ok::<_, String>(SharedEventListener::new()); // (46e7cc96: it cannot fail)
+    LISTENER.get_or_init(make).as_ref().map_err(|why| why.clone())
 }
 
 #[unsafe(no_mangle)]
