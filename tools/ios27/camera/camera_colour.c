@@ -37,6 +37,7 @@ void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1,
 extern CFDictionaryRef (*hakios_camera_colour_info)(void);                               /* camera_device.c */
 
 static __thread id current_node;        /* the source node whose stream is being brought up to date on this thread */
+static id active_node;                  /* the same, whatever the thread (the stream's property may be asked on a queue's) */
 static ptrdiff_t properties_offset = -1;
 static IMP o_allocate;
 
@@ -47,7 +48,9 @@ w_allocate(id self, SEL sel, id source)
 	void *r;
 
 	current_node = self;
+	__atomic_store_n(&active_node, self, __ATOMIC_RELEASE);
 	r = ((void *(*)(id, SEL, id))o_allocate)(self, sel, source);
+	__atomic_store_n(&active_node, before, __ATOMIC_RELEASE);
 	current_node = before;
 	return r;
 }
@@ -64,17 +67,18 @@ colour_info(void)
 	    &kCFTypeDictionaryValueCallBacks);
 	Class format = objc_getClass("BWVideoFormat");
 	SEL make = sel_registerName("pixelBufferAttachmentsForColorSpaceProperties:");
+	id node = current_node != nil ? current_node : __atomic_load_n(&active_node, __ATOMIC_ACQUIRE);
 	int properties;
 	id attachments;
 
-	if (current_node == nil || properties_offset < 0 || format == Nil || !class_respondsToSelector(object_getClass((id)format), make)) {
+	if (node == nil || properties_offset < 0 || format == Nil || !class_respondsToSelector(object_getClass((id)format), make)) {
 		if (__atomic_fetch_add(&said, 1, __ATOMIC_RELAXED) == 0) {
 			say("colour: the stream's colour info asked for outside the source node's update%s: answered empty",
 			    format == Nil ? " (no BWVideoFormat)" : "");
 		}
 		return d;
 	}
-	properties = *(int *)((uint8_t *)(void *)current_node + properties_offset);
+	properties = *(int *)((uint8_t *)(void *)node + properties_offset);
 	attachments = ((id (*)(id, SEL, int))objc_msgSend)((id)format, make, properties);
 	for (size_t i = 0; attachments != nil && i < sizeof(outputs) / sizeof(outputs[0]); i++) {
 		CFStringRef name = CFStringCreateWithCString(NULL, outputs[i], kCFStringEncodingUTF8);
