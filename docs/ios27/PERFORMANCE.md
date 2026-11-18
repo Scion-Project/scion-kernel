@@ -284,3 +284,90 @@ screen first, then the same 300 s of console swipes. Record the temperatures eve
 - Reading SpringBoard's threads with the profiler (`sweetspeed&16384` and `tools/ios27/perf/prof.py`): §2.3's 16 ms of
   SpringBoard CPU a frame is a sum over its threads; whether its main thread is the limit after the fences is N.
 - The built-in default `sweetspeed=100351` (`osfmk/arm/arm_init.c`) lacks the GPU queue (262144) and the other Liquid Glass bits that phone 1's line has. A boot whose loader line names no `sweetspeed` runs the Metal compositor without the queue (`LIQUID-GLASS.md`: 29 % of frames on time against 67 %). Whether to change that default is the owner's.
+
+## 7. Jobs a draw: PanVK's descriptor copies (18 November; `STARBITE_PANVK_CPU_DESC=1`, built, NOT run on a phone)
+
+**What the logs say.** On phone 1's F1 boot (18 November, home-screen swipes) the GPU queue's profile gives, every 10 s,
+about 1,830 vertex/tiler chains at 1.33 ms on average and 1,080 fragment chains at 1.62 ms: about 2.4 s and 1.75 s of
+GPU time, roughly 8 ms and 6 ms of a 14 ms GPU frame (M: `STARLTE GPU QUEUE prof`). The vertex/tiler side is the larger,
+for draws of a few hundred vertices. metal-perf's PanVK statistics (12 November, `STARBITE_DRM_STATS=1`) count about
+10.5 jobs a batch in the 26-pass, 93-draw swipe frame, about 3 jobs a draw (I: 3.6 draws a pass).
+
+**Why three.** PanVK's JM path (Bifrost) copies a draw's descriptors (UBOs, textures, samplers) from the bound sets into
+the draw's own hardware tables with a compute job, one workgroup a descriptor (`bifrost/panvk_vX_meta_desc_copy.c`,
+`meta_get_copy_desc_job`), for the vertex shader and again for the fragment shader whenever the descriptor state or the
+shader changed (`jm/panvk_vX_cmd_draw.c`, `prepare_draw`). CoreAnimation changes pipeline or textures on nearly every draw,
+so a draw is two copy jobs and its IDVS job. Each job in a JM chain costs the job manager's start, dependency and
+completion, whatever it does; how much of the 1.33 ms is that and how much is tiling is NOT measured (B2 below says).
+
+**What `STARBITE_PANVK_CPU_DESC=1` does** (`tools/ios27/mesa-ios/mesa26-panvk-cpu-desc-copy.patch`, in `/var/local/mtl2-env`):
+the copy is done on the CPU instead, when the batch is submitted, into the same tables, before the batch is made
+visible to the GPU (`pan_kmod_flush_bo_map_syncs`). Submission is the latest moment the job's own copy could see a
+different descriptor: an application may update an update-after-bind set until it submits (metal2vulkan's heap sets are
+such), and the copy job reads the set when it runs, after the submission. A push descriptor set is taken as its upload
+takes it, at the draw. Only for a primary command buffer's draw whose shader has no image descriptors (whose attribute
+pairs the job also rewrites); everything else keeps the job. Without the variable PanVK does what it did.
+
+**Counters** (with `STARBITE_DRM_STATS=1`, whatever the switch): the shim's 10 s line
+`drm[pid] vk draws D; descriptor copies: jobs J (N descriptors), on the CPU C (M descriptors)`. With the switch off,
+J / D is the copy jobs a draw; with it on, J should fall to the image cases and C take their place.
+
+**The test** (scion-perf60's root steps `edit-m2.sh add|cpu|bins`, bundle StarbiteMetal 8c622664 + libvulkan_panfrost
+1dcd6b14, the d5 F1 kernel): B1 `add` (counters only, the switch off) against B2 `cpu`. Read `GPU QUEUE prof` (vertex/tiler
+average and count), the `vk batches ... jobs` and `vk draws` lines, fbt's CoreAnimation swap period, the swipe fps, and look at
+the home screen for wrong textures (a wrong copy shows as wrong icons or a GPU fault line). Expected, if the job count is
+the cost: the vertex/tiler time falls by up to two thirds, a few ms of the frame. If it does not fall, the time is in the
+IDVS jobs themselves (tiling), and `STARBITE_PANVK_BINS` (B3) is the next knob.
+
+**Result on phone 1 (18 November, d5's F1 kernel, the same 16 scripted page swipes, logs `con-xnu-boot-f1-1118-1210` B1
+and `-1218` B2, 30 s of swipes each):**
+
+| | B1 (counters only) | B2 (`STARBITE_PANVK_CPU_DESC=1`) |
+|---|---|---|
+| descriptor-copy compute jobs / 30 s | 61,198 | 1,116 (images only); 62,490 copies done on the CPU |
+| PanVK jobs a batch | 47.0 | 34.1 |
+| vertex/tiler chains, average | 1,343 us | 1,311 us |
+| vertex/tiler GPU time / 10 s | 2,067 ms | 2,091 ms |
+| swipes (tester's bench) | 39 % / 36.6 fps | 39 % / 36.7 fps |
+| CoreAnimation swap period p50 (fbt) | 33.5 ms | 33.6 ms |
+
+No wrong texture, no GPU fault. **The copy jobs were not the cost**: a quarter of the jobs went and the vertex/tiler time
+did not move, so they ran beside the draws' critical path. The switch stays off by default.
+
+The same boots also measured the encode split for the first time (the pass log's bridge column): in the home screen's
+main pass, 79 % of an encoder's time is this side's (the frontend, the runtime and PanVK's recording), **82 us a draw**,
+7.1 ms of a 9.0 ms main pass of 87 draws; small passes pay 150 to 300 us each for one or two draws.
+
+## 8. Indexed draws on the GPU's indirect path (18 November; `STARBITE_PANVK_CPU_MINMAX=1`, built, NOT run on a phone)
+
+**What PanVK does with `vkCmdDrawIndexed` on JM** (`jm/panvk_vX_cmd_draw.c`): it is recorded as an indirect draw. Before the
+draw's IDVS job come a write-value job (the search's start values), a compute job that searches the draw's indices for their
+range (`panlib_draw_index_minmax_search_helper`) and a helper compute job that patches the draw's jobs and descriptors from that
+range (`panlib_draw_indexed_indirect_helper`, with the job manager's prefetch suppressed), each waiting for the one before.
+Most of CoreAnimation's draws are indexed (B1: ~1,200 direct draws against ~61,000 descriptor copies in 30 s). A one-draw
+pass costs about 77 us of vertex/tiler chain and the 87-draw main pass about 8.7 ms (sgu_dump, 17 November): about 80 to
+100 us a draw whatever the draw's size, which is what a chain of four dependent jobs a draw would cost, and what B2 did not
+touch (its jobs were not in that chain).
+
+**What `STARBITE_PANVK_CPU_MINMAX=1` does** (`tools/ios27/mesa-ios/mesa26-panvk-cpu-minmax.patch`): for a direct indexed draw
+whose index buffer's memory is mapped (Metal's shared buffers are), the CPU reads the draw's indices when the command is
+recorded and writes their range where the search job would; the write-value and search jobs are not made, and the helper
+depends on what they depended on. The range is the search's (restart indices skipped; none valid gives the same empty
+range). A buffer that is not mapped, or a range past the bound size, keeps the GPU's way. The indices must be those the GPU
+will read: an index buffer the GPU writes earlier in the same submission would be read stale; metal2vulkan's only such
+writer (the restarted-strip rewrite) writes device memory, which is never mapped. Counters on the shim's line: indexed/indirect
+draws, and the ranges found on the CPU and not.
+
+**Expected** if the dependent-job chain is the cost: the chain per indexed draw goes from four jobs to two, the vertex/tiler
+time towards half (about 3 to 4 ms of the 14 ms GPU frame), and PanVK's recording of each draw lighter. Removing the helper
+too (patching the draw's jobs on the CPU, as the CL helper does) would leave one job a draw; it is not built.
+
+**Result on phone 1 (18 November, log `con-xnu-boot-f1-1118-1236`, the same kernel and swipes as B1):** all 30,921
+indexed draws of the 30 s had their range found on the CPU; the write-value and search jobs went (jobs a batch 47.0 ->
+33.7). The vertex/tiler chain average went from 1,343 to 1,277 us (-5 %), its GPU time from 2,067 to 2,002 ms per 10 s
+(-3 %); swipes 36.6 fps, swap period p50 33.5 ms, as B1. The home screen rendered correctly, no fault. **So the dependent
+chain before the draw is not the cost either.** What is left a draw is the helper job and the IDVS job: about 190 us of
+vertex/tiler time a draw (2.0 s per 10 s for about 10,300 draws), which neither of the two removals touched. Whether that
+is the helper's patching, the job manager's prefetch suppression around it, or the tiling itself is not known; the next
+experiments are `STARBITE_PANVK_BINS` (fewer bin levels, no build) and a debug build that submits the helper and the IDVS
+job as separate chains so the GPU queue's profile times each. The switch stays off by default.

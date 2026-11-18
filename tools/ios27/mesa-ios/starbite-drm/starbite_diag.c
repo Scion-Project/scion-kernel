@@ -169,6 +169,12 @@ uint64_t sbdrm_flush_reason[10];                         /* pan_job.c: batches s
  * with no fragment job. Plain counters, bumped without atomics by PanVK's recording threads: a statistic, not an account. */
 unsigned sbdrm_vk_why;
 unsigned long long sbdrm_vk_batches[10], sbdrm_vk_jobs, sbdrm_vk_fragless;
+/* PanVK (mesa26-panvk-cpu-desc-copy.patch): draws, and the descriptor copies of their shaders, as compute jobs (with the
+ * descriptors they copy) or on the CPU at submission (STARBITE_PANVK_CPU_DESC=1). */
+unsigned long long sbdrm_vk_draws, sbdrm_vk_desc_jobs, sbdrm_vk_desc_job_descs, sbdrm_vk_desc_cpu, sbdrm_vk_desc_cpu_descs;
+/* PanVK (mesa26-panvk-cpu-minmax.patch): indexed and indirect draws, and the direct indexed ones whose index range the CPU
+ * found (STARBITE_PANVK_CPU_MINMAX=1) or could not (the buffer not mapped, or the range past it). */
+unsigned long long sbdrm_vk_idraws, sbdrm_vk_minmax_cpu, sbdrm_vk_minmax_gpu;
 void
 sbdrm_count(uint32_t selector)
 {
@@ -214,6 +220,23 @@ sbdrm_count(uint32_t selector)
 		    "begin-rendering %llu job-limit %llu end-cmdbuf %llu event %llu query %llu other %llu; jobs %llu; no fragment job %llu",
 		    getpid(), vall, vb[1], vb[2], vb[3], vb[4], vb[5], vb[6], vb[7], vb[8], vb[9], vb[0],
 		    __atomic_exchange_n(&sbdrm_vk_jobs, 0, __ATOMIC_RELAXED), __atomic_exchange_n(&sbdrm_vk_fragless, 0, __ATOMIC_RELAXED));
+		if (n > 0) {
+			text[sizeof(text) - 1] = 0;
+			sbdrm_kernel_log(text, strlen(text) + 1);
+		}
+	}
+	unsigned long long vd = __atomic_exchange_n(&sbdrm_vk_draws, 0, __ATOMIC_RELAXED);
+	unsigned long long vj = __atomic_exchange_n(&sbdrm_vk_desc_jobs, 0, __ATOMIC_RELAXED);
+	unsigned long long vjd = __atomic_exchange_n(&sbdrm_vk_desc_job_descs, 0, __ATOMIC_RELAXED);
+	unsigned long long vc = __atomic_exchange_n(&sbdrm_vk_desc_cpu, 0, __ATOMIC_RELAXED);
+	unsigned long long vcd = __atomic_exchange_n(&sbdrm_vk_desc_cpu_descs, 0, __ATOMIC_RELAXED);
+	unsigned long long vi = __atomic_exchange_n(&sbdrm_vk_idraws, 0, __ATOMIC_RELAXED);
+	unsigned long long vmc = __atomic_exchange_n(&sbdrm_vk_minmax_cpu, 0, __ATOMIC_RELAXED);
+	unsigned long long vmg = __atomic_exchange_n(&sbdrm_vk_minmax_gpu, 0, __ATOMIC_RELAXED);
+	if (vd + vi + vj + vc != 0) {
+		n = snprintf(text, sizeof(text), "drm[%d] vk draws %llu, indexed/indirect %llu (index range on the CPU %llu, not %llu); "
+		    "descriptor copies: jobs %llu (%llu descriptors), on the CPU %llu (%llu descriptors)", getpid(), vd, vi, vmc, vmg,
+		    vj, vjd, vc, vcd);
 		if (n > 0) {
 			text[sizeof(text) - 1] = 0;
 			sbdrm_kernel_log(text, strlen(text) + 1);
