@@ -102,6 +102,37 @@ add_intermediate_tap(CFMutableDictionaryRef format, int width, int height)
 	CFRelease(all);
 }
 
+/*
+ * The StillImage output also offers 'xf20' (10-bit full range, biplanar 4:2:0): N104's photo formats say
+ * UsesPacked10BitFirmwareStillImageOutputPixelFormat, and with it the source node keeps only 10-bit full-range formats for
+ * the still image output (camera_tenbit.c, which draws it). camera_refuse.c answers that key NO, so a session normally
+ * takes 420f; this is what one that still asks for 10 bits finds.
+ */
+static void
+add_still_tenbit(CFMutableDictionaryRef format)
+{
+	CFDictionaryRef outputs = CFDictionaryGetValue(format, CFSTR("SupportedOutputs"));
+	CFDictionaryRef still = outputs != NULL ? CFDictionaryGetValue(outputs, CFSTR("StillImage")) : NULL;
+	CFArrayRef pfs = still != NULL ? CFDictionaryGetValue(still, CFSTR("SupportedPixelFormats")) : NULL;
+	int xf20 = 0x78663230;  /* 'xf20' */
+
+	if (pfs == NULL) {
+		return;
+	}
+	CFMutableDictionaryRef all = CFDictionaryCreateMutableCopy(NULL, 0, outputs), one = CFDictionaryCreateMutableCopy(NULL, 0, still);
+	CFMutableArrayRef more = CFArrayCreateMutableCopy(NULL, 0, pfs);
+	CFNumberRef n = CFNumberCreate(NULL, kCFNumberIntType, &xf20);
+
+	CFArrayAppendValue(more, n);
+	CFDictionarySetValue(one, CFSTR("SupportedPixelFormats"), more);
+	CFDictionarySetValue(all, CFSTR("StillImage"), one);
+	CFDictionarySetValue(format, CFSTR("SupportedOutputs"), all);
+	CFRelease(n);
+	CFRelease(more);
+	CFRelease(one);
+	CFRelease(all);
+}
+
 CFArrayRef
 scioncam_n104_formats(uint32_t sensor, const char *camera, double fov, scioncam_format_fn make)
 {
@@ -133,6 +164,7 @@ scioncam_n104_formats(uint32_t sensor, const char *camera, double fov, scioncam_
 		CFRelease(base);
 		CFDictionarySetValue(f, CFSTR("SIFREnabled"), e->sifr ? kCFBooleanTrue : kCFBooleanFalse);
 		add_intermediate_tap(f, e->width, e->height);
+		add_still_tenbit(f);
 		if (e->fes_width > 0) {
 			put_number(f, "FrontEndScalerOutputWidth", e->fes_width);
 			put_number(f, "FrontEndScalerOutputHeight", e->fes_height);

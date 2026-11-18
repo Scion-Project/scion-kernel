@@ -281,6 +281,7 @@ supported(const struct prop *p, size_t n)
 #define PF_420F         0x34323066      /* '420f' */
 #define PF_420V         0x34323076      /* '420v' */
 #define PF_BGRA         0x42475241      /* 'BGRA' */
+#define PF_XF20         0x78663230      /* 'xf20': iOS 27's 10-bit still image pool (camera_tenbit.c) */
 
 static CFDictionaryRef
 output_info(int width, int height)
@@ -1003,7 +1004,15 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 	pf = CVPixelBufferGetPixelFormatType(pb);
 	width = (uint32_t)CVPixelBufferGetWidth(pb);
 	height = (uint32_t)CVPixelBufferGetHeight(pb);
-	if (width == 0 || height == 0 || (pf != PF_420F && pf != PF_420V && pf != PF_BGRA)) {
+	CVPixelBufferRef draw = pb;     /* what is drawn into: pb, or for a 10-bit pool an 8-bit buffer widened after */
+
+#ifdef HAKIOS_CAMERA_N104
+	if (pf == PF_XF20 && width > 0 && height > 0 && (draw = scioncam_tenbit_scratch(pb)) == NULL) {
+		CVPixelBufferRelease(pb);
+		return;
+	}
+#endif
+	if (width == 0 || height == 0 || (pf != PF_420F && pf != PF_420V && pf != PF_BGRA && draw == pb)) {
 		if (out->delivered == 0 && out->said_shape == false) {
 			out->said_shape = true;
 			say("%s: %ux%u %c%c%c%c buffers are not for this ISP", out->name, width, height, pf >> 24, pf >> 16 & 255,
@@ -1013,8 +1022,10 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 		return;
 	}
 	CVPixelBufferLockBaseAddress(pb, 0);
+	CVPixelBufferLockBaseAddress(draw, 0);
 
-	struct render_job job = { isp, f, raw, pb, pf, width, height, 8, strcmp(out->name, "StillImage") == 0 && pf != PF_BGRA };
+	uint32_t drawn = draw == pb ? pf : PF_420F;
+	struct render_job job = { isp, f, raw, draw, drawn, width, height, 8, strcmp(out->name, "StillImage") == 0 && drawn != PF_BGRA };
 	uint64_t began = mach_absolute_time();
 
 	dispatch_apply_f(job.pieces, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), &job, render_piece);
@@ -1027,6 +1038,12 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 		say("%s: %ux%u made of every pixel in %.0f ms", out->name, width, height,
 		    (double)(mach_absolute_time() - began) * tb.numer / tb.denom / 1e6);
 	}
+#ifdef HAKIOS_CAMERA_N104
+	if (draw != pb) {
+		scioncam_tenbit_widen(draw, pb);
+	}
+#endif
+	CVPixelBufferUnlockBaseAddress(draw, 0);
 	CVPixelBufferUnlockBaseAddress(pb, 0);
 	CVBufferSetAttachment(pb, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4, kCVAttachmentMode_ShouldPropagate);
 	CVBufferSetAttachment(pb, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, kCVAttachmentMode_ShouldPropagate);
