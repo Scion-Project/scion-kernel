@@ -284,3 +284,37 @@ screen first, then the same 300 s of console swipes. Record the temperatures eve
 - Reading SpringBoard's threads with the profiler (`sweetspeed&16384` and `tools/ios27/perf/prof.py`): §2.3's 16 ms of
   SpringBoard CPU a frame is a sum over its threads; whether its main thread is the limit after the fences is N.
 - The built-in default `sweetspeed=100351` (`osfmk/arm/arm_init.c`) lacks the GPU queue (262144) and the other Liquid Glass bits that phone 1's line has. A boot whose loader line names no `sweetspeed` runs the Metal compositor without the queue (`LIQUID-GLASS.md`: 29 % of frames on time against 67 %). Whether to change that default is the owner's.
+
+## 7. Jobs a draw: PanVK's descriptor copies (18 November; `STARBITE_PANVK_CPU_DESC=1`, built, NOT run on a phone)
+
+**What the logs say.** On phone 1's F1 boot (18 November, home-screen swipes) the GPU queue's profile gives, every 10 s,
+about 1,830 vertex/tiler chains at 1.33 ms on average and 1,080 fragment chains at 1.62 ms: about 2.4 s and 1.75 s of
+GPU time, roughly 8 ms and 6 ms of a 14 ms GPU frame (M: `STARLTE GPU QUEUE prof`). The vertex/tiler side is the larger,
+for draws of a few hundred vertices. metal-perf's PanVK statistics (12 November, `STARBITE_DRM_STATS=1`) count about
+10.5 jobs a batch in the 26-pass, 93-draw swipe frame, about 3 jobs a draw (I: 3.6 draws a pass).
+
+**Why three.** PanVK's JM path (Bifrost) copies a draw's descriptors (UBOs, textures, samplers) from the bound sets into
+the draw's own hardware tables with a compute job, one workgroup a descriptor (`bifrost/panvk_vX_meta_desc_copy.c`,
+`meta_get_copy_desc_job`), for the vertex shader and again for the fragment shader whenever the descriptor state or the
+shader changed (`jm/panvk_vX_cmd_draw.c`, `prepare_draw`). CoreAnimation changes pipeline or textures on nearly every draw,
+so a draw is two copy jobs and its IDVS job. Each job in a JM chain costs the job manager's start, dependency and
+completion, whatever it does; how much of the 1.33 ms is that and how much is tiling is NOT measured (B2 below says).
+
+**What `STARBITE_PANVK_CPU_DESC=1` does** (`tools/ios27/mesa-ios/mesa26-panvk-cpu-desc-copy.patch`, in `/var/local/mtl2-env`):
+the copy is done on the CPU instead, when the batch is submitted, into the same tables, before the batch is made
+visible to the GPU (`pan_kmod_flush_bo_map_syncs`). Submission is the latest moment the job's own copy could see a
+different descriptor: an application may update an update-after-bind set until it submits (metal2vulkan's heap sets are
+such), and the copy job reads the set when it runs, after the submission. A push descriptor set is taken as its upload
+takes it, at the draw. Only for a primary command buffer's draw whose shader has no image descriptors (whose attribute
+pairs the job also rewrites); everything else keeps the job. Without the variable PanVK does what it did.
+
+**Counters** (with `STARBITE_DRM_STATS=1`, whatever the switch): the shim's 10 s line
+`drm[pid] vk draws D; descriptor copies: jobs J (N descriptors), on the CPU C (M descriptors)`. With the switch off,
+J / D is the copy jobs a draw; with it on, J should fall to the image cases and C take their place.
+
+**The test** (scion-perf60's root steps `edit-m2.sh add|cpu|bins`, bundle StarbiteMetal 8c622664 + libvulkan_panfrost
+1dcd6b14, the d5 F1 kernel): B1 `add` (counters only, the switch off) against B2 `cpu`. Read `GPU QUEUE prof` (vertex/tiler
+average and count), the `vk batches ... jobs` and `vk draws` lines, fbt's CoreAnimation swap period, the swipe fps, and look at
+the home screen for wrong textures (a wrong copy shows as wrong icons or a GPU fault line). Expected, if the job count is
+the cost: the vertex/tiler time falls by up to two thirds, a few ms of the frame. If it does not fall, the time is in the
+IDVS jobs themselves (tiling), and `STARBITE_PANVK_BINS` (B3) is the next knob.

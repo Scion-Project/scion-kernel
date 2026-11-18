@@ -1,0 +1,287 @@
+PanVK (JM, Bifrost), Starbite (iOS): a draw's descriptor copies done on the CPU when its batch is submitted, instead of a
+compute job each for its vertex and fragment shader (STARBITE_PANVK_CPU_DESC=1; without it, unchanged), and counters of the
+draws and of the copies (jobs or CPU) for the starbite-drm shim's statistics line. docs/ios27/PERFORMANCE.md section 7.
+NOT run on a phone yet. Applied by tools/ios27/metal/mk-panvk27.sh after mesa26-panvk-batch-stats.
+
+--- a/src/panfrost/vulkan/panvk_vX_cmd_desc_state.c
++++ b/src/panfrost/vulkan/panvk_vX_cmd_desc_state.c
+@@ -182,6 +182,9 @@
+       uint32_t desc_size =
+          i == PANVK_BIFROST_DESC_TABLE_UBO ? 8 : PANVK_DESCRIPTOR_SIZE;
+ 
++#ifdef __APPLE__
++      shader_desc_state->sb_tables_cpu[i] = NULL;
++#endif
+       if (!desc_count)
+          continue;
+ 
+@@ -191,6 +194,9 @@
+          return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+ 
+       shader_desc_state->tables[i] = ptr.gpu;
++#ifdef __APPLE__
++      shader_desc_state->sb_tables_cpu[i] = ptr.cpu;
++#endif
+ 
+       if (i == PANVK_BIFROST_DESC_TABLE_UBO)
+          panvk_cmd_fill_dyn_ubos(desc_state, desc_info, ptr.cpu, desc_count);
+@@ -222,6 +228,9 @@
+       }
+ 
+       shader_desc_state->tables[PANVK_BIFROST_DESC_TABLE_SAMPLER] = sampler.gpu;
++#ifdef __APPLE__
++      shader_desc_state->sb_tables_cpu[PANVK_BIFROST_DESC_TABLE_SAMPLER] = sampler.cpu;
++#endif
+    }
+ 
+    return VK_SUCCESS;
+--- a/src/panfrost/vulkan/panvk_meta.h
++++ b/src/panfrost/vulkan/panvk_meta.h
+@@ -182,6 +182,10 @@
+ struct panvk_shader_desc_info;
+ struct panvk_shader_desc_state;
+ 
++struct panvk_batch;
++/* Starbite (iOS): run the descriptor copies a batch's draws asked for on the CPU (STARBITE_PANVK_CPU_DESC=1). */
++void panvk_per_arch(sb_run_desc_copies)(struct panvk_batch *batch);
++
+ VkResult panvk_per_arch(meta_get_copy_desc_job)(
+    struct panvk_cmd_buffer *cmdbuf,
+    const struct panvk_shader_desc_info *desc_info,
+--- a/src/panfrost/vulkan/panvk_cmd_desc_state.h
++++ b/src/panfrost/vulkan/panvk_cmd_desc_state.h
+@@ -32,6 +32,11 @@
+    uint64_t tables[PANVK_BIFROST_DESC_TABLE_COUNT];
+    uint64_t img_attrib_table;
+    uint64_t dyn_ssbos;
++#ifdef __APPLE__
++   /* Starbite (iOS): the CPU addresses of tables[] (NULL where this draw made none), for the descriptor copies done on the
++    * CPU at submission (STARBITE_PANVK_CPU_DESC=1, bifrost/panvk_vX_meta_desc_copy.c). */
++   void *sb_tables_cpu[PANVK_BIFROST_DESC_TABLE_COUNT];
++#endif
+ #else
+    struct {
+       uint64_t dev_addr;
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -1453,6 +1453,10 @@
+    result = prepare_draw(cmdbuf, draw);
+    if (result != VK_SUCCESS)
+       return;
++   {
++      extern unsigned long long sbdrm_vk_draws;   /* Starbite (iOS): the shim's statistics line */
++      sbdrm_vk_draws++;
++   }
+ 
+    pan_pack_work_groups_compute(&draw->invocation, 1, draw->vertex_range,
+                                 draw->info.instance.count, 1, 1, 1, true,
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -405,6 +405,8 @@
+                 VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+    cmdbuf->cur_batch->jobs = UTIL_DYNARRAY_INIT;
+    cmdbuf->cur_batch->event_ops = UTIL_DYNARRAY_INIT;
++   cmdbuf->cur_batch->sb_desc_copies = UTIL_DYNARRAY_INIT;
++   cmdbuf->cur_batch->sb_desc_snaps = UTIL_DYNARRAY_INIT;
+    assert(cmdbuf->cur_batch);
+    return cmdbuf->cur_batch;
+ }
+@@ -454,6 +456,8 @@
+       list_del(&batch->node);
+       util_dynarray_fini(&batch->jobs);
+       util_dynarray_fini(&batch->event_ops);
++      util_dynarray_fini(&batch->sb_desc_copies);
++      util_dynarray_fini(&batch->sb_desc_snaps);
+ 
+       vk_free(&cmdbuf->vk.pool->alloc, batch);
+    }
+@@ -477,6 +481,8 @@
+       list_del(&batch->node);
+       util_dynarray_fini(&batch->jobs);
+       util_dynarray_fini(&batch->event_ops);
++      util_dynarray_fini(&batch->sb_desc_copies);
++      util_dynarray_fini(&batch->sb_desc_snaps);
+ 
+       vk_free(&cmdbuf->vk.pool->alloc, batch);
+    }
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -62,6 +62,10 @@
+    bool issued;
+    /* Starbite (iOS): the half of the tiler heap this batch's polygon lists are in (1 or 2), 0: the whole heap. */
+    uint8_t sb_heap_half;
++   /* Starbite (iOS): descriptor copies done on the CPU when the batch is submitted (STARBITE_PANVK_CPU_DESC=1), and the
++    * snapshots of push descriptor sets they read (bifrost/panvk_vX_meta_desc_copy.c). */
++   struct util_dynarray sb_desc_copies;
++   struct util_dynarray sb_desc_snaps;
+ };
+ 
+ enum panvk_cmd_event_op_type {
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -28,6 +28,7 @@
+ #include "vk_framebuffer.h"
+ 
+ #include "drm-uapi/panfrost_drm.h"
++#include "panvk_meta.h"
+ 
+ static void
+ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
+@@ -61,6 +62,11 @@
+        * whole desc pool for now. */
+       panvk_pool_flush_maps(&cmdbuf->desc_pool);
+    }
++
++   /* Starbite (iOS): the descriptor copies this batch's draws asked for on the CPU (STARBITE_PANVK_CPU_DESC=1), done now, as
++    * late as the GPU's copy job would have been relative to the descriptor sets' updates the application may make before
++    * submitting (update-after-bind), and before the tables are made visible below. */
++   panvk_per_arch(sb_run_desc_copies)(batch);
+ 
+    /* Flush pending synchronization requests before submitting the job, to
+     * make sure things are GPU-visible. */
+--- a/src/panfrost/vulkan/bifrost/panvk_vX_meta_desc_copy.c
++++ b/src/panfrost/vulkan/bifrost/panvk_vX_meta_desc_copy.c
+@@ -382,8 +382,127 @@
+ out:
+    shader = panvk_internal_shader_from_handle(shader_handle);
+    return panvk_priv_mem_dev_addr(shader->rsd);
++}
++
++/* Starbite (iOS): descriptor copies on the CPU (STARBITE_PANVK_CPU_DESC=1; off by default, NOT run on a phone yet).
++ *
++ * On this JM GPU every draw whose shaders take textures, samplers or UBOs from descriptor sets gets a compute job (here, up
++ * to two a draw: the vertex and the fragment shader's) that copies the descriptors into the draw's own tables, one
++ * workgroup a descriptor. The phone's home screen draws about 93 times a frame in 26 passes and its vertex/tiler/compute
++ * chains carry about three jobs a draw. This does the same copy on the CPU instead, when the batch is submitted: the
++ * values are those the job would read (an application may update an update-after-bind set until it submits; a push set
++ * is snapshotted as its upload is, at the draw), written into the same tables, before pan_kmod_flush_bo_map_syncs makes
++ * the batch visible. Only for a primary command buffer's draw whose shader has no image descriptors (their attribute pairs
++ * stay with the job); anything else keeps the job. */
++struct sb_desc_copy {
++   const uint32_t *map;                                   /* the shader's copy table: COPY_DESC_HANDLE(set, index) */
++   uint32_t limits[PANVK_BIFROST_DESC_TABLE_COUNT];       /* where each table's entries end in the map */
++   void *dst[PANVK_BIFROST_DESC_TABLE_COUNT];
++   const struct panvk_descriptor_set *sets[MAX_SETS];     /* read at submission */
++   int64_t snap[MAX_SETS];                                /* a push set: its bytes in sb_desc_snaps, else -1 */
++   uint32_t counts[MAX_SETS];
++};
++
++extern unsigned long long sbdrm_vk_desc_jobs, sbdrm_vk_desc_job_descs, sbdrm_vk_desc_cpu, sbdrm_vk_desc_cpu_descs;
++
++static int
++sb_cpu_desc(void)
++{
++   static int on = -1;
++   if (on < 0) {
++      const char *e = getenv("STARBITE_PANVK_CPU_DESC");
++      on = e != NULL && e[0] == '1';
++   }
++   return on;
++}
++
++static bool
++sb_desc_copy_on_cpu(struct panvk_cmd_buffer *cmdbuf, const struct panvk_shader_desc_info *desc_info,
++                    const struct panvk_descriptor_state *desc_state,
++                    const struct panvk_shader_desc_state *shader_desc_state, uint32_t copy_count)
++{
++   struct panvk_batch *batch = cmdbuf->cur_batch;
++
++   if (!sb_cpu_desc() || batch == NULL || cmdbuf->vk.level != VK_COMMAND_BUFFER_LEVEL_PRIMARY ||
++       desc_info->others.count[PANVK_BIFROST_DESC_TABLE_IMG] != 0)
++      return false;
++
++   struct sb_desc_copy c;
++   memset(&c, 0, sizeof(c));
++   c.map = panvk_priv_mem_host_addr(desc_info->others.map);
++   if (c.map == NULL)
++      return false;
++   for (uint32_t i = 0; i < PANVK_BIFROST_DESC_TABLE_COUNT; i++) {
++      c.limits[i] = desc_info->others.count[i] + (i > 0 ? c.limits[i - 1] : 0);
++      c.dst[i] = shader_desc_state->sb_tables_cpu[i];
++      if (desc_info->others.count[i] != 0 && c.dst[i] == NULL)
++         return false;
++   }
++   for (uint32_t i = 0; i < MAX_SETS; i++) {
++      const struct panvk_descriptor_set *set = desc_state->sets[i];
++      c.snap[i] = -1;
++      if (set == NULL)
++         continue;
++      c.counts[i] = set->desc_count;
++      if (set == desc_state->push_sets[i]) {
++         /* The push set's upload (cmd_prepare_push_descs, earlier in this draw's preparation) copied descs.host;
++          * take the same bytes now, since descs.host changes with the next push. */
++         size_t bytes = (size_t)set->desc_count * PANVK_DESCRIPTOR_SIZE;
++         c.snap[i] = (int64_t)batch->sb_desc_snaps.size;
++         void *to = util_dynarray_grow_bytes(&batch->sb_desc_snaps, 1, bytes);
++         if (to == NULL)
++            return false;
++         memcpy(to, set->descs.host, bytes);
++      } else {
++         c.sets[i] = set;
++      }
++   }
++   util_dynarray_append(&batch->sb_desc_copies, c);
++   sbdrm_vk_desc_cpu++;
++   sbdrm_vk_desc_cpu_descs += copy_count;
++   return true;
+ }
+ 
++void
++panvk_per_arch(sb_run_desc_copies)(struct panvk_batch *batch)
++{
++   static const uint32_t size[PANVK_BIFROST_DESC_TABLE_COUNT] = {
++      [PANVK_BIFROST_DESC_TABLE_UBO] = sizeof(struct mali_attribute_packed),
++      [PANVK_BIFROST_DESC_TABLE_TEXTURE] = sizeof(struct mali_texture_packed),
++      [PANVK_BIFROST_DESC_TABLE_SAMPLER] = sizeof(struct mali_sampler_packed),
++   };
++
++   util_dynarray_foreach(&batch->sb_desc_copies, struct sb_desc_copy, c) {
++      uint32_t table = 0, first = 0;
++      const uint32_t end = c->limits[PANVK_BIFROST_DESC_TABLE_COUNT - 1];
++
++      for (uint32_t idx = 0; idx < end; idx++) {
++         while (idx >= c->limits[table]) {
++            first = c->limits[table];
++            table++;
++         }
++         /* Images never come here (sb_desc_copy_on_cpu). */
++         if (table == PANVK_BIFROST_DESC_TABLE_IMG || size[table] == 0)
++            continue;
++         const uint32_t handle = c->map[idx];
++         const uint32_t set = COPY_DESC_HANDLE_EXTRACT_TABLE(handle);
++         const uint32_t src = COPY_DESC_HANDLE_EXTRACT_INDEX(handle);
++         uint8_t *to = (uint8_t *)c->dst[table] + (size_t)(idx - first) * size[table];
++         const uint8_t *base = NULL;
++         if (set < MAX_SETS && src < c->counts[set]) {
++            if (c->snap[set] >= 0)
++               base = (const uint8_t *)batch->sb_desc_snaps.data + c->snap[set];
++            else if (c->sets[set] != NULL)
++               base = c->sets[set]->descs.host;
++         }
++         if (base != NULL)
++            memcpy(to, base + (size_t)src * PANVK_DESCRIPTOR_SIZE, size[table]);
++         else
++            memset(to, 0, size[table]);
++      }
++   }
++}
++
+ VkResult
+ panvk_per_arch(meta_get_copy_desc_job)(
+    struct panvk_cmd_buffer *cmdbuf,
+@@ -433,6 +552,15 @@
+       copy_info.tables[i] = shader_desc_state->tables[i];
+    }
+ 
++   /* Starbite (iOS): the copy on the CPU instead, where it may (sb_desc_copy_on_cpu); else counted as a job. */
++   {
++      const uint32_t n = copy_info.desc_copy.limits[PANVK_BIFROST_DESC_TABLE_COUNT - 1];
++      if (sb_desc_copy_on_cpu(cmdbuf, desc_info, desc_state, shader_desc_state, n))
++         return VK_SUCCESS;
++      sbdrm_vk_desc_jobs++;
++      sbdrm_vk_desc_job_descs += n;
++   }
++
+    uint64_t desc_copy_rsd = panvk_meta_desc_copy_rsd(dev);
+    if (!desc_copy_rsd)
+       return VK_ERROR_OUT_OF_DEVICE_MEMORY;
