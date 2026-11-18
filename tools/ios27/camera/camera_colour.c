@@ -15,7 +15,8 @@
  * "session runtime error" -11800, and the app retried about thirty times a second with a black viewfinder.
  *
  * What is done: -[BWMultiStreamCameraSourceNode allocateOrReuseBufferPoolsFromSourceNode:] is wrapped (checked: 3
- * arguments, an object, BOOL or nothing returned); while it runs, the node is this thread's. camera_device.c asks
+ * arguments, an int returned (an OSStatus: _bringStreamUpToDate's), or an object, BOOL or nothing); while it runs, the node is
+ * this thread's. camera_device.c asks
  * hakios_camera_colour_info for its answer when the graph has set none: for each of the stream's outputs, the node's
  * own pixelBufferAttachmentsForColorSpaceProperties: dictionary, which is what the check compares with. The pictures'
  * own colour attachments are camera_device.c's as before (BT.601 matrix, BT.709 primaries and transfer). NOT RUN ON A PHONE.
@@ -122,8 +123,9 @@ scioncam_colour_info(void)
 	}
 	if (v == NULL || ivar_getTypeEncoding(v) == NULL || strchr("iI", ivar_getTypeEncoding(v)[0]) == NULL) {
 		say("colour: -[BWMultiStreamCameraSourceNode %s] is not an int as on iOS 27.0.1: the stream's colour info stays empty", ivar);
-	} else if (m == NULL || method_getNumberOfArguments(m) != 3 || strchr("v@Bc", type[0]) == NULL) {
-		say("colour: -[BWMultiStreamCameraSourceNode %s] is not as on iOS 27.0.1: the stream's colour info stays empty", selector);
+	} else if (m == NULL || method_getNumberOfArguments(m) != 3 || type[0] == '\0' || strchr("iv@Bc", type[0]) == NULL) {
+		say("colour: -[BWMultiStreamCameraSourceNode %s] is not as on iOS 27.0.1 (%s, %u arguments, returns '%s'): the stream's "
+		    "colour info stays empty", selector, m == NULL ? "not there" : "there", m == NULL ? 0 : method_getNumberOfArguments(m), type);
 	} else {
 		properties_offset = ivar_getOffset(v);
 		o_allocate = method_getImplementation(m);

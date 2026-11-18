@@ -9,8 +9,6 @@
  * the preview's image queue sink (BWImageQueueSinkNode, which hands IOSurfaces to Camera.app's preview layer). A node
  * that does not pass a frame on emits a dropped sample instead (-[BWNodeOutput emitDroppedSample:], its reason and time).
  * Said here, with the trace on:
- *   - which of the stream's outputs the source node configures, enables and gives handlers to (outputID and the
- *     configuration it hands the stream: its buffer pool, dimensions, pixel format);
  *   - the first sample each node output emits (node, output, size, pixel format, IOSurface or not, how far its time
  *     stamp is from the host clock's now), and every 10 seconds how many each has emitted;
  *   - every node's dropped samples (the first five of each node, then every 300th), with their reason;
@@ -18,6 +16,9 @@
  *     the sink's own dropped samples.
  * Each method is wrapped only if the class itself has it with the number of arguments and return type of iOS 27.0.1's
  * CMCapture (24A446's shared cache, read 18 November 2026: names and types only); one that differs is left alone and said.
+ * The source node's own output methods (_outputConfigurationForStreamingOutputID:nodeOutput: and its kin) are direct
+ * methods, not in the Objective-C runtime (phone 1, 18 November: "not there"), so what the graph asks of the stream's
+ * outputs is camera_device.c's trace ("trace: stream: set ...").
  * NOT RUN ON A PHONE.
  */
 #include <CoreFoundation/CoreFoundation.h>
@@ -182,7 +183,7 @@ scioncam_flow_emit(void *output_object, void *sample_buffer)
 
 /* ---- the methods wrapped ------------------------------------------------------------------------------------------- */
 
-static IMP o_dropped, o_iq_render, o_iq_drop, o_rq_render, o_stitch_render, o_out_config, o_add_handler, o_enable;
+static IMP o_dropped, o_iq_render, o_iq_drop, o_rq_render, o_stitch_render;
 
 /* -[BWNodeOutput emitDroppedSample:] */
 static void
@@ -277,43 +278,6 @@ w_stitch_render(id self, SEL sel, void *sb, id input)
 	((void (*)(id, SEL, void *, id))o_stitch_render)(self, sel, sb, input);
 }
 
-/* -[BWMultiStreamCameraSourceNode _outputConfigurationForStreamingOutputID:nodeOutput:] */
-static id
-w_out_config(id self, SEL sel, id output_id, id node_output)
-{
-	id config = ((id (*)(id, SEL, id, id))o_out_config)(self, sel, output_id, node_output);
-	char name[48], node_name[48], c[700];
-
-	string_of(output_id, name, sizeof(name));
-	string_of(send0(node_output, "name"), node_name, sizeof(node_name));
-	text_of(config, c, sizeof(c));
-	say("trace: graph: the stream's output %s for the node output %s is configured: %s", name, node_name, c);
-	return config;
-}
-
-/* -[BWMultiStreamCameraSourceNode _addPixelBufferHandler:videoOutputID:] */
-static void
-w_add_handler(id self, SEL sel, id handler, id output_id)
-{
-	char name[48];
-
-	string_of(output_id, name, sizeof(name));
-	say("trace: graph: a pixel buffer handler for the stream's output %s%s", name, handler == nil ? " (nil)" : "");
-	((void (*)(id, SEL, id, id))o_add_handler)(self, sel, handler, output_id);
-}
-
-/* -[BWMultiStreamCameraSourceNode _setStreamOutputsEnabled:streamingOutputs:onDemandStillOutputs:] */
-static void
-w_enable(id self, SEL sel, bool on, id streaming, id stills)
-{
-	char a[300], b[160];
-
-	text_of(streaming, a, sizeof(a));
-	text_of(stills, b, sizeof(b));
-	say("trace: graph: the stream's outputs %s: streaming %s, stills on demand %s", on ? "ENABLED" : "disabled", a, b);
-	((void (*)(id, SEL, bool, id, id))o_enable)(self, sel, on, streaming, stills);
-}
-
 static const struct wrap {
 	const char *class_name, *selector;
 	unsigned arguments;
@@ -325,11 +289,6 @@ static const struct wrap {
 	{ "BWImageQueueSinkNode", "handleDroppedSample:forInput:", 4, 'v', (IMP)w_iq_drop, &o_iq_drop },
 	{ "BWRemoteQueueSinkNode", "renderSampleBuffer:forInput:", 4, 'v', (IMP)w_rq_render, &o_rq_render },
 	{ "BWPreviewStitcherNode", "renderSampleBuffer:forInput:", 4, 'v', (IMP)w_stitch_render, &o_stitch_render },
-	{ "BWMultiStreamCameraSourceNode", "_outputConfigurationForStreamingOutputID:nodeOutput:", 4, '@', (IMP)w_out_config,
-	  &o_out_config },
-	{ "BWMultiStreamCameraSourceNode", "_addPixelBufferHandler:videoOutputID:", 4, 'v', (IMP)w_add_handler, &o_add_handler },
-	{ "BWMultiStreamCameraSourceNode", "_setStreamOutputsEnabled:streamingOutputs:onDemandStillOutputs:", 5, 'v',
-	  (IMP)w_enable, &o_enable },
 };
 
 /* the class's own method of that name (not one it inherits: wrapping that would wrap every other subclass's too) */
