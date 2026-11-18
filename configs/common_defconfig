@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 765 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 766 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -181,7 +181,7 @@ CONFIG_HAKIOS_VIRTIO_SOUND=y
 # QEMU's virtio tablet and keyboard as the touch screen and the buttons (virtio_input=1). QEMU only [hakios.virtio_input.c]
 CONFIG_HAKIOS_VIRTIO_INPUT=y
 
-# QEMU's virtio network device as the link behind en0 (virtio_net=1), or on AVF a stream to the Scion app on the virtio... [hakios.virtio_net.c; requires CONFIG_HAKIOS_WIFI_STA]
+# QEMU's virtio network device as the link behind en0 (virtio_net=1), or on AVF a stream to the Scion app on the ... [hakios.virtio_net.c; requires CONFIG_HAKIOS_WIFI_STA]
 CONFIG_HAKIOS_VIRTIO_NET=y
 
 # a disk image of the host as /dev/rvblk0 (virtio_blk=1). QEMU only [hakios.virtio_blk.c]
@@ -1590,7 +1590,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_TMU_UNGATE is not set
 
 #
-# Network (5)
+# Network (6)
 #
 
 # a log line for each of the first N frames on the network interfaces
@@ -1604,6 +1604,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.virtio_net.c (kernel)
 # CONFIG_VIRTIO_NET_SSID is not set
+
+# read by hakios.virtio_net.c (kernel)
+# CONFIG_VIRTIO_NET_VSOCK is not set
 
 # iOS is told that en0 is a radio, the way the phone's is (hakios.net.c, hakios.wlan.cpp, hakios.apple80211.c), and a ...
 # CONFIG_VIRTIO_NET_WIFI is not set
