@@ -15,9 +15,23 @@
  * behind it (the station boundary, sys/hakios.sta.h). It hears one open network, "Scion" (or
  * virtio_net_ssid=NAME), joins it at the start and whenever iOS asks, and then lets frames
  * pass. So Settings shows Wi-Fi on and that network joined, configd configures the interface
- * by itself (a "Wi-Fi" network service, DHCP), and the status bar has the Wi-Fi bars. Under
- * AVF (Scion's "Network" setting) the cable behind it is Android's VM tethering.
+ * by itself (a "Wi-Fi" network service, DHCP), and the status bar has the Wi-Fi bars.
+ *
+ * Boot-arg virtio_net_vsock=PORT: the link is a stream on the virtio socket device instead (AVF
+ * gives every guest one; Scion's "Network" setting, since the phone's crosvm can't be given a
+ * network card). The guest listens on PORT; the Scion app connects (VirtualMachine.connectVsock)
+ * and runs a user-mode network stack on its end (libslirp: DHCP, DNS and NAT through the app's
+ * own sockets). One structure carries the frames, both ways:
+ *
+ *     u32 length, big-endian (1..HAKIOS_NET_FRAME_MAX), then that many bytes: the Ethernet frame
+ *
+ * repeated for as long as the connection lasts (QEMU's "-netdev stream" framing). The stream
+ * cuts the bytes into packets as it likes, so the receiver puts frames back together; anything
+ * else (a length of 0 or over the maximum) ends the connection. A new connection replaces the
+ * old one: the app connects again whenever it has lost the stream. No interrupt either: the
+ * interface's thread asks (vsock_poll()). Virtio 1.2, section 5.10, for the socket device.
  */
+#include <kern/locks.h>
 #include <kern/thread.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
@@ -27,6 +41,7 @@
 #include <sys/kpi_mbuf.h>
 #include <sys/errno.h>
 #include <sys/hakios.net.h>
+#include <sys/param.h>
 #include <sys/hakios.sta.h>
 #include <sys/hakios.virtio.h>
 #include <sys/systm.h>
@@ -178,6 +193,371 @@ static struct hakios_net_link virtio_link = {
 	.up = true,
 	.transmit = virtio_transmit,
 	.poll = virtio_poll,
+};
+
+/* ---- virtio_net_vsock=PORT: the frames on a stream of the virtio socket device ---------------------------- */
+
+#define VSOCK_QUEUE_RECEIVE     0
+#define VSOCK_QUEUE_TRANSMIT    1
+#define VSOCK_QUEUE_EVENT       2
+#define VSOCK_QUEUE_SIZE        64              /* descriptors, and buffers, per queue */
+#define VSOCK_BUFFER            4096            /* one packet: its header and up to 4052 bytes of the stream; a page */
+#define VSOCK_EVENTS            4
+#define VSOCK_EVENT_SIZE        8
+#define VSOCK_CFG_GUEST_CID     0x00
+#define VSOCK_TYPE_STREAM       1
+#define VSOCK_OP_REQUEST        1
+#define VSOCK_OP_RESPONSE       2
+#define VSOCK_OP_RST            3
+#define VSOCK_OP_SHUTDOWN       4
+#define VSOCK_OP_RW             5
+#define VSOCK_OP_CREDIT_UPDATE  6
+#define VSOCK_OP_CREDIT_REQUEST 7
+#define VSOCK_EVENT_TRANSPORT_RESET 0
+/* the room the peer is told the guest has: what arrives is handed up at once, so only a limit on what is in flight */
+#define VSOCK_BUF_ALLOC         (256 * 1024)
+#define VSOCK_PREFIX            4               /* the frame's length, before each frame */
+
+/* before every packet, either way (little-endian, as the CPU) */
+struct vsock_header {
+	uint64_t src_cid, dst_cid;
+	uint32_t src_port, dst_port, len;
+	uint16_t type, op;
+	uint32_t flags, buf_alloc, fwd_cnt;
+} __attribute__((packed));
+
+struct vsock_queue {
+	vio_queue_t *           vq;
+	uint8_t *               buffers;        /* VSOCK_QUEUE_SIZE of VSOCK_BUFFER */
+	uint64_t                buffers_pa;
+	uint16_t                free[VSOCK_QUEUE_SIZE];       /* transmit: the buffers the device does not have */
+	unsigned                free_count;
+};
+
+static LCK_GRP_DECLARE(vsock_lck_grp, "hakios-vsock-net");
+/* the transmit queue and the connection: transmit (the stack's threads) and poll (the interface's) both send */
+static LCK_MTX_DECLARE(vsock_lock, &vsock_lck_grp);
+
+static struct {
+	vio_dev_t *             dev;
+	struct vsock_queue      rx, tx;
+	vio_queue_t *           events;
+	uint8_t *               event_buffers;
+	uint64_t                event_pa;
+	uint64_t                cid;            /* the guest's */
+	uint32_t                port;           /* the one listened on */
+	bool                    connected;
+	uint64_t                peer_cid;
+	uint32_t                peer_port;
+	uint32_t                peer_buf_alloc, peer_fwd_cnt;   /* the peer's room, as it last said */
+	uint32_t                sent;           /* stream bytes sent on this connection */
+	uint32_t                received;       /* stream bytes received, all handed on at once */
+	uint32_t                received_said;  /* "received" as the peer was last told it */
+	bool                    credit_asked;
+	uint8_t                 frame[VSOCK_PREFIX + HAKIOS_NET_FRAME_MAX];     /* the frame being put together */
+	uint32_t                have;
+	uint64_t                connections, no_room, no_app;
+} vs;
+
+static void
+vsock_give(struct vsock_queue *q, uint16_t id, uint32_t len, bool device_writes)
+{
+	struct vio_sg sg = { q->buffers_pa + (uint64_t)id * VSOCK_BUFFER, len, device_writes };
+
+	(void)vio_queue_add(q->vq, &sg, 1, COOKIE(id));
+}
+
+static void
+vsock_give_event(uint16_t id)
+{
+	struct vio_sg sg = { vs.event_pa + (uint64_t)id * VSOCK_EVENT_SIZE, VSOCK_EVENT_SIZE, true };
+
+	(void)vio_queue_add(vs.events, &sg, 1, COOKIE(id));
+}
+
+static bool
+vsock_queue_make(struct vsock_queue *q, uint16_t index, bool device_writes)
+{
+	int error;
+
+	if ((error = vio_queue_setup(vs.dev, index, VSOCK_QUEUE_SIZE, &q->vq)) != 0) {
+		printf("net: virtio socket queue %u: %d\n", index, error);
+		return false;
+	}
+	if ((q->buffers = vio_dma_alloc(VSOCK_QUEUE_SIZE * VSOCK_BUFFER, &q->buffers_pa)) == NULL) {
+		return false;
+	}
+	for (uint16_t i = 0; i < vio_queue_size(q->vq); i++) {
+		if (device_writes) {
+			vsock_give(q, i, VSOCK_BUFFER, true);
+		} else {
+			q->free[q->free_count++] = i;
+		}
+	}
+	return true;
+}
+
+/*
+ * One packet from port `from` to (cid, port), with vsock_lock held: `head_length` bytes of `head`, then `length`
+ * bytes of `packet` (if not NULL) after the header. False if no buffer was free.
+ */
+static bool
+vsock_send(uint16_t op, uint32_t from, uint64_t cid, uint32_t port, const void *head, size_t head_length,
+    mbuf_t packet, size_t length)
+{
+	struct vsock_queue *q = &vs.tx;
+	struct vsock_header h = {
+		.src_cid = vs.cid, .dst_cid = cid, .src_port = from, .dst_port = port,
+		.len = (uint32_t)(head_length + length), .type = VSOCK_TYPE_STREAM, .op = op,
+		.buf_alloc = VSOCK_BUF_ALLOC, .fwd_cnt = vs.received,
+	};
+	uint8_t *buffer;
+	uint16_t id;
+	void *done;
+
+	while ((done = vio_queue_get(q->vq, NULL)) != NULL) {
+		q->free[q->free_count++] = BUFFER_OF(done);
+	}
+	if (q->free_count == 0 || sizeof(h) + head_length + length > VSOCK_BUFFER) {
+		return false;
+	}
+	id = q->free[--q->free_count];
+	buffer = q->buffers + (size_t)id * VSOCK_BUFFER;
+	memcpy(buffer, &h, sizeof(h));
+	if (head_length != 0) {
+		memcpy(buffer + sizeof(h), head, head_length);
+	}
+	if (packet != NULL && mbuf_copydata(packet, 0, length, buffer + sizeof(h) + head_length) != 0) {
+		q->free[q->free_count++] = id;
+		return false;
+	}
+	vs.received_said = vs.received;
+	vsock_give(q, id, (uint32_t)(sizeof(h) + head_length + length), false);
+	vio_queue_kick(q->vq);
+	return true;
+}
+
+/* A control packet on the connection (vsock_lock held). */
+static void
+vsock_tell(uint16_t op)
+{
+	(void)vsock_send(op, vs.port, vs.peer_cid, vs.peer_port, NULL, 0, NULL, 0);
+}
+
+/* The connection is over (vsock_lock held). */
+static void
+vsock_drop(const char *why)
+{
+	if (vs.connected) {
+		printf("net: vsock: the app's stream on port %u ended: %s\n", vs.port, why);
+	}
+	vs.connected = false;
+	vs.have = 0;
+}
+
+/* A frame to send: its length, then the frame, as one packet. */
+static bool
+vsock_transmit(mbuf_t packet, size_t length)
+{
+	uint8_t prefix[VSOCK_PREFIX] = { (uint8_t)(length >> 24), (uint8_t)(length >> 16), (uint8_t)(length >> 8), (uint8_t)length };
+	bool sent = false;
+
+	lck_mtx_lock(&vsock_lock);
+	if (!vs.connected) {
+		vs.no_app++;
+	} else if ((int64_t)vs.peer_buf_alloc - (int64_t)(uint32_t)(vs.sent - vs.peer_fwd_cnt) < (int64_t)(VSOCK_PREFIX + length)) {
+		vs.no_room++;           /* the app has not read what it has; dropped (TCP sends again), and ask once */
+		if (!vs.credit_asked) {
+			vsock_tell(VSOCK_OP_CREDIT_REQUEST);
+			vs.credit_asked = true;
+		}
+	} else if ((sent = vsock_send(VSOCK_OP_RW, vs.port, vs.peer_cid, vs.peer_port, prefix, sizeof(prefix), packet, length))) {
+		vs.sent += (uint32_t)(VSOCK_PREFIX + length);
+	}
+	lck_mtx_unlock(&vsock_lock);
+	return sent;
+}
+
+/* Bytes of the stream, in order: the frames in them handed up. False if they are not frames. Poll's thread only. */
+static bool
+vsock_stream(const uint8_t *p, uint32_t n)
+{
+	while (n > 0) {
+		uint32_t want = VSOCK_PREFIX, take;
+
+		if (vs.have >= VSOCK_PREFIX) {
+			uint32_t length = (uint32_t)vs.frame[0] << 24 | (uint32_t)vs.frame[1] << 16 | (uint32_t)vs.frame[2] << 8 | vs.frame[3];
+
+			if (length == 0 || length > HAKIOS_NET_FRAME_MAX) {
+				return false;
+			}
+			want = VSOCK_PREFIX + length;
+		}
+		take = MIN(n, want - vs.have);
+		memcpy(vs.frame + vs.have, p, take);
+		vs.have += take;
+		p += take;
+		n -= take;
+		if (vs.have == want && want > VSOCK_PREFIX) {
+			hakios_net_input(vs.frame + VSOCK_PREFIX, want - VSOCK_PREFIX);
+			vs.have = 0;
+		}
+	}
+	return true;
+}
+
+/* One packet from the device. Poll's thread only (the only one that changes the connection). */
+static void
+vsock_packet(const struct vsock_header *h, const uint8_t *payload, uint32_t length)
+{
+	bool ours = vs.connected && h->src_cid == vs.peer_cid && h->src_port == vs.peer_port;
+	bool frames;
+
+	lck_mtx_lock(&vsock_lock);
+	if (h->dst_port != vs.port || h->type != VSOCK_TYPE_STREAM || (!ours && h->op != VSOCK_OP_REQUEST)) {
+		if (h->op != VSOCK_OP_RST) {    /* nobody listens there, or a connection that is gone */
+			(void)vsock_send(VSOCK_OP_RST, h->dst_port, h->src_cid, h->src_port, NULL, 0, NULL, 0);
+		}
+		lck_mtx_unlock(&vsock_lock);
+		return;
+	}
+	if (h->op == VSOCK_OP_REQUEST) {
+		if (vs.connected) {
+			vsock_tell(VSOCK_OP_RST);
+			vsock_drop("the app connected again");
+		}
+		vs.connected = true;
+		vs.peer_cid = h->src_cid;
+		vs.peer_port = h->src_port;
+		vs.sent = vs.received = vs.received_said = 0;
+		vs.have = 0;
+		vs.connections++;
+	}
+	vs.peer_buf_alloc = h->buf_alloc;
+	vs.peer_fwd_cnt = h->fwd_cnt;
+	vs.credit_asked = false;
+	switch (h->op) {
+	case VSOCK_OP_REQUEST:
+		vsock_tell(VSOCK_OP_RESPONSE);
+		printf("net: vsock: the app connected from cid %llu port %u; frames pass on port %u\n", h->src_cid, h->src_port, vs.port);
+		break;
+	case VSOCK_OP_RW:
+		vs.received += length;
+		lck_mtx_unlock(&vsock_lock);
+		frames = vsock_stream(payload, length);         /* (the stack is not entered with the lock held) */
+		lck_mtx_lock(&vsock_lock);
+		if (!frames && vs.connected) {
+			vsock_tell(VSOCK_OP_RST);
+			vsock_drop("what came was not frames");
+		}
+		break;
+	case VSOCK_OP_CREDIT_REQUEST:
+		vsock_tell(VSOCK_OP_CREDIT_UPDATE);
+		break;
+	case VSOCK_OP_SHUTDOWN:
+		vsock_tell(VSOCK_OP_RST);
+		vsock_drop("the app closed it");
+		break;
+	case VSOCK_OP_RST:
+		vsock_drop("the app reset it");
+		break;
+	default:                        /* CREDIT_UPDATE, RESPONSE: only the room, taken above */
+		break;
+	}
+	lck_mtx_unlock(&vsock_lock);
+}
+
+/* What has arrived: packets of the stream, and the device's events. Returns how many packets that was. */
+static unsigned
+vsock_poll(void)
+{
+	unsigned packets = 0;
+	uint32_t length;
+	void *done;
+
+	while ((done = vio_queue_get(vs.rx.vq, &length)) != NULL) {
+		uint16_t id = BUFFER_OF(done);
+		const uint8_t *buffer = vs.rx.buffers + (size_t)id * VSOCK_BUFFER;
+		struct vsock_header h;
+
+		if (length >= sizeof(h) && length <= VSOCK_BUFFER) {
+			memcpy(&h, buffer, sizeof(h));
+			vsock_packet(&h, buffer + sizeof(h), MIN(h.len, length - (uint32_t)sizeof(h)));
+		}
+		vsock_give(&vs.rx, id, VSOCK_BUFFER, true);     /* the buffer goes back */
+		packets++;
+	}
+	if (packets) {
+		vio_queue_kick(vs.rx.vq);
+	}
+	while ((done = vio_queue_get(vs.events, NULL)) != NULL) {
+		uint16_t id = BUFFER_OF(done);
+		uint32_t event;
+
+		memcpy(&event, vs.event_buffers + (size_t)id * VSOCK_EVENT_SIZE, sizeof(event));
+		if (event == VSOCK_EVENT_TRANSPORT_RESET) {     /* (the VM was moved or restored: connections are gone) */
+			lck_mtx_lock(&vsock_lock);
+			vsock_drop("the transport was reset");
+			vs.cid = vio_cfg_read64(vs.dev, VSOCK_CFG_GUEST_CID);
+			lck_mtx_unlock(&vsock_lock);
+		}
+		vsock_give_event(id);
+		vio_queue_kick(vs.events);
+	}
+	/* the peer learns of the room made with every packet sent; without traffic back, tell it now and then */
+	lck_mtx_lock(&vsock_lock);
+	if (vs.connected && vs.received - vs.received_said >= VSOCK_BUF_ALLOC / 4) {
+		vsock_tell(VSOCK_OP_CREDIT_UPDATE);
+	}
+	lck_mtx_unlock(&vsock_lock);
+	return packets;
+}
+
+static void
+vsock_counts(char *line, size_t room)
+{
+	snprintf(line, room, "vsock port %u: %s, %llu connections; frames dropped: %llu with no room, %llu with no app",
+	    vs.port, vs.connected ? "the app is connected" : "waiting for the app", vs.connections, vs.no_room, vs.no_app);
+}
+
+static bool
+vsock_start(uint32_t port)
+{
+	int error;
+
+	if ((vs.dev = vio_find(VIRTIO_ID_VSOCK, 0)) == NULL) {
+		return false;
+	}
+	if ((error = vio_init(vs.dev, 0, NULL)) != 0) {
+		printf("net: %s: the virtio socket device refused (it offers %#llx)\n", vio_name(vs.dev), vio_device_features(vs.dev));
+		return false;
+	}
+	if (!vsock_queue_make(&vs.rx, VSOCK_QUEUE_RECEIVE, true) || !vsock_queue_make(&vs.tx, VSOCK_QUEUE_TRANSMIT, false) ||
+	    vio_queue_setup(vs.dev, VSOCK_QUEUE_EVENT, VSOCK_EVENTS, &vs.events) != 0 ||
+	    (vs.event_buffers = vio_dma_alloc(PAGE_SIZE, &vs.event_pa)) == NULL) {
+		printf("net: %s: no queues for the virtio socket device\n", vio_name(vs.dev));
+		vio_fail(vs.dev);
+		return false;
+	}
+	for (uint16_t i = 0; i < vio_queue_size(vs.events); i++) {
+		vsock_give_event(i);
+	}
+	vs.cid = vio_cfg_read64(vs.dev, VSOCK_CFG_GUEST_CID);
+	vs.port = port;
+	vio_driver_ok(vs.dev);
+	vio_queue_kick(vs.rx.vq);
+	vio_queue_kick(vs.events);
+	printf("net: virtio socket device on %s: guest cid %llu, the app's frames on port %u\n", vio_name(vs.dev), vs.cid, port);
+	return true;
+}
+
+static struct hakios_net_link vsock_link = {
+	.name = "the Scion app's network (virtio socket)",
+	.address = { 0x02, 'r', 'e', 'd', 'w', 'd' },
+	.up = true,
+	.transmit = vsock_transmit,
+	.poll = vsock_poll,
+	.counts = vsock_counts,
 };
 
 /* ---- virtio_net_wifi=1: a station with one network, always in reach ------------------------------------- */
@@ -343,23 +723,34 @@ vsta_start(const uint8_t address[ETHER_ADDR_LEN])
 void
 hakios_virtio_net_init(void)
 {
-	uint32_t enabled = 1, wifi = 0;
+	uint32_t enabled = 1, wifi = 0, port = 0;
+	struct hakios_net_link *link;
+	bool started;
 
 	if (PE_parse_boot_argn("virtio_net", &enabled, sizeof(enabled)) && !enabled) {
 		return;
 	}
-	if (vio_find(VIRTIO_ID_NET, 0) == NULL) {
-		return;                 /* quietly: most machines have none */
+	PE_parse_boot_argn("virtio_net_vsock", &port, sizeof(port));
+	if (port != 0 && vio_find(VIRTIO_ID_VSOCK, 0) != NULL) {
+		link = &vsock_link;
+	} else if (vio_find(VIRTIO_ID_NET, 0) != NULL) {
+		link = &virtio_link;
+	} else {
+		if (port != 0) {
+			printf("net: virtio_net_vsock=%u, but there is no virtio socket device\n", port);
+		}
+		return;                 /* quietly otherwise: most machines have neither */
 	}
 	if (PE_parse_boot_argn("virtio_net_wifi", &wifi, sizeof(wifi)) && wifi) {
-		virtio_link.wireless = true;
-		virtio_link.up = false;         /* until the station has joined its network */
+		link->wireless = true;
+		link->up = false;               /* until the station has joined its network */
 	}
-	if (!virtio_net_start(virtio_link.address) || !hakios_net_attach(&virtio_link)) {
+	started = link == &vsock_link ? vsock_start(port) : virtio_net_start(link->address);
+	if (!started || !hakios_net_attach(link)) {
 		printf("net: no network interface\n");
 		return;
 	}
-	if (virtio_link.wireless) {
-		vsta_start(virtio_link.address);
+	if (link->wireless) {
+		vsta_start(link->address);
 	}
 }

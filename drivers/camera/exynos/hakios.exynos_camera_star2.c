@@ -1025,7 +1025,8 @@ paths_init(void)
 		.name = "the telephoto camera (S5K3M3 on CSIS2)", .sensor = TELE_SENSOR, .bus = &tele_bus, .addr = &tele_addr,
 		.csis_pa = TELE_CSIS_PA, .phy_pa = TELE_PHY_PA, .wdma_pa = TELE_WDMA_PA, .phy_size = 0x4000, .phy_off = 0x1400,
 		.iso_off = TELE_ISO, .reset_bit = 1, .iso_shared = false, .bias = false,
-		.lanes = 4, .settle = TELE_SETTLE, .interleave = 0, .w = 2016, .h = 1512, .slot_bytes = 6u << 20,
+		/* CSI_MODE_VC_ONLY is 2: VC0 carries pixels and VC1 carries the PDAF tail. */
+		.lanes = 4, .settle = TELE_SETTLE, .interleave = 2, .w = 2016, .h = 1512, .slot_bytes = 6u << 20,
 		.mode_lines = S3M3_MODE_LINES, .margin = TELE_MARGIN, .line_ns = S3M3_MODE_LINE_NS, .bayer = 1, .turn = false,
 		.exp = 1000, .gain = 0x80,
 	};

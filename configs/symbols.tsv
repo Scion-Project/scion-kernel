@@ -615,6 +615,7 @@ VIRTIO_CONSOLE	arg	virtio_console	User space	k	hakios.virtio_console.c	none. Wit
 VIRTIO_INPUT	arg	virtio_input	Touch and buttons	k	hakios.virtio_input.c	
 VIRTIO_MMIO	arg	virtio_mmio	User space	k	hakios.virtio.c	
 VIRTIO_NET_SSID	arg	virtio_net_ssid	Network	k	hakios.virtio_net.c	
+VIRTIO_NET_VSOCK	arg	virtio_net_vsock	Network	k	hakios.virtio_net.c	
 VIRTIO_NET_WIFI	arg	virtio_net_wifi	Network	k	hakios.virtio_net.c	iOS is told that en0 is a radio, the way the phone's is (hakios.net.c, hakios.wlan.cpp, hakios.apple80211.c), and a station of this file's stands
 VIRTIO_POLL	arg	virtio_poll	User space	k	hakios.virtio.c	
 VIRTIO_SOUND	arg	virtio_sound	Audio and battery	k	hakios.virtio_sound.c	

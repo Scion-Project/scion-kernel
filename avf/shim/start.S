@@ -71,11 +71,13 @@ _start:
 /*
  * A core started with PSCI CPU_ON (avfboot_main hands the kernel to the biggest core): EL1,
  * MMU and caches off like the boot core. Jumps to hop_entry with x0 = hop_arg, as the boot
- * core would have.
+ * core would have, with FP/SIMD on (CPACR_EL1.FPEN: see the jump at the end of avfboot_main).
  */
 	.globl avfboot_hop
 avfboot_hop:
 	msr	daifset, #0xf
+	mov	x1, #(3 << 20)		/* CPACR_EL1.FPEN: no traps at EL1 or EL0 */
+	msr	cpacr_el1, x1
 	adrp	x1, hop_entry
 	ldr	x1, [x1, :lo12:hop_entry]
 	adrp	x0, hop_arg

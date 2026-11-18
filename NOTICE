@@ -139,4 +139,8 @@ Fetched at build time, never committed:
   His patches under tools/mesa/panvk/ change Mesa (MIT) and those under tools/metal/m2v/ change metal2vulkan
   (GPL-2.0-or-later OR LGPL-3.0-or-later), each under the licence of the code it changes, as their headers say.
 - Nils (github.com/dwaris): his commits to this repository, from 12 November 2026 (drivers/audio/abox/hakios.exynos_abox.c,
-  drivers/audio/codec/hakios.max98512.c), under the licence of the files they change.
+  drivers/audio/codec/hakios.max98512.c; from 18 November also drivers/camera/exynos/hakios.exynos_camera_star2.c,
+  userland/src/camera_device.c and userland/src/inject_media.c), under the licence of the files they change.
+- deLiseLINO (github.com/deLiseLINO): his commits to this repository, from 18 November 2026 (avf/shim/avfboot.c,
+  avf/shim/start.S, userland/src/eagl.c, drivers/virtio/hakios.virtio_net.c, avf/scion/avf.properties), under the licence
+  of the files they change.

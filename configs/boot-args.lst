@@ -653,6 +653,7 @@ virtio_input	k
 virtio_mmio	k
 virtio_net	k
 virtio_net_ssid	k
+virtio_net_vsock	k
 virtio_net_wifi	k
 virtio_poll	k
 virtio_sound	k
