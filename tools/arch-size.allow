@@ -36,7 +36,7 @@ drivers/media/mfc/hakios.exynos_mfc.c                     1365
 drivers/modem/hakios.ipa.c                                 872
 drivers/modem/hakios.mpss.c                               6383
 drivers/modem/hakios.qmi.c                                 963
-drivers/modem/hakios.shannon.c                            2905
+drivers/modem/hakios.shannon.c                            2927
 drivers/net/hakios.net.c                                  1485
 drivers/power/exynos/hakios.exynos_cpufreq.c              2102  # 1531 today, and the growth of open pull request #337
 drivers/power/max77705/hakios.max77705.c                  1125

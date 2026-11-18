@@ -138,6 +138,7 @@
  *   cp_ds=N      the dual SIM field told to the modem (0)
  *   cp_wait=N    seconds the started modem is watched before it is put back in reset (20; 25 with the link)
  *   cp_delay=N   seconds after the boot before the modem's driver does anything (30), so that its lines are in the log
+ *   cp_warm=1    go on when the CP's power domain was started by an earlier kernel of this power-on (a warm restart, the XNU fork's sweetwarm=; RESET_SEQUENCER_STATUS not 0 as found), as this driver did before 18 Nov: its memory read and written. Off: in that case the CP and its memory are left alone and the modem needs a cold boot (one such run panicked: an SError)
  *
  * WHERE IT MAY RUN. The CP's memory is fixed by the boot chain at 0xF0000000. On a tree whose loader puts XNU itself
  * there this driver must not load anything: it checks that no page of the 146 MB is XNU's and that the kernel is not in
@@ -2611,6 +2612,27 @@ cp_thread(__unused void *arg, __unused wait_result_t result)
 
 	look_pmu("as found");
 	look_mbox("as found");
+	/*
+	 * A cold boot (S-Boot) leaves the CP's power domain never started (RESET_SEQUENCER_STATUS 0). Started already means
+	 * an earlier kernel of this power-on ran the CP and the SoC was not reset since: the XNU fork's warm restart
+	 * (sweetwarm=). That kernel's image check had the secure world take the CP's memory: after a warm restart on the
+	 * phone (18 Nov) the memory read as zeros where a cold boot finds the loader's image, and this run panicked with
+	 * an SError (delivered at an interrupt unmask, so the access is not named) while it loaded the CP. Until the way
+	 * back (Samsung's daemon's mode 2 "re-init" after a reset assert and release, not run here) is tried on purpose with
+	 * cp_warm=1, the CP is left alone: no memory read, no secure call.
+	 */
+	{
+		uint32_t seq = rd(cp.pmu, PMU_RESET_SEQ_STAT) & 7, warm = 0;
+
+		if (seq != 0 && (!PE_parse_boot_argn("cp_warm", &warm, sizeof(warm)) || warm == 0)) {
+			say("cp: the CP's power domain was started by an earlier kernel without a reset of the SoC "
+			    "(RESET_SEQUENCER_STATUS %u: a warm restart): its memory is the secure world's since that run's check, "
+			    "and touching it ended a run in an SError; the CP is left alone (a cold boot brings the modem; "
+			    "cp_warm=1 goes on anyway)\n", seq);
+			set_state(101);
+			return;
+		}
+	}
 	look_mem();
 	if (!read_toc()) {
 		set_state(101);
