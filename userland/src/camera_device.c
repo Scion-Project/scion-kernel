@@ -372,8 +372,13 @@ static void let_go(struct output *out);
 CFDictionaryRef (*hakios_camera_colour_info)(void);     /* VideoOutputsColorInfo the graph has not set (NULL: empty) */
 CFDictionaryRef hakios_camera_frame_colour;             /* iOS 27: every picture's colour attachments (camera_colour.c) */
 
+#ifdef HAKIOS_CAMERA_N104     /* iOS 27's graph also configures IntermediateTap, and reads every configuration back */
+#define OUTPUTS 4
+static const char *const output_names[OUTPUTS] = { "PrimaryScaler", "SecondaryScaler", "StillImage", "IntermediateTap" };
+#else
 #define OUTPUTS 3
 static const char *const output_names[OUTPUTS] = { "PrimaryScaler", "SecondaryScaler", "StillImage" };
+#endif
 
 #define MAX_ZOOM        16              /* (the most the iPhone X's wide camera zooms digitally) */
 
@@ -477,6 +482,7 @@ struct stream {
 	bool            af_locked;      /* LockAFNow: no search but one asked for */
 	float           af_window[4];   /* AFWindowParams: where to focus, as fractions of the frame (x0, y0, x1, y1) */
 	struct output   out[OUTPUTS];
+	CFMutableDictionaryRef other_configs;   /* configurations of outputs not drawn (Depth ...), given back as set */
 	pthread_mutex_t lock;
 	pthread_t       worker;
 	volatile bool   running;
@@ -502,6 +508,12 @@ output_index(CFStringRef name)
 		}
 	}
 	return -1;
+}
+
+static void
+copy_entry(const void *key, const void *value, void *to)
+{
+	CFDictionarySetValue(to, key, value);
 }
 
 static OSStatus
@@ -556,6 +568,9 @@ stream_copy_property(CMBaseObjectRef o, CFStringRef key, CFAllocatorRef allocato
 				CFDictionarySetValue(d, name, s->out[i].enabled ? kCFBooleanTrue : kCFBooleanFalse);
 			}
 			CFRelease(name);
+		}
+		if (configs && s->other_configs != NULL) {
+			CFDictionaryApplyFunction(s->other_configs, copy_entry, d);
 		}
 		pthread_mutex_unlock(&s->lock);
 		value = d;
@@ -718,6 +733,9 @@ stream_set_property(CMBaseObjectRef o, CFStringRef key, CFTypeRef value)
 		if (value == NULL || CFGetTypeID(value) != CFDictionaryGetTypeID()) {
 			return 0;
 		}
+#ifdef HAKIOS_CAMERA_N104
+		scioncam_say_outputs(s->camera->name, key, value);
+#endif
 		pthread_mutex_lock(&s->lock);
 		CFIndex n = CFDictionaryGetCount(value);
 		const void **keys = calloc((size_t)n + 1, sizeof(void *)), **values = calloc((size_t)n + 1, sizeof(void *));
@@ -729,6 +747,14 @@ stream_set_property(CMBaseObjectRef o, CFStringRef key, CFTypeRef value)
 
 			if (k < 0) {
 				say_once("stream: an output not here:", keys[i], NULL);
+#ifdef HAKIOS_CAMERA_N104
+				if (configs && CFGetTypeID(keys[i]) == CFStringGetTypeID()) {
+					if (s->other_configs == NULL) {
+						s->other_configs = (CFMutableDictionaryRef)new_dict();
+					}
+					CFDictionarySetValue(s->other_configs, keys[i], values[i]);
+				}
+#endif
 				continue;
 			}
 			out = &s->out[k];
@@ -1737,6 +1763,9 @@ stream_finalize(CMBaseObjectRef o)
 	}
 	if (s->formats) {
 		CFRelease(s->formats);
+	}
+	if (s->other_configs) {
+		CFRelease(s->other_configs);
 	}
 	if (s->supported) {
 		CFRelease(s->supported);

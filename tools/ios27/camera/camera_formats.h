@@ -19,4 +19,8 @@ CFArrayRef scioncam_n104_formats(uint32_t sensor, const char *camera, double fov
 CVPixelBufferRef scioncam_tenbit_scratch(CVPixelBufferRef pb);
 void scioncam_tenbit_widen(CVPixelBufferRef from, CVPixelBufferRef pb);
 
+/* camera_outputs.c: one line for each output a VideoOutputConfigurations / VideoOutputsEnabled / VideoOutputHandlers set
+   names (its pixel format, size and pool), so that the console shows which outputs the graph uses */
+void scioncam_say_outputs(const char *camera, CFStringRef key, CFDictionaryRef value);
+
 #endif
