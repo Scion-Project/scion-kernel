@@ -14,6 +14,9 @@
  * and wraps that node class's own -renderSampleBuffer:forInput: and -handleDroppedSample:forInput: (each class once, at
  * most 24): their first call, then every 300th, is said with the input's name and the sample. A node that renders and
  * never emits is where the pictures stop; one that is never called is behind a connection that does not deliver.
+ * An output that leads nowhere has the whole graph said once (-[BWGraph dotString], "trace: graph: ..." lines): phone 1 with
+ * dylib -21 showed the source node's Preview(PrimaryScaler) output with no connection at all, so the preview's sink
+ * pipeline is not attached to it, and the graph's own description shows what is there instead.
  * Names and types are iOS 27.0.1's CMCapture (24A446's shared cache: names only). NOT RUN ON A PHONE.
  */
 #include <CoreFoundation/CoreFoundation.h>
@@ -163,6 +166,32 @@ wrap_class(Class c)
 	say("trace: flow: %s's renderSampleBuffer:forInput: traced%s", class_getName(k), w->drop != NULL ? " (and its drops)" : "");
 }
 
+/* the graph's own picture of itself (-[BWGraph dotString]), one console line per line of it, once a process */
+static void
+say_graph(id output)
+{
+	static int done;
+	id graph = call0(call0(output, "node"), "graph"), dot = call0(graph, "dotString");
+	CFIndex n;
+	char *text;
+
+	if (__atomic_fetch_add(&done, 1, __ATOMIC_RELAXED) != 0 || dot == nil || CFGetTypeID((CFTypeRef)dot) != CFStringGetTypeID()) {
+		return;
+	}
+	n = CFStringGetMaximumSizeForEncoding(CFStringGetLength((CFStringRef)dot), kCFStringEncodingUTF8) + 1;
+	if ((text = malloc((size_t)n)) == NULL || !CFStringGetCString((CFStringRef)dot, text, n, kCFStringEncodingUTF8)) {
+		free(text);
+		return;
+	}
+	unsigned lines = 0;
+
+	for (char *last = NULL, *l = strtok_r(text, "\n", &last); l != NULL && lines < 400; l = strtok_r(NULL, "\n", &last)) {
+		say("trace: graph: %.400s", l);
+		lines++;
+	}
+	free(text);
+}
+
 /* called once for each node output, at its first emitted sample (camera_flowtrace.c) */
 void
 scioncam_flow_next(void *output_object, const char *node_class, const char *output_name)
@@ -174,6 +203,7 @@ scioncam_flow_next(void *output_object, const char *node_class, const char *outp
 	if (node == nil) {
 		say("trace: flow: %s's output %s leads nowhere (connection %s, consumer %s)", node_class, output_name,
 		    connection != nil ? "there" : "nil", call0(output, "consumer") != nil ? "there" : "nil");
+		say_graph(output);
 		return;
 	}
 	name_of(call0(input, "name"), in, sizeof(in));
