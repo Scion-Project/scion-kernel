@@ -31,7 +31,7 @@
 #   ENABLE_AUDIO_BT=0 build without both (and without the firmware).
 # After the steps, OUT.inject: the libraries the root has for the kernel to insert (inject-record.sh), which
 # tools/ios27/s9/make-boot-image.sh puts into the boot image's sweetinject= (docs/ios27/INSTALL-S9.md).
-# NOT applied (owner wants the real iOS 27): the 86 "speed" daemon trims, Spotlight/Siri/photos/ML/intelligence off-switches.
+# NOT applied (owner wants the real iOS 27): the 85 "speed" daemon trims, Spotlight/Siri/photos/ML/intelligence off-switches.
 # The iOS build: BUILD_VERSION (build-root.sh sets it from the inputs), else IOS27_BUILD, else tools/ios27/builds/DEFAULT; the OS
 #   image's own SystemVersion.plist, the private directory's BUILD (prepare-root-inputs.sh) and a reused cache's DONE must all
 #   name that build, or the build stops before the cache (docs/ios27/UPDATING-IOS.md). The three images' default names: its .conf.
