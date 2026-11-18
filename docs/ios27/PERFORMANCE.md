@@ -361,3 +361,13 @@ draws, and the ranges found on the CPU and not.
 **Expected** if the dependent-job chain is the cost: the chain per indexed draw goes from four jobs to two, the vertex/tiler
 time towards half (about 3 to 4 ms of the 14 ms GPU frame), and PanVK's recording of each draw lighter. Removing the helper
 too (patching the draw's jobs on the CPU, as the CL helper does) would leave one job a draw; it is not built.
+
+**Result on phone 1 (18 November, log `con-xnu-boot-f1-1118-1236`, the same kernel and swipes as B1):** all 30,921
+indexed draws of the 30 s had their range found on the CPU; the write-value and search jobs went (jobs a batch 47.0 ->
+33.7). The vertex/tiler chain average went from 1,343 to 1,277 us (-5 %), its GPU time from 2,067 to 2,002 ms per 10 s
+(-3 %); swipes 36.6 fps, swap period p50 33.5 ms, as B1. The home screen rendered correctly, no fault. **So the dependent
+chain before the draw is not the cost either.** What is left a draw is the helper job and the IDVS job: about 190 us of
+vertex/tiler time a draw (2.0 s per 10 s for about 10,300 draws), which neither of the two removals touched. Whether that
+is the helper's patching, the job manager's prefetch suppression around it, or the tiling itself is not known; the next
+experiments are `STARBITE_PANVK_BINS` (fewer bin levels, no build) and a debug build that submits the helper and the IDVS
+job as separate chains so the GPU queue's profile times each. The switch stays off by default.
