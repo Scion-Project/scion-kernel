@@ -1,0 +1,95 @@
+PanVK (JM), Starbite (iOS): with STARBITE_PANVK_CPU_DIRECT=1 (off by default; without it PanVK is unchanged) an indexed draw
+whose index range the CPU found (mesa26-panvk-cpu-minmax's sb_cpu_minmax, which the switch turns on too) is recorded as a
+direct draw: the IDVS (or vertex + tiler) job gets its indices, range and offsets when the draw is recorded, exactly as
+libpan's panlib_draw_indexed_indirect_helper would write them, and no helper compute job, no job-prefetch suppression and no
+dependency come before it. docs/ios27/PERFORMANCE.md section 9. NOT run on a phone. Applied by tools/ios27/metal/mk-panvk27.sh
+after mesa26-panvk-cpu-minmax.
+
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c	2026-11-18 13:00:27
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c	2026-11-18 13:00:27
+@@ -48,6 +48,8 @@
+    /* Starbite (iOS): the index range the CPU found for a direct indexed draw (STARBITE_PANVK_CPU_MINMAX=1) */
+    bool sb_minmax;
+    uint32_t sb_min, sb_max;
++   /* STARBITE_PANVK_CPU_DIRECT=1: an indexed draw whose range the CPU found, recorded as a direct draw (no helper job) */
++   bool sb_direct;
+ #endif
+    unsigned vertex_range;
+    unsigned padded_vertex_count;
+@@ -92,6 +94,10 @@
+ static bool
+ is_indirect_draw(const struct panvk_draw_data *draw)
+ {
++#ifdef __APPLE__
++   if (draw->sb_direct)
++      return false;
++#endif
+    return draw->info.indirect.buffer_dev_addr != 0 ||
+           draw->info.index.index_size != 0;
+ }
+@@ -951,6 +957,15 @@
+ 
+       /* In case of indirect draw, the descriptor will be patched at runtime */
+       cfg.index_count = is_indirect_draw(draw) ? 1 : draw->info.vertex.count;
++#ifdef __APPLE__
++      /* STARBITE_PANVK_CPU_DIRECT: what panlib_draw_indexed_indirect_helper writes here, written when the draw is recorded */
++      if (draw->sb_direct && draw->info.index.index_size) {
++         cfg.indices = draw->info.index.buffer_dev_addr +
++                       (uint64_t)draw->info.index.offset * draw->info.index.index_size;
++         cfg.base_vertex_offset =
++            (int64_t)draw->info.vertex.base - draw->info.vertex.raw_offset;
++      }
++#endif
+ 
+       cfg.low_depth_cull = cfg.high_depth_cull =
+          vk_rasterization_state_depth_clip_enable(rs);
+@@ -1845,7 +1860,8 @@
+    static int on = -1;
+    if (on < 0) {
+       const char *e = getenv("STARBITE_PANVK_CPU_MINMAX");
+-      on = e != NULL && e[0] == '1';
++      const char *d = getenv("STARBITE_PANVK_CPU_DIRECT");
++      on = (e != NULL && e[0] == '1') || (d != NULL && d[0] == '1');
+    }
+    if (!on)
+       return false;
+@@ -1927,6 +1943,39 @@
+    };
+ #ifdef __APPLE__
+    draw.sb_minmax = sb_cpu_minmax(cmdbuf, &draw.info, firstIndex, indexCount, &draw.sb_min, &draw.sb_max);
++   /* Starbite (iOS): STARBITE_PANVK_CPU_DIRECT=1 (off by default; NOT run on a phone). With the range known on the CPU the
++    * draw needs nothing from the GPU before it: it is recorded as Mesa 24's PanVK recorded every indexed draw, a direct
++    * IDVS (or vertex + tiler) job with the indices, the range and the offsets written now, exactly as the helper job
++    * (libpan/draw_helper.cl, panlib_draw_indexed_indirect_helper) would write them. No helper compute job, no job-prefetch
++    * suppression around it, no dependency: the draws of a pass follow each other in the job chain as plain draws do.
++    * Varyings come from the command buffer's varying pool sized for the range (the direct path), not the device's indirect
++    * varying buffer. A range with no valid index (min > max) keeps the indirect way (the helper makes it a null job). */
++   if (draw.sb_minmax && draw.sb_min <= draw.sb_max) {
++      static int direct = -1;
++      if (direct < 0) {
++         const char *d = getenv("STARBITE_PANVK_CPU_DIRECT");
++         direct = d != NULL && d[0] == '1';
++      }
++      if (direct) {
++         const uint32_t range = draw.sb_max - draw.sb_min + 1;
++         struct panvk_draw_data dd = {
++            .info = {
++               .index = panvk_draw_info_index(cmdbuf, firstIndex),
++               .vertex.base = vertexOffset,
++               .vertex.raw_offset = (int32_t)draw.sb_min + vertexOffset,
++               .vertex.count = indexCount,
++               .instance.base = firstInstance,
++               .instance.count = instanceCount,
++               .prim = panvk_get_client_prim(cmdbuf),
++            },
++            .sb_direct = true,
++            .vertex_range = range,
++            .padded_vertex_count = padded_vertex_count(cmdbuf, range, instanceCount),
++         };
++         panvk_cmd_draw(cmdbuf, &dd);
++         return;
++      }
++   }
+ #endif
+ 
+    panvk_cmd_draw_indirect(cmdbuf, &draw);

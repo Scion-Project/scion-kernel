@@ -371,3 +371,109 @@ vertex/tiler time a draw (2.0 s per 10 s for about 10,300 draws), which neither 
 is the helper's patching, the job manager's prefetch suppression around it, or the tiling itself is not known; the next
 experiments are `STARBITE_PANVK_BINS` (fewer bin levels, no build) and a debug build that submits the helper and the IDVS
 job as separate chains so the GPU queue's profile times each. The switch stays off by default.
+
+## 9. What holds a home-screen swipe at 30 a second (18 November; the timeline from the F1 boots' traces)
+
+**The question.** A busy swipe frame costs about 9 ms of CPU encode and 13 to 14 ms of GPU (sections 7 and 8). Each half
+fits in 16.7 ms on its own. One reading was that they run in series: frame N+1's encode would not start until frame N's GPU
+work is done. If that were true, a SwapEnd that returned sooner (and a third surface) would overlap them and give ~60.
+
+**What the code does** (the fork's `iokit/Kernel/arm/SweetFramebuffer.cpp` at `scion/xnu-12377` 27a3e12):
+- `AppleCLCD::swap()` (SwapEnd, line 1228) waits for the chains of the swap before it (line 1252,
+  `starlte_gpu_user_wait_seq(prev, true)`), then records the frame. So at most two frames are in flight, and SwapEnd(N)
+  returns as soon as frame N-1's chains are done, not frame N's. The encode of N+1 already overlaps the GPU work of N.
+- The vsync tick (`vsyncFired`, line 735) sends the vsync notification first (line 755), takes the newest recorded frame,
+  sleeps until that frame's own chains are done (line 875) and presents it (line 891; 1.9 ms, a GPU job under the GPU's lock).
+  While it sleeps the next tick is late.
+- backboardd's render thread renders from its display timer. Its burst sample (PRESENT.md section 7) puts 59 % of its time in
+  that wait, 15 % in SwapEnd and 26 % running. No sample of it is in a drawable or IOSurface wait. The thread
+  `metal2vulkan-queue-wait` that sits in a wait 40 % of the time is the bridge's completion thread, not the render thread.
+
+**The traces.** Every F1 boot ran with `sweetfb_trace=70`: a ring of the last 768 framebuffer events (about 3.5 s, during the
+scripted home swipes) with their times. `tools/ios27/perf/fbt-regimes.py` splits a ring into runs where the app GPU queue
+never ran empty (from `B` to `E`) and the swaps outside them. In every boot the swaps fall into two clean classes:
+
+| boot (log `con-xnu-boot-…`) | GPU-busy runs: ms, chains, swaps, **queue ms a swap** | busy swaps: period p50, SwapEnd hold p50, tick→call p50 | idle swaps: n, period p50, hold p50, tick→call p50, chains |
+|---|---|---|---|
+| f1-1118-1210 (B1) | 545, 275, 16: **34.1**; 105, 38, 4: 26.2 | 35.4, 18.8, 11.6 ms (n 28) | 61; 33.5, 0.0, 5.5 ms; 6 |
+| f1-1118-1218 (B2) | 521, 220, 16: **32.6**; 85, 49, 3: 28.5 | 34.8, 13.9, 11.5 (n 24) | 63; 33.4, 0.0, 5.5; 6 |
+| f1-1118-1236 (M3) | 318, 128, 10: **31.8**; 114, 47, 4: 28.6 | 35.3, 15.9, 10.4 (n 22) | 64; 33.5, 0.0, 5.6; 6 |
+| sp2-1117-2231 | 435, 187, 13: **33.4**; 275, 168, 9: 30.5 | 35.5, 17.2, 10.7 (n 29) | 61; 33.3, 0.0, 4.0; 6 |
+
+"Queue ms a swap" is the time the app queue was not empty divided by the swaps in the run. It includes the present (about
+1.9 ms a frame), which holds the GPU while a queued chain waits.
+
+**One busy frame** (f1-1118-1210's ring; ms from the first event; letters as in the trace's comment, SweetFramebuffer.cpp line 80):
+
+    2.13  T  tick, 19 chains queued;  F 362: it takes swap 362 and sleeps for its chains
+   16.12  S  CA calls SwapEnd for 363, 14.0 ms after the tick (its render); 32 chains queued
+   35.30  G  362's chains done: the tick wakes;  R 363: SwapEnd returns (held 19.2 ms, for 362)
+   37.25  P  362 presented
+   39.63  T  the next tick, 37.5 ms after the last (it slept);  F 363
+   53.40  S  364 (13.8 ms after its tick), 32 queued
+   72.16  G  363 done;  72.17 R 364 (held 18.8 ms);  74.06 P;  76.49 T  F 364 ...
+  306.79  E  the queue runs empty for the first time: 480 chains since it last started
+
+**One idle frame** (the same ring):
+
+  1003.57  T  tick, nothing queued (no new swap: the render thread waits for its timer)
+  1009.61  B  the first chain of swap 387;  1009.99 S 387 (6 chains), R 387 at once (held 0)
+  1017.89  E  its 6 chains done (7.9 ms of GPU)
+  1020.01  T  F 387, G at once;  1021.83 P
+  1036.90  T  nothing new again;  1041.40 B  1041.76 S 388 ...
+
+**What that says.**
+1. **Busy swaps** (the page moving, 0.3 to 0.55 s a swipe) are **GPU-bound**. The queue does not run empty for half a
+   second, and each swap costs 32 to 34 ms of GPU queue time. The SwapEnd hold of 14 to 19 ms is CA waiting for a GPU that
+   has no idle time. The next encode already overlaps: the swap call comes 10 to 12 ms after the tick, while the GPU is still
+   on the frames before it. A SwapEnd that returned at once, with a third surface, would give CA's frames nowhere to run: the
+   GPU would queue them up, adding latency, not frames. **The CPU/GPU serialisation hypothesis is false.** The overlap change
+   is not built.
+2. **Idle swaps** (two thirds of the swaps in every ring) are small frames: 6 chains, 4 to 8 ms of GPU, 4 to 6 ms of render
+   after the tick, nothing held. They come exactly every second tick (p50 33.3 to 33.5 ms) while the GPU and the render thread
+   are idle in between. This cadence is set **upstream of the GPU stack**: the window server has nothing new at the tick in
+   between. These swaps come in runs of about a second after each swipe's busy run. Which producer they come from is
+   **N**: SpringBoard's commits, or an animation that asks for 30 Hz. SpringBoard's main thread was running in 26 % of its
+   samples over the 27.6 s window (`smpburst=SpringBoard`, the same boots: 1,426 of 5,514 at 5 ms), so it is not saturated
+   on average. The sampler does not print the stacks of running samples, so where those 26 % go is not known.
+3. **The yardstick hid the GPU.** The CA swap period's p50 of 33.5 ms that sections 7 and 8 compared is the median over both
+   classes. The idle swaps dominate it, and their cadence does not depend on the GPU. A GPU change shows only in the busy
+   class: the GPU queue time a swap of its runs and the busy-swap period. `fbt-regimes.py` prints both. (Sections 7 and 8
+   are still negative on their own measure: the vertex/tiler GPU time did not move.)
+4. **Why `sweetfb_nowait` v2 was slower** (xnu PR 47, boot nw2, 17 November: 30.5 against ~38 fps). It removed the tick's
+   sleep (line 875), not the SwapEnd hold. With the GPU saturated, a frame not done at its tick stays recorded, and the next
+   swap replaces it. Its log's busy windows: "frames shown done" 73 to 90 per 5 s, "frames a newer one replaced meanwhile" 43
+   to 86. A third to a half of the GPU's frames were drawn and never shown, on a GPU with no time to spare. Overlapping more
+   cannot help a saturated GPU; dropping finished work makes it worse.
+
+**So, for 60 during the page movement:** the busy frame's GPU time must halve, from about 32 ms to under 16.7 ms. The 10 s
+profiles put about 58 % of it in vertex/tiler chains and 42 % in fragment chains (f1-1118-1210 12:12:08: 1,819 × 1,335 us
+against 1,075 × 1,619 us), so about 18 ms and 13 ms a busy frame, plus the present (I: the window's split applied to its busy frames). For the frames after a swipe, the 30 Hz
+producer must be found first. No GPU or framebuffer change moves it.
+
+### 9.1 Indexed draws as direct draws (`STARBITE_PANVK_CPU_DIRECT=1`, built, NOT run on a phone)
+
+Sections 7 and 8 removed the jobs around a draw that ran off the critical path, and the time did not move. What is left of
+an indexed draw is its helper compute job and its IDVS job. The helper (`libpan/draw_helper.cl`,
+`panlib_draw_indexed_indirect_helper`) is one invocation that patches the draw's job, varyings and attributes from the
+index range. It runs with `PANLIB_BARRIER_JM_SUPPRESS_PREFETCH`, and the IDVS job depends on it. So every draw of a pass waits
+for a one-thread compute job to be dispatched, to run and to write back before the job manager fetches the draw. That is a
+pipeline drain a draw, whatever the draw's size, and it fits the ~100 us a draw of the 87-draw main pass.
+
+`mesa26-panvk-cpu-direct.patch` (after `mesa26-panvk-cpu-minmax`): with `STARBITE_PANVK_CPU_DIRECT=1` in `mtl2-env`, an indexed
+draw whose index range the CPU found (the switch turns section 8's range search on too) is recorded on the direct path,
+as Mesa 24's PanVK recorded every indexed draw. The IDVS (or vertex + tiler) job gets its index pointer, index count,
+`offset_start` (= min + vertexOffset), `base_vertex_offset` (= -min), invocation count (the range), instance size and
+varyings from the command buffer's pool when the draw is recorded. These are the values the helper would write. No helper,
+no prefetch suppression and no dependency come before the job. A range with no valid index keeps the indirect path.
+Without the variable PanVK is unchanged. The shim's line shows it: `indexed/indirect` falls to about 0 and `vk draws`
+takes their place.
+
+Built: the patch series reproduces the built tree from Mesa 26.2.6's tarball. Bundle m4: StarbiteMetal ad08e6dc… (its
+`__text` identical to m3's 7c953578) and libvulkan_panfrost 22bd0c44…. Risk: a wrong range or offset is a wrong or missing
+icon, not a fault. The range is section 8's, which rendered correctly on the phone.
+
+**The phone test** (requested from the tester, one boot each, the F1 image and line, the same scripted swipes, bundle m4
+by `edit-m4.sh`): a fresh baseline first if the phone is on 27.2.1; then `bins` (`STARBITE_PANVK_BINS=aa`: is tiling the
+vertex/tiler time?), `direct`, and `both`. Read `fbt-regimes.py`'s busy-run GPU time a swap and busy-swap period, the 10 s
+profile's vertex/tiler average, the swipe fps and the home screen.
