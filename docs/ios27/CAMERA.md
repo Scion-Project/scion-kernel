@@ -330,6 +330,45 @@ scratch 420f buffer and widens it into the pool (`StillImage: the graph's pool i
 not need 10 bits: its outputs take 420f, a two-plane IOSurface that the Metal bridge samples (`newTextureWithDescriptor:iosurface:plane:`
 with its YCbCr planes, `tools/metal/bridge/NativeMetalObjects.rs`). **Not run on a phone yet.**
 
+### The sixth cause: outputs the graph configures that the stream did not keep (18 November)
+
+Phone 1 ran dylibs `-17` to `-20` on 18 November (front and back camera, `cam_trace=1`). With `-17` the still image output had
+its 420f, and cameracaptured still aborted at every session: `Internal inconsistency, output pixel format () doesn't match the
+pixelBufferPool's pixel format (420f)`. The throw is in `-[BWMultiStreamCameraSourceNode allocateOrReuseBufferPoolsFromSourceNode:]`
+(24A446, its logic only): after setting `VideoOutputConfigurations`, the source node reads the property back from the stream
+and wants each output's `PixelFormat` to equal its pool's. Two things made it differ:
+
+1. The graph configures `IntermediateTap` and `Depth`, which `camera_device.c` did not keep (`stream: an output not here`), so
+   they were missing from the read-back. On iOS 27 `IntermediateTap` is now a fourth output, drawn as the scalers are, and the
+   configurations of outputs that are not drawn are given back as they were set (dylib `-18`).
+2. The graph's own configuration of `PrimaryScaler` (1504 x 1128 in Photo mode) carries `PixelFormat` 0. The source node takes a
+   streaming output's pixel format from its node output's video format, which nothing downstream resolves on the S9 (the Live
+   Photo movie that would use it is left out, above), while the output's pool, shared with the other streaming outputs, is
+   420f. `camera_outputs.c` reads a configuration whose `PixelFormat` is missing or 0 back as 420f (dylib `-20`;
+   `-19` filled only a missing one). Each set of configurations, enables and handlers is said on one line: `outputs: Back
+   Camera: VideoOutputConfigurations: StillImage (format 420f, 4032x3024, ...), PrimaryScaler (...)`.
+
+With `-20` (11:00) the graph ran for the first time on iOS 27: no abort, `the graph starts the stream`, `PrimaryScaler: the first
+picture given (1504x1128 420f)`, the source node's `Preview(PrimaryScaler)` output emitting about eight pictures a second
+(`camera_isp.c` on the CPU), the shutter giving a 4032 x 3024 picture to the still image coordinator, and the flip button
+changing to the front camera. Still missing: the screen stayed black (no node after the source node emitted anything; the
+viewfinder was open, so the frames stop inside cameracaptured's graph), and the photograph failed (`-11800`, underlying
+`-16808`, 10 ms after the shutter, before the picture was made) and was not saved. Dylib `-21` follows each output to the node
+it leads to (`camera_flownext.c`: `trace: flow: ... leads to <class> "<name>"`, `... renders a sample ...`).
+
+### SpringBoard's main-display layout (18 November)
+
+`camera_sbtrace.c` on phone 1 (dylib `-16`, `-17`) shows that SpringBoard does publish its layout: the home screen, the lock
+screen and then `com.apple.camera` as elements, and the backlight's state 2 (on) once it is on. Two publishers carry it. The
+one FrontBoard's shell makes for the main display gets the elements and the backlight state, flushes once at 23 s (no
+elements, backlight 0) and never again. The second, made by SpringBoard and set as the primary publisher at 43 s
+(`setPrimaryPublisher` in SpringBoard's log), flushes every change with its elements but without the backlight. A third,
+for the continuity display, is held by a suppression (`startListener`, `-[SBContinuityDisplayLayoutCoordinator start]`) that
+never ends, which is harmless. cameracaptured's monitor timed out waiting for the first layout at 21 s, before SpringBoard
+published anything, and afterwards sees no application in front: `camera_layout.c`'s stand-in is still what lets the
+camera run. Why the first publisher stops flushing (the shell's `%@ Loading` transition, `FBSystemShellInitialize`, ends
+at 55 s with the other milestones, so it is not that) is not known yet.
+
 ### Where the pictures stop: the flow trace
 
 With `cam_trace=1`, `tools/ios27/camera/camera_flowtrace.c` follows the frames through cameracaptured's graph: which of the
