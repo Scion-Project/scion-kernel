@@ -369,6 +369,7 @@ struct output {
 static void let_go(struct output *out);
 
 CFDictionaryRef (*hakios_camera_colour_info)(void);     /* VideoOutputsColorInfo the graph has not set (NULL: empty) */
+CFDictionaryRef hakios_camera_frame_colour;             /* iOS 27: every picture's colour attachments (camera_colour.c) */
 
 #define OUTPUTS 3
 static const char *const output_names[OUTPUTS] = { "PrimaryScaler", "SecondaryScaler", "StillImage" };
@@ -1031,6 +1032,9 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 	CVBufferSetAttachment(pb, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, kCVAttachmentMode_ShouldPropagate);
 	CVBufferSetAttachment(pb, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2,
 	    kCVAttachmentMode_ShouldPropagate);
+	if (hakios_camera_frame_colour != NULL) {
+		CVBufferSetAttachments(pb, hakios_camera_frame_colour, kCVAttachmentMode_ShouldPropagate);
+	}
 
 	if (metadata != NULL) {
 		CFMutableDictionaryRef m = CFDictionaryCreateMutableCopy(NULL, 0, metadata);

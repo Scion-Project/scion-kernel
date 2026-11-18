@@ -285,16 +285,29 @@ fails has properties that are not the node's. In 24A446 the scalers' properties 
 come from its own method (firmware still image output, 10-bit, ...); the per-output methods are direct methods, out of the
 Objective-C runtime's reach, so which output and which properties could not be read from outside.
 
-`tools/ios27/camera/camera_colour.c` (dylib `-14`, always on in cameracaptured with the kernel's camera, not the trace) answers
-for any output and any properties: it wraps `+[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:]` to remember,
-per thread, what it gave last (unchanged), and every output's entry of the stream's colour info is one object, a dictionary
-whose `count`, `objectForKey:` and `keyEnumerator` are those of the attachments last given on the asking thread. The check
-asks for the attachments right before it compares, so the comparison finds them equal. When the update still fails it says
-so: `colour: the source node's update FAILED (N): node colour space properties P; attachments asked K time(s) (...), the
-colour info's entries compared C time(s)` (C 0 with K > 0 would mean the comparison is not `isEqualToDictionary:` on the
-entry; K 0 that the failure is elsewhere in `_bringStreamUpToDate`). The pictures keep `camera_device.c`'s own attachments
-(BT.601 matrix, BT.709 primaries and transfer); if the still image output wants another colour space, the photograph's
-colours are off until those follow (a known gap below). **Not run on a phone yet.** Every name it uses is in 24B156's CMCapture too.
+Which output, read from 24A446: the scalers' colour space properties are the node's (0 here: "N/A", not checked); any other
+output's (the still image output's) are, when the still image output is the firmware's and wants a 10-bit pixel format, 1
+("sRGB/601") or 3 ("P3/601", for a wide colour space), else the node's again (`BWColorSpacePropertiesToString`'s table: 0 N/A,
+1 sRGB/601, 2 sRGB/709, 3 P3/601, 4 P3/709, ...). With the node's at 0, the only value that fails is 1: the still image output
+wants sRGB/601.
+
+What the S9's pictures are (`camera_isp.c`): sRGB's curve, BT.601's matrix (420f full range, 420v video range), the sensor's
+colours white-balanced and taken as sRGB's primaries: sRGB/601, which is also the only colour space the streams offer
+(`SupportedColorSpaces`: sRGB). So `tools/ios27/camera/camera_colour.c` (dylib `-15`, always on in cameracaptured with the
+kernel's camera) answers the truth: every output's entry of `VideoOutputsColorInfo` is `pixelBufferAttachmentsForColorSpaceProperties:1`
+(sRGB/601), and every picture `camera_device.c` makes carries those same attachments from the first session on
+(`hakios_camera_frame_colour`; before, BT.601 matrix and BT.709 primaries and transfer). It also wraps the attachments method to
+remember what it was asked for (unchanged) and `allocateOrReuseBufferPoolsFromSourceNode:` to say an update that still fails:
+`colour: the source node's update FAILED (N): node colour space properties P; attachments asked K time(s) in the update, for
+properties ...`, so that one boot shows both sides. A check that asks for 3 would mean the session wants wide colour (P3),
+which the pictures are not: converting them is a known gap below. `cam_colour_any=1` on the boot line (a diagnostic, off by
+default) answers instead with entries that read as whatever attachments the check asked for last on that thread (dylib `-14`
+did only that): a session that then runs while `-15`'s does not would show that the values differ. **Not run on a phone yet.**
+Every name it uses is in 24B156's CMCapture too.
+
+The still image output wanting a 10-bit pixel format (`stillImageOutputRequires10BitPixelFormat`) also means the photograph may
+come in a 10-bit pool ('x420' or the like), which `camera_device.c` does not draw into (`StillImage: ... buffers are not for this
+ISP`): the next gap if the shutter gives nothing.
 
 ### Where the pictures stop: the flow trace
 

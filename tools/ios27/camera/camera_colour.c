@@ -6,28 +6,33 @@
  *
  * Why: the graph's source node (BWMultiStreamCameraSourceNode), bringing the stream up to date for a session
  * (-allocateOrReuseBufferPoolsFromSourceNode: -> _bringStreamUpToDate -> _verifyColorSpacePropertiesForAllOutputs), reads
- * the stream's VideoOutputsColorInfo once and then, for every output whose colour space properties are not 0 (the node's
- * _colorSpaceProperties for the scalers; the still image output's own, which may be another), wants that output's entry
- * to be equal (isEqualToDictionary:) to what +[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:] gives for
- * those properties, asked right before the comparison; anything else is error -12780 (iOS 27.0.1's CMCapture, 24A446's
- * shared cache, read 18 November 2026: its logic only; the per-output methods are direct methods, out of reach of the
- * Objective-C runtime). Apple's ISP driver answers the property with the colour attachments of what it makes for each
- * output. The S9's stream answered an empty dictionary (the graph never sets the property), so on phone 1 every session of
- * Camera.app failed at once with -12780 (the app's "session runtime error" -11800), and the app retried about thirty times
- * a second with a black viewfinder (17 November 23:49). The node's own _colorSpaceProperties was 0 when read (18 November
- * 00:15), and the sessions still failed: the output that fails is one whose properties are not the node's.
+ * the stream's VideoOutputsColorInfo once and then, for every output whose colour space properties are not 0, wants that
+ * output's entry to be equal (isEqualToDictionary:) to +[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:] of
+ * those properties; anything else is error -12780. iOS 27.0.1's CMCapture (24A446's shared cache, read 18 November 2026:
+ * its logic only): the scalers' properties are the node's _colorSpaceProperties; any other output's (the still image
+ * output's) are, when the still image output is the firmware's and wants a 10-bit pixel format, 1 ("sRGB/601") or 3
+ * ("P3/601", for a wide colour space), else the node's again. Apple's ISP driver answers the property with the colour
+ * attachments of what it makes for each output. The S9's stream answered an empty dictionary (the graph never sets the
+ * property), so every session of Camera.app on phone 1 failed at once with -12780 (the app's "session runtime error" -11800)
+ * and was retried about thirty times a second with a black viewfinder (17 November 23:49). With the node's own properties as
+ * the answer the sessions still failed (18 November 00:15): they were 0 ("N/A", the scalers are not checked) and the
+ * attachments of 0 are nil, so the output that fails is the still image output, at 1, sRGB/601.
+ *
+ * What the S9's pictures are (camera_isp.c): sRGB's curve, BT.601's matrix (420f full range, 420v video range), the
+ * sensor's colours white-balanced with no colour matrix unless a tuning gives one, taken as sRGB's primaries (BT.709's):
+ * sRGB/601, properties 1, which is also the only colour space the streams offer (SupportedColorSpaces: sRGB).
  *
  * What is done (always, in cameracaptured with the kernel's camera):
- *   - +[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:] is wrapped to remember, per thread, what it gave last
- *     (it is not changed);
- *   - camera_device.c asks hakios_camera_colour_info for its answer when the graph has set none: every output's entry is one
- *     object, a dictionary whose count, objectForKey: and keyEnumerator are those of what that wrapper gave last on the
- *     asking thread, so the check's comparison, made right after it asked for the attachments, finds them equal for any
- *     output and any properties;
- *   - -[BWMultiStreamCameraSourceNode allocateOrReuseBufferPoolsFromSourceNode:] is wrapped (checked: 3 arguments, an int
- *     returned) to say the update's result when it fails, with the properties asked for and how many comparisons there were.
- * The pictures' own colour attachments are camera_device.c's as before (BT.601 matrix, BT.709 primaries and transfer).
- * NOT RUN ON A PHONE.
+ *   - the stream's VideoOutputsColorInfo, when the graph has set none, is +[BWVideoFormat
+ *     pixelBufferAttachmentsForColorSpaceProperties:1] for every output, and every picture camera_device.c makes carries
+ *     those same attachments (hakios_camera_frame_colour): the stream says what it makes, and makes what it says;
+ *   - pixelBufferAttachmentsForColorSpaceProperties: is wrapped to remember what the check asked for (it is not changed), and
+ *     -[BWMultiStreamCameraSourceNode allocateOrReuseBufferPoolsFromSourceNode:] (checked: 3 arguments, an int returned) to
+ *     say an update that still fails, with the properties the check asked for: one boot shows both sides. A check that asks
+ *     for 3 (P3/601) would mean the session wants wide colour, which the S9's pictures are not: the conversion is a known gap.
+ * With cam_colour_any=1 on the boot line (a diagnostic, off by default), every output's entry is instead a dictionary that
+ * reads as whatever attachments the check asked for last on that thread: a session that then runs shows that the colour
+ * check was its only stop. NOT RUN ON A PHONE.
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <objc/message.h>
@@ -36,13 +41,20 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/sysctl.h>
 #include "camera_trace.h"
 
 void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1, 2)));    /* camera_say.c */
 #define say hakios_camera_say
 
 extern CFDictionaryRef (*hakios_camera_colour_info)(void);                               /* camera_device.c */
+extern CFDictionaryRef hakios_camera_frame_colour;                                      /* camera_device.c */
+
+#define SRGB_601        1       /* BWColorSpaceProperties: "sRGB/601" (24A446's BWColorSpacePropertiesToString) */
+
+static bool any_colour;         /* cam_colour_any=1: the diagnostic entries (below) */
 
 static __thread id current_node;        /* the source node whose stream is being brought up to date on this thread */
 static ptrdiff_t properties_offset = -1;
@@ -142,10 +154,10 @@ w_allocate(id self, SEL sel, id source)
 	asked = compared = 0;
 	r = ((int (*)(id, SEL, id))o_allocate)(self, sel, source);
 	if (r != 0 && __atomic_fetch_add(&said, 1, __ATOMIC_RELAXED) < 5) {
-		say("colour: the source node's update FAILED (%d): node colour space properties %d; attachments asked %d time(s) (%d %d "
-		    "%d %d), the colour info's entries compared %d time(s)", r,
-		    properties_offset >= 0 ? *(int *)((uint8_t *)(void *)self + properties_offset) : -1, asked, asked_props[0],
-		    asked_props[1], asked_props[2], asked_props[3], compared);
+		say("colour: the source node's update FAILED (%d): node colour space properties %d; attachments asked %d time(s) "
+		    "in the update, for properties %d %d %d %d (1 sRGB/601, 3 P3/601; the stream answered %s); entries compared %d time(s)",
+		    r, properties_offset >= 0 ? *(int *)((uint8_t *)(void *)self + properties_offset) : -1, asked, asked_props[0],
+		    asked_props[1], asked_props[2], asked_props[3], any_colour ? "the diagnostic's" : "sRGB/601", compared);
 	}
 	current_node = before;
 	return r;
@@ -155,25 +167,82 @@ w_allocate(id self, SEL sel, id source)
    is not looked at) */
 static const char *const outputs[] = { "PrimaryScaler", "SecondaryScaler", "StillImage", "IntermediateTap", "Depth" };
 
+/* the attachments of sRGB/601: what every output of the S9's stream makes (kept: computed once) */
+static CFDictionaryRef
+srgb_601(void)
+{
+	static CFDictionaryRef kept;
+	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+	Class format = objc_getClass("BWVideoFormat");
+
+	pthread_mutex_lock(&lock);
+	if (kept == NULL && format != Nil && o_attachments != NULL) {
+		id d = ((id (*)(id, SEL, int))o_attachments)((id)format, sel_registerName("pixelBufferAttachmentsForColorSpaceProperties:"),
+		    SRGB_601);
+
+		if (d != nil && CFGetTypeID((CFTypeRef)d) == CFDictionaryGetTypeID()) {
+			kept = CFDictionaryCreateCopy(NULL, (CFDictionaryRef)d);
+		}
+	}
+	pthread_mutex_unlock(&lock);
+	return kept;
+}
+
 static CFDictionaryRef
 colour_info(void)
 {
 	static int said;
 	CFMutableDictionaryRef d = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
 	    &kCFTypeDictionaryValueCallBacks);
-	id e = entry();
+	CFTypeRef e = any_colour && entry() != nil ? (CFTypeRef)entry() : (CFTypeRef)srgb_601();
 
-	for (size_t i = 0; e != nil && i < sizeof(outputs) / sizeof(outputs[0]); i++) {
+	if (hakios_camera_frame_colour == NULL) {
+		hakios_camera_frame_colour = srgb_601();        /* (from now on every picture carries them) */
+	}
+
+	for (size_t i = 0; e != NULL && i < sizeof(outputs) / sizeof(outputs[0]); i++) {
 		CFStringRef name = CFStringCreateWithCString(NULL, outputs[i], kCFStringEncodingUTF8);
 
-		CFDictionarySetValue(d, name, (CFTypeRef)e);
+		CFDictionarySetValue(d, name, e);
 		CFRelease(name);
 	}
 	if (__atomic_fetch_add(&said, 1, __ATOMIC_RELAXED) == 0) {
-		say("colour: the stream's colour info asked for%s: each output's entry follows the attachments the check asks for",
-		    current_node != nil ? " in the source node's update" : " (not in the source node's update)");
+		char line[400] = "nil";
+		CFStringRef text = srgb_601() != NULL ? CFCopyDescription(srgb_601()) : NULL;
+
+		if (text != NULL) {
+			CFStringGetCString(text, line, sizeof(line), kCFStringEncodingUTF8);
+			CFRelease(text);
+		}
+		for (char *c = line; *c; c++) {
+			*c = *c == '\n' ? ' ' : *c;
+		}
+		say("colour: the stream's colour info asked for%s: %s", current_node != nil ? " in the source node's update" :
+		    " (not in the source node's update)", any_colour ? "cam_colour_any=1: each output's entry reads as the attachments "
+		    "the check asks for (a diagnostic)" : "every output sRGB/601, as its pictures are");
+		if (!any_colour || hakios_camera_trace) {
+			say("colour: sRGB/601's attachments: %s", line);
+		}
 	}
 	return d;
+}
+
+static bool
+boot_arg(const char *name)
+{
+	char args[1024] = "";
+	size_t n = sizeof(args) - 1, len = strlen(name);
+
+	if (sysctlbyname("kern.bootargs", args, &n, NULL, 0) != 0) {
+		return false;
+	}
+	args[n < sizeof(args) ? n : sizeof(args) - 1] = '\0';
+	for (char *last = NULL, *w = strtok_r(args, " ", &last); w != NULL; w = strtok_r(NULL, " ", &last)) {
+		if (strncmp(w, name, len) == 0 && w[len] == '=' && atoi(w + len + 1) > 0) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void
@@ -211,18 +280,19 @@ scioncam_colour_info(void)
 		if (a != NULL) {
 			method_getReturnType(a, atype, sizeof(atype));
 		}
-		if (a == NULL || method_getNumberOfArguments(a) != 3 || atype[0] != '@' || entry() == nil) {
-			say("colour: +[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:] is not as on iOS 27.0.1 (%s), or no "
-			    "entry class: the stream's colour info stays empty", a == NULL ? "not there" : "other arguments or return type");
+		if (a == NULL || method_getNumberOfArguments(a) != 3 || atype[0] != '@') {
+			say("colour: +[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:] is not as on iOS 27.0.1 (%s): the "
+			    "stream's colour info stays empty", a == NULL ? "not there" : "other arguments or return type");
 		} else {
 			properties_offset = ivar_getOffset(v);
 			o_attachments = method_getImplementation(a);
 			method_setImplementation(a, (IMP)w_attachments);
 			o_allocate = method_getImplementation(m);
 			method_setImplementation(m, (IMP)w_allocate);
+			any_colour = boot_arg("cam_colour_any");
 			hakios_camera_colour_info = colour_info;
-			say("colour: -[BWMultiStreamCameraSourceNode %s] and +[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:] "
-			    "wrapped: the stream's colour info follows what the graph's check asks for", selector);
+			say("colour: the stream's colour info will be %s, and the pictures carry sRGB/601's attachments from the first "
+			    "session on", any_colour ? "the diagnostic's (cam_colour_any=1)" : "sRGB/601 for every output");
 		}
 	}
 	pthread_mutex_unlock(&once_lock);
