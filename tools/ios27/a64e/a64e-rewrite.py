@@ -11,9 +11,18 @@ One instruction for one, in S_ATTR_PURE_INSTRUCTIONS sections only:
 Left for the kernel (sweet_a64e.c) to emulate on trap: PACGA, FJCVTZS, FCADD,
 LDRA* with writeback or out-of-range offsets.
 
-  a64e-rewrite.py cache DIR/dyld_shared_cache_arm64e [--only SUBSTR ...] [--dry-run]
+  a64e-rewrite.py cache DIR/dyld_shared_cache_arm64e [--only SUBSTR ...] [--skip SUBSTR ...] [--dry-run] [--log FILE]
   a64e-rewrite.py macho FILE ... [--dry-run]       (thin or fat; arm64e slices)
-Files are modified in place (clone them first: cp -c).
+  a64e-rewrite.py census CACHE_MAIN [--allow SUBSTR ...]   per image, the words this rewrite would still change (no image
+                                                   skipped): exit 1 if an image not named by --allow has any
+  a64e-rewrite.py verify CACHE_MAIN --log FILE     every logged word holds its new value
+  a64e-rewrite.py restore CACHE_MAIN --log FILE    every logged word gets its original value back
+Files are modified in place (clone them first: cp -c). --log writes "ADDR OLD NEW" per changed word ("# image PATH" before
+each image), so a cache rewrite can be verified and undone word for word.
+
+libcorecrypto: its FIPS self-test (cc_fips_test) MACs its own __text. Rewrite it and then reseal it with fips-seal.py (the
+seal is recomputed only where it was true before; docs/ios27/CORECRYPTO.md). Skipping it, as the pipeline did until
+18 November 2026, leaves its RETAB/BLRAA/BRAA words to the kernel's emulation: the hottest traps of the S9.
 
 Data inside the code: the words of an LC_DATA_IN_CODE range are never touched (macho mode); a LDRAx / LDAPR candidate
 with an undecodable word within 8 words before and after it is left alone too (macho mode; A64E_NO_RULE_C=1 turns
@@ -124,7 +133,8 @@ def text_sections(lc, ncmds):
         off += csz
 
 
-def do_cache(main, only, dry, skip=()):
+def do_cache(main, only, dry, skip=(), log=None, per=None):
+    """log: a file to write "ADDR OLD NEW" lines to. per: a list that gets (path, counts) per image (census)."""
     maps = []
     files = {}
     for p in sorted(glob.glob(main + '*')):
@@ -173,17 +183,31 @@ def do_cache(main, only, dry, skip=()):
             continue
         ncmds, sz = struct.unpack_from('<II', mh, 16)
         lc = read(im[0] + 32, sz)
+        ci = {}
+        if log:
+            log.write(f'# image {path}\n')
         for addr, size, _ in text_sections(lc, ncmds):
             p, o = loc(addr)
             if p is None:
                 continue
             mm = files[p]
             buf = np.array(mm[o:o + (size & ~3)]).view(np.uint32) if dry else mm[o:o + (size & ~3)].view(np.uint32)
+            orig = np.array(buf) if (log or per is not None) else None
             left = []
-            add(tot, rewrite_words(buf, textdata_idx(addr, len(buf)), left=left))
-            for i in left:
-                print(f'textdata: {addr + 4 * i:#x} {int(buf[i]):08x} D {path}')
+            c = rewrite_words(buf, textdata_idx(addr, len(buf)), left=left)
+            add(tot, c)
+            if orig is not None:
+                ch = np.flatnonzero(orig != buf)
+                c['changed'] = len(ch)
+                if log:
+                    log.writelines(f'{addr + 4 * int(i):#x} {int(orig[i]):08x} {int(buf[i]):08x}\n' for i in ch)
+            add(ci, c)
+            if per is None:
+                for i in left:
+                    print(f'textdata: {addr + 4 * i:#x} {int(buf[i]):08x} D {path}')
             dirty += size
+        if per is not None:
+            per.append((path, ci))
         nimg += 1
         if not dry and dirty > 256 << 20:   # write back as it goes: a slow (USB) image would pile up dirty pages
             for mm in files.values():
@@ -245,9 +269,86 @@ def do_macho(path, dry, left=None):
     return len(slices), tot
 
 
+def check_log(main, logp, restore=False, dry=False):
+    """verify (restore=False): every logged word holds NEW. restore: every logged word that holds NEW gets OLD back.
+    Returns (ok, bad)."""
+    maps, files = [], {}
+    for p in sorted(glob.glob(main + '*')):
+        if p.endswith(('.map', '.atlas', '.symbols')):
+            continue
+        with open(p, 'rb') as f:
+            h = f.read(0x200)
+        if not h.startswith(b'dyld_v1'):
+            continue
+        mo, mc = struct.unpack_from('<II', h, 0x10)
+        with open(p, 'rb') as f:
+            f.seek(mo)
+            for _ in range(mc):
+                a, sz, o, _, _ = struct.unpack('<QQQII', f.read(32))
+                maps.append((a, sz, p, o))
+        files[p] = np.memmap(p, dtype=np.uint8, mode='r+' if restore and not dry else 'r')
+    ok = bad = 0
+    for line in open(logp):
+        if line.startswith('#') or not line.strip():
+            continue
+        ad, old, new = line.split()
+        ad, old, new = int(ad, 16), int(old, 16), int(new, 16)
+        for a, sz, p, o in maps:
+            if a <= ad < a + sz:
+                v = files[p][o + ad - a:o + ad - a + 4].view(np.uint32)
+                break
+        else:
+            bad += 1
+            continue
+        cur = int(v[0])
+        if restore:
+            if cur == new:
+                if not dry:
+                    v[0] = old
+                ok += 1
+            elif cur == old:
+                ok += 1
+            else:
+                bad += 1
+                if bad <= 10:
+                    print(f'restore: {ad:#x} holds {cur:08x}, neither {old:08x} nor {new:08x}: left alone')
+        else:
+            good = cur == new
+            ok += good
+            bad += not good
+            if not good and bad <= 10:
+                print(f'verify: {ad:#x} holds {cur:08x}, logged {old:08x} -> {new:08x}')
+    if restore and not dry:
+        for mm in files.values():
+            mm.flush()
+    return ok, bad
+
+
+def census(main, allow):
+    """the words a64e-rewrite would still change, per image, with nothing skipped; exit status 1 if an image not in allow
+    has any. A skipped image (libcorecrypto until 18 November 2026) shows up here instead of in the kernel's trap counts."""
+    per = []
+    _, tot = do_cache(main, (), True, (), per=per)
+    keys = ('ret', 'br', 'blr', 'pac', 'ldra', 'ldapr')
+    bad = 0
+    rows = sorted(((c.get('changed', 0), p, c) for p, c in per), reverse=True)
+    for n, p, c in rows:
+        if not n:
+            break
+        allowed = any(x in p for x in allow)
+        bad += not allowed
+        print(f'{"allowed" if allowed else "LEFT":8s} {n:7d} {p}  ' + ' '.join(f'{k} {c.get(k, 0)}' for k in keys if c.get(k)))
+    left = {k: v for k, v in tot.items() if k.endswith('_left') and v}
+    print(f'census: {len(per)} images, {sum(1 for n, _, _ in rows if n)} with words to rewrite, {bad} not allowed; '
+          f'left for the kernel by design: {left}')
+    return bad
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('kind', choices=['cache', 'macho'])
+    ap.add_argument('kind', choices=['cache', 'macho', 'census', 'verify', 'restore'])
+    ap.add_argument('--log', help='cache: write ADDR OLD NEW per changed word; verify/restore: the log of a cache run')
+    ap.add_argument('--allow', nargs='*', default=[], help='census: images allowed to keep words to rewrite')
     ap.add_argument('paths', nargs='+')
     ap.add_argument('--only', nargs='*', default=[])
     ap.add_argument('--dry-run', action='store_true')
@@ -255,8 +356,19 @@ def main():
                     help='leave images whose path contains one of these untranslated '
                          '(libcorecrypto: its FIPS self-test MACs its own code)')
     a = ap.parse_args()
+    if a.kind == 'census':
+        sys.exit(1 if census(a.paths[0], a.allow) else 0)
+    if a.kind in ('verify', 'restore'):
+        if not a.log:
+            ap.error(f'{a.kind} needs --log')
+        ok, bad = check_log(a.paths[0], a.log, a.kind == 'restore', a.dry_run)
+        print(f'{a.kind}: {ok} ok, {bad} bad')
+        sys.exit(1 if bad else 0)
     if a.kind == 'cache':
-        n, tot = do_cache(a.paths[0], a.only, a.dry_run, a.skip)
+        log = open(a.log, 'w') if a.log else None
+        n, tot = do_cache(a.paths[0], a.only, a.dry_run, a.skip, log=log)
+        if log:
+            log.close()
         print(f'{n} images', tot)
         if os.environ.get('TEXTDATA_SKIP'):
             print(f'textdata: {tot.get("data_left", 0)} words left alone')
