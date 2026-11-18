@@ -225,7 +225,14 @@ from your own device.
 - **Nils** ([@dwaris](https://github.com/dwaris)), a Galaxy S9+ owner and one of the installer's testers. Two fixes for the
   speakers found on his own phone: the first sound no longer lost when the stream starts before the amplifiers' driver has
   registered, and the MAX98512's enable given a moment before it is read back, with a pause between a bus transfer's
-  retries. His commits are in the history under his name. Thank you, Nils.
+  retries. Then four for the S9+'s cameras: the S5K3M3 telephoto's two virtual channels told apart so its frames are
+  real, the telephoto's availability read again after a failure, and the capture graph's audio ended cleanly when the
+  camera is switched (end-of-stream markers sent, late samples and stale notifications dropped). His commits are in the
+  history under his name. Thank you, Nils.
+- **deLiseLINO** ([@deLiseLINO](https://github.com/deLiseLINO)), who runs Scion in AVF on a Pixel 7: the boot hang there
+  found and fixed (FP/SIMD turned on before the jump to XNU), CoreAnimation's masks drawn on the Mali-G710 (GLSL ES 1.00
+  extension lines dropped from ES 3.00 shaders), and the guest's network as a stream on the virtio socket device, served by
+  libslirp in the Scion app (`virtio_net_vsock=PORT`). His commits are in the history under his name. Thank you.
 
 ## Licenses and the legal side
 
