@@ -12,7 +12,8 @@
 # phone's files (tools/camtuning-exynos.py; never in the repository) to /private/var/hakios/camera.
 # The trace (docs/ios27/CAMERA.md, "The trace"; off by default): CAMERA_TRACE=N writes /private/var/hakios/camera/trace (the
 # library's switch, the same as cam_trace=N on the boot line); CAMERA_TRACE_APP=1 also records the library for Camera.app,
-# where it only takes the app's os_log while the trace is on.
+# where it only takes the app's os_log while the trace is on; CAMERA_TRACE_SB=1 records it for SpringBoard too, where with the
+# trace on it says FrontBoard's display layout publisher's calls (camera_sbtrace.c) and nothing else.
 #   ENABLE_CAMERA=0  off.   undo: the library, its record, the tunings this step put there and the cache taken off the root.
 # Idempotent. NOT run on a phone: neither the library nor this step (the capture device itself streamed into Camera.app on
 # iOS 16.5, 3 November 2026).
@@ -42,6 +43,7 @@ feature_apply() {
 	feature_put "$FEATURE_OUT/cam.dylib" "$R$LIB" 0755
 	local programs=cameracaptured
 	[[ ${CAMERA_TRACE_APP:-0} != 1 ]] || programs="cameracaptured Camera"
+	[[ ${CAMERA_TRACE_SB:-0} != 1 ]] || programs="$programs SpringBoard"
 	feature_inject "$LIB" $programs
 	if [[ ${CAMERA_TRACE:-0} =~ ^[1-9]$ ]]; then
 		install -d -m 0755 "$R$TUNE"

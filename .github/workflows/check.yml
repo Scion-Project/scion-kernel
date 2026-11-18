@@ -110,6 +110,8 @@ jobs:
         run: sh tools/mali-va-test.sh
       - name: The framebuffer's sweetfb_nowait present state machine (hakios.sweetfb_present.h) shows only finished frames, releases each swap once and never strands one, over random schedules (sanitizers)
         run: sh tools/sweetfb-present-test.sh
+      - name: The framebuffer's frame-info answers (hakios.sweetfb_frameinfo.h) read back and decode as iOS 27's IOMobileFramebuffer reads them, for every boot-argument value, mask and known value (sanitizers)
+        run: sh tools/sweetfb-frameinfo-test.sh
       - name: The Galaxy S9 secure-OS probe's DER reader (hakios.exynos_tee_der.h) keeps inside what the keymaster TA sends, mutated or cut short (sanitizers)
         run: sh tools/exynos-tee-der-test.sh
       - name: The rule that holds the Galaxy S9's M3s at 1794 MHz unless the over-current guard's stage two allows more (hakios.exynos_cpufreq_ceiling.h) (sanitizers)

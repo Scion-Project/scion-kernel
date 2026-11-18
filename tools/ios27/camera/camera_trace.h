@@ -14,9 +14,25 @@ void scioncam_trace_vendor(void);
 /* cameracaptured: wrap the session server's application-state and display-layout methods (camera_statetrace.c) */
 void scioncam_trace_state(void);
 
+/* cameracaptured: wrap the graph's source node, its node outputs and the preview's sinks to say where frames go and stop
+   (camera_flowtrace.c); scioncam_flow_emit is called by camera27.c for every sample a node output emits */
+void scioncam_trace_flow(void);
+void scioncam_flow_emit(void *output, void *sample_buffer);
+
 /* cameracaptured, always (not the trace): a nil layout of the main display taken as the client in the foreground
    (camera_layout.c) */
 void scioncam_layout_fallback(void);
+
+/* cameracaptured, always (not the trace): sessions built without video thumbnails and the Live Photo movie (camera_refuse.c) */
+void scioncam_no_thumbnails(void);
+
+/* cameracaptured, always (not the trace): the stream's VideoOutputsColorInfo answered with the source node's own colour
+   attachments, which its colour space check wants (camera_colour.c) */
+void scioncam_colour_info(void);
+
+/* SpringBoard, with the trace: wrap FBSDisplayLayoutPublisher's element, backlight, suppression and flush methods
+   (camera_sbtrace.c) */
+void scioncam_trace_layout_publisher(void);
 
 /* Camera.app: wrap -[AVCaptureFigVideoDevice supportsAVCaptureSessionPreset:] to say the cameras' formats (camera_apptrace.c) */
 void scioncam_trace_app(void);
