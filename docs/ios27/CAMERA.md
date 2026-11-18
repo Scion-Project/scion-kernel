@@ -356,6 +356,23 @@ viewfinder was open, so the frames stop inside cameracaptured's graph), and the 
 `-16808`, 10 ms after the shutter, before the picture was made) and was not saved. Dylib `-21` follows each output to the node
 it leads to (`camera_flownext.c`: `trace: flow: ... leads to <class> "<name>"`, `... renders a sample ...`).
 
+### Where the preview stops now (18 November, dylibs `-21` to `-26`, 24A446 and 24B156)
+
+- The source node has 21 outputs. Only `StillImage` (to the still image coordinator) and `DetectedObjects` (to face
+  detection) are connected; `Preview(PrimaryScaler)` leads nowhere (`camera_flownext.c`).
+- The session's parsed configuration has one preview sink with a video preview connection, and the camera source has its
+  video preview sink connection (`camera_previewtrace.c`). `FigCapturePreviewSinkPipeline` is made, from an output of the
+  "Back Camera" source node with an empty name, with no image queue sink given, and its build returns success.
+- The graph's connections (`camera_connecttrace.c`): the still pipeline asks for and gets all of its own (coordinator, frame
+  coordinator, format converter, `BWUBNode` "UB", scaler, Meteor headroom, encoder, still image sink), and the metadata path
+  its own. The preview pipeline asks for **none** through `-[BWGraph connectOutput:toInput:pipelineStage:deferredAttach:]`.
+  The next step is to find out what `_buildVideoPreviewSinkPipeline:...` (a direct call from the init) does on the S9, for
+  example a stitcher or image queue sink that it does not make and that it skips without failing.
+- The photograph goes through `BWUBNode` (unified bracketing), whose processing setup returns -16808 on the S9 even with the
+  formats' fusion answered NO (`camera_stills.c`). The still pipeline has to be built without UB.
+- 24B156: inserting `cam.dylib` into SpringBoard (the layout publisher trace) stalls SpringBoard at the Apple logo. Insert it
+  into cameracaptured and Camera only.
+
 ### SpringBoard's main-display layout (18 November)
 
 `camera_sbtrace.c` on phone 1 (dylib `-16`, `-17`) shows that SpringBoard does publish its layout: the home screen, the lock
