@@ -180,10 +180,12 @@ struct apple80211_link_changed {
 };
 
 /*
- * The RSSI event's data: the framework (the handler of event 39) wants at least 0xb4 bytes and makes
- * a dictionary of them. Each group that has a flag counts only with it set; the counters and the
- * rates have none. A driver's counters are per interval, and these stay 0: wifid's link-quality
- * logic reads a loss rate out of them, and from nothing it concludes nothing.
+ * The RSSI event's data (event 39). iOS 27's framework drops this event when its payload is shorter
+ * than 0x250 bytes, so the 0xb4 payload that this file posted until now never reached wifid: no RSSI
+ * arrived, the scaled RSSI stayed 0, and the status bar's bars stayed empty. The fields up to 0xb4 keep
+ * the 16.5 layout (has_rssi at 0, rssi at 4, has_per_core at 8, has_snr at 0xb, has_noise at 0xe,
+ * has_cca at 0x12, the counters from 0x14); the rest is zero. A group counts only with its flag set.
+ * The counters are per interval; they stay 0 (wifid's loss-rate logic concludes nothing from them).
  */
 struct apple80211_rssi_changed {
 	uint8_t has_rssi, unused_0[3];
@@ -198,12 +200,12 @@ struct apple80211_rssi_changed {
 	uint8_t has_beacons, has_firmware_counts, unused_2[2];
 	uint32_t firmware_tx_fail, firmware_tx_retrans, firmware_tx_frames;
 	uint32_t tx_rate, tx_fallback_rate, rx_rate;    /* Mbit/s */
-	uint8_t rest[0xb4 - 0x4c];
+	uint8_t rest[0x250 - 0x4c];             /* iOS 27's LQM fields after the rates (0x250 bytes in all) */
 };
 
-_Static_assert(sizeof(struct apple80211_rssi_changed) == 0xb4 && offsetof(struct apple80211_rssi_changed, tx_fail) == 0x14 &&
+_Static_assert(sizeof(struct apple80211_rssi_changed) == 0x250 && offsetof(struct apple80211_rssi_changed, tx_fail) == 0x14 &&
     offsetof(struct apple80211_rssi_changed, has_beacons) == 0x30 && offsetof(struct apple80211_rssi_changed, tx_rate) == 0x40,
-    "the RSSI event as Darwin userland 16.5 reads it");
+    "the RSSI event as iOS 27 reads it: 16.5's fields, and the 0x250-byte minimum that iOS 27 checks");
 _Static_assert(sizeof(struct apple80211_assoc) == A80211_ASSOC_SIZE && offsetof(struct apple80211_assoc, key) == A80211_ASSOC_KEY,
     "the association request as Darwin userland 16.5 has it");
 _Static_assert(sizeof(struct apple80211_link_changed) == 32 && offsetof(struct apple80211_link_changed, reason) == 0x14,
@@ -735,13 +737,22 @@ hakios_apple80211_event(enum hakios_sta_event event, int status)
 	}
 }
 
+#define HAKIOS_STAND_IN_NOISE (-92)     /* dBm */
+
 /* How the network joined is heard now (drivers/wifi/hakios.sta.c, on its thread): what wifid scales the status bar's bars from. */
 void
 hakios_apple80211_quality(const struct hakios_sta_quality *quality)
 {
 	static unsigned said;
-	struct apple80211_rssi_changed event = { .has_rssi = 1, .rssi = quality->rssi, .tx_rate = quality->tx_rate,
-		                                 .tx_fallback_rate = quality->tx_rate, .rx_rate = quality->rx_rate };
+	/*
+	 * Noise is a stand-in until the radio's own floor is read (brcmfmac's phy noise): -92 dBm is a typical
+	 * indoor floor. SNR is what the radio hears above it.
+	 */
+	struct apple80211_rssi_changed event = { .has_rssi = 1, .rssi = quality->rssi,
+		                                 .has_snr = 1, .snr = (int16_t)(quality->rssi - HAKIOS_STAND_IN_NOISE),
+		                                 .has_noise = 1, .noise = HAKIOS_STAND_IN_NOISE,
+		                                 .tx_rate = quality->tx_rate, .tx_fallback_rate = quality->tx_rate,
+		                                 .rx_rate = quality->rx_rate };
 
 	/* (the first few, then now and then) */
 	if (said < 40 || said % 60 == 0) {
