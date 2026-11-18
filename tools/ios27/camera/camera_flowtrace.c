@@ -176,6 +176,7 @@ scioncam_flow_emit(void *output_object, void *sample_buffer)
 	if (fresh) {
 		sample_of(sample_buffer, what, sizeof(what));
 		say("trace: flow: %s's output %s emits its first sample: %s", f->node ? class_getName(f->node) : "?", f->output, what);
+		scioncam_flow_next(output, f->node ? class_getName(f->node) : "?", f->output);     /* camera_flownext.c */
 	}
 	summary(mach_absolute_time());
 	pthread_mutex_unlock(&flow_lock);
@@ -343,6 +344,7 @@ scioncam_trace_flow(void)
 	}
 	scioncam_flow_on = 1;
 	pthread_mutex_unlock(&once_lock);
+	scioncam_trace_preview();       /* camera_previewtrace.c */
 	if (tried > 0) {
 		say("trace: flow: %u of %zu methods traced", wrapped, sizeof(wraps) / sizeof(wraps[0]));
 	}

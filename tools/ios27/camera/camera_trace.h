@@ -18,6 +18,10 @@ void scioncam_trace_state(void);
    (camera_flowtrace.c); scioncam_flow_emit is called by camera27.c for every sample a node output emits */
 void scioncam_trace_flow(void);
 void scioncam_flow_emit(void *output, void *sample_buffer);
+/* camera_flownext.c: at an output's first sample, the node it leads to, said, and that node's render method traced */
+void scioncam_flow_next(void *output, const char *node_class, const char *output_name);
+/* camera_previewtrace.c: the session configuration's preview sinks, said (with the flow trace) */
+void scioncam_trace_preview(void);
 
 /* cameracaptured, always (not the trace): a nil layout of the main display taken as the client in the foreground
    (camera_layout.c) */
@@ -25,6 +29,8 @@ void scioncam_layout_fallback(void);
 
 /* cameracaptured, always (not the trace): sessions built without video thumbnails and the Live Photo movie (camera_refuse.c) */
 void scioncam_no_thumbnails(void);
+/* cameracaptured, always: the photo formats' fused and deferred photographs answered NO (camera_stills.c) */
+void scioncam_single_frame_stills(void);
 
 /* cameracaptured, always (not the trace): the stream's VideoOutputsColorInfo answered with the source node's own colour
    attachments, which its colour space check wants (camera_colour.c) */

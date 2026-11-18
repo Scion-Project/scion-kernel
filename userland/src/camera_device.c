@@ -281,6 +281,7 @@ supported(const struct prop *p, size_t n)
 #define PF_420F         0x34323066      /* '420f' */
 #define PF_420V         0x34323076      /* '420v' */
 #define PF_BGRA         0x42475241      /* 'BGRA' */
+#define PF_XF20         0x78663230      /* 'xf20': iOS 27's 10-bit still image pool (camera_tenbit.c) */
 
 static CFDictionaryRef
 output_info(int width, int height)
@@ -371,8 +372,13 @@ static void let_go(struct output *out);
 CFDictionaryRef (*hakios_camera_colour_info)(void);     /* VideoOutputsColorInfo the graph has not set (NULL: empty) */
 CFDictionaryRef hakios_camera_frame_colour;             /* iOS 27: every picture's colour attachments (camera_colour.c) */
 
+#ifdef HAKIOS_CAMERA_N104     /* iOS 27's graph also configures IntermediateTap, and reads every configuration back */
+#define OUTPUTS 4
+static const char *const output_names[OUTPUTS] = { "PrimaryScaler", "SecondaryScaler", "StillImage", "IntermediateTap" };
+#else
 #define OUTPUTS 3
 static const char *const output_names[OUTPUTS] = { "PrimaryScaler", "SecondaryScaler", "StillImage" };
+#endif
 
 #define MAX_ZOOM        16              /* (the most the iPhone X's wide camera zooms digitally) */
 
@@ -476,6 +482,7 @@ struct stream {
 	bool            af_locked;      /* LockAFNow: no search but one asked for */
 	float           af_window[4];   /* AFWindowParams: where to focus, as fractions of the frame (x0, y0, x1, y1) */
 	struct output   out[OUTPUTS];
+	CFMutableDictionaryRef other_configs;   /* configurations of outputs not drawn (Depth ...), given back as set */
 	pthread_mutex_t lock;
 	pthread_t       worker;
 	volatile bool   running;
@@ -501,6 +508,12 @@ output_index(CFStringRef name)
 		}
 	}
 	return -1;
+}
+
+static void
+copy_entry(const void *key, const void *value, void *to)
+{
+	CFDictionarySetValue(to, key, value);
 }
 
 static OSStatus
@@ -549,12 +562,22 @@ stream_copy_property(CMBaseObjectRef o, CFStringRef key, CFAllocatorRef allocato
 
 			if (configs) {
 				if (s->out[i].config != NULL) {
+#ifdef HAKIOS_CAMERA_N104
+					CFDictionaryRef c = scioncam_config_read_back(s->camera->name, name, s->out[i].config);
+
+					CFDictionarySetValue(d, name, c);
+					CFRelease(c);
+#else
 					CFDictionarySetValue(d, name, s->out[i].config);
+#endif
 				}
 			} else {
 				CFDictionarySetValue(d, name, s->out[i].enabled ? kCFBooleanTrue : kCFBooleanFalse);
 			}
 			CFRelease(name);
+		}
+		if (configs && s->other_configs != NULL) {
+			CFDictionaryApplyFunction(s->other_configs, copy_entry, d);
 		}
 		pthread_mutex_unlock(&s->lock);
 		value = d;
@@ -717,6 +740,9 @@ stream_set_property(CMBaseObjectRef o, CFStringRef key, CFTypeRef value)
 		if (value == NULL || CFGetTypeID(value) != CFDictionaryGetTypeID()) {
 			return 0;
 		}
+#ifdef HAKIOS_CAMERA_N104
+		scioncam_say_outputs(s->camera->name, key, value);
+#endif
 		pthread_mutex_lock(&s->lock);
 		CFIndex n = CFDictionaryGetCount(value);
 		const void **keys = calloc((size_t)n + 1, sizeof(void *)), **values = calloc((size_t)n + 1, sizeof(void *));
@@ -728,6 +754,14 @@ stream_set_property(CMBaseObjectRef o, CFStringRef key, CFTypeRef value)
 
 			if (k < 0) {
 				say_once("stream: an output not here:", keys[i], NULL);
+#ifdef HAKIOS_CAMERA_N104
+				if (configs && CFGetTypeID(keys[i]) == CFStringGetTypeID()) {
+					if (s->other_configs == NULL) {
+						s->other_configs = (CFMutableDictionaryRef)new_dict();
+					}
+					CFDictionarySetValue(s->other_configs, keys[i], values[i]);
+				}
+#endif
 				continue;
 			}
 			out = &s->out[k];
@@ -1003,7 +1037,15 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 	pf = CVPixelBufferGetPixelFormatType(pb);
 	width = (uint32_t)CVPixelBufferGetWidth(pb);
 	height = (uint32_t)CVPixelBufferGetHeight(pb);
-	if (width == 0 || height == 0 || (pf != PF_420F && pf != PF_420V && pf != PF_BGRA)) {
+	CVPixelBufferRef draw = pb;     /* what is drawn into: pb, or for a 10-bit pool an 8-bit buffer widened after */
+
+#ifdef HAKIOS_CAMERA_N104
+	if (pf == PF_XF20 && width > 0 && height > 0 && (draw = scioncam_tenbit_scratch(pb)) == NULL) {
+		CVPixelBufferRelease(pb);
+		return;
+	}
+#endif
+	if (width == 0 || height == 0 || (pf != PF_420F && pf != PF_420V && pf != PF_BGRA && draw == pb)) {
 		if (out->delivered == 0 && out->said_shape == false) {
 			out->said_shape = true;
 			say("%s: %ux%u %c%c%c%c buffers are not for this ISP", out->name, width, height, pf >> 24, pf >> 16 & 255,
@@ -1013,8 +1055,10 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 		return;
 	}
 	CVPixelBufferLockBaseAddress(pb, 0);
+	CVPixelBufferLockBaseAddress(draw, 0);
 
-	struct render_job job = { isp, f, raw, pb, pf, width, height, 8, strcmp(out->name, "StillImage") == 0 && pf != PF_BGRA };
+	uint32_t drawn = draw == pb ? pf : PF_420F;
+	struct render_job job = { isp, f, raw, draw, drawn, width, height, 8, strcmp(out->name, "StillImage") == 0 && drawn != PF_BGRA };
 	uint64_t began = mach_absolute_time();
 
 	dispatch_apply_f(job.pieces, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), &job, render_piece);
@@ -1027,6 +1071,12 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 		say("%s: %ux%u made of every pixel in %.0f ms", out->name, width, height,
 		    (double)(mach_absolute_time() - began) * tb.numer / tb.denom / 1e6);
 	}
+#ifdef HAKIOS_CAMERA_N104
+	if (draw != pb) {
+		scioncam_tenbit_widen(draw, pb);
+	}
+#endif
+	CVPixelBufferUnlockBaseAddress(draw, 0);
 	CVPixelBufferUnlockBaseAddress(pb, 0);
 	CVBufferSetAttachment(pb, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4, kCVAttachmentMode_ShouldPropagate);
 	CVBufferSetAttachment(pb, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, kCVAttachmentMode_ShouldPropagate);
@@ -1720,6 +1770,9 @@ stream_finalize(CMBaseObjectRef o)
 	}
 	if (s->formats) {
 		CFRelease(s->formats);
+	}
+	if (s->other_configs) {
+		CFRelease(s->other_configs);
 	}
 	if (s->supported) {
 		CFRelease(s->supported);

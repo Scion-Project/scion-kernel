@@ -309,6 +309,83 @@ The still image output wanting a 10-bit pixel format (`stillImageOutputRequires1
 come in a 10-bit pool ('x420' or the like), which `camera_device.c` does not draw into (`StillImage: ... buffers are not for this
 ISP`): the next gap if the shutter gives nothing.
 
+### The fifth cause: no pixel format for the still image output (18 November)
+
+N104's `AVCaptureSession.plist` says `UsesPacked10BitFirmwareStillImageOutputPixelFormat` for the photo formats of both
+cameras ("12MP", the front camera's "7MP") and for 1080p, 720p and 1920 x 1440: the A13's ISP gives its photographs in a
+packed 10-bit format. iOS 27.0.1's CMCapture (24A446's shared cache, its logic only) then sets the source node's
+`stillImageOutputRequires10BitPixelFormat`, and `-[BWMultiStreamCameraSourceNode _supportedPixelFormatsForOutputID:]`
+keeps, of each output's `SupportedPixelFormats` in the stream's format, the ones whose range, bit depth, 4:2:2-ness and raw-ness
+match what the output wants: for the still image output full range, 10-bit exactly when that flag is set, not 4:2:2, not raw,
+and no more lossy compression than the session allows. The other outputs follow the session's client video format (420f
+for Photo mode). The S9's streams offered 420f, 420v and BGRA, so with the flag the still image output was left with no
+pixel format at all, and the session that builds its pools for every output could not start.
+
+Dylib `-17`: `camera_refuse.c` answers NO to `-[FigCaptureSourceVideoFormat usesPacked10BitFirmwareStillImageOutputPixelFormat]`
+(`still: ... replaced (NO: the still image output takes 420f)`, and at a session `still: the format wants a 10-bit still
+image ... answered NO`): the still image output takes 420f, which `camera_device.c` draws. `cam_still10=1` on the boot line
+keeps the plist's answer; for that case `camera_formats.c` also offers `xf20` (10-bit full range, two planes, each sample 16
+bits with its 10 bits at the top) on the StillImage output, and `camera_tenbit.c` draws the picture in 8 bits into a
+scratch 420f buffer and widens it into the pool (`StillImage: the graph's pool is 10-bit (xf20): ...`). The preview does
+not need 10 bits: its outputs take 420f, a two-plane IOSurface that the Metal bridge samples (`newTextureWithDescriptor:iosurface:plane:`
+with its YCbCr planes, `tools/metal/bridge/NativeMetalObjects.rs`). **Not run on a phone yet.**
+
+### The sixth cause: outputs the graph configures that the stream did not keep (18 November)
+
+Phone 1 ran dylibs `-17` to `-20` on 18 November (front and back camera, `cam_trace=1`). With `-17` the still image output had
+its 420f, and cameracaptured still aborted at every session: `Internal inconsistency, output pixel format () doesn't match the
+pixelBufferPool's pixel format (420f)`. The throw is in `-[BWMultiStreamCameraSourceNode allocateOrReuseBufferPoolsFromSourceNode:]`
+(24A446, its logic only): after setting `VideoOutputConfigurations`, the source node reads the property back from the stream
+and wants each output's `PixelFormat` to equal its pool's. Two things made it differ:
+
+1. The graph configures `IntermediateTap` and `Depth`, which `camera_device.c` did not keep (`stream: an output not here`), so
+   they were missing from the read-back. On iOS 27 `IntermediateTap` is now a fourth output, drawn as the scalers are, and the
+   configurations of outputs that are not drawn are given back as they were set (dylib `-18`).
+2. The graph's own configuration of `PrimaryScaler` (1504 x 1128 in Photo mode) carries `PixelFormat` 0. The source node takes a
+   streaming output's pixel format from its node output's video format, which nothing downstream resolves on the S9 (the Live
+   Photo movie that would use it is left out, above), while the output's pool, shared with the other streaming outputs, is
+   420f. `camera_outputs.c` reads a configuration whose `PixelFormat` is missing or 0 back as 420f (dylib `-20`;
+   `-19` filled only a missing one). Each set of configurations, enables and handlers is said on one line: `outputs: Back
+   Camera: VideoOutputConfigurations: StillImage (format 420f, 4032x3024, ...), PrimaryScaler (...)`.
+
+With `-20` (11:00) the graph ran for the first time on iOS 27: no abort, `the graph starts the stream`, `PrimaryScaler: the first
+picture given (1504x1128 420f)`, the source node's `Preview(PrimaryScaler)` output emitting about eight pictures a second
+(`camera_isp.c` on the CPU), the shutter giving a 4032 x 3024 picture to the still image coordinator, and the flip button
+changing to the front camera. Still missing: the screen stayed black (no node after the source node emitted anything; the
+viewfinder was open, so the frames stop inside cameracaptured's graph), and the photograph failed (`-11800`, underlying
+`-16808`, 10 ms after the shutter, before the picture was made) and was not saved. Dylib `-21` follows each output to the node
+it leads to (`camera_flownext.c`: `trace: flow: ... leads to <class> "<name>"`, `... renders a sample ...`).
+
+### Where the preview stops now (18 November, dylibs `-21` to `-26`, 24A446 and 24B156)
+
+- The source node has 21 outputs. Only `StillImage` (to the still image coordinator) and `DetectedObjects` (to face
+  detection) are connected; `Preview(PrimaryScaler)` leads nowhere (`camera_flownext.c`).
+- The session's parsed configuration has one preview sink with a video preview connection, and the camera source has its
+  video preview sink connection (`camera_previewtrace.c`). `FigCapturePreviewSinkPipeline` is made, from an output of the
+  "Back Camera" source node with an empty name, with no image queue sink given, and its build returns success.
+- The graph's connections (`camera_connecttrace.c`): the still pipeline asks for and gets all of its own (coordinator, frame
+  coordinator, format converter, `BWUBNode` "UB", scaler, Meteor headroom, encoder, still image sink), and the metadata path
+  its own. The preview pipeline asks for **none** through `-[BWGraph connectOutput:toInput:pipelineStage:deferredAttach:]`.
+  The next step is to find out what `_buildVideoPreviewSinkPipeline:...` (a direct call from the init) does on the S9, for
+  example a stitcher or image queue sink that it does not make and that it skips without failing.
+- The photograph goes through `BWUBNode` (unified bracketing), whose processing setup returns -16808 on the S9 even with the
+  formats' fusion answered NO (`camera_stills.c`). The still pipeline has to be built without UB.
+- 24B156: inserting `cam.dylib` into SpringBoard (the layout publisher trace) stalls SpringBoard at the Apple logo. Insert it
+  into cameracaptured and Camera only.
+
+### SpringBoard's main-display layout (18 November)
+
+`camera_sbtrace.c` on phone 1 (dylib `-16`, `-17`) shows that SpringBoard does publish its layout: the home screen, the lock
+screen and then `com.apple.camera` as elements, and the backlight's state 2 (on) once it is on. Two publishers carry it. The
+one FrontBoard's shell makes for the main display gets the elements and the backlight state, flushes once at 23 s (no
+elements, backlight 0) and never again. The second, made by SpringBoard and set as the primary publisher at 43 s
+(`setPrimaryPublisher` in SpringBoard's log), flushes every change with its elements but without the backlight. A third,
+for the continuity display, is held by a suppression (`startListener`, `-[SBContinuityDisplayLayoutCoordinator start]`) that
+never ends, which is harmless. cameracaptured's monitor timed out waiting for the first layout at 21 s, before SpringBoard
+published anything, and afterwards sees no application in front: `camera_layout.c`'s stand-in is still what lets the
+camera run. Why the first publisher stops flushing (the shell's `%@ Loading` transition, `FBSystemShellInitialize`, ends
+at 55 s with the other milestones, so it is not that) is not known yet.
+
 ### Where the pictures stop: the flow trace
 
 With `cam_trace=1`, `tools/ios27/camera/camera_flowtrace.c` follows the frames through cameracaptured's graph: which of the

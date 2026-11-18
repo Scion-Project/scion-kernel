@@ -13,4 +13,17 @@ typedef CFDictionaryRef (*scioncam_format_fn)(int sensor_width, int sensor_heigh
 /* the SupportedFormatsArray of the stream of the kernel's SENSOR (1 the back camera, 2 the front one); NULL for another */
 CFArrayRef scioncam_n104_formats(uint32_t sensor, const char *camera, double fov, scioncam_format_fn make);
 
+/* camera_tenbit.c: the still image output's 10-bit ('xf20') pool: an 8-bit 420f buffer of pb's size to draw into (NULL:
+   none), and the picture widened from it into pb (both locked) */
+#include <CoreVideo/CoreVideo.h>
+CVPixelBufferRef scioncam_tenbit_scratch(CVPixelBufferRef pb);
+void scioncam_tenbit_widen(CVPixelBufferRef from, CVPixelBufferRef pb);
+
+/* camera_outputs.c: one line for each output a VideoOutputConfigurations / VideoOutputsEnabled / VideoOutputHandlers set
+   names (its pixel format, size and pool), so that the console shows which outputs the graph uses */
+void scioncam_say_outputs(const char *camera, CFStringRef key, CFDictionaryRef value);
+/* camera_outputs.c: an output's configuration as VideoOutputConfigurations is read back (retained): with 420f put in as
+   its PixelFormat when the graph set none */
+CFDictionaryRef scioncam_config_read_back(const char *camera, CFStringRef output, CFDictionaryRef config);
+
 #endif

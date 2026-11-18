@@ -22,6 +22,13 @@
  * Photo was switched off too (rc.jobs.photo: it needs the video and the sound around the shutter). -[FigCaptureIrisSinkConfiguration
  * irisMovieCaptureEnabled] and -momentCaptureMovieRecordingEnabled answer NO (checked: 2 arguments, BOOL): the photograph
  * is taken without its movie. Said once. NOT RUN ON A PHONE.
+ *
+ * 3. The 10-bit still image. N104's photo formats say UsesPacked10BitFirmwareStillImageOutputPixelFormat (the A13's ISP
+ * gives its photographs in a packed 10-bit format); the source node then wants a 10-bit full-range pool for its still image
+ * output and keeps none of the stream's 8-bit formats for it (-[BWMultiStreamCameraSourceNode _supportedPixelFormatsForOutputID:],
+ * 24A446). -[FigCaptureSourceVideoFormat usesPacked10BitFirmwareStillImageOutputPixelFormat] answers NO (checked: 2
+ * arguments, BOOL), so the still image output takes 420f as the iPhone XR's does. cam_still10=1 on the boot line keeps the
+ * plist's answer (the still is then drawn into 'xf20', camera_tenbit.c). Said once. NOT RUN ON A PHONE.
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <objc/message.h>
@@ -29,6 +36,9 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/sysctl.h>
 #include "camera_trace.h"
 
 void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1, 2)));    /* camera_say.c */
@@ -88,6 +98,62 @@ replace_bool(Class c, const char *selector, bool (**original)(id, SEL))
 	say("live photo: -[FigCaptureIrisSinkConfiguration %s] replaced (NO)", selector);
 }
 
+static bool (*o_packed10)(id, SEL);
+
+static bool
+w_no_packed10(id self, SEL sel)
+{
+	static int said;
+
+	if (o_packed10(self, sel) && __atomic_fetch_add(&said, 1, __ATOMIC_RELAXED) == 0) {
+		say("still: the format wants a 10-bit still image (UsesPacked10BitFirmwareStillImageOutputPixelFormat): answered NO, "
+		    "the still image output takes 420f");
+	}
+	return false;
+}
+
+static bool
+still10_kept(void)
+{
+	char args[1024] = "", *w, *last = NULL;
+	size_t n = sizeof(args) - 1;
+
+	if (sysctlbyname("kern.bootargs", args, &n, NULL, 0) != 0) {
+		return false;
+	}
+	args[n < sizeof(args) ? n : sizeof(args) - 1] = '\0';
+	for (w = strtok_r(args, " ", &last); w != NULL; w = strtok_r(NULL, " ", &last)) {
+		if (strncmp(w, "cam_still10=", 12) == 0 && atoi(w + 12) > 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void
+no_packed10_still(void)
+{
+	const char *selector = "usesPacked10BitFirmwareStillImageOutputPixelFormat";
+	Class c = objc_getClass("FigCaptureSourceVideoFormat");
+	Method m = c != Nil ? class_getInstanceMethod(c, sel_registerName(selector)) : NULL;
+	char type[8] = "";
+
+	if (m != NULL) {
+		method_getReturnType(m, type, sizeof(type));
+	}
+	if (m == NULL || method_getNumberOfArguments(m) != 2 || (type[0] != 'B' && type[0] != 'c')) {
+		say("still: -[FigCaptureSourceVideoFormat %s] is not as on iOS 27.0.1: left alone (a 10-bit still is drawn into xf20)",
+		    selector);
+	} else if (still10_kept()) {
+		say("still: cam_still10=1: -[FigCaptureSourceVideoFormat %s] left as the plist says (a 10-bit still is drawn into xf20)",
+		    selector);
+	} else {
+		o_packed10 = (bool (*)(id, SEL))method_getImplementation(m);
+		method_setImplementation(m, (IMP)w_no_packed10);
+		say("still: -[FigCaptureSourceVideoFormat %s] replaced (NO: the still image output takes 420f)", selector);
+	}
+}
+
 static void
 no_live_photo_movie(void)
 {
@@ -98,6 +164,8 @@ no_live_photo_movie(void)
 		return;
 	}
 	done = true;
+	no_packed10_still();
+	scioncam_single_frame_stills();         /* camera_stills.c */
 	replace_bool(c, "irisMovieCaptureEnabled", &o_iris_movie);
 	replace_bool(c, "momentCaptureMovieRecordingEnabled", &o_moment_movie);
 }
