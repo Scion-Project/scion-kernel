@@ -7,6 +7,10 @@ surface hash of the GL glue. Kernel changes are behind a bit of `sweetspeed=<mas
 ended in a SIGILL before. The root edits are tools you run on your own root image; nothing of the builder's images, caches, roots, logs or the shared
 cache's symbols is here.
 
+> **18 November 2026: daemon trims are no longer an optimisation here.** Every iOS 27 daemon runs except the hardware-less ones
+> ([FULLROOT.md](FULLROOT.md#daemon-policy)); a daemon's cost is cut by fixing what it trips over (traps, crash loops, a missing hardware
+> answer), not by switching it off. The kernel and GPU work below is unaffected.
+
 **What is verified, and how.** The numbers come from a phone with kernels that had these changes behind `sbx` bits (one bit each: the command line is at its
 607-byte limit) and roots edited as described; the table of boots is the work's own log, not a repeat. This repository carries the kernel part as
 `scion/xnu-12377-starlte:osfmk/arm64/sweet_prof.c` (new), edits to `sweet_a64e.c`, `starlte_smp.c`, `hakios.exynos_cpufreq.c` and patch

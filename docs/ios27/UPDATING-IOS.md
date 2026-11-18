@@ -119,7 +119,7 @@ whether the tool itself fixes something of 24A446). **(b)** It was found by hand
 
 | Where | What | Kind |
 |---|---|---|
-| `tools/ios27/fullroot/lists/` (`daemons-crashloop.list`, `daemons-hw.list`, `daemons-hogs.list`, `daemons-bp.keys` with 122 job paths, `launchd-override-disabled.list`), `tools/ios27/starlte-disabled-ios27.list` | Launchd labels and job paths, chosen from 24A446's boot logs. `edit-launchd.py:44` reports the ones that are not on the root and goes on. | b (the names mostly survive; the crash loops have to be measured again on boots: a day) |
+| `tools/ios27/fullroot/lists/` (`daemons-crashloop.list`, `daemons-hw.list`, `daemons-hogs.list`, `daemons-bp.keys` with the 15 hardware-less job paths (18 Nov 2026), `launchd-override-disabled.list`), `tools/ios27/starlte-disabled-ios27.list` | Launchd labels and job paths, chosen from 24A446's boot logs. `edit-launchd.py:44` reports the ones that are not on the root and goes on. | b (the names mostly survive; the crash loops have to be measured again on boots: a day) |
 | `check-root.sh:6-9,34-48` | Files and jobs that must be there (`SpringBoard`, `backboardd`, `configd`, `lsd`, `runningboardd` ...), and the cache's main file and `.01`. | c (stable names); a new subcache count is fine |
 | `steps.d/50-xpc-disable.sh` (MessagesBlastDoorService), `steps.d/70-lsd-extkit.sh` (FeatureFlag `ExtensionKit/enforce_xpc_cache_code_signing`), `steps.d/40-prefs.sh` (preference keys) | Paths and keys found on 24A446. The steps tolerate an absent path. | b (check that each still exists and still matters: hours) |
 | `tools/ios27/speed/edit-wall.sh:3`, `NIGHT.md:117` | PosterBoard's store schema (v61 on 27.0.1). | b (read the new version from the log of the first boot) |

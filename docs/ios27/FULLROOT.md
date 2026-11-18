@@ -42,13 +42,17 @@ some Settings rows lack icons.
 4. `check-root.sh`: required files, cache hard links, patched words, launchd plist sanity, prefs, Mach-O rewrite complete.
 
 ## Daemon policy
-`DAEMON_SET=bp` (default) removes exactly the job set of the owner build so the first full-root boot is comparable with it;
-`DAEMON_SET=min` is the real iOS 27: only jobs for hardware the port has no driver for (`lists/daemons-hw.list`) and measured crash loops
-(`lists/daemons-crashloop.list`) are moved to `launchd-disabled.plist`. The CPU-hog list is opt-in and off.
-Jobs either set would remove can be left on, each off by default (`20-launchd.sh`; running the step again without them
-takes them off again): `CC_CONTROLS=1` keeps `siriactionsd` (Control Centre's App Intent controls die without it),
-`CRASH_REPORTS=1` keeps `ReportCrash` and `osanalyticshelper` (iOS's own crash reports), `KEEP_JOBS="LABEL ..."` keeps any
-job by exact label or job key. None has been booted yet: [CONTROL-CENTRE.md](CONTROL-CENTRE.md).
+**Since 18 November 2026: trims are not the approach.** The owner's rule: "keep iOS as intact and clean as possible, we want to fix
+services, not remove them." Both sets (`DAEMON_SET=bp`, the default, and `DAEMON_SET=min`) now move out ONLY the jobs for hardware the
+S9 does not have (`lists/daemons-hw.list`, `lists/daemons-bp.keys`, each entry with its reason): CommCenter x4 (Apple baseband),
+fairplayd.H2 and fairplaydeviceidentityd (SEP FairPlay), security.cryptexd and securityresearchdeviceinit (SEP / Apple SoC), aned (no
+ANE), nearbyd (UWB), appledepthd (depth camera), watchdogd (Apple's hardware watchdog), wifip2pd and replicatord (AWDL); bluetoothd is
+moved out too and put back by `92-audio-bt` as the hakios-inject one. `lists/daemons-crashloop.list` is empty and `com.apple.rapportd` is
+no longer overridden off. Everything else of iOS 27 runs: Siri, Spotlight, the intelligence/ML daemons, analytics, Photos analysis,
+Music, News, Weather, Health, Home, Game Center, iCloud, Find My, logd, ReportCrash, sharingd, PerfPower*, suggestd, routined, triald...
+A daemon that crashes or burns CPU gets a fix (kernel or root step) or a precise task, never a trim; it is re-trimmed only if it makes the
+phone unusable (boot loop, frozen UI), alone, with a TODO here. `lists/daemons-hogs.list` (`DISABLE_HOGS=1`) stays an opt-in measuring aid.
+`CC_CONTROLS=1`, `CRASH_REPORTS=1` and `KEEP_JOBS` still work but are no-ops for the jobs they name (all on by default now).
 
 ## Verification boot (what the tools are for)
 `verify-boot.sh SERIAL BOOT LABEL [MIN]` flashes BOOT (read-back checked), starts `console-capture.sh` for the phone's USB port *before* the
