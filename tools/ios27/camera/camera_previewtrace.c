@@ -25,6 +25,7 @@
 
 void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1, 2)));    /* camera_say.c */
 #define say hakios_camera_say
+void scioncam_trace_connections(void);                                                  /* camera_connecttrace.c */
 
 static id
 call0(id o, const char *sel)
@@ -161,6 +162,7 @@ scioncam_trace_preview(void)
 			}
 		}
 		say("trace: preview: the session's preview sinks traced");
+		scioncam_trace_connections();   /* camera_connecttrace.c */
 	}
 	pthread_mutex_unlock(&once_lock);
 }
