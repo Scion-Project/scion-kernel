@@ -17,7 +17,7 @@ drivers/bluetooth/bcm4361/hakios.bcm4361_bt.c             2222  # +34: bt_vsc= t
 drivers/camera/exynos/hakios.ak737x.c                      991  # 901 today, and the growth of open pull request #334
 drivers/camera/exynos/hakios.exynos_camera.c              4045  # 3692 today, and the growth of open pull request #334
 drivers/camera/exynos/hakios.exynos_camera_rear.c         1404  # 1395 today, and the growth of open pull request #334
-drivers/camera/exynos/hakios.exynos_camera_star2.c        4482
+drivers/camera/exynos/hakios.exynos_camera_star2.c        4483
 drivers/camera/exynos/hakios.exynos_iris.c                1721
 drivers/camera/hakios.camera.c                            4754
 drivers/display/dpu/hakios.exynos_dpu.c                   1043
@@ -87,9 +87,9 @@ tools/qmi-test/test_qmi.c                                 1562
 userland/src/HakiosMetal.m                                1534
 userland/src/HakiosMetalCA.m                              8747
 userland/src/audio_plugin.c                               1100
-userland/src/camera_device.c                              2043
+userland/src/camera_device.c                              2044
 userland/src/camera_isp.c                                 1230
-userland/src/eagl.c                                       4781
+userland/src/eagl.c                                       4827
 userland/src/gfx/gfx_gl.c                                 1083
 userland/src/gnssd.m                                      1936
 userland/src/gnsstool.c                                   1104
@@ -97,7 +97,7 @@ userland/src/gps_app.m                                    1073
 userland/src/hakiosmetal_air.m                            6342
 userland/src/init.c                                       1840
 userland/src/inject.c                                     2048
-userland/src/inject_media.c                                993
+userland/src/inject_media.c                                1093
 userland/src/inject_sb.c                                  3999
 userland/src/metal_drv_test.m                             7737
 userland/src/metal_stubdev.m                               877
