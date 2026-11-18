@@ -166,6 +166,26 @@ wrap_class(Class c)
 	say("trace: flow: %s's renderSampleBuffer:forInput: traced%s", class_getName(k), w->drop != NULL ? " (and its drops)" : "");
 }
 
+/* every output of a node and the node each leads to (phone 1, dylib -22: the graph gave no description) */
+static void
+say_outputs(id node)
+{
+	id outputs = call0(node, "outputs");
+	CFIndex n = outputs != nil && CFGetTypeID((CFTypeRef)outputs) == CFArrayGetTypeID() ? CFArrayGetCount((CFArrayRef)outputs) : -1;
+	char name[64], to[64];
+
+	say("trace: graph: %s has %ld output(s); inputs %ld", node != nil ? class_getName(object_getClass(node)) : "nil", (long)n,
+	    (long)(call0(node, "inputs") != nil ? CFArrayGetCount((CFArrayRef)call0(node, "inputs")) : -1));
+	for (CFIndex i = 0; i < n && i < 40; i++) {
+		id o = (id)CFArrayGetValueAtIndex((CFArrayRef)outputs, i), next = call0(call0(call0(o, "connection"), "input"), "node");
+
+		name_of(call0(o, "name"), name, sizeof(name));
+		name_of(call0(next, "name"), to, sizeof(to));
+		say("trace: graph: output %ld %s -> %s%s%s", (long)i, name, next != nil ? class_getName(object_getClass(next)) : "nothing",
+		    next != nil ? " " : "", next != nil ? to : "");
+	}
+}
+
 /* the graph's own picture of itself (-[BWGraph dotString]), one console line per line of it, once a process */
 static void
 say_graph(id output)
@@ -175,7 +195,13 @@ say_graph(id output)
 	CFIndex n;
 	char *text;
 
-	if (__atomic_fetch_add(&done, 1, __ATOMIC_RELAXED) != 0 || dot == nil || CFGetTypeID((CFTypeRef)dot) != CFStringGetTypeID()) {
+	if (__atomic_fetch_add(&done, 1, __ATOMIC_RELAXED) != 0) {
+		return;
+	}
+	say_outputs(call0(output, "node"));
+	if (dot == nil || CFGetTypeID((CFTypeRef)dot) != CFStringGetTypeID()) {
+		say("trace: graph: no description (graph %s, dotString %s)", graph != nil ? class_getName(object_getClass(graph)) : "nil",
+		    dot != nil ? "not a string" : "nil");
 		return;
 	}
 	n = CFStringGetMaximumSizeForEncoding(CFStringGetLength((CFStringRef)dot), kCFStringEncodingUTF8) + 1;
