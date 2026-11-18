@@ -65,7 +65,7 @@ main(void)
 	r.version = SCNR_VERSION;
 	r.size = SCNR_SIZE;
 	r.reason = SCNR_R_TEST;
-	r.flags = SCNR_F_DIRECT | SCNR_F_RESTAGED | SCNR_F_WDT_ARMED | SCNR_F_APPEND;
+	r.flags = SCNR_F_DIRECT | SCNR_F_RESTAGED | SCNR_F_WDT_ARMED | SCNR_F_LINE | SCNR_F_APPEND;
 	r.entry = ~0u;
 	strcpy(r.cmdline, "sweetwarmed=1");
 	r.method = SCNR_M_XNU;
@@ -116,7 +116,10 @@ main(void)
 		b.kernel_size = 1 << 20;
 		b.ramdisk_pa = 0x86000000;
 		b.ramdisk_size = 1 << 20;
-		b.fdt_pa = SCNR_FDT_SAVE;
+		b.fdt_pa = SCNR_FDT_SAVE;                       /* the header, not the FDT */
+		seal(&b);
+		CHECK(scnr_check(&b, BASE) != NULL);
+		b.fdt_pa = SCNR_FDT_SAVE + 0x1000;
 		seal(&b);
 		CHECK(scnr_check(&b, BASE) == NULL);
 		b.method = 7;

@@ -1827,7 +1827,7 @@ uintptr_t star_boot_ram(const struct star_ram *r, uintptr_t fdt, const char **wh
  * ---- Warm restart (warm.c, scion_reentry.h, docs/ios27/WARM-RESTART.md) ------------------------------------------
  * What the record names, started as the cold boot would start it, with no menu: BOOT's payload (appended to this
  * Image, which the kernel put where S-Boot does) through xnu_enter with the payload's line, the record's in its
- * place, or the payload's with the record's appended; or an Android kernel and ramdisk through ram_start with S-Boot's
+ * place (SCNR_F_LINE), or the payload's with the record's appended (SCNR_F_LINE | SCNR_F_APPEND); or an Android kernel and ramdisk through ram_start with S-Boot's
  * FDT as the cold boot kept it (warm_fdt_save). Returns the entry (log[17]: its x0) or 0 (fail() said why).
  */
 uintptr_t star_warm_start(volatile uint64_t *log, const struct scion_reentry *r);
@@ -1838,7 +1838,8 @@ uintptr_t star_warm_start(volatile uint64_t *log, const struct scion_reentry *r)
     if (r->method == SCNR_M_ANDROID) {
         struct star_ram ram;
         uintptr_t fdt = (uintptr_t)r->fdt_pa;
-        if (fdt != SCNR_FDT_SAVE || *(volatile uint64_t *)fdt != SCNR_FDT_MAGIC)
+        if (fdt != SCNR_FDT_SAVE + PAGE_SIZE || *(volatile uint64_t *)SCNR_FDT_SAVE != SCNR_FDT_MAGIC ||
+            __builtin_bswap32(*(volatile uint32_t *)fdt) != 0xd00dfeedU)
             return fail(log, -91, "WARM: NO SAVED S-BOOT FDT");
         ram.method = M_ANDROID;
         ram.kernel = (uintptr_t)r->kernel_pa;
@@ -1848,18 +1849,19 @@ uintptr_t star_warm_start(volatile uint64_t *log, const struct scion_reentry *r)
         ram.ramdisk_size = r->ramdisk_size;
         ram.dtb_size = 0;
         ram.cmdline = r->cmdline;
-        return ram_start(log, &ram, fdt + PAGE_SIZE);
+        return ram_start(log, &ram, fdt);
     }
     boot_fdt = 0;
     boot_el = 4;
     boot_info();
     if (!boot_p)
         return fail(log, -90, "WARM: NO SWEETXNU PAYLOAD");
-    const char *src = (r->flags & SCNR_F_LINE) ? r->cmdline : boot_p->cmdline;
+    int replace = (r->flags & SCNR_F_LINE) && !(r->flags & SCNR_F_APPEND);
+    const char *src = replace ? r->cmdline : boot_p->cmdline;
     for (unsigned i = 0; i < BOOT_LINE_LENGTH; ++i)
         cmd[i] = src[i];
     cmd[BOOT_LINE_LENGTH - 1] = 0;
-    if (!(r->flags & SCNR_F_LINE) && (r->flags & SCNR_F_APPEND))
+    if ((r->flags & SCNR_F_LINE) && (r->flags & SCNR_F_APPEND))
         line_append(cmd, BOOT_LINE_LENGTH, r->cmdline);
     star_fb_text(2, "STARTING XNU");
     return xnu_enter(log, boot_p, boot_rd_start, boot_rd_end - boot_rd_start, cmd);

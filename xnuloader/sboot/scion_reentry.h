@@ -24,12 +24,12 @@
 
 /* flags */
 #define SCNR_F_DIRECT     (1U << 0)    /* no menu: start what the record names */
-#define SCNR_F_LINE       (1U << 1)    /* cmdline replaces the payload's own line */
+#define SCNR_F_LINE       (1U << 1)    /* cmdline is used: it replaces the payload's own line ... */
 #define SCNR_F_MENU       (1U << 2)    /* come back to the menu instead (not implemented by xnuloader/sboot) */
 #define SCNR_F_RESTAGED   (1U << 3)    /* the kernel put the Image (and its payload) where S-Boot does */
 #define SCNR_F_WDT_ARMED  (1U << 4)    /* the cluster-1 watchdog runs: the loader stops it before the OS starts ... */
 #define SCNR_F_WDT_KEEP   (1U << 5)    /* ... unless this is set too (an OS that feeds or stops it itself) */
-#define SCNR_F_APPEND     (1U << 6)    /* cmdline is appended to the payload's own line (with SCNR_F_LINE: ignored) */
+#define SCNR_F_APPEND     (1U << 6)    /* ... or, with this too, is appended to it (without SCNR_F_LINE: ignored) */
 
 /* method */
 #define SCNR_M_XNU        0U           /* the SWEETXNU payload appended to the Image */
@@ -58,7 +58,7 @@ struct scion_reentry {
 	uint64_t kernel_size;       /* 0x298 */
 	uint64_t ramdisk_pa;        /* 0x2a0 SCNR_M_ANDROID: its ramdisk */
 	uint64_t ramdisk_size;      /* 0x2a8 */
-	uint64_t fdt_pa;            /* 0x2b0 S-Boot's FDT as the loader saved it at the cold boot, 0 = none */
+	uint64_t fdt_pa;            /* 0x2b0 S-Boot's FDT as the cold boot saved it (SCNR_FDT_SAVE + 0x1000), 0 = none */
 	uint8_t image_sha256[32];   /* 0x2b8 SHA-256 of what is appended to the Image: [image_pa + the Image's own size
 	                             * (its _image_end, where the SWEETXNU payload starts), image_pa + image_size), as
 	                             * the kernel staged it. The Image's own bytes are not covered: the loader runs in

@@ -129,11 +129,13 @@ the file systems by then (the 17 November proof): the warm restart reuses it as 
 - **State:** EL1; MMU, D-cache and I-cache off; everything the loader reads cleaned to the point of coherency; DAIF
   masked; one CPU running (the boot CPU, MPIDR 0x81000000), the others PSCI-off; x0 = the record's physical address,
   x1-x3 = 0; the GIC empty and the timers off; the cluster-1 watchdog running when the record says so.
-- **Record** (`struct scion_reentry`, 728 bytes, little-endian): "SCNR", version 1, size, reason, flags (direct start,
-  line replaces / line appended, re-staged, watchdog armed / keep it armed), entry index, CRC-32 (IEEE, over the record
-  with the field 0), the line (608 bytes, XNU's `boot_args.CommandLine`), method (0 = BOOT's XNU payload, 1 = an
-  Android kernel + ramdisk), the watchdog's time, the Image's address and size, the Android kernel's and ramdisk's,
-  S-Boot's saved FDT, and the SHA-256 of what is appended to the Image. Agreed with the agent building
+- **Record** (`struct scion_reentry`, 728 bytes, little-endian): "SCNR", version 1, size, reason, flags (bit 0 direct
+  start, bit 1 the record's line is used and replaces the payload's, bit 6 with bit 1 it is appended instead, bit 2
+  the menu, bit 3 re-staged, bit 4 watchdog armed, bit 5 keep it armed), entry index, CRC-32 (IEEE, over all 728
+  bytes with the field 0), the line (608 bytes, XNU's `boot_args.CommandLine`, NUL-terminated) at 24, method at 632
+  (0 = BOOT's XNU payload, 1 = an Android kernel + ramdisk), the watchdog's time at 636, the Image's address and size,
+  the Android kernel's and ramdisk's, S-Boot's saved FDT at 688 (the FDT itself: 0x91101000, after the save's 4 KiB
+  header "SCNRFDT1" + size at 0x91100000), and the SHA-256 of what is appended to the Image at 696. Agreed with the agent building
   scion-boot-exynos9810's second stage (its `include/boot.h`); either side changes it only with the other.
 - **What the loader may not trust:** anything in RAM but the record (copied first) and what the SHA-256 covers. The
   Image's own bytes are not covered (the loader runs in them and writes its data and stack there before it can look); a

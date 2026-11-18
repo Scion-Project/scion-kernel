@@ -165,7 +165,7 @@ scnr_check(const struct scion_reentry *r, uint64_t base)
 		return "WARM: IMAGE NOT WHERE THE LOADER RUNS";
 	}
 	if (c.method == SCNR_M_ANDROID) {
-		if (!c.kernel_pa || !c.kernel_size || !c.ramdisk_pa || !c.ramdisk_size || !c.fdt_pa) {
+		if (!c.kernel_pa || !c.kernel_size || !c.ramdisk_pa || !c.ramdisk_size || c.fdt_pa != SCNR_FDT_SAVE + 0x1000) {
 			return "WARM: ANDROID START INCOMPLETE";
 		}
 	} else if (c.method != SCNR_M_XNU) {
