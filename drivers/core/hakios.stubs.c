@@ -164,6 +164,10 @@ void hakios_bcm4361_bt_init(void) {}
 extern void loader_log_line(const char *line);
 void hakios_bt_console(__unused const char *arg) { loader_log_line("usb: bt: this kernel has no Bluetooth driver (BCM4361_BT)\n"); }
 #endif
+/* the USB console's "warm": the warm restart is the iOS 27 kernel's (its fork's bsd/dev/starlte_warm.c) */
+extern void loader_log_line(const char *line);
+void hakios_warm_console(const char *arg);
+void hakios_warm_console(__unused const char *arg) { loader_log_line("usb: warm: this kernel has no warm restart\n"); }
 #ifndef HAKIOS_SSP
 void hakios_ssp_init(void) {}
 void hakios_ssp_console(__unused const char *arg) {}  /* the USB console's "sensors": no hub driver */
