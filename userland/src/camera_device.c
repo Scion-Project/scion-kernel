@@ -1767,6 +1767,12 @@ stream_finalize(CMBaseObjectRef o)
 	}
 	pthread_mutex_unlock(&all_streams_lock);
 	(void)stream_stop(o);
+	/* (out of the streams' list: the other stream's next start would look at this one after it is freed) */
+	for (int i = 0; i < 2; i++) {
+		if (all_streams[i] == o) {
+			all_streams[i] = NULL;
+		}
+	}
 	for (int i = 0; i < OUTPUTS; i++) {
 		if (s->out[i].config) {
 			CFRelease(s->out[i].config);
