@@ -1987,6 +1987,19 @@ hakios_exynos_cpufreq_gov_start(void)
 	(void)PE_parse_boot_argn("ocp_guard", &ocpg_mode, sizeof(ocpg_mode));
 	(void)PE_parse_boot_argn("ocp_guard_flags", &ocpg_flags, sizeof(ocpg_flags));
 	ocpg_mode = MIN(ocpg_mode, 4u);
+	if (ocpg_mode >= 2) {
+		/*
+		 * Levels 2-4 read the M3's OCP registers (S3_0_C15_C12_7 and four more). Samsung's own Exynos 9810 kernel never does:
+		 * exynos-ocp.c is built only with CONFIG_EXYNOS_OCP (drivers/soc/samsung/Makefile 49, Kconfig 162-167, "default n"),
+		 * and every 9810 config has it off (exynos9810-starlte_defconfig "# CONFIG_EXYNOS_OCP is not set", the stock
+		 * 4.9.118 config the same). On this SoC the driver is dead code; the 9820 (M4) driver that is built reaches the block
+		 * by MMIO (GCU_BASE_ADDR 0x1E4C0000), not these encodings. The first such read stopped the core for good on two S9s
+		 * (16.5: dab99986; 27: T3, 18 Nov 2026): it does not return, so nothing here can recover from it. Not done again.
+		 */
+		say("cpufreq_gov: ocp_guard=%u asked: levels 2-4 are retired (the M3's OCP registers: Samsung's 9810 kernel never "
+		    "reads them, and here the first read never returns); level 1, observing only\n", ocpg_mode);
+		ocpg_mode = 1;
+	}
 	if (boost_ms == 0) {
 		touch_big = touch_lit = 0;
 	}
@@ -2013,7 +2026,12 @@ hakios_exynos_cpufreq_gov_start(void)
 		                        .control_mc = 83000, .dt_min = 650000, .dt_max = 2314000, .dt_levels = big_dt,
 		                        .n_dt_levels = sizeof(big_dt) / sizeof(big_dt[0]) };
 	value = 0;
-	(void)PE_parse_boot_argn("cpufreq_ocp_regs", &ocp_regs, sizeof(ocp_regs));
+	if (PE_parse_boot_argn("cpufreq_ocp_regs", &value, sizeof(value)) && value != 0) {
+		/* retired: Samsung's 9810 kernel never touches these registers (CONFIG_EXYNOS_OCP off); here the first read never returned */
+		say("cpufreq_gov: cpufreq_ocp_regs=%u ignored: the M3's OCP registers are not read on this SoC\n", value);
+	}
+	ocp_regs = 0;
+	value = 0;
 	if (PE_parse_boot_argn("cpufreq_ocp", &value, sizeof(value)) && value != 0) {
 		ocp_on = ocp_pmic();
 	}

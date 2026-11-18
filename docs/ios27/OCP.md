@@ -19,6 +19,38 @@ kernel makes it.
 Line numbers are those of `Scion-Project/android_kernel_samsung_exynos9810` at `lineage-24.0` (the device tree
 `arch/arm64/boot/dts/exynos/exynos9810-starlte_eur_open_26.dts`, "the tree" below), unless another file is named.
 
+**18 November 2026: why the register read hangs, and what changed.** T3 (`ocp_guard=2`) hung on an S9 under iOS 27 exactly
+as `cpufreq_ocp_regs` had under 16.5: the "reading ... now" line, then nothing from that core. The premise behind levels 2-4,
+that "Samsung's kernel reads these registers fine", is wrong for this SoC: **Samsung's Exynos 9810 kernel never builds
+`exynos-ocp.c`.** It is compiled only with `CONFIG_EXYNOS_OCP` (`drivers/soc/samsung/Makefile` 48-49), which is `default n`
+(`drivers/soc/samsung/Kconfig` 162-167), and every 9810 configuration has it off: `# CONFIG_EXYNOS_OCP is not set` in
+`exynos9810-starlte_defconfig` (LineageOS `android_kernel_samsung_universal9810` lineage-17.1, line 4484), in TGP's
+`exynos9810-starlte_defconfig_STOCK` (4596), flar2's `starlte` (4592), `exynos-linux-stable/starlte` (4607), and in a
+stock 4.9.118 `SOC_EXYNOS9810=y` running configuration (`Zerone-Laboratories/ztOS` `modem/stock-kernel.config`, 4667).
+Nothing else in the 9810 tree names OCPTHROTTCTL, GCUCTL or OCPINTCTL. The `exynos-ocp` node in the device tree has no
+driver bound to it, so on a stock S9 the five encodings have never been executed by any shipping kernel. Where Samsung did
+ship the driver, the Exynos 9820 (`CONFIG_EXYNOS_OCP=y`, LineageOS `android_kernel_samsung_exynos9820` `exynos9820-*_defconfig`),
+the same registers are **MMIO** in a GCU block (`GCU_BASE_ADDR 0x1E4C0000`, OCPTHROTTCTL at +0x9F0, GCUCTL at +0x22C), not
+system registers; that base is the 9820's and nothing public gives one for the 9810, so no MMIO read is substituted here.
+
+What the read does on an M3 cannot be read from public source (the EL3 monitor and the EL2 uH image are closed). A trap at
+EL1 (undefined instruction) would panic XNU, which did not happen; a core that stops while the others run fits the access
+being trapped to a higher exception level (EL2 or EL3, both Samsung's on this phone and the same under Scion as under
+Linux: XNU runs at EL1 and calls PSCI by SMC) that does not return, or an encoding the M3 does not decode as a register at
+all. No ACTLR or access-enable bit for these encodings appears anywhere in Samsung's 9810 source, and none is set by its
+kernel: there is nothing Samsung does here that Scion skipped. Either way it is a path no Samsung kernel takes on this SoC.
+
+So Samsung's protection above 1794 MHz on the 9810 is **only**: the PMIC's CPU over-current warning (`s2mps18.c`, OCP_WARN1 =
+0x80 from `cpu_ocp_warn_en`), which acts in hardware, and the hotplug governor's per-core-count ceilings
+(`exynos-hotplug_governor.c` 1093-1110: `single_freq`/`dual_freq`/`triple_freq`/`quad_freq`) with the other M3s off by
+CPU_OFF. Stage one's software handling of the OCP block is not part of it. The fix (xnu `scion/xnu-12377` and this tree's
+16.5 driver): `ocp_guard=2..4` are clamped to level 1 with a line saying so, and `cpufreq_ocp_regs` is ignored; nothing in
+either kernel executes the five encodings any more. Level 1 (the PMIC warning, the PMU's M3 power state, SPI 213 counted)
+stays. The road to 2314 MHz is now the M3 offline path (CPU_OFF, CPU_ON again) plus the PMIC warning read back on, which is
+what Samsung's 9810 kernel actually stands on; stage two's "armed" condition will need redefining around that when the
+offline path exists (it refuses today in any case). The sections below describe the design as first built; the tests
+table is revised for the change.
+
 ## Contents
 
 - (1) The facts
@@ -314,10 +346,8 @@ test has failed: report the reason, do not repeat it with a higher level).
 |---|---|---|---|---|
 | T1 | `ocp_guard=1` | the attach line, the OCP_WARN1 line, the self-test line, the ten-second lines for five minutes | attached (0); the handler ran; `tests` going up one a minute, `interrupts` equal to `tests`; the M3s at 1794 MHz at most; record OCP_WARN1's value (0x80 or not) and the PMU power nibbles | **yes**: no M3 register, no write but to the GIC's pending bit |
 | T2 | `ocp_guard=1 ocp_guard_flags=1` | as T1, `buck2 limit` | as T1; `buck2 limit` stays 0 at 1794 MHz under the five-minute load of 17 November | yes |
-| T3 | `ocp_guard=2` | the "reading ... now" line, then the "read:" line within the second; the summaries going on | the "read:" line arrives; GCUCTL's interrupt "on"; the governor's summaries go on afterwards; record the five values. **If the "read:" line never comes, the registers are not reachable from this kernel: the rest of the plan stops here** | **no**: the S9+ hung on this read under 16.5; the owner present to pull the battery/force a restart and to take the boot argument out |
-| T4 | `ocp_guard=3`, idle five minutes | `level 3: ARMED`; ten-second lines | ARMED; `IRP 3` at 1794 MHz (and lower IRPs when the governor lowers the rate: 650 MHz 0, 1261 MHz 1); tests passing; no `DEAD` | owner present the first time (the first writes to the block), then yes |
-| T5 | `ocp_guard=3`, the five-minute load of 17 November | ten-second lines, `temp big` | no throttle expected; if one comes: the THROTTLE line, the M3s under the clip in the next summary, `released` going up once the load falls | yes, after T4 |
-| T6 | `ocp_guard=3`, an hour of normal use | the same | no DEAD; `interrupts` = `tests` + `throttles`; no reset | yes |
+| T3 (retry, revised) | `ocp_guard=2` (and, on 16.5, `cpufreq_ocp_regs=1`) | the "ocp_guard=2 asked: levels 2-4 are retired ..." line (16.5: also "cpufreq_ocp_regs=1 ignored"); then exactly T1's lines; **no** "reading the OCP registers" line | the retired line; level 1's lines as T1 (attach, OCP_WARN1 0x80, self-test passing, `tests` = `interrupts`); the governor's summaries every ten seconds for five minutes; the M3s at 1794 MHz at most; no hang. It proves the clamp, not the registers | **yes**: no M3 register is executed any more |
+| T4-T6 | (retired) | | Samsung's 9810 kernel never handles the OCP block in software; nothing to arm | |
 | T7 | `ocp_guard=4` | `stage two: ...` | says "more M3s on than Samsung allows ..." and the M3s stay at 1794 MHz: the rule refuses as it must | yes |
 | T8 | (only once the fork can take an M3 offline and start it again, a separate piece of work with its own tests) `ocp_guard=4` | `stage two: ALLOWED: 2314000`; THROTTLE lines; `temp big` | the M3s at 2314 MHz only with two on; any throttle stepping them down and releasing; 2314 never with three or four on; the temperature under 83 C | **no**: the owner present, short runs first |
 
