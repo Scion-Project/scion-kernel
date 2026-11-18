@@ -8,6 +8,9 @@ for f in sbin/launchd System/Library/CoreServices/SpringBoard.app/SpringBoard us
          System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e.01 \
          private/var/keybags/systembag.kb System/Library/xpc/launchd.plist System/Library/xpc/launchd-disabled.plist; do
     [[ -e $R/$f ]] && ok "present $f" || bad "missing $f"; done
+# the media library's directory (steps.d/45-media-library.sh): without it MusicLibrary raises and Settings and atc abort (docs/ios27/SETTINGS.md)
+M=$R/private/var/mobile/Media/iTunes_Control
+if [[ -d $M && $(stat -f %u "$M") == 501 ]]; then ok "iTunes_Control owned by mobile"; else info "no iTunes_Control owned by mobile (Settings and atc abort in MusicLibrary; steps.d/45-media-library.sh)"; fi
 # the wallpaper stand-in and the brightness library: the phone starts without them (docs/ios27/INSTALL-S9.md, section 4)
 for f in usr/lib/m.dylib usr/lib/b.dylib; do [[ -e $R/$f ]] && ok "present $f" || info "absent $f (optional: wallpaper stand-in / brightness slider)"; done
 # full-ness: nothing trimmed, symbols out
