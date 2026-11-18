@@ -27,6 +27,11 @@ In the repository:
   off, behind SCION_NATIVE_PAC) are UniXNU's own small patches (native-at-par-sync, zzx-pmap-sync-64bit-pa,
   native-pac-arm64-user-jop and a hunk of native-pac-keys, at a9ec98c and f65660d/a11553a, by their contributors), taken with
   their notice, LICENSES/BSD-2-Clause-Patent-UniXNU.txt, under BSD-2-Clause-Patent; 0098's macro name is ours.
+  From UniXNU at edd7aff (10 November 2026), the lines that put a page on the speculative queue in sweet_sr_read_src and
+  sweet_dyld_read_src of the fork's scion/xnu-12377 (boot-arg sweet_sr_spec, from native-4k-shared-region-slide.patch), and from
+  eb0a987 (11 November 2026) the ESR and FAR of the implementation-specific error panic in osfmk/arm64/sleh.c (from
+  platform-error-name-address.patch), by its contributors, under the same notice and licence; each place names its origin.
+  docs/UPSTREAM-SYNC-2026-11-18.md lists what else was read and why it was left.
 - mkbootimg.py (Android Open Source Project), devices/redwood/prebuilt/mkbootimg.py: Apache License 2.0.
 - Mu-Silicium / Project Mu (Project Silicium, Microsoft and contributors): devices/redwood/uefi/ holds a
   patch and files against it; their license applies to the derived parts (BSD-2-Clause-Patent).
