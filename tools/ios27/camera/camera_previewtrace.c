@@ -67,7 +67,9 @@ w_sinks(id self, SEL sel)
 			char id_[64], type[48], conn[240];
 
 			line_of(call0(p, "sinkID"), id_, sizeof(id_));
-			line_of(call0(p, "sourceDeviceType"), type, sizeof(type));
+			/* an int, not an object (phone 1, dylib -24: described as one, cameracaptured crashed at 0xa) */
+			snprintf(type, sizeof(type), "%d", class_respondsToSelector(object_getClass(p), sel_registerName("sourceDeviceType")) ?
+			    ((int (*)(id, SEL))objc_msgSend)(p, sel_registerName("sourceDeviceType")) : -1);
 			line_of(call0(p, "videoPreviewSinkConnectionConfiguration"), conn, sizeof(conn));
 			say("trace: preview: sink %ld: ID %s, source device type %s, video preview connection %.200s", i, id_, type, conn);
 		}
@@ -85,6 +87,33 @@ w_source_preview(id self, SEL sel)
 		say("trace: preview: the camera source's video preview sink connection: %s", c != nil ? "there" : "NONE");
 	}
 	return c;
+}
+
+/*
+ * -[FigCapturePreviewSinkPipeline initWithConfiguration:sourcePreviewOutput:sourceSensorRawPreviewOutput:
+ * sourceHueMapPreviewOutput:imageQueueSinkNode:graph:name:inferenceScheduler:captureDevice:previewTapDelegate:
+ * zoomPIPOverlayDelegate:personalPhotographerCaptureDelegate:sourceStillImageOutputsByPortType:] (15 arguments, all objects):
+ * whether the preview sink pipeline is made, from which output, and what it gives back.
+ */
+typedef id (*init15)(id, SEL, id, id, id, id, id, id, id, id, id, id, id, id, id);
+static init15 o_pipeline_init;
+
+static id
+w_pipeline_init(id self, SEL sel, id cfg, id preview, id raw, id hue, id iq, id graph, id name, id inference, id device, id tap,
+    id pip, id pp, id stills)
+{
+	char out[64] = "nil", node[64] = "nil", n[64] = "nil";
+	id made;
+
+	line_of(call0(preview, "name"), out, sizeof(out));
+	line_of(call0(call0(preview, "node"), "name"), node, sizeof(node));
+	line_of(name, n, sizeof(n));
+	say("trace: preview: a preview sink pipeline \"%s\" is made from output %s of \"%s\" (image queue sink %s)", n, out, node,
+	    iq != nil ? "given" : "nil");
+	made = o_pipeline_init(self, sel, cfg, preview, raw, hue, iq, graph, name, inference, device, tap, pip, pp, stills);
+	say("trace: preview: ... it is %s; the output now leads to %s", made != nil ? "made" : "NOT made (nil)",
+	    call0(call0(preview, "connection"), "input") != nil ? "a node" : "nothing");
+	return made;
 }
 
 static void
@@ -117,6 +146,20 @@ scioncam_trace_preview(void)
 		wrap("FigCaptureSessionParsedConfiguration", "parsedPreviewSinkConfigurations", (IMP)w_sinks, &o_sinks);
 		wrap("FigCaptureSessionParsedCameraSourceConfiguration", "videoPreviewSinkConnectionConfiguration",
 		    (IMP)w_source_preview, &o_source_preview);
+		{
+			const char *sel = "initWithConfiguration:sourcePreviewOutput:sourceSensorRawPreviewOutput:sourceHueMapPreviewOutput:"
+			    "imageQueueSinkNode:graph:name:inferenceScheduler:captureDevice:previewTapDelegate:zoomPIPOverlayDelegate:"
+			    "personalPhotographerCaptureDelegate:sourceStillImageOutputsByPortType:";
+			Class c = objc_getClass("FigCapturePreviewSinkPipeline");
+			Method m = c != Nil ? class_getInstanceMethod(c, sel_registerName(sel)) : NULL;
+
+			if (m != NULL && method_getNumberOfArguments(m) == 15) {
+				o_pipeline_init = (init15)method_getImplementation(m);
+				method_setImplementation(m, (IMP)w_pipeline_init);
+			} else {
+				say("trace: preview: -[FigCapturePreviewSinkPipeline initWithConfiguration:...] is not as on iOS 27.0.1: not traced");
+			}
+		}
 		say("trace: preview: the session's preview sinks traced");
 	}
 	pthread_mutex_unlock(&once_lock);

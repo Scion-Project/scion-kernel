@@ -165,6 +165,7 @@ no_live_photo_movie(void)
 	}
 	done = true;
 	no_packed10_still();
+	scioncam_single_frame_stills();         /* camera_stills.c */
 	replace_bool(c, "irisMovieCaptureEnabled", &o_iris_movie);
 	replace_bool(c, "momentCaptureMovieRecordingEnabled", &o_moment_movie);
 }
