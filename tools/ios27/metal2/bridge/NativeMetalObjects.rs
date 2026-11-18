@@ -621,10 +621,18 @@ pub unsafe extern "C" fn nmb_buffer_new_no_copy(device: *mut NmbDevice, pointer:
         // deallocator; no caller callback runs under this gate. Drop it before
         // returning/formatting a failure; GPU work and resource release never
         // take it. A device's unrelated APIs and other devices remain separate.
+        // Starbite: PanVK imports host memory in whole 16 KiB pages (minImportedHostPointerAlignment, Darwin's page),
+        // but CoreAnimation hands over its shared images (VM tag 51, read only) with lengths that are 4 KiB multiples
+        // (0x9000, 0xb000, 0xd000 ...): every one was refused as NotRepresentable (771 of 771 refusals in the phones' logs to 18 Nov, bursting
+        // as the app switcher opens; the likely cause of its black previews, not yet confirmed on a phone). The VM maps a
+        // whole page or none of it, so when the pointer is page aligned the rest of its last page is mapped too:
+        // import the length rounded up to the page. The buffer then reports the rounded length.
+        const PAGE: u64 = 0x4000;
+        let import = if (pointer as u64) & (PAGE - 1) == 0 { length.checked_add(PAGE - 1).ok_or("length")? & !(PAGE - 1) } else { length };
         let buffer = {
             let _gate = device.2.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            // SAFETY: as above.
-            unsafe { device.0.new_buffer_with_bytes_no_copy(memory, length, modes, None) }
+            // SAFETY: as above; the rounded tail lies in the same, mapped, page.
+            unsafe { device.0.new_buffer_with_bytes_no_copy(memory, import, modes, None) }
         };
         Ok(boxed(NmbBuffer(buffer.map_err(e("no-copy buffer"))?)))
     })
