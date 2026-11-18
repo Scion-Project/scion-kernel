@@ -14,6 +14,8 @@ its header addresses, cmdline, os_version and DTBH are kept; only the kernel
   info TEMPLATE
   pack TEMPLATE IMAGE OUT [--append PAYLOAD] [--ramdisk R] [--cmdline S] [--image-size-from-file]
   kernel BOOTIMG OUT      (write the kernel slot, e.g. the woa UEFI's bootshim + FD)
+  payload BOOTIMG OUT     (write the SWEETXNU payload sboot's image carries after the loader, as packed: for
+                           make-boot-image.sh --payload; prints its size and SHA-256, not its command line)
 """
 import argparse
 import hashlib
@@ -139,6 +141,16 @@ def kernel(args):
     print(f"{args.out}: {len(k)} bytes")
 
 
+def payload(args):
+    k = parse(Path(args.boot).read_bytes())["kernel"]
+    offs = [o for o in range(0, len(k), 4096) if k[o:o + 8] == b"SWEETXNU"]
+    if len(offs) != 1:
+        raise SystemExit(f"{args.boot}: {len(offs)} SWEETXNU payloads at 4 KiB offsets of the kernel slot (want exactly one)")
+    p = k[offs[0]:]
+    Path(args.out).write_bytes(p)
+    print(f"{args.out}: {len(p)} bytes from kernel slot offset {offs[0]:#x}, sha256 {hashlib.sha256(p).hexdigest()}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -156,8 +168,12 @@ def main():
     k = sub.add_parser("kernel")
     k.add_argument("boot")
     k.add_argument("out")
+    q = sub.add_parser("payload")
+    q.add_argument("boot")
+    q.add_argument("out")
     args = ap.parse_args()
-    {"info": lambda: info(args.template), "pack": lambda: pack(args), "kernel": lambda: kernel(args)}[args.cmd]()
+    {"info": lambda: info(args.template), "pack": lambda: pack(args), "kernel": lambda: kernel(args),
+     "payload": lambda: payload(args)}[args.cmd]()
 
 
 if __name__ == "__main__":

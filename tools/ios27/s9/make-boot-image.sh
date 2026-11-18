@@ -39,6 +39,10 @@
 #                   build marked safe (the boot-loop guard starts it after three failed boots)
 #   [--scion-chain-sboot]   scion: also append the sboot loader above with this payload as the entry "Starbite" (its menus,
 #                   store, recovery and fastboot one menu entry away; the payload is then in BOOT twice)
+#   [--payload P]   pack an existing SWEETXNU payload exactly as it is instead of making one: no --kernel, --donor-adt,
+#                   --cmdline, --inject-record, --camera-node, --firmware or --canvas, no sweetepoch= added; the payload's own
+#                   command line is used as it stands. For a new loader around the payload of an image that already boots
+#                   (`starlte-pack-boot.py payload BOOTIMG OUT` takes it out of one). Its line is not printed.
 # What it does (the steps the project's test images are made with): strip -x copy of the kernel; the S9's Apple device tree
 # (mkadt_starlte.py --big --bank2 --bank2-mb 1536 --iphone11, then adt-extra-ram.py: 8 cores, the 1.5 GiB window of the second DRAM
 # bank, seven extra RAM ranges of the first; adt-firmware.py, see --firmware; camera/adt-isp-node.py, see --camera-node); mkpayload.py (kernel + ADT + command line -> SWEETXNU payload, padded to 4 KiB);
@@ -52,7 +56,7 @@ PY=${PY:-python3}
 KERNEL= DONOR= TEMPLATE= LINE= OUT=$ROOT/out/xnu-boot-ios27.img LOADER=$ROOT/xnuloader/sboot/out/xnu_boot.Image
 LINEFILE=$T27/cmdline/starlte-rc.txt
 RECORD=default CAMERA_NODE=auto FIRMWARE=auto CANVAS=
-LOADER_KIND=sboot SCION_BOOT= SCION_CHAIN=0 SCION_ENTRIES=()
+LOADER_KIND=sboot SCION_BOOT= SCION_CHAIN=0 SCION_ENTRIES=() PAYLOAD=
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--kernel) KERNEL=$2; shift ;; --donor-adt) DONOR=$2; shift ;; --template) TEMPLATE=$2; shift ;;
@@ -65,14 +69,21 @@ while [ $# -gt 0 ]; do
 	--scion-boot) SCION_BOOT=$2; shift ;;
 	--scion-entry) SCION_ENTRIES+=("$2"); shift ;;
 	--scion-chain-sboot) SCION_CHAIN=1 ;;
-	-h | --help) sed -n '3,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--payload) PAYLOAD=$2; shift ;;
+	-h | --help) sed -n '3,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "make-boot-image: unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
 done
 die() { echo "make-boot-image: $*" >&2; exit 1; }
-[ -f "$KERNEL" ] || die "--kernel: no kernel at '$KERNEL' (OS_PROFILE=ios-27 make kernel)"
-[ -f "$DONOR" ] || die "--donor-adt: no device tree at '$DONOR' (tools/ios27/s9/fetch-apple-inputs.sh)"
+if [ -n "$PAYLOAD" ]; then
+	[ -f "$PAYLOAD" ] || die "--payload: no file at '$PAYLOAD'"
+	[ -z "$KERNEL$DONOR" ] || die "--payload replaces --kernel and --donor-adt: give one or the other"
+	[ "$(head -c 8 "$PAYLOAD")" = SWEETXNU ] || die "--payload: $PAYLOAD is not a SWEETXNU payload"
+else
+	[ -f "$KERNEL" ] || die "--kernel: no kernel at '$KERNEL' (OS_PROFILE=ios-27 make kernel)"
+	[ -f "$DONOR" ] || die "--donor-adt: no device tree at '$DONOR' (tools/ios27/s9/fetch-apple-inputs.sh)"
+fi
 [ -f "$TEMPLATE" ] || die "--template: no boot image at '$TEMPLATE' (tools/ios27/s9/flash.sh pull-template)"
 case "$LOADER_KIND" in
 sboot)
@@ -89,6 +100,23 @@ scion)
 esac
 case "$CANVAS" in '' | [1-9]*x[1-9]*) ;; *) die "--canvas WxH (got '$CANVAS')" ;; esac
 case "$CANVAS" in *[!0-9x]* | *x*x*) die "--canvas WxH (got '$CANVAS')" ;; esac
+mkdir -p "$(dirname "$OUT")"
+W=$(mktemp -d "${TMPDIR:-/tmp}/bootimg.XXXXXX"); trap 'rm -rf "$W"' EXIT
+if [ -n "$PAYLOAD" ]; then
+	"$PY" - "$PAYLOAD" "$W/payload.bin" <<'PY'
+import hashlib, sys
+from pathlib import Path
+b = Path(sys.argv[1]).read_bytes()
+line = b[0x48:0x48 + 608]
+assert b[:8] == b'SWEETXNU' and len(b) > 0x2a8, 'not a SWEETXNU payload'
+assert line[607] == 0, 'the payload\'s command line is not terminated'
+n = len(line.split(b'\0')[0])
+Path(sys.argv[2]).write_bytes(b + b'\0' * (-len(b) % 4096))
+print(f'make-boot-image: --payload: {len(b)} bytes, sha256 {hashlib.sha256(b).hexdigest()}; its command line {n} of 607 bytes '
+      f'(sha256 {hashlib.sha256(line.split(bytes(1))[0]).hexdigest()}), used as it is')
+PY
+	n=; LINE=
+else
 # the sensor hub's image for the device tree (firmware.sh: complete and checked, or no image)
 SHUB_FILES=
 case "$FIRMWARE" in
@@ -126,8 +154,6 @@ if [ -n "$CANVAS" ]; then
 fi
 n=$(printf '%s' "$LINE" | wc -c | tr -d ' ')
 [ "$n" -le 607 ] || die "the command line is $n bytes; the payload holds 607 (it would be cut)"
-mkdir -p "$(dirname "$OUT")"
-W=$(mktemp -d "${TMPDIR:-/tmp}/bootimg.XXXXXX"); trap 'rm -rf "$W"' EXIT
 cp "$KERNEL" "$W/kernel.x"; xcrun strip -x "$W/kernel.x"
 "$PY" "$T27/mkadt_starlte.py" --big --bank2 --bank2-mb 1536 --iphone11 "$DONOR" ${CANVAS:+--canvas "$CANVAS"} "$W/base.adt" >/dev/null
 "$PY" "$T27/adt-extra-ram.py" "$W/base.adt" "$W/ram.adt"
@@ -151,6 +177,7 @@ if packed != sys.argv[2]:
 p.write_bytes(b + b'\0' * (-len(b) % 4096))
 print(f'command line: {len(packed)} of 607 bytes, read back from the payload')
 PY
+fi
 head -c 4096 /dev/zero > "$W/ramdisk.bin"
 if [ "$LOADER_KIND" = sboot ]; then
 	"$PY" "$T27/starlte-pack-boot.py" pack "$TEMPLATE" "$LOADER" "$OUT" --append "$W/payload.bin" --ramdisk "$W/ramdisk.bin" | tail -1
@@ -170,4 +197,4 @@ else
 	echo "make-boot-image: scion-boot loader: NOT YET RUN ON A PHONE (docs/ios27/SCION-LOADER.md: the first test, and the way back)"
 fi
 shasum -a 256 "$OUT" | tee "$OUT.sha256"
-echo "command line ($n bytes): $LINE"
+[ -n "$PAYLOAD" ] || echo "command line ($n bytes): $LINE"
