@@ -18,6 +18,8 @@ void scioncam_trace_state(void);
    (camera_flowtrace.c); scioncam_flow_emit is called by camera27.c for every sample a node output emits */
 void scioncam_trace_flow(void);
 void scioncam_flow_emit(void *output, void *sample_buffer);
+/* camera_flownext.c: at an output's first sample, the node it leads to, said, and that node's render method traced */
+void scioncam_flow_next(void *output, const char *node_class, const char *output_name);
 
 /* cameracaptured, always (not the trace): a nil layout of the main display taken as the client in the foreground
    (camera_layout.c) */
