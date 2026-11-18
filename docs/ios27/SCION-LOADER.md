@@ -54,6 +54,10 @@ identical to sboot's, build the loader with `make PLATFORM=starlte LDR_OS_TOKENS
 18 November (321 bytes; 1018 of 1024 with the built-ins) those 54 bytes leave out cam_switch, sgu_irq, decmpfs_lz4
 and sweetatpath.
 
+## scion_guard
+
+The loader appends `scion_guard=<addr>` to the boot line: the address of the guard record. The kernel acknowledges a successful boot once SpringBoard has run for 20 seconds, and that acknowledgement resets the loader's strike count. Three automatic starts without an acknowledgement, and the fourth goes to recovery. The kernel side is [xnu PR 53](https://github.com/Scion-Project/xnu/pull/53) (merged 18 November 2026).
+
 ## The first test on the phone
 
 The plan is scion-boot's
