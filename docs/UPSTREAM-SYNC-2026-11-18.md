@@ -47,6 +47,7 @@ the commit we took 0096-0098 from, is only on those archive branches now; the co
 | RamBlock | idea only (`userland/src/var_store.c`, `tools/var-seed.py`) | `00a6e5d` (13 Nov) | persistent APFS root containers, concurrent direct mode, one-write bitmap reset, solid-state media | their kext's code paths; our store is a different implementation of the idea | not applicable |
 | GopFramebuffer | never | `b0d812d` (11 Nov) | macOS display attributes, half-float frames, per-frame counters | UEFI GOP framebuffer kext; Scion has its own framebuffer | not applicable |
 | UniXNU-sm8550-common | never | `2dc650c` (7 Nov) | SM8550 SMMU, video clocks, Bluetooth GENI UART | Qualcomm SM8550 | not applicable |
+| UniXNU's other repositories (UniXNU-sheng, uefi-sheng, ShengNovatekTouch, ShengHidInput, ShengPreflight, Ath12kWifi, QcaBluetooth, QcomDwc3, QcomBaseband, QcomGeniSpi, Adreno740, AdrenoPM4, AdrenoFirmware, AirNir, VerifiedRoot, ArmSmmu4K, VirtioMmioBlock, VirtioMmioConsole, ArmVirtPlatform) | never | pushed 24 Oct to 18 Nov | the Sheng phone (SM8550: touch, HID, UFS, Wi-Fi 7, Bluetooth, USB, modem), Adreno GPUs, their VM devices and verified root | Qualcomm, Adreno or their virtual machine; Adreno/AIR work is the Metal stack's | not applicable |
 | ShengUfs | read at `f2d6a4a` (facts, `drivers/storage/ufs/hakios.ufshc.h`) | `f020bd6` (15 Nov) | 25 commits: up to eight commands at once, Linux ufshcd's queueing, spinning through short waits, write caching, APFS container windows | our driver already keeps 31 slots of its own list (`hakios.ufshc.c` lines 13-34); the window and store work is theirs | already have (concurrency); rest not applicable |
 
 UniXNU's licence: `BSD-2-Clause-Patent` for UniXNU itself (LICENSES/BSD-2-Clause-Patent-UniXNU.txt); its kext repositories say
@@ -72,8 +73,8 @@ UniXNU's licence: `BSD-2-Clause-Patent` for UniXNU itself (LICENSES/BSD-2-Clause
 | Take | Repository | Pull request | Builds | Run on a phone |
 |---|---|---|---|---|
 | neighbour pages of a 16 KiB slide page on the speculative queue (`sweet_sr_spec=1`, off) | xnu | [Scion-Project/xnu#50](https://github.com/Scion-Project/xnu/pull/50) | STARLTE and FRANKEL: KERNEL OK | no |
-| the Darwin assembler's `;` in `starlte_cpu_clock_report` | xnu | (being opened) | (building) | no |
-| ESR and FAR in the implementation-specific error panic | xnu | (being opened) | (building) | no |
+| the Darwin assembler's `;` in `starlte_cpu_clock_report` | xnu | [Scion-Project/xnu#51](https://github.com/Scion-Project/xnu/pull/51) | STARLTE and FRANKEL: KERNEL OK | no (the function has no caller) |
+| ESR and FAR in the implementation-specific error panic | xnu | [Scion-Project/xnu#52](https://github.com/Scion-Project/xnu/pull/52) | STARLTE and FRANKEL: KERNEL OK | no |
 
 ## How this was read
 
