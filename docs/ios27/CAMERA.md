@@ -277,12 +277,24 @@ space properties are not 0, wants that output's entry to equal `+[BWVideoFormat 
 of the node's `_colorSpaceProperties` (a dictionary of colour attachments); anything else returns -12780 and the session
 fails. Apple's ISP plug-in answers the property itself with each output's colour attachments; the graph never sets it.
 
-`tools/ios27/camera/camera_colour.c` (always on in cameracaptured with the kernel's camera, not the trace) wraps
-`allocateOrReuseBufferPoolsFromSourceNode:` to know the node on that thread, and `camera_device.c` asks it for the answer when
-the graph has set none: the node's own attachments for each output. Said once: `colour: the stream's colour info for the source
-node's check: colour space properties N, each output {...}`. The pictures keep `camera_device.c`'s own attachments (BT.601
-matrix, BT.709 primaries and transfer); if the node wants another colour space (P3), the preview's colours are off until
-those follow (a known gap below). **Not run on a phone yet** (dylib `-11`). All names it uses are in 24B156's CMCapture too.
+Two answers were tried on phone 1 the same night, both with the same loop. Dylib `-11`'s wrap of
+`allocateOrReuseBufferPoolsFromSourceNode:` refused itself (the method returns an `OSStatus`, an int, which its check did not
+allow). Dylib `-13` (00:15) answered every output with `pixelBufferAttachmentsForColorSpaceProperties:` of the node's
+`_colorSpaceProperties`, which was **0** (and the attachments of 0 are nil), and the sessions still failed: the output that
+fails has properties that are not the node's. In 24A446 the scalers' properties are the node's, and the still image output's
+come from its own method (firmware still image output, 10-bit, ...); the per-output methods are direct methods, out of the
+Objective-C runtime's reach, so which output and which properties could not be read from outside.
+
+`tools/ios27/camera/camera_colour.c` (dylib `-14`, always on in cameracaptured with the kernel's camera, not the trace) answers
+for any output and any properties: it wraps `+[BWVideoFormat pixelBufferAttachmentsForColorSpaceProperties:]` to remember,
+per thread, what it gave last (unchanged), and every output's entry of the stream's colour info is one object, a dictionary
+whose `count`, `objectForKey:` and `keyEnumerator` are those of the attachments last given on the asking thread. The check
+asks for the attachments right before it compares, so the comparison finds them equal. When the update still fails it says
+so: `colour: the source node's update FAILED (N): node colour space properties P; attachments asked K time(s) (...), the
+colour info's entries compared C time(s)` (C 0 with K > 0 would mean the comparison is not `isEqualToDictionary:` on the
+entry; K 0 that the failure is elsewhere in `_bringStreamUpToDate`). The pictures keep `camera_device.c`'s own attachments
+(BT.601 matrix, BT.709 primaries and transfer); if the still image output wants another colour space, the photograph's
+colours are off until those follow (a known gap below). **Not run on a phone yet.** Every name it uses is in 24B156's CMCapture too.
 
 ### Where the pictures stop: the flow trace
 
@@ -304,7 +316,7 @@ drops: its reason); the sink renders but the app shows nothing (the image queue,
 | The Live Photo movie | `camera_refuse.c` | the movie file sink's scaler was built on a nil video capture output: aborted | a video capture output for Photo mode (the source pipeline's), and the sound around the shutter (no audio server on this root) |
 | Formats behind a front-end scaler (1080p30, 720p30, 1920 x 1440) | `camera_formats.c` | cameracaptured threw sizing an output whose pixel format it did not know (with `IntermediateTap` missing, abort 1 above) | offer `Video-FullSensor-FES-30` again now that `IntermediateTap` is listed, and check the outputs' pixel formats |
 | `IntermediateTap` frames | `camera_formats.c`, `camera_device.c` | listed (BGRA) so the graph can weigh it, but no frame is made for it | deliver it when the graph enables it (the flow trace says whether it does) |
-| P3 colour on the pictures | `camera_device.c` | the frames carry BT.709 attachments whatever the node's colour space | set each picture's attachments from the node's `pixelBufferAttachmentsForColorSpaceProperties:` and convert the colours |
+| The outputs' real colour info | `camera_colour.c`, `camera_device.c` | the stream's `VideoOutputsColorInfo` answers whatever the graph's check asks for, and the frames carry BT.709 attachments whatever the output's colour space | answer each output's own colour space (as Apple's ISP plug-in does) and convert the pictures' colours to it |
 | SIFR (the iPhone sensor's second exposure) | `camera_formats.c` | the S9's sensors have none; the formats say SIFR only so that N104's names match | nothing to restore |
 
 ### The trace
