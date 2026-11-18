@@ -309,6 +309,12 @@ boot log names them (`STARLTE BOOTARGS: WARNING`).
   (`sweetfg`), the PMIC's clock (`rtc_pmic`) and the heat protection (`tmu=3`): written on 14 and 17 November with no
   phone attached, and built. **All of the defaults on at once has been built and not yet run on a phone.**
 
+## sweet_sr_spec (on by default on the S9 since 18 November 2026)
+
+`sweet_sr_spec` puts the neighbour source pages that the shared-region and dyld pagers read onto the speculative queue, so they can be reclaimed instead of staying resident. It is on by default on the Galaxy S9 (STARLTE) since [xnu PR 55](https://github.com/Scion-Project/xnu/pull/55); `sweet_sr_spec=0` turns it off. Other machines stay off by default. The change comes from UniXNU's `native-4k-shared-region-slide.patch` (BSD-2-Clause-Patent lines).
+
+On one S9 boot, wired memory was 709 MiB with it on and 916 MiB without. That is one boot each way, not a clean A/B comparison.
+
 ## Known problems
 
 - **It can hang hard.** On the test phones the kernel has a few times stopped dead some minutes into a session, console included,
