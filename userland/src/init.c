@@ -1500,6 +1500,20 @@ test_writable(void)
 	list_tree("/tmp/t", 1);
 }
 
+#ifndef WNOHANG
+#define WNOHANG         1
+#endif
+
+/* The children started in the background that have ended since: taken back, not left as zombies to the end of the list */
+static void
+reap_background(void)
+{
+	int status;
+
+	while (wait4(-1, &status, WNOHANG, NULL) > 0) {
+	}
+}
+
 /* Run one line of /etc/rc: words separated by blanks, no quoting; a last word "&" = do not wait. */
 static void
 run_command(char *line)
@@ -1513,6 +1527,7 @@ run_command(char *line)
 	struct stat st;
 	pid_t pid;
 
+	reap_background();
 	for (char *p = line; *p && argc < 63;) {
 		while (*p == ' ' || *p == '\t') {
 			*p++ = 0;
@@ -1555,6 +1570,7 @@ run_command(char *line)
 		}
 		for (int left = seconds * 5; left > 0; left--) {
 			usleep(200000);
+			reap_background();
 		}
 		return;
 	}
