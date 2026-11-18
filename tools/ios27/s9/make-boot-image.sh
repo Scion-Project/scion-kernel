@@ -29,10 +29,22 @@
 #                   say the same (sweetfb_lw=828 sweetfb_lh=1702), and this refuses a line whose sweetfb_lw/sweetfb_lh differ.
 #   [--loader I]    default xnuloader/sboot/out/xnu_boot.Image (tools/ios27/s9/build-loader.sh)
 #   [--out O]       default out/xnu-boot-ios27.img (out/ is not in git; the image holds your IPSW's device identity: never share it)
+#   [--loader-kind sboot|scion]   sboot (the default, unchanged): the loader above with the payload appended. scion: the
+#                   second-stage loader of Scion-Project/scion-boot-exynos9810 (loader/, docs/STATUS.md there), which
+#                   checks the SHA-256 of what it starts and has a menu, a boot-loop guard and a crash screen; NOT YET RUN
+#                   ON A PHONE (docs/ios27/SCION-LOADER.md). The payload becomes its default entry "iOS 27".
+#   [--scion-boot D]   scion: a checkout of scion-boot-exynos9810 where `make PLATFORM=starlte loader` has run
+#                   (D/build/starlte/scion-loader.bin, D/tools/mkloaderimg.py)
+#   [--scion-entry NAME:xnu:FILE[:safe]]   scion: one more entry (repeatable), e.g. an iOS 16.5 payload or a known-good
+#                   build marked safe (the boot-loop guard starts it after three failed boots)
+#   [--scion-chain-sboot]   scion: also append the sboot loader above with this payload as the entry "Starbite" (its menus,
+#                   store, recovery and fastboot one menu entry away; the payload is then in BOOT twice)
 # What it does (the steps the project's test images are made with): strip -x copy of the kernel; the S9's Apple device tree
 # (mkadt_starlte.py --big --bank2 --bank2-mb 1536 --iphone11, then adt-extra-ram.py: 8 cores, the 1.5 GiB window of the second DRAM
 # bank, seven extra RAM ranges of the first; adt-firmware.py, see --firmware; camera/adt-isp-node.py, see --camera-node); mkpayload.py (kernel + ADT + command line -> SWEETXNU payload, padded to 4 KiB);
 # starlte-pack-boot.py (the loader as the image's kernel, the payload appended, a one-page empty ramdisk).
+# With --loader-kind scion the last step differs: scion-boot's mkloaderimg.py makes the kernel slot (the loader, then each
+# entry as an SCN2 record with its SHA-256), starlte-pack-boot.py packs it with --image-size-from-file.
 # Nothing here touches a phone.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd); T27=$ROOT/tools/ios27
@@ -40,6 +52,7 @@ PY=${PY:-python3}
 KERNEL= DONOR= TEMPLATE= LINE= OUT=$ROOT/out/xnu-boot-ios27.img LOADER=$ROOT/xnuloader/sboot/out/xnu_boot.Image
 LINEFILE=$T27/cmdline/starlte-rc.txt
 RECORD=default CAMERA_NODE=auto FIRMWARE=auto CANVAS=
+LOADER_KIND=sboot SCION_BOOT= SCION_CHAIN=0 SCION_ENTRIES=()
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--kernel) KERNEL=$2; shift ;; --donor-adt) DONOR=$2; shift ;; --template) TEMPLATE=$2; shift ;;
@@ -48,7 +61,11 @@ while [ $# -gt 0 ]; do
 	--camera-node) CAMERA_NODE=$2; shift ;;
 	--firmware) FIRMWARE=$2; shift ;;
 	--canvas) CANVAS=$2; shift ;;
-	-h | --help) sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--loader-kind) LOADER_KIND=$2; shift ;;
+	--scion-boot) SCION_BOOT=$2; shift ;;
+	--scion-entry) SCION_ENTRIES+=("$2"); shift ;;
+	--scion-chain-sboot) SCION_CHAIN=1 ;;
+	-h | --help) sed -n '3,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "make-boot-image: unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -57,7 +74,19 @@ die() { echo "make-boot-image: $*" >&2; exit 1; }
 [ -f "$KERNEL" ] || die "--kernel: no kernel at '$KERNEL' (OS_PROFILE=ios-27 make kernel)"
 [ -f "$DONOR" ] || die "--donor-adt: no device tree at '$DONOR' (tools/ios27/s9/fetch-apple-inputs.sh)"
 [ -f "$TEMPLATE" ] || die "--template: no boot image at '$TEMPLATE' (tools/ios27/s9/flash.sh pull-template)"
-[ -f "$LOADER" ] || die "no loader at $LOADER (tools/ios27/s9/build-loader.sh)"
+case "$LOADER_KIND" in
+sboot)
+	[ -z "$SCION_BOOT" ] && [ "$SCION_CHAIN" = 0 ] && [ ${#SCION_ENTRIES[@]} = 0 ] ||
+		die "--scion-boot, --scion-entry and --scion-chain-sboot go with --loader-kind scion"
+	[ -f "$LOADER" ] || die "no loader at $LOADER (tools/ios27/s9/build-loader.sh)" ;;
+scion)
+	SL=$SCION_BOOT/build/starlte/scion-loader.bin
+	[ -n "$SCION_BOOT" ] && [ -f "$SL" ] && [ -f "$SCION_BOOT/build/starlte/scion-loader.image-end" ] &&
+		[ -f "$SCION_BOOT/tools/mkloaderimg.py" ] ||
+		die "--loader-kind scion: --scion-boot DIR, a scion-boot-exynos9810 checkout after make PLATFORM=starlte loader"
+	[ "$SCION_CHAIN" = 0 ] || [ -f "$LOADER" ] || die "--scion-chain-sboot: no loader at $LOADER (tools/ios27/s9/build-loader.sh)" ;;
+*) die "--loader-kind sboot or scion (got '$LOADER_KIND')" ;;
+esac
 case "$CANVAS" in '' | [1-9]*x[1-9]*) ;; *) die "--canvas WxH (got '$CANVAS')" ;; esac
 case "$CANVAS" in *[!0-9x]* | *x*x*) die "--canvas WxH (got '$CANVAS')" ;; esac
 # the sensor hub's image for the device tree (firmware.sh: complete and checked, or no image)
@@ -123,6 +152,22 @@ p.write_bytes(b + b'\0' * (-len(b) % 4096))
 print(f'command line: {len(packed)} of 607 bytes, read back from the payload')
 PY
 head -c 4096 /dev/zero > "$W/ramdisk.bin"
-"$PY" "$T27/starlte-pack-boot.py" pack "$TEMPLATE" "$LOADER" "$OUT" --append "$W/payload.bin" --ramdisk "$W/ramdisk.bin" | tail -1
+if [ "$LOADER_KIND" = sboot ]; then
+	"$PY" "$T27/starlte-pack-boot.py" pack "$TEMPLATE" "$LOADER" "$OUT" --append "$W/payload.bin" --ramdisk "$W/ramdisk.bin" | tail -1
+else
+	# scion-boot's loader: the payload as its default entry, then --scion-entry ones, then (asked) sboot with the payload;
+	# everything must end below S-Boot's initrd at 0x89000000 (load at 0x80080000)
+	ENTRIES=(--entry "iOS 27:xnu:$W/payload.bin:default")
+	for e in ${SCION_ENTRIES[@]+"${SCION_ENTRIES[@]}"}; do ENTRIES+=(--entry "$e"); done
+	if [ "$SCION_CHAIN" = 1 ]; then
+		"$PY" "$T27/starlte-pack-boot.py" pack "$TEMPLATE" "$LOADER" "$W/sboot.img" --append "$W/payload.bin" --ramdisk "$W/ramdisk.bin" >/dev/null
+		"$PY" "$T27/starlte-pack-boot.py" kernel "$W/sboot.img" "$W/sboot-slot.bin" >/dev/null
+		ENTRIES+=(--entry "Starbite:image:$W/sboot-slot.bin")
+	fi
+	"$PY" "$SCION_BOOT/tools/mkloaderimg.py" --loader "$SL" --image-end "$(cat "$SCION_BOOT/build/starlte/scion-loader.image-end")" \
+		"${ENTRIES[@]}" --max-bytes 0x8f80000 -o "$W/slot.bin" | sed 's/^/make-boot-image: /'
+	"$PY" "$T27/starlte-pack-boot.py" pack "$TEMPLATE" "$W/slot.bin" "$OUT" --ramdisk "$W/ramdisk.bin" --image-size-from-file | tail -1
+	echo "make-boot-image: scion-boot loader: NOT YET RUN ON A PHONE (docs/ios27/SCION-LOADER.md: the first test, and the way back)"
+fi
 shasum -a 256 "$OUT" | tee "$OUT.sha256"
 echo "command line ($n bytes): $LINE"

@@ -12,7 +12,7 @@ its header addresses, cmdline, os_version and DTBH are kept; only the kernel
 (and ramdisk) are replaced.
 
   info TEMPLATE
-  pack TEMPLATE IMAGE OUT [--append PAYLOAD] [--ramdisk R] [--cmdline S]
+  pack TEMPLATE IMAGE OUT [--append PAYLOAD] [--ramdisk R] [--cmdline S] [--image-size-from-file]
   kernel BOOTIMG OUT      (write the kernel slot, e.g. the woa UEFI's bootshim + FD)
 """
 import argparse
@@ -91,6 +91,12 @@ def pack(args):
         image_size = (len(kernel) + 0x10000 + 0xfff) & ~0xfff
         struct.pack_into("<Q", kernel, 16, max(image_size, stock[1]))
         stock = image_header(kernel)
+    elif args.image_size_from_file:
+        # An IMAGE that already carries what follows it (scion-boot's loader with its SCN2 records): the header's
+        # image_size covers the whole file, as --append does.
+        image_size = (len(kernel) + 0x10000 + 0xfff) & ~0xfff
+        struct.pack_into("<Q", kernel, 16, max(image_size, stock[1]))
+        stock = image_header(kernel)
     ramdisk = Path(args.ramdisk).read_bytes() if args.ramdisk else bytes(4096)
 
     page, align = tpl["page"], tpl["align"]
@@ -145,6 +151,8 @@ def main():
     p.add_argument("--append")
     p.add_argument("--ramdisk")
     p.add_argument("--cmdline")
+    p.add_argument("--image-size-from-file", action="store_true",
+                   help="set the Image header's image_size from the file (an IMAGE with its payload already appended)")
     k = sub.add_parser("kernel")
     k.add_argument("boot")
     k.add_argument("out")
