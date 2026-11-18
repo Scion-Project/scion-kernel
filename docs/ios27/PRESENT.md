@@ -314,3 +314,67 @@ whether the framebuffer is holding a frame (the self-check line, the nowait coun
 for, while swiping: `A5XELTE FB prof2: ticks avg ~16667 us`; `tick slept for the GPU avg` near 0; the `nowait:` line with
 `frames shown done` = the frames, `SELF-CHECK 0`, `GPU slow 0`. Black screen or no swaps after the logo: note whether a
 `SELF-CHECK` line came; the same boot line without `sweetfb_nowait=1` is the fallback.
+
+## 7. Frame info, and the notification backboardd registers (`sweetfb_frameinfo=N`, built; NOT run on a phone)
+
+**The measurement** (phone 1, 17 November, the `sp2` boot: home-screen swipes, `sweetfb_trace=70 sweetfb_prof=1`, the
+`FBT:` events read by a small parser of the `S`/`R`/`F`/`G`/`P`/`T` events): CoreAnimation's SwapEnd calls come every
+33.4 ms at the median (average 38.8, 91 periods), a clean two-refresh cadence; the SwapEnd hold is 0 ms at the median
+(average 4.8); recorded to GPU done 13.2 ms, present 1.9 ms, recorded to shown 15.1 ms; 89 of 92 swaps shown. The same
+boot's burst sampler on backboardd (`smpburst=backboardd`, every 20 ms for 31 s of swipes, 1482 samples, symbolicated
+against 24A446's shared cache) says where its render thread (`CA::WindowServer::IOMFBServer::thread_body`, the one that
+calls SwapEnd) was: 59 % waiting in its run loop for the display timer, 15 % in SwapEnd, 26 % running. Its renders come
+from the display timer (`display_timer_callback` → `IOMFBServer::vsync_callback` → `Server::render_for_time`). The other
+CoreAnimation threads were idle. So the window server is mostly not blocked in the stand-in: it renders when it has
+something new, about every second refresh.
+
+**Notification type 9 is not a frame callback.** The one IOMFB notification backboardd registers with the stand-in
+(`SWEET FB: backboardd notifications type 9 on`) is ReqDCPReset: in 24A446's IOMobileFramebuffer,
+`IOMobileFramebufferEnableReqDCPResetNotifications` calls the enable-notifications entry with type 9 (the vsync one uses 5),
+and `NotifyCallbackFuncs[9]` is `ReqDCPResetNotifyFunc`, which logs its name and calls CoreAnimation's
+`IOMFBServer::req_dcp_reset_callback` with no data: a request from the display coprocessor to be reset. The table: 0
+HotPlug, 1 Power, 2 none, 3 FrameInfo, 4 CRC, 5 Vsync, 6 NeedSwap, 7 Relbufinfo, 8 ProxSensingNeeded, 9 ReqDCPReset, 10
+APTQuantaSwitch, 11 GenlockError (NIGHT.md has the same list). It must never be sent; nothing here sends it.
+
+**Frame info is how CoreAnimation learns when a swap reached the panel.** In 24A446's QuartzCore,
+`IOMFBDisplay::add_timing` (it writes the display timings CoreAnimation's clients read, through `flush_timings_locked`) has
+one caller, `IOMFBServer::frame_info_callback`, which reads `Presentation_time`, `Requested_presentation` and
+`Last_Fence_or_Event_Time` from IOMFB's frame-info dictionary, passes the presentation time to `add_timing`, and forwards
+the frame's timing to clients (`forward_frame_info_callback`). The window server asks for frame info only when
+`IOMobileFramebufferSupportedFrameInfo` returns a key list (`AccelServer`'s constructor), and the stand-in answered its
+selector 74 with a count of 0: backboardd never asked, which is why it registered no type 3. The protocol (IOMFB's
+`InfoKeyInitialize`, `kern_SupportedFrameInfo`, `kern_ChangeFrameInfo`, `figure_frame_info_mask`, `FrameInfoNotifyFunc`,
+`kern_egest_timestamp`; QuartzCore's `enable_frame_info_tag_list`):
+
+| step | what |
+|---|---|
+| selector 74 SupportedFrameInfo | scalar in: a key's index; scalars out: the number of keys, a mode (1: a shared data queue instead of notifications); 64 bytes out: the key's name. Index 0 first; a failure or a count of 0 and IOMFB has no frame info |
+| enable | `IOMobileFramebufferFrameInfo` registers type 3 (selector 72, `FrameInfoNotifyFunc`), then selector 73 ChangeFrameInfo with scalars 3 and the mask |
+| the tags | the window server enables, one at a time, those of its nine tags the list offers (others are skipped): Presentation_time, Presentation_delta, Requested_presentation, Performance_headroom, Thermal_throttle, Min_FrameTime, Max_FrameTime, Vbl_FrameTime, Last_Fence_or_Event_Time |
+| the notification | 64-bit arguments: [mask (bit 31: values in 32-bit halves, not used here), swap id, one value per mask bit in key order]; at least two. IOMFB makes {name: value} of them and calls `frame_info_callback(swap id, dictionary)` |
+| clocks | Issued_time, Presentation_time, Requested_presentation, Min/Max/Vbl_FrameTime and Last_Fence_or_Event_Time are taken as mach_continuous_time and moved to mach_absolute_time (0 stays 0) |
+
+**What `sweetfb_frameinfo=N` does** (fork `SweetFramebuffer.cpp`; the key table and the message in
+`drivers/display/sweetfb/hakios.sweetfb_frameinfo.h`, copied by `profiles/ios-27.copy`, host-tested by
+`tools/sweetfb-frameinfo-test.sh`, which reads the list and decodes every message as IOMFB does). Selector 74 lists only
+keys the kernel can fill; selector 73 keeps a client's mask; after the present of a swap, every client that enabled
+Presentation_time gets type 3 with the swap id CoreAnimation gave (the SwapEnd record's). Without the argument selector 74
+answers a count of 0 as before and nothing is sent.
+
+| bit of N | key | value | how sure |
+|---|---|---|---|
+| 1 | Presentation_time | mach_continuous_time when the present of that swap finished (the frame is in the buffer the panel is scanned out of; to within a refresh, the time it reached the glass) | the meaning is certain (CoreAnimation logs it as "presented at"); the value is the kernel's best |
+| 2 | Last_Fence_or_Event_Time | when the vsync thread saw the swap's last GPU chain done (STARLTE only) | from the name only: switchable for that reason |
+| | not offered | Requested_presentation (CoreAnimation's target time; its place in the swap record is not known), Presentation_delta, Min/Max/Vbl_FrameTime, Performance_headroom, Thermal_throttle (the last two feed CoreAnimation's throttle) | |
+
+A swap replaced before it was shown gets no frame info (what DCP does for one is not known). A notification goes out only
+when Presentation_time is enabled.
+
+**What it may change, and the test.** Without frame info the window server's display timer runs on its own clock (the
+period is right: `AppleInternalDisplay::heartbeat_rate` falls back to 1/60 s, or `IOMFBDisplayRefresh` with `sweetfb_cav=1`),
+and its clients get no presentation feedback. Whether that is what keeps home-screen swipes at two refreshes is NOT shown.
+The phone test: the owner's bench line plus `sweetfb_trace=70 sweetfb_prof=1 sweetfb_frameinfo=1` (then `=3`), the same
+swipes as the measurement above; the console should show `sweetfb_frameinfo=1: frame info offered, 1 key(s)`, backboardd's
+selector 74, `backboardd notifications type 3 on`, `frame info mask 0x1`, then `frame info for swap N: ...` (the first three
+and every thousandth). Read the CoreAnimation swap period's median with the `FBT:` parser: 33.4 ms today; a move toward
+16.7 is the result wanted. The same kernel without the argument is today's behaviour.
