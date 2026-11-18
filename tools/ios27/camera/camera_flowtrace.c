@@ -344,6 +344,7 @@ scioncam_trace_flow(void)
 	}
 	scioncam_flow_on = 1;
 	pthread_mutex_unlock(&once_lock);
+	scioncam_trace_preview();       /* camera_previewtrace.c */
 	if (tried > 0) {
 		say("trace: flow: %u of %zu methods traced", wrapped, sizeof(wraps) / sizeof(wraps[0]));
 	}
