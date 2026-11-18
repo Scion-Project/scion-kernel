@@ -28,6 +28,7 @@
 #define PMU_WDT_MASK    0x40CU
 
 uintptr_t star_warm_start(volatile uint64_t *log, const struct scion_reentry *r);   /* xnu_boot.c */
+void star_pmsg(const char *s);                  /* xnu_boot.c: a line into the pmsg ring (TWRP: pmsg-ramoops-0) */
 
 static struct scion_reentry warm_rec;
 
@@ -51,6 +52,9 @@ warm_give_up(const char *why)
 	star_fb_text(3, "WARM RESTART FAILED:");
 	star_fb_text(4, why);
 	star_fb_text(5, "RECOVERY IN 10 S");
+	star_pmsg("STARBITE: warm: the loader gave up: ");
+	star_pmsg(why);
+	star_pmsg("; recovery in 10 s\n");
 	__asm__ volatile("mrs %0, cntfrq_el0" : "=r" (freq));
 	if (!freq) {
 		freq = 26000000U;
@@ -96,6 +100,8 @@ star_warm(uintptr_t record, volatile uint64_t *log, uint64_t el, uint64_t sctlr)
 	log[77] = star_fb_enable();
 	star_fb_text(0, "PROJECT STARBITE");
 	star_fb_text(1, "WARM RESTART");
+	/* each step a line in the pmsg ring after the kernel's (TWRP shows them if this restart ends in recovery) */
+	star_pmsg(el == 4 ? "STARBITE: warm: the loader entered at EL1\n" : "STARBITE: warm: the loader entered, not at EL1\n");
 	if (el != 4) {
 		warm_give_up("WARM: NOT EL1");
 	}
@@ -103,10 +109,12 @@ star_warm(uintptr_t record, volatile uint64_t *log, uint64_t el, uint64_t sctlr)
 	if (why) {
 		warm_give_up(why);
 	}
+	star_pmsg("STARBITE: warm: the record is right\n");
 	star_fb_text(2, "CHECKING THE PAYLOAD'S SHA-256");
 	if (!scnr_image_ok(&warm_rec, (const void *)_start, (uint64_t)(_image_end - _start))) {
 		warm_give_up("WARM: IMAGE SHA-256 MISMATCH");
 	}
+	star_pmsg("STARBITE: warm: the payload's SHA-256 is right\n");
 	entry = star_warm_start(log, &warm_rec);
 	if (!entry) {
 		warm_give_up("WARM: THE OS COULD NOT BE PLACED");
@@ -114,5 +122,6 @@ star_warm(uintptr_t record, volatile uint64_t *log, uint64_t el, uint64_t sctlr)
 	if ((warm_rec.flags & SCNR_F_WDT_ARMED) && !(warm_rec.flags & SCNR_F_WDT_KEEP)) {
 		warm_wdt_stop();
 	}
+	star_pmsg("STARBITE: warm: the OS placed, entering it\n");
 	return entry;
 }

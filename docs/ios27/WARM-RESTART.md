@@ -303,6 +303,22 @@ What a failure looks like, and why each is safe:
 - The new kernel panics early: its panic path (`sweetreboot=` if on the line) or the keys, as for a cold boot.
 - Nothing above writes storage. RAM is the only thing changed.
 
+**Where it stopped, when the console is gone.** After the point of no return the console is stopped, so the kernel
+writes each step as a line in its log's ring (`STARLTE WARM: step 1: the USB console stopped` ... `step 7: the staged
+pages cleaned; TCR_EL1 ... SCTLR_EL1 ...; into the stub`), and right before the jump it puts the header `STARBITE: warm
+restart: XNU's handoff reached the stub (no panic)` and the console's last lines into the pmsg ring (0xFED14000; TWRP:
+`/sys/fs/pstore/pmsg-ramoops-0`). The loader appends `STARBITE: warm: the loader entered at EL1`, `the record is
+right`, `the payload's SHA-256 is right`, `the OS placed, entering it`, or `the loader gave up: <why>`. With
+`sweetreboot=` on the line an XNU panic writes `STARBITE: XNU panic (sweetreboot)` with the panic text and the same
+step lines instead, and resets to TWRP at once. So when a warm restart ends in TWRP, read that file first, before
+anything else boots (the next boot's loader and TWRP write the same ring):
+- `XNU panic` and no `reached the stub`: the kernel panicked during the handoff; the last `step` line says where.
+- `reached the stub` and no loader line: the stub or the copy (the watchdog would then reset into BOOT, not TWRP).
+- `the loader gave up: ...`: the loader refused (the reason is on the panel too).
+- `entering it` and still TWRP: the next kernel panicked early.
+The first try on the phone (18 Nov) ended in TWRP about four seconds after `point of no return`, before these lines
+existed; the ring had been overwritten by later boots when it was read.
+
 **Step 2.** `sweetwarm_smp=1` with the line's usual eight cores: secondaries `CPU_OFF` and the next kernel's `CPU_ON`.
 Look for every `SweetCPU ... PSCI CPU_ON rc=0` in the second boot. Add the GPU's stop.
 
