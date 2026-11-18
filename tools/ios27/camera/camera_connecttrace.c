@@ -55,7 +55,8 @@ port_of(id port, char *out, size_t cap)
 
 typedef bool (*connect_fn)(id, SEL, id, id, id, bool);
 static connect_fn o_connect;
-static void (*o_attach_now)(id, SEL), (*o_deferred)(id, SEL);
+static void (*o_attach_now)(id, SEL);
+static bool (*o_deferred)(id, SEL);     /* B16@0:8 on phone 1 (24B156) */
 static long long (*o_prepare)(id, SEL, id, id);
 static int n_connect, n_attach, n_deferred, n_prepare;
 
@@ -93,11 +94,11 @@ w_attach_now(id self, SEL sel)
 	o_attach_now(self, sel);
 }
 
-static void
+static bool
 w_deferred(id self, SEL sel)
 {
 	said_connection(self, "attach DEFERRED", &n_deferred);
-	o_deferred(self, sel);
+	return o_deferred(self, sel);
 }
 
 static long long
@@ -111,6 +112,28 @@ w_prepare(id self, SEL sel, id node, id cancellable)
 		name_of(call0(node, "name"), n, sizeof(n));
 		say("trace: connect: prepared %s \"%s\": %lld", node != nil ? class_getName(object_getClass(node)) : "nil", n, r);
 	}
+	return r;
+}
+
+/*
+ * -[FigCapturePreviewSinkPipeline _buildVideoPreviewSinkPipeline:sourcePreviewOutput:sourceSensorRawPreviewOutput:
+ * sourceHueMapPreviewOutput:graph:inferenceScheduler:captureDevice:previewTapDelegate:zoomPIPOverlayDelegate:
+ * personalPhotographerCaptureDelegate:sourceStillImageOutputsByPortType:] (13 arguments, all objects; phone 1 with dylib
+ * -26 on 24B156: the preview pipeline is made and asks for no connection at all): the output it is given and what it returns.
+ */
+typedef int (*build13)(id, SEL, id, id, id, id, id, id, id, id, id, id, id);
+static build13 o_build;
+
+static int
+w_build(id self, SEL sel, id cfg, id preview, id raw, id hue, id graph, id inference, id device, id tap, id pip, id pp, id stills)
+{
+	char o[120];
+	int r;
+
+	port_of(preview, o, sizeof(o));
+	r = o_build(self, sel, cfg, preview, raw, hue, graph, inference, device, tap, pip, pp, stills);
+	say("trace: connect: the video preview sink pipeline is built from %s%s: %d", preview != nil ? o : "NO OUTPUT (nil)",
+	    graph != nil ? "" : " with no graph", r);
 	return r;
 }
 
@@ -144,5 +167,8 @@ scioncam_trace_connections(void)
 	n += hook("BWNodeConnection", "attachNow", 2, (IMP)w_attach_now, (IMP *)&o_attach_now);
 	n += hook("BWNodeConnection", "deferredAttach", 2, (IMP)w_deferred, (IMP *)&o_deferred);
 	n += hook("BWGraph", "_prepareNode:cancellable:", 4, (IMP)w_prepare, (IMP *)&o_prepare);
-	say("trace: connect: %u of 4 methods traced", n);
+	n += hook("FigCapturePreviewSinkPipeline", "_buildVideoPreviewSinkPipeline:sourcePreviewOutput:sourceSensorRawPreviewOutput:"
+	    "sourceHueMapPreviewOutput:graph:inferenceScheduler:captureDevice:previewTapDelegate:zoomPIPOverlayDelegate:"
+	    "personalPhotographerCaptureDelegate:sourceStillImageOutputsByPortType:", 13, (IMP)w_build, (IMP *)&o_build);
+	say("trace: connect: %u of 5 methods traced", n);
 }
