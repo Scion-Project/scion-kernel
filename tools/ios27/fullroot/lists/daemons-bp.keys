@@ -1,4 +1,4 @@
-# launchd.plist job keys the owner build "bp" removes (hardware, crash loops, the 85 speed trims (medialibraryd is kept: atc and Settings need it, docs/ios27/SETTINGS.md), logd/sharingd/fileindexerd/PerfPower*/modelcatalogd/modelmanagerd/axassetsd,
+# launchd.plist job keys the owner build "bp" removes (hardware, crash loops, the 84 speed trims (medialibraryd and weatherd are kept: atc and Settings need the one, the Weather widget the other), logd/sharingd/fileindexerd/PerfPower*/modelcatalogd/modelmanagerd/axassetsd,
 # iOS 26-era hog list). DAEMON_SET=bp. One key per line (key = the job plist path; labels are not unique).
 /System/Library/LaunchAngels/com.apple.systemvoiceassistant.plist
 /System/Library/LaunchDaemons/com.apple.CommCenter-noncellular.plist
@@ -112,7 +112,6 @@
 /System/Library/LaunchDaemons/com.apple.triald.plist
 /System/Library/LaunchDaemons/com.apple.visualintelligenced.plist
 /System/Library/LaunchDaemons/com.apple.watchdogd.plist
-/System/Library/LaunchDaemons/com.apple.weatherd.plist
 /System/Library/LaunchDaemons/com.apple.wifianalyticsd.plist
 /System/Library/LaunchDaemons/com.apple.wifip2pd.plist
 /System/Library/NanoLaunchDaemons/com.apple.nanomediaremotelinkagent.plist
