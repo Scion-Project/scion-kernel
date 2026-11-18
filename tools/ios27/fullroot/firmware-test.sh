@@ -30,7 +30,7 @@ mkfw() { # DIR
 
 # 1. FIRMWARE_DIR: complete -> taken; a file missing, a wrong sum -> refused, the file named
 mkfw "$T/fw"
-out=$( (. "$H/firmware.sh"; FIRMWARE_DIR=$T/fw fw_prepare && echo "DIR=$FIRMWARE_DIR READY=$FIRMWARE_READY") 2>&1) || true
+out=$( (. "$H/firmware.sh"; export FIRMWARE_DIR=$T/fw; fw_prepare && echo "DIR=$FIRMWARE_DIR READY=$FIRMWARE_READY") 2>&1) || true
 [[ $out == *"DIR=$T/fw READY=1"* ]] && ok "a complete directory is taken and exported" || bad "complete directory: $out"
 cp -R "$T/fw" "$T/fw-missing"; rm "$T/fw-missing/wifi/bcmdhd_clm.blob"
 if out=$( (. "$H/firmware.sh"; FIRMWARE_DIR=$T/fw-missing fw_prepare) 2>&1); then bad "a missing file was taken"
