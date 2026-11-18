@@ -1,0 +1,54 @@
+iOS 27, the Metal plug-in's frontend: a no-copy buffer over memory this process may never write is made over a copy of its bytes.
+backboardd's no-copy buffers over CoreAnimation's images that other processes share read-only (VM tag 51, prot 1/1, share
+mode 5) are memory the kernel's IMPORT_HOST cannot wire either way, so PanVK's import failed, metal2vulkan answered
+Unsupported(HostMemory, NotRepresentable) and the frontend returned nil: the app switcher's non-live cards drew black.
+Nothing in backboardd can write those pages and CoreAnimation only samples them, so the buffer now holds a copy taken when it
+is made; the caller's deallocator still runs when the buffer goes. A range with any page whose maximum protection allows a
+write is refused as before (a copy would no longer alias bytes its caller writes). SWEET_MTL2_NOCOPY_RO=0 gives the old answer.
+The first 8 copies (then every power of two) log "native-metal: no-copy read-only memory ... copied (N so far)".
+Applied after frontend-nocopy-diag.diff (its refusal line is then only for memory that is still refused).
+--- a/tools/ios27/metal2/NativeBridgeMetalFrontend.mm
++++ b/tools/ios27/metal2/NativeBridgeMetalFrontend.mm
+@@ -2414,8 +2414,42 @@
+  if(!handle){NBLOG(@"native-metal: buffer refused: %@",lastError());return nil;}
+  NBBuffer *buffer=[NBBuffer new];buffer.handle=handle;buffer.options=options;return (id<MTLBuffer>)buffer;
+ }
++// iOS 27: whether this process may never write any of the length bytes at pointer: every page is mapped, readable, and its
++// mapping's maximum protection has no write (CoreAnimation's images that another process shares read-only, VM tag 51).
++static bool neverWritable(const void *pointer,size_t length) {
++ vm_address_t at=(vm_address_t)(uintptr_t)pointer;const vm_address_t end=at+length;
++ if(end<at)return false;
++ while(at<end) {
++  vm_address_t region=at;vm_size_t size=0;mach_port_t object=MACH_PORT_NULL;
++  vm_region_basic_info_data_64_t basic={};mach_msg_type_number_t count=VM_REGION_BASIC_INFO_COUNT_64;
++  if(vm_region_64(mach_task_self(),&region,&size,VM_REGION_BASIC_INFO_64,(vm_region_info_t)&basic,&count,&object)!=KERN_SUCCESS)return false;
++  if(object!=MACH_PORT_NULL)mach_port_deallocate(mach_task_self(),object);
++  if(region>at || !size)return false;
++  if(!(basic.protection&VM_PROT_READ) || (basic.max_protection&VM_PROT_WRITE))return false;
++  at=region+size;
++ }
++ return true;
++}
+ - (id<MTLBuffer>)newBufferWithBytesNoCopy:(void *)pointer length:(NSUInteger)length options:(MTLResourceOptions)options deallocator:(void (^)(void *,NSUInteger))deallocator {
+  NmbBuffer *handle=nmb_buffer_new_no_copy(gDevice,pointer,length,options);
++ // iOS 27: the kernel's IMPORT_HOST cannot wire memory this process maps read-only and shared (CoreAnimation's images from
++ // other processes, VM tag 51, prot 1/1, share mode 5), so the device refuses a no-copy buffer over it, and the app switcher's
++ // cards drew black. Nothing in this process can write those pages and CoreAnimation only samples them, so the buffer holds a
++ // copy of the bytes taken now; the caller's deallocator still runs when the buffer goes. Memory this process may write is
++ // refused as before: a copy would stop aliasing bytes its caller writes. SWEET_MTL2_NOCOPY_RO=0 refuses read-only memory too.
++ static int copyReadOnly=-1;
++ if(copyReadOnly<0){const char *e=getenv("SWEET_MTL2_NOCOPY_RO");copyReadOnly=(e && *e=='0')?0:1;}
++ if(!handle && copyReadOnly && pointer && length && neverWritable(pointer,length)) {
++  handle=nmb_buffer_new(gDevice,length,options,pointer);
++  static std::atomic<unsigned> copied{0};
++  const unsigned n=copied.fetch_add(1)+1;
++  if(n<=8 || (n&(n-1))==0) {
++   char line[160];
++   snprintf(line,sizeof line,"native-metal: no-copy read-only memory %#lx+%#lx %s (%u so far)",(unsigned long)(uintptr_t)pointer,
++    (unsigned long)length,handle?"copied":"not copied either",n);
++   sm2_logs(line);
++  }
++ }
+  if(!handle) {
+   // iOS 27: what memory the device would not import, for the first 16 refusals (the kernel's IMPORT_HOST wires the pages
+   // for writing, else for reading, and refuses the range when neither wires): the VM region the pointer is in, its
