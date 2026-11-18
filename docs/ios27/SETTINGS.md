@@ -43,6 +43,11 @@ Not yet captured on the phone: the exception's name and reason as printed (the c
 The order of MusicLibrary's checks and the root's contents make `iTunes_Control ... does not exist.` the one that fires; the
 test boot below settles it.
 
+Reproduced on the owner image (o272, no camera arguments, root v9) at 16:07 on 18 November: Settings opened and scrolled
+without fault; **tapping General > About aborted it one second later** with the same ten frames. About lists the number of
+songs and videos, which is where Settings asks MusicLibrary. Reopened, Settings ran on for over a minute. In the same boot,
+atc aborted 14 times. On that boot Settings > Bluetooth drew its header and the Bluetooth switch (on), but no Devices section.
+
 ## What changed between 24A446 and 24B156
 
 The root side did not change: the directory was missing and `medialibraryd` trimmed on both. The set of images that link
@@ -64,8 +69,8 @@ empty. A writer connection (atc, for one) then creates the database itself (`-[M
 _createDatabaseDirectoryIfNonexistent]`, `_createDatabaseFileIfNonexistent`). `check-root.sh` says whether the directory is
 there. For a root already on the phone, the step can be run on its mounted image.
 
-**Not run on a phone yet.** The test: the same root with the step, owner image o272, Settings opened, scrolled, General >
-About, Bluetooth, a home swipe and Settings again; expected 0 `CRASH Preferences` and 0 `CRASH atc`, and
+**Not run on a phone yet.** The test: the same root with the step, owner image o272, Settings opened, scrolled, **General >
+About** (the tap that aborts it), Bluetooth, a home swipe and Settings again; expected 0 `CRASH Preferences` and 0 `CRASH atc`, and
 `iTunes_Control/iTunes/MediaLibrary.sqlitedb` made by the phone. If Settings still aborts with the same frames, the next check
 in the order above (the database file, which only `medialibraryd` or a writer makes) is the one to look at, and putting
 `com.apple.medialibraryd` back (`edit-launchd.py --keep`) is the next test.
