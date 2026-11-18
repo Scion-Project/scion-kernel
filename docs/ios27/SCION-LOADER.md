@@ -37,6 +37,23 @@ tools/ios27/s9/make-boot-image.sh --kernel ... --donor-adt ... --template ... \
 
 Without `--loader-kind scion` nothing changes: the same steps and the same image as before.
 
+To put the loader around a payload that already boots (the first phone test wants exactly that), take the payload
+out of that image and pack it as it is, instead of making a new one (which would add `sweetepoch=<now>` and depend on
+every input being the same):
+
+```sh
+tools/ios27/starlte-pack-boot.py payload BOOT-THAT-BOOTS.img payload.bin
+tools/ios27/s9/make-boot-image.sh --payload payload.bin --template BOOT-THAT-BOOTS.img \
+    --loader-kind scion --scion-boot ~/src/scion-boot-exynos9810
+```
+
+Its command line is then the payload's own, unchanged (the script prints only its length and SHA-256). For a boot
+identical to sboot's, build the loader with `make PLATFORM=starlte LDR_OS_TOKENS=0 loader`: by default it appends
+`scion_ldr=` and `scion_guard=` (54 bytes) to the line, and the kernel appends its built-in arguments
+(osfmk/arm/arm_init.c, starlte_default_bootargs) only while its 1024-byte line has room. With iOS 27.2.1's line of
+18 November (321 bytes; 1018 of 1024 with the built-ins) those 54 bytes leave out cam_switch, sgu_irq, decmpfs_lz4
+and sweetatpath.
+
 ## The first test on the phone
 
 The plan is scion-boot's
