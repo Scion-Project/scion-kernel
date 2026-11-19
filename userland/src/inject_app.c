@@ -603,6 +603,20 @@ igl_take_gl(const struct mach_header *header, intptr_t image_slide)
 	volatile uint32_t *at = (volatile uint32_t *)((uintptr_t)header + IGL_CHOOSE_OFFSET);
 	uint32_t was = *at;
 
+	/*
+	 * (merge round 2: the kernel has a Metal device now, Metal on Vulkan with metal=2 -- then IGL is left to take it, as
+	 * on an iPhone; the OpenGL ES path only where Metal has no device)
+	 */
+	{
+		void *(*create)(void) = (void *(*)(void))dlsym(RTLD_DEFAULT, "MTLCreateSystemDefaultDevice");
+		void *device = create != NULL ? create() : NULL;
+
+		if (device != NULL) {
+			n = snprintf(line, sizeof(line), "hakios: %s: a Metal device is there: IGL left to make a Metal one\n", who);
+			say(line, (size_t)n);
+			return;
+		}
+	}
 	if (was != IGL_CHOOSE_INSN) {
 		n = snprintf(line, sizeof(line), "hakios: %s: IGL's Metal/OpenGL choice not where this build has it (%08x at +%#x): left alone\n",
 		    who, was, IGL_CHOOSE_OFFSET);
@@ -620,6 +634,47 @@ igl_take_gl(const struct mach_header *header, intptr_t image_slide)
 	n = snprintf(line, sizeof(line), "hakios: %s: IGL told to make an OpenGL ES device, not a Metal one (no Metal here): %s (%d)\n",
 	    who, kr == KERN_SUCCESS && *at == ARM64_NOP ? "patched" : "NOT PATCHED", kr);
 	say(line, (size_t)n);
+}
+
+/*
+ * An uncaught Objective-C exception (merge round 2: Instagram ends with "terminating due to uncaught exception of type
+ * NSException" and nothing more): its name, reason and the stack it was thrown from, before the default handler.
+ */
+static void (*previous_uncaught)(id);
+
+static void
+uncaught(id exception)
+{
+	char line[1600];
+	id name = ((id (*)(id, SEL))objc_msgSend)(exception, sel_registerName("name"));
+	id reason = ((id (*)(id, SEL))objc_msgSend)(exception, sel_registerName("reason"));
+	id stack = ((id (*)(id, SEL))objc_msgSend)(exception, sel_registerName("callStackReturnAddresses"));
+	const char *nm = name != nil ? ((const char *(*)(id, SEL))objc_msgSend)(name, sel_registerName("UTF8String")) : "?";
+	const char *rs = reason != nil ? ((const char *(*)(id, SEL))objc_msgSend)(reason, sel_registerName("UTF8String")) : "?";
+	long count = stack != nil ? ((long (*)(id, SEL))objc_msgSend)(stack, sel_registerName("count")) : 0;
+	int k = snprintf(line, sizeof(line), "hakios: %s: UNCAUGHT EXCEPTION %s: %.700s; thrown from:", who, nm ? nm : "?", rs ? rs : "?");
+
+	for (long i = 0; i < count && i < 16 && k < (int)sizeof(line) - 60; i++) {
+		id num = ((id (*)(id, SEL, long))objc_msgSend)(stack, sel_registerName("objectAtIndex:"), i);
+		uintptr_t a = (uintptr_t)((unsigned long long (*)(id, SEL))objc_msgSend)(num, sel_registerName("unsignedLongLongValue"));
+		Dl_info dl;
+		size_t cache = 0;
+		uintptr_t start = (uintptr_t)_dyld_get_shared_cache_range(&cache);
+
+		if (a - start < cache || dladdr((void *)a, &dl) == 0 || dl.dli_fname == NULL) {
+			k += snprintf(line + k, sizeof(line) - (size_t)k, " %#lx", (unsigned long)(a - slide));
+		} else {
+			const char *base = strrchr(dl.dli_fname, '/');
+
+			k += snprintf(line + k, sizeof(line) - (size_t)k, " %s+%#lx", base != NULL ? base + 1 : dl.dli_fname,
+			    (unsigned long)(a - (uintptr_t)dl.dli_fbase));
+		}
+	}
+	line[k++] = '\n';
+	say(line, (size_t)k);
+	if (previous_uncaught != NULL) {
+		previous_uncaught(exception);
+	}
 }
 
 /* Put ours in the place of a method, keeping the one that was there. */
@@ -666,6 +721,13 @@ hakios_app_init(void)
 	}
 	if (strcmp(name, "Sileo") == 0) {
 		dispatch_async(dispatch_get_main_queue(), ^{ keep_to_the_repositories(); });
+	}
+	{
+		extern void *NSGetUncaughtExceptionHandler(void);
+		extern void NSSetUncaughtExceptionHandler(void (*)(id));
+
+		previous_uncaught = (void (*)(id))NSGetUncaughtExceptionHandler();
+		NSSetUncaughtExceptionHandler(uncaught);
 	}
 	if (strcmp(name, "Instagram") == 0) {
 		_dyld_register_func_for_add_image(igl_take_gl);
