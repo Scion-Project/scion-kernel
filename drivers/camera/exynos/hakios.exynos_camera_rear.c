@@ -127,7 +127,7 @@
  * dev/hakios.drivers.h by tools/hakios-config.py) compiles this file to nothing, every other one compiles that file to
  * nothing. Bringing the two into one driver waits until both phones can be run (docs/exynos9810-cameras.md).
  */
-#ifndef HAKIOS_DEVICE_IS_STAR2LTE
+#if !defined(HAKIOS_DEVICE_IS_STAR2LTE) && !defined(HAKIOS_DEVICE_IS_CROWNLTE)   /* (the Note9: the S9+'s driver) */
 
 /* what hakios.exynos_camera.c calls (it declares them too) */
 uint32_t hakios_s9rear_setup(uint32_t ipclk_mhz, int (*say)(const char *, ...), uint32_t also);

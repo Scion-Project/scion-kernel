@@ -293,7 +293,7 @@
  * dev/hakios.drivers.h by tools/hakios-config.py) compiles those files to nothing, every other one compiles this file to
  * nothing. Bringing the two into one driver waits until both phones can be run (docs/exynos9810-cameras.md).
  */
-#ifdef HAKIOS_DEVICE_IS_STAR2LTE
+#if defined(HAKIOS_DEVICE_IS_STAR2LTE) || defined(HAKIOS_DEVICE_IS_CROWNLTE)
 
 /* the two sensors' tables, made at build time for this phone only (tools/mk-star2-setfiles.sh): not asked of any other build */
 #include "hakios.s5k2l3_setfiles.h"
@@ -4367,8 +4367,17 @@ hakios_exynos_camera_init(void)
 
 	paths_init();
 	PE_parse_boot_argn("cam_s9_rear_probe", &rear_probe, sizeof(rear_probe));
-	PE_parse_boot_argn("cam_s9_rear", &cam_rear, sizeof(cam_rear));
-	if ((cam_rear || rear_probe) && strcmp(HAKIOS_DEVICE, "star2lte") != 0) {
+	/*
+	 * The Galaxy Note9 (crownlte) has the S9+'s cameras on the same pins, buses and rails (Samsung's device trees of the two,
+	 * board revision 26: every camera node the same but for the phandles' numbers; 19 November 2026), so this driver is the
+	 * Note9's too. There its rear and telephoto cameras are on unless cam_s9_rear=0 / cam_s9_tele=0 (its boot line is full).
+	 */
+	bool crown = strcmp(HAKIOS_DEVICE, "crownlte") == 0, star2like = crown || strcmp(HAKIOS_DEVICE, "star2lte") == 0;
+
+	if (!PE_parse_boot_argn("cam_s9_rear", &cam_rear, sizeof(cam_rear)) && crown) {
+		cam_rear = 1;
+	}
+	if ((cam_rear || rear_probe) && !star2like) {
 		say("exynos_camera: cam_s9_rear / cam_s9_rear_probe are Star2's (S5K2L3 on CSIS0); this kernel is %s's: left "
 		    "off\n", HAKIOS_DEVICE);
 		cam_rear = rear_probe = 0;
@@ -4378,8 +4387,10 @@ hakios_exynos_camera_init(void)
 		    "CSIS0; probe level %u, stream %s (telephoto, OIS and AF untouched)\n", rear_probe, cam_rear ? "on" : "off");
 	}
 	PE_parse_boot_argn("cam_s9_tele_probe", &tele_probe, sizeof(tele_probe));
-	PE_parse_boot_argn("cam_s9_tele", &cam_tele, sizeof(cam_tele));
-	if ((cam_tele || tele_probe) && strcmp(HAKIOS_DEVICE, "star2lte") != 0) {
+	if (!PE_parse_boot_argn("cam_s9_tele", &cam_tele, sizeof(cam_tele)) && crown) {
+		cam_tele = 1;
+	}
+	if ((cam_tele || tele_probe) && !star2like) {
 		say("exynos_camera: cam_s9_tele / cam_s9_tele_probe are Star2's (S5K3M3 on CSIS2); this kernel is %s's: left "
 		    "off\n", HAKIOS_DEVICE);
 		cam_tele = tele_probe = 0;

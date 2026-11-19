@@ -29,7 +29,7 @@ fi
 # The Galaxy S9+'s camera driver (bsd/dev/hakios.exynos_camera_star2.c) includes two headers that are made, not kept in
 # the repository: the sensors' register tables with their RAM patches, from Samsung's GPL headers (tools/mk-star2-setfiles.sh
 # says where they come from and why). A star2lte kernel with the camera driver gets them here, beside the driver.
-if grep -q '^#define HAKIOS_DEVICE_IS_STAR2LTE' bsd/dev/hakios.drivers.h 2>/dev/null &&
+if grep -qE '^#define HAKIOS_DEVICE_IS_(STAR2LTE|CROWNLTE)' bsd/dev/hakios.drivers.h 2>/dev/null &&
     grep -q '^#define HAKIOS_DRIVERS_LIST .*[" ]exynos_camera[" ]' bsd/dev/hakios.drivers.h; then
 	"$ROOT/tools/mk-star2-setfiles.sh" || exit 1
 	for h in hakios.s5k2l3_setfiles.h hakios.s5k3m3_setfiles.h; do
