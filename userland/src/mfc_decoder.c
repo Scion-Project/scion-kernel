@@ -584,14 +584,24 @@ hakios_mfc_decoder_register(void)
 		say("hakios: mfc: something of VideoToolbox's is not where it was: the hardware decoder is not registered\n");
 		return;
 	}
+	/*
+	 * Registered as hardware (merge round 7, 19 November 2026: YouTube at 1080p60 was decoded by Apple's software H.264 decoder --
+	 * three 'com.apple.coremedia.JVTlib' threads in mediaserverd at 30-56 % each, the big cores at 83 C -- while this decoder took
+	 * only the 480p and 720p sessions: registered with an ID and a name alone it counts as a software decoder, and a session that
+	 * asks for hardware first goes past it). kVTVideoDecoderList_IsHardwareAccelerated says what it is: the MFC.
+	 */
+	const CFStringRef *hw_key = dlsym(vt, "kVTVideoDecoderList_IsHardwareAccelerated");
+
 	for (size_t i = 0; i < sizeof(codecs) / sizeof(codecs[0]); i++) {
-		const void *keys[] = { *kVTVideoDecoderList_DecoderID_, *kVTVideoDecoderList_DecoderName_ };
-		const void *values[] = { codecs[i].id, codecs[i].name };
-		CFDictionaryRef info = CFDictionaryCreate(NULL, keys, values, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+		const void *keys[] = { *kVTVideoDecoderList_DecoderID_, *kVTVideoDecoderList_DecoderName_, hw_key != NULL ? *hw_key : NULL };
+		const void *values[] = { codecs[i].id, codecs[i].name, kCFBooleanTrue };
+		CFDictionaryRef info = CFDictionaryCreate(NULL, keys, values, hw_key != NULL ? 3 : 2, &kCFTypeDictionaryKeyCallBacks,
+		    &kCFTypeDictionaryValueCallBacks);
 		OSStatus status = VTRegisterVideoDecoderWithInfo_(codecs[i].codec, info, create);
 
 		CFRelease(info);
-		say("hakios: mediaserverd: the MFC's decoder registered for '%c%c%c%c' (%d)\n", (codecs[i].codec >> 24) & 0xFF,
-		    (codecs[i].codec >> 16) & 0xFF, (codecs[i].codec >> 8) & 0xFF, codecs[i].codec & 0xFF, (int)status);
+		say("hakios: mediaserverd: the MFC's decoder registered for '%c%c%c%c'%s (%d)\n", (codecs[i].codec >> 24) & 0xFF,
+		    (codecs[i].codec >> 16) & 0xFF, (codecs[i].codec >> 8) & 0xFF, codecs[i].codec & 0xFF,
+		    hw_key != NULL ? " as hardware" : " (no hardware key in VideoToolbox: as software)", (int)status);
 	}
 }
