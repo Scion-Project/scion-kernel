@@ -77,6 +77,8 @@ struct mfc_decoder {
 	bool pending_set[PENDING_MAX];
 	uint8_t *stream;
 	size_t stream_bytes;
+	CMFormatDescriptionRef format;  /* the one the block was opened for (a sample of another: opened again for it) */
+	unsigned formats;               /* formats taken in this session after the first */
 };
 
 static void
@@ -183,17 +185,20 @@ open_block(struct mfc_decoder *d)
 	return true;
 }
 
+/*
+ * The block opened for FORMAT, and the pool's surfaces asked for in its size: at the session's start, and again in it when a
+ * sample comes in another format (can_accept() said yes: YouTube changes its quality inside one session). A refusal here at
+ * the start sends the session on to the software decoder.
+ */
 static OSStatus
-start_session(void *decoder, void *session, CMVideoFormatDescriptionRef format)
+configure(struct mfc_decoder *d, CMVideoFormatDescriptionRef format)
 {
-	struct mfc_decoder *d = storage(decoder);
 	OSStatus (*get)(CMFormatDescriptionRef, size_t, const uint8_t **, size_t *, size_t *, int *) =
 	    d->codec == HAKIOS_MFC_H264 ? CMVideoFormatDescriptionGetH264ParameterSetAtIndex : CMVideoFormatDescriptionGetHEVCParameterSetAtIndex;
 	size_t count = 0, room = 0;
 	const uint8_t *set;
 	size_t bytes;
 
-	d->session = session;
 	if (get(format, 0, NULL, NULL, &count, &d->length_size) != noErr || count == 0 || d->length_size < 1 || d->length_size > 4) {
 		say("hakios: mfc: no parameter sets in the format: not for the hardware\n");
 		return ERR_COULD_NOT_FIND;
@@ -202,6 +207,9 @@ start_session(void *decoder, void *session, CMVideoFormatDescriptionRef format)
 		say("hakios: mfc: more than 8 bits, or not 4:2:0: software\n");
 		return ERR_COULD_NOT_FIND;
 	}
+	free(d->header);
+	d->header = NULL;
+	d->header_bytes = 0;
 	for (size_t i = 0; i < count; i++) {
 		if (get(format, i, &set, &bytes, NULL, NULL) == noErr) {
 			append(&d->header, &d->header_bytes, &room, set, bytes);
@@ -221,7 +229,7 @@ start_session(void *decoder, void *session, CMVideoFormatDescriptionRef format)
 	int32_t pixel = (full != NULL && CFBooleanGetValue(full)) ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
 	int32_t width = size.width, height = size.height;
 
-#define KEEP(to, key) do { CFTypeRef v = CMFormatDescriptionGetExtension(format, key); d->to = v != NULL ? CFRetain(v) : NULL; } while (0)
+#define KEEP(to, key) do { CFTypeRef v = CMFormatDescriptionGetExtension(format, key); if (d->to != NULL) { CFRelease(d->to); } d->to = v != NULL ? CFRetain(v) : NULL; } while (0)
 	KEEP(matrix, kCMFormatDescriptionExtension_YCbCrMatrix);
 	KEEP(primaries, kCMFormatDescriptionExtension_ColorPrimaries);
 	KEEP(transfer, kCMFormatDescriptionExtension_TransferFunction);
@@ -240,7 +248,7 @@ start_session(void *decoder, void *session, CMVideoFormatDescriptionRef format)
 	const void *values[] = { pixel_n, width_n, height_n, surface, align_row_n, align_plane_n, extra_n };
 	CFDictionaryRef attributes = CFDictionaryCreate(NULL, keys, values, d->zc && extra >= 0 ? 7 : 4, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
-	OSStatus status = VTDecoderSessionSetPixelBufferAttributes_(session, attributes);
+	OSStatus status = VTDecoderSessionSetPixelBufferAttributes_(d->session, attributes);
 	CFRelease(attributes);
 	CFRelease(surface);
 	CFRelease(one_n);
@@ -250,8 +258,24 @@ start_session(void *decoder, void *session, CMVideoFormatDescriptionRef format)
 	CFRelease(pixel_n);
 	CFRelease(width_n);
 	CFRelease(height_n);
-	say("hakios: mfc: a %s session of %dx%d, %zu parameter sets (%d)\n", d->codec == HAKIOS_MFC_H264 ? "H.264" : "HEVC", width, height, count, (int)status);
+	if (d->format != format) {
+		if (d->format != NULL) {
+			CFRelease(d->format);
+		}
+		d->format = (CMFormatDescriptionRef)CFRetain(format);
+	}
+	say("hakios: mfc: a %s %s of %dx%d, %zu parameter sets (%d)\n", d->codec == HAKIOS_MFC_H264 ? "H.264" : "HEVC",
+	    d->formats == 0 ? "session" : "format in the session", width, height, count, (int)status);
 	return status;
+}
+
+static OSStatus
+start_session(void *decoder, void *session, CMVideoFormatDescriptionRef format)
+{
+	struct mfc_decoder *d = storage(decoder);
+
+	d->session = session;
+	return configure(d, format);
 }
 
 /* whatever frame the kernel wrote goes back to VideoToolbox: its frameRefCon by its tag */
@@ -374,6 +398,8 @@ decode_unit(struct mfc_decoder *d, const uint8_t *stream, size_t bytes, uint32_t
 	return status;
 }
 
+static OSStatus finish_delayed(void *decoder);
+
 static OSStatus
 decode_frame(void *decoder, void *frame, CMSampleBufferRef sample, uint32_t flags, uint32_t *info)
 {
@@ -386,6 +412,22 @@ decode_frame(void *decoder, void *frame, CMSampleBufferRef sample, uint32_t flag
 	(void)flags;
 	if (info != NULL) {
 		*info = 1;              /* kVTDecodeInfo_Asynchronous: a frame may come after this returns */
+	}
+	CMFormatDescriptionRef format = CMSampleBufferGetFormatDescription(sample);
+
+	if (format != NULL && d->format != NULL && format != d->format && !CMFormatDescriptionEqual(format, d->format)) {
+		/* the first sample of the format can_accept() took: what the block holds comes out, then it opens for this one */
+		finish_delayed(decoder);
+		if (d->spare != NULL) {
+			CVPixelBufferRelease(d->spare);   /* (the old size's) */
+			d->spare = NULL;
+		}
+		d->formats++;
+		if (configure(d, (CMVideoFormatDescriptionRef)format) != noErr) {
+			say("hakios: mfc: the block would not open for the session's new format\n");
+			VTDecoderSessionEmitDecodedFrame_(d->session, frame, ERR_MALFUNCTION, 0, NULL);
+			return noErr;
+		}
 	}
 	if (source == NULL || CMBlockBufferCopyDataBytes(block, 0, total, source) != kCMBlockBufferNoErr) {
 		free(source);
@@ -476,8 +518,24 @@ finish_delayed(void *decoder)
 static Boolean
 can_accept(void *decoder, CMFormatDescriptionRef format)
 {
-	(void)decoder, (void)format;
-	return false;           /* a new format is a new session (the block's instance is sized for one stream) */
+	/*
+	 * Another format of the same codec, 8 bits, 4:2:0, with its parameter sets: taken, and the block opened again for it at
+	 * its first sample (decode_frame). Said no, VideoToolbox made a new session while this one still had the block (one
+	 * client at a time), and the new one went to Apple's software decoder: YouTube's next quality, 120-200% of mediaserverd.
+	 */
+	struct mfc_decoder *d = storage(decoder);
+	OSStatus (*get)(CMFormatDescriptionRef, size_t, const uint8_t **, size_t *, size_t *, int *) =
+	    d->codec == HAKIOS_MFC_H264 ? CMVideoFormatDescriptionGetH264ParameterSetAtIndex : CMVideoFormatDescriptionGetHEVCParameterSetAtIndex;
+	FourCharCode subtype = CMFormatDescriptionGetMediaSubType(format);
+	size_t count = 0;
+	int length_size = 0;
+	bool ok = (d->codec == HAKIOS_MFC_H264 ? subtype == 'avc1' : (subtype == 'hvc1' || subtype == 'hev1')) &&
+	    get(format, 0, NULL, NULL, &count, &length_size) == noErr && count != 0 && length_size >= 1 && length_size <= 4 &&
+	    is_8bit_420(d, (CMVideoFormatDescriptionRef)format);
+
+	say("hakios: mfc: another format offered (%dx%d): %s\n", CMVideoFormatDescriptionGetDimensions(format).width,
+	    CMVideoFormatDescriptionGetDimensions(format).height, ok ? "taken" : "a new session");
+	return ok;
 }
 
 static OSStatus
@@ -504,6 +562,9 @@ finalize(void *object)
 	slots_free(d, 0);
 	free(d->header);
 	free(d->stream);
+	if (d->format != NULL) {
+		CFRelease(d->format);
+	}
 	if (d->matrix != NULL) {
 		CFRelease(d->matrix);
 	}
