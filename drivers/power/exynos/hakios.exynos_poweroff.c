@@ -36,6 +36,7 @@ extern void hakios_var_save_on_return(void);
 extern bool hakios_s6e3ha8_blank(int (*say)(const char *, ...));   /* drivers/display/panel/hakios.s6e3ha8.c; a stand-in says no */
 
 extern void hakios_thread_say_stack(thread_t thread, int (*say_as)(const char *, ...));  /* osfmk/arm64/machine_routines.c */
+extern void hakios_threads_say_blocked(thread_t except, int (*say_as)(const char *, ...));   /* (the same) */
 extern void halt_all_cpus(boolean_t reboot) __attribute__((noreturn));
 
 bool hakios_exynos_power_off(const char *who, int (*say_as)(const char *, ...));
@@ -138,6 +139,8 @@ shutdown_stalled(__unused thread_call_param_t p0, __unused thread_call_param_t p
 	say("\n--- shutdown: not halted %d s after reboot(2) (howto %#x): stuck; the shutdown thread's stack (nm on the "
 	    "unstripped kernel names the frames) ---\n", WATCH_SECS, watch_howto);
 	hakios_thread_say_stack(watch_thread, say);
+	say("--- shutdown: the programs' threads still waiting (one of them holds the vnode the unmount drains) ---\n");
+	hakios_threads_say_blocked(watch_thread, say);
 	say("--- shutdown: %s anyway ---\n", (watch_howto & RB_HALT) ? "halted (powered off)" : "restarted");
 	halt_all_cpus((watch_howto & RB_HALT) == 0);
 }
