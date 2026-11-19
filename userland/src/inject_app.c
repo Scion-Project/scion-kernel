@@ -19,6 +19,7 @@
 #include <sys/types.h>
 #include <sys/ucontext.h>
 #include <mach/mach.h>
+#include <libkern/OSCacheControl.h>
 
 /* <sys/codesign.h>'s, not in the SDK's public headers */
 extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
@@ -575,6 +576,52 @@ __attribute__((used)) static struct {
 	(const void *)watched_spawn, (const void *)posix_spawn
 };
 
+/*
+ * Instagram and Metal (step 118, 19 November): Instagram died at launch with brk #1 in FBSharedFramework, in the function
+ * after IGLocalizedNextString: Meta's graphics library (IGL) asked for a Metal device (igl::metal::HWDevice::queryDevices),
+ * got none -- this port has no Metal; MTLCreateSystemDefaultDevice() is nil -- and trapped. The same function has an
+ * OpenGL ES path (igl::opengl::ios::HWDevice::createWithContext), taken when its fourth argument is 0; the instruction that
+ * chooses, "cbnz x24" at FBSharedFramework+0x932708 (this build of Instagram), is made a nop in this process's memory, so
+ * IGL makes an OpenGL ES device. Only when the bytes there are exactly that instruction: another build of the app is left
+ * alone, and said so.
+ */
+#define IGL_CHOOSE_OFFSET       0x932708
+#define IGL_CHOOSE_INSN         0xB50003B8u     /* cbnz x24, +0x74 */
+#define ARM64_NOP               0xD503201Fu
+
+static void
+igl_take_gl(const struct mach_header *header, intptr_t image_slide)
+{
+	Dl_info dl;
+	char line[300];
+	int n;
+
+	(void)image_slide;
+	if (dladdr(header, &dl) == 0 || dl.dli_fname == NULL || strstr(dl.dli_fname, "/FBSharedFramework.framework/FBSharedFramework") == NULL) {
+		return;
+	}
+	volatile uint32_t *at = (volatile uint32_t *)((uintptr_t)header + IGL_CHOOSE_OFFSET);
+	uint32_t was = *at;
+
+	if (was != IGL_CHOOSE_INSN) {
+		n = snprintf(line, sizeof(line), "hakios: %s: IGL's Metal/OpenGL choice not where this build has it (%08x at +%#x): left alone\n",
+		    who, was, IGL_CHOOSE_OFFSET);
+		say(line, (size_t)n);
+		return;
+	}
+	vm_address_t page = (vm_address_t)at & ~(vm_address_t)(vm_page_size - 1);
+	kern_return_t kr = vm_protect(mach_task_self(), page, vm_page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+
+	if (kr == KERN_SUCCESS) {
+		*at = ARM64_NOP;
+		kr = vm_protect(mach_task_self(), page, vm_page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+		sys_icache_invalidate((void *)page, vm_page_size);
+	}
+	n = snprintf(line, sizeof(line), "hakios: %s: IGL told to make an OpenGL ES device, not a Metal one (no Metal here): %s (%d)\n",
+	    who, kr == KERN_SUCCESS && *at == ARM64_NOP ? "patched" : "NOT PATCHED", kr);
+	say(line, (size_t)n);
+}
+
 /* Put ours in the place of a method, keeping the one that was there. */
 static void
 watch(const char *name, const char *selector, IMP ours, void *theirs)
@@ -619,6 +666,9 @@ hakios_app_init(void)
 	}
 	if (strcmp(name, "Sileo") == 0) {
 		dispatch_async(dispatch_get_main_queue(), ^{ keep_to_the_repositories(); });
+	}
+	if (strcmp(name, "Instagram") == 0) {
+		_dyld_register_func_for_add_image(igl_take_gl);
 	}
 	if (strcmp(name, "Sileo") != 0) {
 		watch("NSError", "initWithDomain:code:userInfo:", (IMP)watched_error_init, &error_init);
