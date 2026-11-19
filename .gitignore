@@ -162,3 +162,4 @@ __pycache__/
 
 # the loader S-Boot starts, as built (tools/ios27/s9/build-loader.sh)
 /xnuloader/sboot/out/
+tools/ios27/fullroot/warm-m2v/
