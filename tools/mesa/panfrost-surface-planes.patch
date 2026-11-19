@@ -1,0 +1,95 @@
+--- a/src/gallium/frontends/osmesa/osmesa.c
++++ b/src/gallium/frontends/osmesa/osmesa.c
+@@ -87,7 +87,7 @@
+ osmesa_create_screen(void);
+ 
+ extern struct pipe_resource *
+-osmesa_surface_resource(struct pipe_screen *screen, uint32_t surface);
++osmesa_surface_resource(struct pipe_screen *screen, uintptr_t image);
+ 
+ 
+ 
+@@ -163,8 +163,8 @@
+ osmesa_st_get_egl_image(struct pipe_frontend_screen *fscreen, void *image,
+                         struct st_egl_image *out)
+ {
+-   out->texture = osmesa_surface_resource(fscreen->screen,
+-                                          (uint32_t)(uintptr_t)image);
++   /* (an IOSurface's ID, or a plane of one: struct hakios_surface_plane in hakios-drm's xf86drm.h) */
++   out->texture = osmesa_surface_resource(fscreen->screen, (uintptr_t)image);
+    if (!out->texture)
+       return false;
+    out->format = out->texture->format;
+--- a/src/gallium/targets/osmesa/osmesa_target.c
++++ b/src/gallium/targets/osmesa/osmesa_target.c
+@@ -106,17 +106,58 @@
+ 
+ 
+ struct pipe_resource *
+-osmesa_surface_resource(struct pipe_screen *screen, uint32_t surface);
++osmesa_surface_resource(struct pipe_screen *screen, uintptr_t image);
+ 
+ /*
+  * The memory of an IOSurface as a texture, to draw into and to draw with (Darwin on redwood):
+  * the kernel's GPU driver makes a buffer of the surface. NULL: the screen is not the GPU's, or
+  * the surface is not one plane of 32-bit pixels, blue first, in rows the GPU can address.
+  */
++#ifdef OSMESA_GPU
++/*
++ * One plane of a two-plane IOSurface (a video frame: '420v' or '420f', luma then chroma) as a
++ * texture to draw with, R8 or R8G8, in the surface's own memory: without it each new frame was
++ * copied into its textures (12 MB a frame for 1080p, half the window server's time).
++ */
++static struct pipe_resource *
++osmesa_surface_plane_resource(struct pipe_screen *screen,
++                              const struct hakios_surface_plane *p)
++{
++   struct hakios_drm_surface s = { .surface = p->surface };
++   struct pipe_resource templ = {
++      .target = PIPE_TEXTURE_2D,
++      .depth0 = 1,
++      .array_size = 1,
++      .bind = PIPE_BIND_SAMPLER_VIEW,
++   };
++   struct winsys_handle handle = { .type = WINSYS_HANDLE_TYPE_FD };
++
++   if (p->magic != HAKIOS_SURFACE_PLANE_MAGIC || (p->components != 1 && p->components != 2))
++      return NULL;
++   if (gpu_fd < 0 || hakios_drm_surface(gpu_fd, &s) != 0)
++      return NULL;
++   if ((s.pixel_format != 0x34323076 /* '420v' */ && s.pixel_format != 0x34323066 /* '420f' */) ||
++       s.planes != 2)
++      return NULL;
++   if ((uint64_t)s.offset + p->offset + (uint64_t)p->row_bytes * (p->height - 1) +
++       (uint64_t)p->width * p->components > s.size)
++      return NULL;
++   templ.format = p->components == 1 ? PIPE_FORMAT_R8_UNORM : PIPE_FORMAT_R8G8_UNORM;
++   templ.width0 = p->width;
++   templ.height0 = p->height;
++   handle.handle = p->surface;
++   handle.stride = p->row_bytes;
++   handle.offset = s.offset + p->offset;
++   handle.size = s.size;
++   return screen->resource_from_handle(screen, &templ, &handle, 0);
++}
++#endif
++
+ struct pipe_resource *
+-osmesa_surface_resource(struct pipe_screen *screen, uint32_t surface)
++osmesa_surface_resource(struct pipe_screen *screen, uintptr_t image)
+ {
+ #ifdef OSMESA_GPU
++   uint32_t surface = (uint32_t)image;
+    struct hakios_drm_surface s = { .surface = surface };
+    struct pipe_resource templ = {
+       .target = PIPE_TEXTURE_2D,
+@@ -127,6 +168,9 @@
+    };
+    struct winsys_handle handle = { .type = WINSYS_HANDLE_TYPE_FD };
+ 
++   /* (no IOSurface ID is that big, and no pointer here smaller: the first 4 GB are no one's) */
++   if (image > UINT32_MAX)
++      return osmesa_surface_plane_resource(screen, (const struct hakios_surface_plane *)image);
+    if (gpu_fd < 0 || hakios_drm_surface(gpu_fd, &s) != 0)
+       return NULL;
+    if (s.pixel_format != 0x42475241 /* 'BGRA' */ || s.planes != 0)

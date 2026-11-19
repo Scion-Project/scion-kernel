@@ -103,6 +103,21 @@ struct hakios_drm_surface {
 	uint32_t width, height, pixel_format, planes;   /* and what they are */
 };
 int hakios_drm_surface(int fd, struct hakios_drm_surface *surface);
+
+/*
+ * Not libdrm's: one plane of a two-plane IOSurface (a video frame, '420v' or '420f'), given to
+ * glEGLImageTargetTexture2DOES as the image in place of a surface's ID (a pointer to this, which is
+ * never under 4 GB here): osmesa_target.c (tools/mesa/panfrost-surface-planes.patch) makes an R8
+ * (luma) or R8G8 (chroma) texture of it, in the surface's own memory. As userland/src/gl_osmesa.c has it.
+ */
+#define HAKIOS_SURFACE_PLANE_MAGIC 0x504c4e31u  /* 'PLN1' */
+struct hakios_surface_plane {
+	uint32_t magic;
+	uint32_t surface;                       /* the IOSurface's ID */
+	uint32_t offset;                        /* the plane's first byte, from the surface's base address */
+	uint32_t row_bytes, width, height;      /* the plane's */
+	uint32_t components;                    /* 1: R8, 2: R8G8 */
+};
 /* Not libdrm's: which IOSurface's memory is mapped at BASE in this process, told by whoever maps it (AdrenoMetal's frontend,
  * tools/m2v), for Turnip's VK_EXT_external_memory_host, which is given only the address: its ID, 0 if nobody said. */
 void hakios_drm_host_surface(const void *base, uint64_t size, uint32_t surface);

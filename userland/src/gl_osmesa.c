@@ -148,6 +148,42 @@ hakios_gl_surface_texture(struct hakios_gl *gl, uint32_t surface)
 	return glGetError() == 0;
 }
 
+/* As tools/mesa/hakios-drm/xf86drm.h has it (osmesa_target.c, tools/mesa/panfrost-surface-planes.patch). */
+#define HAKIOS_SURFACE_PLANE_MAGIC 0x504c4e31u  /* 'PLN1' */
+struct hakios_surface_plane {
+	uint32_t magic, surface, offset, row_bytes, width, height, components;
+};
+
+/*
+ * A plane of a video frame: the image is a pointer to its description (never under 4 GB here, where a surface's ID
+ * always is). Panfrost takes rows and a start on 64 bytes only; the others are refused and copied.
+ */
+int
+hakios_gl_surface_plane_texture(struct hakios_gl *gl, uint32_t surface, uint32_t offset, uint32_t row_bytes,
+    uint32_t width, uint32_t height, uint32_t components)
+{
+	struct hakios_surface_plane plane = {
+		.magic = HAKIOS_SURFACE_PLANE_MAGIC, .surface = surface, .offset = offset, .row_bytes = row_bytes,
+		.width = width, .height = height, .components = components,
+	};
+	static void (*image_target)(unsigned target, void *image);
+	static int asked, shares;
+
+	(void)gl;
+	if (!asked) {
+		asked = 1;
+		image_target = (void (*)(unsigned, void *))OSMesaGetProcAddress("glEGLImageTargetTexture2DOES");
+		shares = which_driver() == DRIVER_PANFROST;
+	}
+	if (image_target == NULL || !shares || (uintptr_t)&plane <= UINT32_MAX) {
+		return 0;
+	}
+	while (glGetError() != 0) {
+	}
+	image_target(GL_TEXTURE_2D, &plane);
+	return glGetError() == 0;
+}
+
 /* Mesa draws in this process: there is no host to show anything. */
 int
 hakios_gl_present(struct hakios_gl *gl, uint32_t surface)

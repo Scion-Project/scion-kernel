@@ -85,6 +85,21 @@ hakios_gl_pace(struct hakios_gl *gl)
 	return gfx_pace(gl->gfx);
 }
 
+/* a video frame's planes: not offered by the host here; they are copied */
+int
+hakios_gl_surface_plane_texture(struct hakios_gl *gl, uint32_t surface, uint32_t offset, uint32_t row_bytes,
+    uint32_t width, uint32_t height, uint32_t components)
+{
+	(void)gl;
+	(void)surface;
+	(void)offset;
+	(void)row_bytes;
+	(void)width;
+	(void)height;
+	(void)components;
+	return 0;
+}
+
 int
 hakios_gl_surface_texture(struct hakios_gl *gl, uint32_t id)
 {

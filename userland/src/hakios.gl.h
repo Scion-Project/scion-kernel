@@ -20,6 +20,13 @@ const char *hakios_gl_library(void);                           /* for the log */
  */
 int hakios_gl_surface_texture(struct hakios_gl *gl, uint32_t surface);
 /*
+ * One plane of a two-plane IOSurface ('420v'/'420f': a video frame) as the texture bound to GL_TEXTURE_2D, in the
+ * surface's own memory: R8 (components 1, luma) or R8G8 (2, chroma); OFFSET is the plane's from the base address. 1 when
+ * done, 0 when the library cannot (then the plane is copied, as before).
+ */
+int hakios_gl_surface_plane_texture(struct hakios_gl *gl, uint32_t surface, uint32_t offset, uint32_t row_bytes,
+    uint32_t width, uint32_t height, uint32_t components);
+/*
  * The frame just drawn into the surface's texture (hakios_gl_surface_texture) is shown by the host
  * itself, in a window of its own: 1 when it is (nothing to copy back for the display), 0 when the
  * library has no such host or the surface is not the display's. (SCGPU: the Scion app's gfxstream.)

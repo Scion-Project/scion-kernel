@@ -917,11 +917,77 @@ surface_mirrored(struct eagl *e, struct image *image)
  * Make a texture, which is bound, of its IOSurface's own memory, if that is what is asked for
  * (the whole of a surface of blue-first pixels, the same way up) and the library can do it.
  */
+/*
+ * A plane of a video frame ('420v'/'420f': luma as R8, chroma as RG8, the way CoreAnimation asks for them) made a
+ * texture of the surface's own memory: without it every new frame was copied into its two textures, 3 MB a frame
+ * for 1080p and several frames a frame (the window server's drawing thread, 7 ms of each frame; with YouTube's
+ * controls over the video it went past 16 ms and frames were dropped). The writer (mediaserverd's MFC decoder, or the
+ * MFC itself) locks the surface, which moves its seed, and the Mali's submission cleans what a processor wrote
+ * (MiniIOSurface's cleanSeed). glplanes=0: copied, as before.
+ */
+#define GL_RED_         0x1903
+#define GL_RG_          0x8227
+#define GL_R8_          0x8229
+#define GL_RG8_         0x822b
+static int share_planes = 1;
+static bool
+plane_shared(struct eagl *e, struct image *image)
+{
+	IOSurfaceRef surface = image->surface;
+	uint32_t pixels = IOSurfaceGetPixelFormat(surface), components;
+	const uint8_t *base, *plane;
+
+	if (!share_surfaces || !share_planes || image->target || image->invert || IOSurfaceGetPlaneCount(surface) != 2 ||
+	    (pixels != '420v' && pixels != '420f') || image->plane > 1 || image->type != GL_UNSIGNED_BYTE) {
+		return false;
+	}
+	components = image->plane == 0 ? 1 : 2;
+	if (components == 1 ? image->format != GL_RED_ || (image->internal != GL_R8_ && image->internal != GL_RED_) :
+	    image->format != GL_RG_ || (image->internal != GL_RG8_ && image->internal != GL_RG_)) {
+		return false;
+	}
+	if ((size_t)image->width != IOSurfaceGetWidthOfPlane(surface, image->plane) ||
+	    (size_t)image->height != IOSurfaceGetHeightOfPlane(surface, image->plane)) {
+		return false;
+	}
+	base = IOSurfaceGetBaseAddress(surface);
+	plane = IOSurfaceGetBaseAddressOfPlane(surface, image->plane);
+	if (base == NULL || plane == NULL || plane < base ||
+	    !hakios_gl_surface_plane_texture(e->gl, IOSurfaceGetID(surface), (uint32_t)(plane - base),
+	    (uint32_t)IOSurfaceGetBytesPerRowOfPlane(surface, image->plane), (uint32_t)image->width,
+	    (uint32_t)image->height, components)) {
+		static unsigned told;
+
+		if (told++ < 8) {
+			say("hakios-gl: surface %u ('%.4s' %zu x %zu) plane %u (%d x %d, %zu bytes a row, at %td) copied: the "
+			    "library refused its memory\n", IOSurfaceGetID(surface), (const char *)&(uint32_t){ OSSwapInt32(pixels) },
+			    IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), image->plane, image->width, image->height,
+			    IOSurfaceGetBytesPerRowOfPlane(surface, image->plane), base != NULL && plane != NULL ? plane - base : -1);
+		}
+		return false;
+	}
+	{
+		static unsigned told;
+
+		if (told++ < 4) {
+			say("hakios-gl: surface %u ('%.4s' %d x %d) plane %u: the texture is its memory (%zu bytes a row, at %td)\n",
+			    IOSurfaceGetID(surface), (const char *)&(uint32_t){ OSSwapInt32(pixels) }, image->width, image->height,
+			    image->plane, IOSurfaceGetBytesPerRowOfPlane(surface, image->plane), plane - base);
+		}
+	}
+	image->shared = true;
+	e->shared++;
+	return true;
+}
+
 static bool
 surface_shared(struct eagl *e, struct image *image)
 {
 	IOSurfaceRef surface = image->surface;
 
+	if (plane_shared(e, image)) {
+		return true;
+	}
 	if (!share_surfaces || image->invert || image->alpha_first || image->format != GL_BGRA || image->type != GL_UNSIGNED_BYTE ||
 	    image->plane != 0 || (size_t)image->width != IOSurfaceGetWidth(surface) ||
 	    (size_t)image->height != IOSurfaceGetHeight(surface) ||
@@ -4789,6 +4855,7 @@ install(void)
 			}
 		}
 		share_surfaces = strstr(arguments, "glcopy=1") == NULL;
+		share_planes = strstr(arguments, "glplanes=0") == NULL;
 		if ((argument = strstr(arguments, "glsurfaces=")) != NULL) {
 			images_most = (unsigned)strtoul(argument + 11, NULL, 10);
 			images_most = images_most < 16 ? 16 : images_most;
