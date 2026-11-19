@@ -677,6 +677,48 @@ uncaught(id exception)
 	}
 }
 
+/*
+ * Every NSException made (merge round 3: Instagram replaced the uncaught-exception handler with its own, and still ended in
+ * "terminating due to uncaught exception of type NSException" with nothing said): name, reason and the stack that made it,
+ * the first 20. Exceptions an app throws and catches itself are said too: the last one before the abort is the one.
+ */
+static id (*exception_init)(id, SEL, id, id, id);
+static unsigned exceptions_said;
+
+static id
+watched_exception_init(id self, SEL cmd, id name, id reason, id info)
+{
+	id made = exception_init(self, cmd, name, reason, info);
+
+	if (exceptions_said++ < 20) {
+		char line[1400];
+		const char *nm = name != nil ? ((const char *(*)(id, SEL))objc_msgSend)(name, sel_registerName("UTF8String")) : "?";
+		const char *rs = reason != nil && ((BOOL (*)(id, SEL, Class))objc_msgSend)(reason, sel_registerName("isKindOfClass:"),
+		    objc_getClass("NSString")) ? ((const char *(*)(id, SEL))objc_msgSend)(reason, sel_registerName("UTF8String")) : "";
+		void *frames[12];
+		int fn = backtrace(frames, 12);
+		int k = snprintf(line, sizeof(line), "hakios: %s: NSException %s: %.600s; made from:", who, nm ? nm : "?", rs ? rs : "");
+
+		for (int i = 2; i < fn && k < (int)sizeof(line) - 60; i++) {
+			Dl_info dl;
+			size_t cache = 0;
+			uintptr_t start = (uintptr_t)_dyld_get_shared_cache_range(&cache);
+
+			if ((uintptr_t)frames[i] - start < cache || dladdr(frames[i], &dl) == 0 || dl.dli_fname == NULL) {
+				k += snprintf(line + k, sizeof(line) - (size_t)k, " %#lx", (unsigned long)((uintptr_t)frames[i] - slide));
+			} else {
+				const char *base = strrchr(dl.dli_fname, '/');
+
+				k += snprintf(line + k, sizeof(line) - (size_t)k, " %s+%#lx", base != NULL ? base + 1 : dl.dli_fname,
+				    (unsigned long)((uintptr_t)frames[i] - (uintptr_t)dl.dli_fbase));
+			}
+		}
+		line[k++] = '\n';
+		say(line, (size_t)k);
+	}
+	return made;
+}
+
 /* Put ours in the place of a method, keeping the one that was there. */
 static void
 watch(const char *name, const char *selector, IMP ours, void *theirs)
@@ -733,6 +775,7 @@ hakios_app_init(void)
 		_dyld_register_func_for_add_image(igl_take_gl);
 	}
 	if (strcmp(name, "Sileo") != 0) {
+		watch("NSException", "initWithName:reason:userInfo:", (IMP)watched_exception_init, &exception_init);
 		watch("NSError", "initWithDomain:code:userInfo:", (IMP)watched_error_init, &error_init);
 		goto started;           /* (an App Store app: the signals and the keychain only; its network calls are many) */
 	}
