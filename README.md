@@ -8,35 +8,41 @@ Every change here was made and checked on that one phone, a round at a time, fro
 pulled in TWRP). Nothing here carries Apple's files, keys or any device's identity: the iOS system image is built, as upstream,
 from an IPSW you supply yourself, and the installer zip that build makes is **yours only and never to be shared**.
 
+**November 19, 2026: rebased on upstream's current `main`.** Upstream rewrote its history, so the Note9 work (123 commits up to
+test round 118) was carried over file by file onto the new layout. It now has upstream's Metal on Vulkan, the S9+'s camera
+driver (which the Note9 uses), and the rest of upstream's work. The pre-rebase branch is kept as `note9-old`.
+
 ## What works on the Note9
 
 | Area | State | Where |
 |---|---|---|
 | Boot, 8 cores, GPU (Mali), Wi-Fi, battery | works | upstream S9 drivers, `crownlte` boot-args |
-| Display (S6E3HA8 "crown") | works, brightness slider | `drivers/gpu/hakios.s6e3ha8.c` |
+| Display (S6E3HA8 "crown") | works, brightness slider | `drivers/display/panel/hakios.s6e3ha8.c` |
 | **Screen off with the side button** (really dark) and back on, no lines or smudges | works | `hakios.s6e3ha8.c` (below) |
 | **Auto-Lock** (Settings > Display) | works | `userland/src/inject_sb.c` |
-| Touch screen, palm rejection while the S Pen is near | works | `hakios.s6sy761.c` |
-| **S Pen** (Wacom W9018) with pressure | works | `drivers/input/hakios.w9018.c`, `inject.c` (finger slot 11) |
+| Touch screen, palm rejection while the S Pen is near | works | `drivers/input/touch/hakios.s6sy761.c` |
+| **S Pen** (Wacom W9018) with pressure | works | `drivers/input/touch/hakios.w9018.c`, `inject.c` (finger slot 11) |
 | Keys: side, volume, Bixby (as Home) | works | `hakios.exynos_keys.c` |
-| **Charging at 10 W** (was 1-2 W) | works | `drivers/power/hakios.max77705.c` |
+| **Charging at 10 W** (was 1-2 W) | works | `drivers/power/max77705/hakios.max77705.c` |
 | Speakers (MAX98512), microphone (CS47L93) | works | `hakios.max98512.c`, `audio_plugin.c` |
 | Bluetooth: on/off from Settings and Control Center, pairing, A2DP | works | `inject_bluetoothd.c`, `inject_bluetool.c`, `inject_sb.c` |
-| Front camera: preview, photos | works | `hakios.exynos_camera.c`, `camera_device.c` |
+| **Cameras: rear wide (S5K2L3), rear telephoto (S5K3M3), front (S5K3H1)** | work; autofocus (a software contrast search) is slow | `drivers/camera/exynos/hakios.exynos_camera_star2.c` (the S9+'s), `camera_device.c` |
 | **Video recording** (hardware H.264 encoder, MFC) | saves and plays; recorded **audio stutters** | `hakios.exynos_mfc.c`, `mfc_encoder.c`, `inject_media.c` |
-| Hardware video decoding (MFC) | works | `hakios.exynos_mfc.c` |
-| Persistent `/private/var` on USERDATA (HFS+), Sileo | works | `hakios.ufs.c`, `hakios.ufshc.c` |
+| Hardware video decoding (MFC, H.264) | works | `hakios.exynos_mfc.c` |
+| **Metal** (upstream's Metal on Vulkan: metal2vulkan over PanVK on the Mali-G72) | works for apps; the window server stays on OpenGL ES (faster here) | `userland/src/metalvk/`, `METAL=vk` |
+| **App Store apps** (decrypted from your own device, installed with AppSync): full screen, keychain, sign-in sheets | work: YouTube with Google sign-in, Instagram (laggy: Metal through translation) | below |
+| Persistent `/private/var` on USERDATA (HFS+), Sileo | works | `drivers/storage/ufs/` |
 | Sensors (sensor hub: accelerometer, gyro, light, proximity, compass), rotation | works | `inject.c` |
 
-**Does not work / not attempted:** cellular (Shannon modem; no CommCenter), rear cameras, NFC, Apple ID sign-in (Apple's
-device check rejects this port; nothing here forges a device identity), FairPlay-protected content (not implemented, by choice),
-Face ID.
+**Does not work / not attempted:** cellular (upstream's Shannon modem driver is in the tree, not tried on the Note9), NFC,
+Apple ID sign-in (Apple's device check rejects this port; nothing here forges a device identity), FairPlay-protected content (not
+implemented, by choice), Face ID.
 
 ## What was changed, and why
 
-### Screen off and on (`drivers/gpu/hakios.s6e3ha8.c`)
+### Screen off and on (`drivers/display/panel/hakios.s6e3ha8.c`)
 - Display-off alone (DCS 28) left the panel faintly lit. Off is now 28 + sleep-in, with the DECON's frames held
-  (`hakios_scanout_hold`, `drivers/gpu/hakios.exynos_dpu.c`) so nothing is sent to a sleeping panel.
+  (`hakios_scanout_hold`, `drivers/display/dpu/hakios.exynos_dpu.c`) so nothing is sent to a sleeping panel.
 - This panel cannot be woken from a bare sleep-in: it came back with black horizontal lines and smudges. Samsung's own kernel
   (and so TWRP) never does that: every blank is a power-down, every unblank a full power-up and init. The wake now does the
   same as Samsung's `_dsim_enable` / `panel_drv.c`:
@@ -52,59 +58,76 @@ Face ID.
   with no frame going out, twice, and kept only when both reads agree, and every write-back is read back.
 - A second screen-off while already asleep (seen after a backboardd restart at boot) now sends nothing; before, it broke the
   asleep state and the panel was never woken.
-- `MiniIOMobileFramebuffer.cpp`: while the panel sleeps there is no TE, so a flip not taken is no longer taken for a broken
-  scan-out (which used to drop the scaler path for good: ghosting and stutter after every screen-off).
+- Upstream's S9 `panel_sleep=1` (a bare sleep-in/out, through `hakios_s6e3ha8_power()`) is not used on the Note9: that entry
+  goes into the sequence above here.
+- The xnu fork's `MiniIOMobileFramebuffer.cpp`: while the panel sleeps there is no TE, so a flip not taken is no longer taken for
+  a broken scan-out (which used to drop the scaler path for good: ghosting and stutter after every screen-off).
 
 ### Auto-Lock (`userland/src/inject_sb.c`)
 With no CommCenter (no cellular), SpringBoard's `SBTelephonyManager` retried every second
 (`_handleTelephonyDaemonRestart` → `handleCallControlFailure:` → `updateCalls` → `resetIdleTimer`), and every retry reset
 the idle timer, so the screen never locked. The resets made inside that retry are dropped; the retry itself, and every other
-reset (touch, buttons), are left alone. Log-only hooks of SpringBoard's idle timer stay in (`hakios: idle:` lines).
+reset (touch, buttons), are left alone.
 
-### Charging (`drivers/power/hakios.max77705.c`)
-The charger was only read, never set, so iOS charged at 1-2 W. The driver now sets CNFG_09 (input limit) and CNFG_02 (charge
-current) to 2000 mA behind CHGPROT, clears the watchdog, and limits the charge to 500 mA outside 0-45 °C.
-`max77705_chg=0` turns it off.
+### App Store apps
+- **Letterboxing** (`inject_sb.c`): SpringBoard ran every third-party app in "classic mode" (a 16:9 iPhone's screen, scaled),
+  because no app knows this 1125x2313 screen. `-[SBApplication _classicModeFromSupportedTypes]` now says none: full screen.
+- **Keychain** (xnu fork, `bsd/kern/mach_loader.c` and `kern_cs.c`): a decrypted app's header page never matches its signature,
+  so the kernel ran it with csflags 0 and gave securityd none of its entitlements: every keychain call failed with -34018. With
+  signatures not enforced (as everywhere on this port), such a page no longer takes CS_VALID away.
+- **Sign-in sheets** (`inject_sb.c`): FrontBoard refused to open SafariViewService for an app ("Un-trusted clients may not open
+  applications in the background"), because LaunchServices' records here have no entitlements for the system's apps. A system
+  app whose Info.plist names its view-service Mach service (`com.apple.uikit.viewservice.<id>`) is taken for a view service.
+  YouTube's Google sign-in works since.
+- **Metal for apps built with newer SDKs** (`userland/src/metalvk/HakiosMetalVK.mm`): `recommendedMaxWorkingSetSize`,
+  `currentAllocatedSize`, `maxTransferRate` and `hasUnifiedMemory` answered (Instagram ended on the first).
+- `libhakios.app.dylib` (`userland/src/inject_app.c`), injected into Instagram and YouTube, logs what kills an app: the signal's
+  instruction and registers, every NSException made, failed keychain calls and the app's code signature.
 
-### Bluetooth
-- `inject_bluetoothd.c`: a missing H4 transport callback crashed bluetoothd at power-off; it is filled with a no-op.
-- `userland/bluetool/D22AP.deepsleep.script`: there was none, so bluetoothd waited for a timeout after every power-off.
-- `inject_bluetool.c`: answers to slow MobileGestalt questions are cached, which takes power-on to about 0.7 s.
-- `inject_sb.c`: Control Center's Bluetooth button read a BluetoothManager of its own that never attached (grey button). It is
-  given the shared one.
+### Cameras
+Samsung's device trees of the S9+ and the Note9 (revision 26) have every camera node the same but for phandle numbers: the
+same pins (MCLK `gpc1-4/5`, resets `gpg2-5/6/7`, flash `gpg3-5`), I2C channels and rails. So the Note9's kernel builds the
+S9+'s driver, rear and telephoto on by default (`cam_s9_rear=0` / `cam_s9_tele=0` turn them off).
 
-### Video recording (`mfc_encoder.c`, `inject_media.c`, `hakios.exynos_mfc.c`)
-- The software HEVC encoder could not keep up, and hooking VideoToolbox through `__interpose` or the GOT never reaches
-  shared-cache callers. The MFC is registered as a real VideoToolbox encoder plugin for `avc1`/`hvc1` instead.
-- mediaserverd's capture graph is kept from crashing after the stop, and audio buffers longer than a second (garbage
-  timestamps from the audio node) are dropped, so the movie is finished and plays.
-- Known: the recorded sound ticks/stutters. Still being worked on.
+### Metal and the window server
+Upstream's Metal on Vulkan runs here (the `MetalTri` test draws; Instagram draws through it). With the window server on Metal
+too, the UI draws more correctly but the whole system is slower on this phone, so the build keeps it on OpenGL ES
+(`METAL_WS=0`: a line `-backboardd` in `HakiosMetal.clients`). A line `backboardd` in `/private/var/db/HakiosMetal.clients` on the
+phone puts it back on Metal, without a rebuild.
 
-### Also
-- S Pen: `inject.c` handled 10 fingers and the pen is finger 11. Ghost touches around the pen tip are dropped while the pen is
-  near.
-- Storage: larger UFS slot buffers, sleeping waits, and 30-second write statistics (`hakios.ufshc.c`).
-- Keys: **Bixby + volume-down held for 3 s** ends the run and goes back to the loader with the log kept. This is the way
-  out when the screen is dark and the touch screen dead. (Volume-down + power is the phone's forced restart, which loses the
-  log.)
-- `kern.hakios.ustacks` (`hakios.input.c`): write a process name to dump its user stacks to the log.
+### Charging, Bluetooth, video, the rest
+- Charging (`hakios.max77705.c`): the charger was only read, never set, so iOS charged at 1-2 W. CNFG_09 and CNFG_02 are set to
+  2000 mA behind CHGPROT, the watchdog cleared, 500 mA outside 0-45 °C (`max77705_chg=0` turns it off). Upstream's diagnostics
+  and watchdog kick are kept beside it.
+- Bluetooth: a missing H4 transport callback crashed bluetoothd at power-off (filled with a no-op); a `D22AP.deepsleep.script`;
+  slow MobileGestalt answers cached; Control Center's button given the shared BluetoothManager.
+- Video recording: the MFC as a VideoToolbox encoder plug-in for `avc1`/`hvc1`; audio buffers longer than a second dropped so the
+  movie is finished (upstream's own fixes of the capture graph's stop are used).
+- S Pen: `inject.c` handled 10 fingers and the pen is finger 11. Keys: **Bixby + volume-down held for 3 s** ends the run and
+  goes back to the loader with the log kept (the way out when the screen is dark and touch is dead).
+- Upstream fixes needed to build on macOS: `pan_drmSyncobj*` declared before use (`tools/mesa/hakios-drm/hakios.drm.c`),
+  the system image's stamp from `uuidgen` (`userland/build.sh`).
 
 ## Building it
 
-As upstream (scion-installer), with this fork's `note9` branch as the kernel and the Note9's boot-args:
+The kernel's own changes are in the xnu fork [cooblg/xnu](https://github.com/cooblg/xnu/tree/note9), branch `note9`
+(`profiles/ios-16.5.conf` names it). With upstream's
+[scion-installer](https://github.com/Scion-Project/scion-installer), add `crownlte` to the `case` that sets `METAL_USERLAND`
+(Metal is built only for the S9+ there), then:
 
 ```sh
-./build-installer.sh --ipsw <your iPhone10,3/10,6 16.5 IPSW> --device all --kernel-ref <commit of this branch> \
-  -- -N -t 0 -a "crownlte=exynos_keys=1 s6sy761=1 mali=9 fb_zc=1 fb_dpp=1 cpus=8 m3_prep=3 isa_floor=1 pan=0 \
-max77705=1 max77705_haptic=1 wifi=1 wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 brcmfmac_tcm_idx=1 mali_gov=1 cpufreq_gov=1 \
-tmu_stop=90 ufs=3 panel=1 panel_gamma=0 backlight=2 abox=8 max98512=3 bt=7 cam=5 cam_s9=7 mfc=5 cs47l93=6 abox_mic=1 \
-shub=6 ufs_write=1 var_hfs=ufs_USERDATA_data"
+METAL_WS=0 SYSTEM_FULL=1 FRAGMENTS="panel9 mfc9 sense9" ./build-installer.sh --ipsw <your iPhone10,3/10,6 16.5 IPSW> \
+  --device crownlte --kernel-ref <commit of this branch> -- -N -t 0 -a "crownlte=exynos_keys=1 s6sy761=1 mali=9 fb_zc=1 \
+fb_dpp=1 cpus=8 m3_prep=3 isa_floor=1 pan=0 max77705=1 max77705_haptic=1 wifi=1 wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 \
+brcmfmac_tcm_idx=1 mali_gov=1 cpufreq_gov=1 tmu_stop=90 ufs=3 panel=1 panel_gamma=0 backlight=2 abox=8 max98512=3 bt=7 cam=5 \
+cam_s9=7 mfc=5 cs47l93=6 abox_mic=1 shub=6 ufs_write=1 var_hfs=ufs_USERDATA_data metal=2"
 ```
 
-with the environment `SYSTEM_FULL=1 FRAGMENTS="panel9 mfc9 sense9"`. `var_hfs` keeps `/private/var` on USERDATA, which must
-have been formatted as HFS+ once (this **erases Android's data**; see scion-installer's `--format-userdata`). Back up Boot,
-System and EFS in TWRP first. The loader's boot-argument line has a length limit past which it is cut silently, so check the
-log's "Boot args" line after changing it.
+- macOS needs Xcode (26 here) with its Metal toolchain (`xcodebuild -downloadComponent MetalToolchain`) for Metal, and
+  Homebrew's llvm on `PATH`.
+- `var_hfs` keeps `/private/var` on USERDATA, which must have been formatted as HFS+ once (this **erases Android's data**; see
+  scion-installer's `--format-userdata`). Back up Boot, System and EFS in TWRP first.
+- The loader's boot-argument line is cut silently at about 620 characters: check the log's "Boot args" line after changing it.
 
 Testing: pull `/proc/last_kmsg` in TWRP after each run. End a run with five fingers held on the screen for 1.5 s, or with
 Bixby + volume-down for 3 s. A forced restart loses the log.
