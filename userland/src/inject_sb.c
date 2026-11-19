@@ -1043,6 +1043,9 @@ idle_tel_restart(id self, SEL sel, id arg)
 	in_tel_restart = false;
 }
 
+/* the idle timer's diagnostics (the hooks below and the per-reset lines): only with /private/var/db/hakios.idle_diag present */
+static bool idle_diag;
+
 static void
 idle_reset_plain(id self, SEL sel)
 {
@@ -1053,8 +1056,10 @@ idle_reset_plain(id self, SEL sel)
 		}
 		return;
 	}
-	idle_who("resetIdleTimer");
-	idle_count_reset("resetIdleTimer", nil);
+	if (idle_diag) {
+		idle_who("resetIdleTimer");
+		idle_count_reset("resetIdleTimer", nil);
+	}
 	((void (*)(id, SEL))o_reset_plain)(self, sel);
 }
 
@@ -1117,18 +1122,27 @@ static void
 idle_watch(int round)
 {
 	if (round == 0) {
+		/*
+		 * (the Auto-Lock fix: resetIdleTimer and the telephony retry, always; the rest are what found it, step 104-105, and
+		 * cost a description at every reset -- every touch -- so they are hooked only for a diagnosis)
+		 */
+		idle_hook1("SBIdleTimerGlobalCoordinator", "resetIdleTimer", (IMP)idle_reset_plain, &o_reset_plain);
+		idle_hook1("SBTelephonyManager", "_handleTelephonyDaemonRestart", (IMP)idle_tel_restart, &o_tel_restart);
+		idle_diag = access("/private/var/db/hakios.idle_diag", F_OK) == 0;
+		if (!idle_diag) {
+			say("hakios: idle: the telephony retry's resets are dropped (Auto-Lock); no diagnostics\n");
+			return;
+		}
 		idle_hook1("SBIdleTimerGlobalCoordinator", "_setIdleTimerWithDescriptor:forReason:", (IMP)idle_set_desc, &o_set_desc);
 		idle_hook1("SBIdleTimerGlobalCoordinator", "acquireIdleTimerDisableAssertionForReason:", (IMP)idle_acquire, &o_acquire);
 		idle_hook1("SBIdleTimerGlobalCoordinator", "_setIdleTimerSourceEnabled:forReason:", (IMP)idle_src_enabled, &o_src_enabled);
 		idle_hook1("SBIdleTimerGlobalCoordinator", "resetIdleTimerForReason:", (IMP)idle_reset_reason, &o_reset_reason);
 		idle_hook1("SBIdleTimerGlobalCoordinator", "resetIdleTimerIfNonConsecutiveSource:forReason:", (IMP)idle_reset_nc, &o_reset_nc);
-		idle_hook1("SBIdleTimerGlobalCoordinator", "resetIdleTimer", (IMP)idle_reset_plain, &o_reset_plain);
 		idle_hook1("SBBacklightIdleTimer", "idleTimerDidReset:forUserAttention:at:", (IMP)idle_bl_reset_att, &o_bl_reset_att);
 		idle_hook1("SBBacklightIdleTimer", "setDescriptor:", (IMP)idle_bl_set_desc, &o_bl_set_desc);
 		idle_hook1("SBBacklightIdleTimer", "idleTimer:attentionLostTimeoutDidExpire:", (IMP)idle_bl_att_lost, &o_bl_att_lost);
 		idle_hook1("SBIdleTimerProxy", "idleTimerDidExpire:", (IMP)idle_px_expire, &o_px_expire);
 		idle_hook1("SBIdleTimerProxy", "idleTimerDidWarn:", (IMP)idle_px_warn, &o_px_warn);
-		idle_hook1("SBTelephonyManager", "_handleTelephonyDaemonRestart", (IMP)idle_tel_restart, &o_tel_restart);
 		say("hakios: idle: SpringBoard's idle timer watched\n");
 	}
 	Class gc = objc_getClass("SBIdleTimerGlobalCoordinator");
@@ -1189,6 +1203,9 @@ classic_none(id self, SEL sel)
  */
 static IMP o_has_vs;
 
+static CFMutableDictionaryRef vs_known;          /* bundle ID -> kCFBooleanTrue/False: each Info.plist read once */
+static os_unfair_lock vs_lock = OS_UNFAIR_LOCK_INIT;
+
 static BOOL
 has_view_services(id self, SEL sel)
 {
@@ -1199,6 +1216,18 @@ has_view_services(id self, SEL sel)
 		return YES;
 	}
 	id bid = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("bundleIdentifier"));
+	if (bid != nil) {
+		CFTypeRef known = NULL;
+
+		os_unfair_lock_lock(&vs_lock);
+		if (vs_known != NULL) {
+			known = CFDictionaryGetValue(vs_known, (CFStringRef)bid);
+		}
+		os_unfair_lock_unlock(&vs_lock);
+		if (known != NULL) {
+			return known == kCFBooleanTrue;
+		}
+	}
 	id url = class_respondsToSelector(object_getClass(self), sel_registerName("bundleURL")) ?
 	    ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("bundleURL")) : nil;
 	const char *b = bid != nil ? ((const char *(*)(id, SEL))objc_msgSend)(bid, sel_registerName("UTF8String")) : NULL;
@@ -1240,6 +1269,14 @@ has_view_services(id self, SEL sel)
 	}
 	if (purl != NULL) {
 		CFRelease(purl);
+	}
+	if (bid != nil) {
+		os_unfair_lock_lock(&vs_lock);
+		if (vs_known == NULL) {
+			vs_known = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+		}
+		CFDictionarySetValue(vs_known, (CFStringRef)bid, vends ? kCFBooleanTrue : kCFBooleanFalse);
+		os_unfair_lock_unlock(&vs_lock);
 	}
 	if (vends && said++ < 20) {
 		say("hakios: viewservice: %s has no view-services entitlement in LaunchServices' record; its Info.plist names %s: "

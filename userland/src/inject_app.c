@@ -501,6 +501,10 @@ static id
 watched_error_init(id self, SEL cmd, id domain, long code, id info)
 {
 	id made = error_init(self, cmd, domain, code, info);
+
+	if (errors_said >= 80) {
+		return made;            /* (said enough: nothing more done for each error an app makes) */
+	}
 	const char *d = domain != nil ? ((const char *(*)(id, SEL))objc_msgSend)(domain, sel_registerName("UTF8String")) : "?";
 
 	if (d != NULL && !(strcmp(d, "NSURLErrorDomain") == 0 && code == -999) && errors_said < 80) {
