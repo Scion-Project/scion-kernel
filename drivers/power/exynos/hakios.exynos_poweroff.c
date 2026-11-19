@@ -21,10 +21,12 @@
  */
 #include <stdint.h>
 #include <kern/clock.h>
+#include <kern/thread_call.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <pexpert/pexpert.h>
 #include <sys/errno.h>
+#include <sys/reboot.h>
 #include <sys/systm.h>
 #include <sys/hakios.exynos_acpm.h>
 #include <sys/hakios.exynos_soc.h>
@@ -33,8 +35,14 @@
 extern void hakios_var_save_on_return(void);
 extern bool hakios_s6e3ha8_blank(int (*say)(const char *, ...));   /* drivers/display/panel/hakios.s6e3ha8.c; a stand-in says no */
 
+extern void hakios_thread_say_stack(thread_t thread, int (*say_as)(const char *, ...));  /* osfmk/arm64/machine_routines.c */
+extern void halt_all_cpus(boolean_t reboot) __attribute__((noreturn));
+
 bool hakios_exynos_power_off(const char *who, int (*say_as)(const char *, ...));
 void hakios_exynos_halt_off(boolean_t reboot);
+void hakios_shutdown_watch(int howto);
+
+static volatile bool halting;           /* halt_all_cpus() reached: the watch has nothing to do */
 
 #define PMU_PA                  ((uint32_t)EXYNOS_PMU_PA)     /* flexpmu_cal_system_exynos9810.h:39 */
 #define PMU_PS_HOLD_CONTROL     EXYNOS_POWEROFF_PMU_PS_HOLD_CONTROL         /* sec_ext.h:33 */
@@ -83,6 +91,7 @@ hakios_exynos_halt_off(boolean_t reboot)
 {
 	uint32_t level = 0;
 
+	halting = true;
 	if (!reboot && !PE_parse_boot_argn("halt_off", &level, sizeof(level))) {
 		char platform[24] = "";
 
@@ -106,4 +115,51 @@ hakios_exynos_halt_off(boolean_t reboot)
 		    error == ENXIO ? "no ACPM, or no such channel" : "no answer", error);
 	}
 	(void)hakios_exynos_power_off("halt_off: 3", say);
+}
+
+/*
+ * The shutdown watch (reboot_kernel(), xnu fork): a shutdown that has not reached halt_all_cpus() WATCH_SECS after
+ * reboot(2) is stuck. On the Note9 (merge round 6) it hung in the force unmount of /dev, after the data volume was
+ * unmounted, with the spinner on screen until the battery ran down. The watch says the stuck thread's kernel stack,
+ * then halts (powered off by halt_off) or restarts as asked. The data volume is saved by the halt's own path
+ * (hakios_var_save_on_return()). shutdown_watch=0 turns it off.
+ */
+#define WATCH_SECS      10
+
+static thread_t watch_thread;
+static int watch_howto;
+
+static void
+shutdown_stalled(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
+{
+	if (halting) {
+		return;
+	}
+	say("\n--- shutdown: not halted %d s after reboot(2) (howto %#x): stuck; the shutdown thread's stack (nm on the "
+	    "unstripped kernel names the frames) ---\n", WATCH_SECS, watch_howto);
+	hakios_thread_say_stack(watch_thread, say);
+	say("--- shutdown: %s anyway ---\n", (watch_howto & RB_HALT) ? "halted (powered off)" : "restarted");
+	halt_all_cpus((watch_howto & RB_HALT) == 0);
+}
+
+void
+hakios_shutdown_watch(int howto)
+{
+	static thread_call_t call;
+	uint32_t on = 1;
+	uint64_t deadline;
+
+	(void)PE_parse_boot_argn("shutdown_watch", &on, sizeof(on));
+	if (on == 0 || call != NULL) {
+		return;
+	}
+	watch_thread = current_thread();
+	watch_howto = howto;
+	call = thread_call_allocate_with_options(shutdown_stalled, NULL, THREAD_CALL_PRIORITY_KERNEL, 0);
+	if (call == NULL) {
+		return;
+	}
+	clock_interval_to_deadline(WATCH_SECS, NSEC_PER_SEC, &deadline);
+	thread_call_enter_delayed(call, deadline);
+	say("shutdown: reboot(2) with howto %#x: watched for %d s\n", howto, WATCH_SECS);
 }

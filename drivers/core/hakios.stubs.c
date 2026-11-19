@@ -42,6 +42,7 @@ void hakios_var_save_on_return(void);
 void hakios_mic_quiesce(void);
 void HakiosWLANStart(const char *interface, const uint8_t *address);
 void hakios_exynos_halt_off(boolean_t reboot);          /* (machine_routines.c's halt_all_cpus(), patch 1510) */
+void hakios_shutdown_watch(int howto);                  /* (kern_shutdown.c's reboot_kernel()) */
 bool hakios_s6e3ha8_blank(int (*say)(const char *, ...));
 
 #ifndef HAKIOS_EXYNOS_ACPM
@@ -251,6 +252,7 @@ bool hakios_spen_near(__unused uint32_t *x, __unused uint32_t *y) { return false
 
 #ifndef HAKIOS_EXYNOS_POWEROFF
 void hakios_exynos_halt_off(__unused boolean_t reboot) {}  /* a halt hands the phone to the loader, as it always did */
+void hakios_shutdown_watch(__unused int howto) {}           /* no watch on a stalled shutdown */
 #endif
 #ifndef HAKIOS_EXYNOS_DPU
 /* the display's own scan-out (MiniIOMobileFramebuffer.cpp, fb_flip/fb_dpp/fps_log): none, frames go into the boot framebuffer */
