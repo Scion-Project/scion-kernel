@@ -855,6 +855,11 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# metal_tri and MetalTri.app open the plug-in themselves (no boot-arg): this file shows it the device
 		# (src/hakios_metal_shown.c); with boot-arg metal=N the level decides for every other process as before
 		printf 'metal_tri\nmetal_libcheck\n' > root/lib/HakiosMetal.clients
+		# METAL_WS=0: the window server kept on OpenGL ES (-backboardd), apps still shown the device with metal=2. The Note9: its
+		# boot line has no room for camtl=0 (cut at about 620 characters), and CoreAnimation on Metal through metal2vulkan made
+		# the whole system slower there (merge round 1, 19 November 2026); /private/var/db/HakiosMetal.clients can say
+		# otherwise on the phone (a line backboardd, no rebuild)
+		[ "${METAL_WS:-1}" = 0 ] && echo -backboardd >> root/lib/HakiosMetal.clients
 		cp obj/metal_tri obj/metal_libcheck root/bin/
 		cp obj/metal_tri.metallib root/share/
 		rm -rf obj/MetalTri.app
