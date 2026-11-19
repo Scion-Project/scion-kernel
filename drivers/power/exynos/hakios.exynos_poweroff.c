@@ -48,6 +48,8 @@ static volatile bool halting;           /* halt_all_cpus() reached: the watch ha
 #define PMU_PA                  ((uint32_t)EXYNOS_PMU_PA)     /* flexpmu_cal_system_exynos9810.h:39 */
 #define PMU_PS_HOLD_CONTROL     EXYNOS_POWEROFF_PMU_PS_HOLD_CONTROL         /* sec_ext.h:33 */
 #define PS_HOLD_HIGH            (1u << 8)       /* sec_reboot.c:135, exynos-reboot.c:252 */
+#define PMU_INFORM2             0x808u          /* xnuloader/loader.c (sec_ext.h): 0x12345678, a restart */
+#define PMU_INFORM3             0x80Cu          /* ... 0x12345674, into recovery */
 
 static bool
 read_int(const char *name, int *value)
@@ -79,7 +81,21 @@ hakios_exynos_power_off(const char *who, int (*say_as)(const char *, ...))
 	volatile uint32_t *ps_hold = (volatile uint32_t *)(pmu + (PMU_PS_HOLD_CONTROL & 0xfffu));
 	uint32_t v = *ps_hold;
 
-	say_as("%s: PS_HOLD_CONTROL %08x: PS_HOLD low, the phone off (this log is lost with it)\n", who, v);
+	/*
+	 * The loader writes INFORM2/INFORM3 for "restart into recovery" when it arms the watchdog (xnuloader/wdt_exynos.c,
+	 * recovery_after_reset()), so that a run that ends goes to TWRP with its log. They outlive PS_HOLD: the next start
+	 * with the power key went to TWRP and not into BOOT. A power-off clears them, as Samsung's sec_power_off() leaves
+	 * no reboot reason behind.
+	 */
+	vm_offset_t inform = ml_io_map(PMU_PA, 0x1000);
+
+	if (inform != 0) {
+		*(volatile uint32_t *)(inform + PMU_INFORM2) = 0;
+		*(volatile uint32_t *)(inform + PMU_INFORM3) = 0;
+		__asm__ volatile ("dsb sy" ::: "memory");
+	}
+	say_as("%s: PS_HOLD_CONTROL %08x: INFORM2/3 cleared (%s), PS_HOLD low, the phone off (this log is lost with it)\n",
+	    who, v, inform != 0 ? "the next start is BOOT's" : "NOT: the PMU not mapped");
 	*ps_hold = v & ~PS_HOLD_HIGH;
 	delay(1000 * 1000);
 	say_as("%s: still running a second after PS_HOLD (%08x): the loader's way instead\n", who, *ps_hold);
