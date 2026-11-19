@@ -1114,7 +1114,7 @@ audio_source_end(void *context)
 }
 
 static BOOL
-audio_source_stop(id self, SEL selector, id *error)
+n9_audio_source_stop(id self, SEL selector, id *error)
 {
 	BOOL r = ((BOOL (*)(id, SEL, id *))original_audio_source_stop)(self, selector, error);
 
@@ -1262,7 +1262,7 @@ end_live_output(id self, SEL selector)
 static IMP original_make_format_live;
 
 static void
-make_format_live(id self, SEL selector)
+n9_make_format_live(id self, SEL selector)
 {
 	bool ended = false;
 
@@ -1311,7 +1311,7 @@ wrap_audio_source_stop(void)
 	done = true;
 	original_audio_source_stop = method_getImplementation(m);
 	/* on BWAudioSourceNode itself (added there if it inherits stop:), never on its superclass */
-	class_replaceMethod(cls, sel, (IMP)audio_source_stop, method_getTypeEncoding(m));
+	class_replaceMethod(cls, sel, (IMP)n9_audio_source_stop, method_getTypeEncoding(m));
 	say("hakios: mediaserverd: -[BWAudioSourceNode stop:] wrapped (its outputs marked ended after a stop)\n");
 	{
 		SEL g = sel_registerName("_generateSamples");
@@ -1366,7 +1366,7 @@ wrap_audio_source_stop(void)
 
 		if (types != NULL && types[0] == 'v' && strspn(strchr(types, ':') + 1, "0123456789") == strlen(strchr(types, ':') + 1)) {
 			original_make_format_live = method_getImplementation(fm);
-			class_replaceMethod(oc, f, (IMP)make_format_live, types);
+			class_replaceMethod(oc, f, (IMP)n9_make_format_live, types);
 			say("hakios: mediaserverd: -[BWNodeOutput makeConfiguredFormatLive] (%s) wrapped: an output we ended stays ended\n", types);
 		} else {
 			say("hakios: mediaserverd: -[BWNodeOutput makeConfiguredFormatLive]: %s; left alone\n", fm ? types : "not there");
@@ -1392,7 +1392,7 @@ image_added(__unused const struct mach_header *header, __unused intptr_t image_s
 	/* before anything of the image that was just added runs, and this is the only place in this
 	 * library that is told about a new image at all */
 	keep_metal_from_the_capture_stack();
-	wrap_audio_source_stop();
+	/* wrap_audio_source_stop(); -- upstream's hooks of the same methods (the table above) do this now */ (void)wrap_audio_source_stop;
 	for (size_t i = 0; i < sizeof(replacements) / sizeof(replacements[0]); i++) {
 		struct replacement *r = &replacements[i];
 		Class cls;
