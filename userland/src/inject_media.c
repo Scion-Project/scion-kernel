@@ -37,7 +37,10 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreMedia/CoreMedia.h>
 #include <CoreVideo/CoreVideo.h>
+#include <dispatch/dispatch.h>
 #include <dlfcn.h>
+#include <signal.h>
+#include <sys/ucontext.h>
 #include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <mach/mach_time.h>
@@ -76,6 +79,12 @@ extern const void *_dyld_get_shared_cache_range(size_t *length);
 #define CACHE_BASE 0x180000000UL                /* where the cache was built to be, before the slide */
 
 static uintptr_t slide;
+static id send0(id o, const char *sel);
+static CFMutableSetRef ended_outputs;           /* outputs we marked ended: their later buffers are dropped */
+static pthread_mutex_t ended_lock = PTHREAD_MUTEX_INITIALIZER;
+static CFMutableDictionaryRef ends_owed;        /* output -> how many of the node's own (late) ends to swallow (end_live_output) */
+static __thread bool ending_here;               /* audio_source_end's own markEndOfLiveOutput */
+static CFMutableSetRef stopped_sources;         /* audio source nodes stopped and not started again (under ended_lock) */
 
 /*
  * The daemon's last words. There is no crash reporter in this system: a mediaserverd that dies says only "exited due
@@ -348,8 +357,25 @@ static BOOL
 audio_source_start(id self, SEL selector, id *error)
 {
 	if (camera) objc_setAssociatedObject(self, &audio_source_stopped, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	BOOL started = ((BOOL (*)(id, SEL, id *))original_audio_source_start)(self, selector, error);
-	id made = error != NULL ? *error : NULL;
+	BOOL started;
+	id made;
+
+	pthread_mutex_lock(&ended_lock);
+	if (stopped_sources != NULL) {
+		CFSetRemoveValue(stopped_sources, (const void *)self);         /* running again */
+	}
+	if (ended_outputs != NULL) {
+		id outs = send0(self, "outputs");
+		long n = outs != nil ? ((long (*)(id, SEL))objc_msgSend)(outs, sel_registerName("count")) : 0;
+
+		for (long i = 0; i < n; i++) {
+			CFSetRemoveValue(ended_outputs, (const void *)((id (*)(id, SEL, long))objc_msgSend)(outs,
+			    sel_registerName("objectAtIndex:"), i));
+		}
+	}
+	pthread_mutex_unlock(&ended_lock);
+	started = ((BOOL (*)(id, SEL, id *))original_audio_source_start)(self, selector, error);
+	made = error != NULL ? *error : NULL;
 	static bool said;
 
 	if (started || made == NULL || ((long (*)(id, SEL))objc_msgSend)(made, sel_registerName("code")) != ERROR_NO_SUCH_THING) {
@@ -505,6 +531,43 @@ emit_sample_buffer(id self, SEL selector, CMSampleBufferRef sample_buffer)
 		}
 		return;
 	}
+	if (ended_outputs != NULL) {
+		bool drop = false;
+
+		pthread_mutex_lock(&ended_lock);
+		/* until its node is started again (audio_source_start takes its outputs out of the set) */
+		drop = CFSetContainsValue(ended_outputs, (const void *)self);
+		pthread_mutex_unlock(&ended_lock);
+		if (drop) {
+			static bool said_drop;
+
+			if (!said_drop) {
+				said_drop = true;
+				say("hakios: mediaserverd: a buffer for an output already ended (the audio source after its stop): dropped\n");
+			}
+			return;
+		}
+	}
+	/*
+	 * An audio buffer of more than a second, which no capture makes: the audio source's "gap" of 10 000 s and more (step 99,
+	 * 448 039 462 frames at a pts 10 000 s in the past), from times it could not place. Not passed on: the movie's writer
+	 * cannot put it anywhere, and waited for ever (no moov). It carries no sound (no buffer holds that many frames).
+	 */
+	{
+		CMFormatDescriptionRef af = CMSampleBufferGetFormatDescription(sample_buffer);
+
+		if (af != NULL && CMFormatDescriptionGetMediaType(af) == kCMMediaType_Audio &&
+		    CMTimeGetSeconds(CMSampleBufferGetDuration(sample_buffer)) > 1.0) {
+			static int said;
+
+			if (said++ < 6) {
+				say("hakios: mediaserverd: an audio buffer of %.1f s (%ld frames, pts %.3f s) not passed on\n",
+				    CMTimeGetSeconds(CMSampleBufferGetDuration(sample_buffer)), (long)CMSampleBufferGetNumSamples(sample_buffer),
+				    CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample_buffer)));
+			}
+			return;
+		}
+	}
 	if (camera && is_node(((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("node")), "BWAudioSourceNode")) {
 		/* The audio timer may still emit after stop has ended this output. */
 		Ivar ended = class_getInstanceVariable(objc_getClass("BWNodeOutput"), "_receivedEOD");
@@ -521,6 +584,80 @@ emit_sample_buffer(id self, SEL selector, CMSampleBufferRef sample_buffer)
 		return;
 	}
 	time_photo_encoder(self, sample_buffer);
+	/*
+	 * How far behind real time the buffers go out: the host clock now less the buffer's presentation time, every 100th
+	 * audio buffer and every 150th video one (the audio source's queue ran ~15 s late in step 85/86: is its audio late too?)
+	 */
+	{
+		CMFormatDescriptionRef f = CMSampleBufferGetFormatDescription(sample_buffer);
+		CMMediaType type = f != NULL ? CMFormatDescriptionGetMediaType(f) : 0;
+		static unsigned audio_n, video_n;
+		unsigned n = type == kCMMediaType_Audio ? ++audio_n : type == kCMMediaType_Video ? ++video_n : 0;
+
+		if ((type == kCMMediaType_Audio && (n % 100 == 1 || (n <= 300 && n % 10 == 1))) || (type == kCMMediaType_Video && n % 150 == 1)) {
+			CMTime pts = CMSampleBufferGetPresentationTimeStamp(sample_buffer);
+			double now = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()));
+			id node = send0(self, "node");
+			id name = node != nil ? send0(node, "name") : nil;
+
+			say("hakios: mediaserverd: lag: %s buffer %u from %s: pts %.3f s, %.3f s behind the host clock\n",
+			    type == kCMMediaType_Audio ? "audio" : "video", n, name != nil ?
+			    ((const char *(*)(id, SEL))objc_msgSend)(name, sel_registerName("UTF8String")) : "?",
+			    CMTimeGetSeconds(pts), now - CMTimeGetSeconds(pts));
+			if (type == kCMMediaType_Audio) {
+				/* what the buffer says of itself, and (from the audio source) how much of it the silence path made */
+				const AudioStreamBasicDescription *asbd = CMAudioFormatDescriptionGetStreamBasicDescription(f);
+				long long silence = -1;
+				Class asn = objc_getClass("BWAudioSourceNode");
+
+				if (node != nil && asn != Nil && ((BOOL (*)(id, SEL, Class))objc_msgSend)(node, sel_registerName("isKindOfClass:"), asn)) {
+					Ivar sv = class_getInstanceVariable(asn, "_silenceFramesGeneratedSinceLastAURenderProc");
+
+					if (sv != NULL) {
+						silence = *(long long *)((uintptr_t)node + (uintptr_t)ivar_getOffset(sv));
+					}
+				}
+				/* the node's own clock (an audio device's?), where it is now against the host clock */
+				double clock_now = -1;
+
+				if (node != nil && ((BOOL (*)(id, SEL, SEL))objc_msgSend)(node, sel_registerName("respondsToSelector:"),
+				    sel_registerName("clock"))) {
+					CMClockRef clock = (CMClockRef)send0(node, "clock");
+
+					if (clock != NULL) {
+						clock_now = CMTimeGetSeconds(CMClockGetTime(clock));
+					}
+				}
+				say("hakios: mediaserverd: lag: that audio buffer: node %p, its clock at %.3f s (host %.3f s)\n", (void *)node,
+				    clock_now, now);
+				/*
+				 * The audio source's buffers going out ever later (step 91: 2.1 s more every 10 buffers of 21 ms -- each one
+				 * some 200 ms late): every thread of this process printed by the kernel (kern.hakios.ustacks), twice, at
+				 * 1 s and at 5 s behind, to see what the audio's queue waits on.
+				 */
+				{
+					static int dumps;
+					double behind = now - CMTimeGetSeconds(pts);
+					Class asn2 = objc_getClass("BWAudioSourceNode");
+
+					if (node != nil && asn2 != Nil && ((BOOL (*)(id, SEL, Class))objc_msgSend)(node,
+					    sel_registerName("isKindOfClass:"), asn2) && behind < 100 &&
+					    ((dumps == 0 && behind > 1.0) || (dumps == 1 && behind > 5.0))) {
+						dumps++;
+						say("hakios: mediaserverd: lag: audio %.1f s behind: every thread of mediaserverd asked for (ustacks %d)\n",
+						    behind, dumps);
+						sysctlbyname("kern.hakios.ustacks", NULL, NULL, (void *)"mediaserverd", sizeof("mediaserverd"));
+					}
+				}
+				say("hakios: mediaserverd: lag: that audio buffer: %ld frames, %.4f s long, %.0f Hz %u ch (format '%c%c%c%c'), "
+				    "node %s, silence frames since the last render %lld\n", (long)CMSampleBufferGetNumSamples(sample_buffer),
+				    CMTimeGetSeconds(CMSampleBufferGetDuration(sample_buffer)), asbd ? asbd->mSampleRate : 0.0,
+				    asbd ? (unsigned)asbd->mChannelsPerFrame : 0, asbd ? (char)(asbd->mFormatID >> 24) : '?',
+				    asbd ? (char)(asbd->mFormatID >> 16) : '?', asbd ? (char)(asbd->mFormatID >> 8) : '?',
+				    asbd ? (char)asbd->mFormatID : '?', node != nil ? object_getClassName(node) : "?", silence);
+			}
+		}
+	}
 	((void (*)(id, SEL, CMSampleBufferRef))original_emit_sample_buffer)(self, selector, sample_buffer);
 }
 
@@ -581,6 +718,124 @@ mark_end(id self, SEL selector)
  * the codec's VCPHEVCRegisterEncoder is an empty function. It is registered here, as the codec
  * registers its decoder (VTRegisterVideoDecoderWithInfo, not hardware accelerated).
  */
+
+/*
+ * -[BWGraph stop:] waits ten seconds for its sink nodes to go idle and then traps, after logging which are still active
+ * (-[BWGraph _logActiveSinkNodesAfterGraphStopTimeout]) at a level this console never shows. That logging is ours instead:
+ * every sink node, its class and name, and for each input whether it has had its end of data, with the node above it.
+ */
+static const char *
+class_of(id o)
+{
+	return o != nil ? object_getClassName(o) : "nil";
+}
+
+static id
+send0(id o, const char *sel)
+{
+	SEL s = sel_registerName(sel);
+
+	if (o == nil || !((BOOL (*)(id, SEL, SEL))objc_msgSend)(o, sel_registerName("respondsToSelector:"), s)) {
+		return nil;
+	}
+	return ((id (*)(id, SEL))objc_msgSend)(o, s);
+}
+
+static id
+upstream_node(id in)
+{
+	id conn = send0(in, "connection"), out = nil;
+	const char *sels[] = { "output", "sourceOutput", "upstreamOutput", "producer" };
+
+	for (unsigned k = 0; out == nil && k < sizeof(sels) / sizeof(sels[0]); k++) {
+		out = send0(conn, sels[k]);
+	}
+	if (out == nil) {
+		out = send0(in, "upstreamOutput");
+	}
+	return send0(out, "node");
+}
+
+static void
+node_name(id node, char *nm, size_t size)
+{
+	id name = send0(node, "name");
+
+	nm[0] = 0;
+	if (name == nil || ((long (*)(id, SEL))objc_msgSend)(name, sel_registerName("length")) == 0) {
+		name = send0(node, "displayName");
+	}
+	if (name != nil) {
+		CFStringGetCString((CFStringRef)name, nm, (CFIndex)size, kCFStringEncodingUTF8);
+	}
+}
+
+/* a node, its inputs' and outputs' liveness, and (depth permitting) the nodes above each input; seen: printed already */
+static void
+walk_up(id node, int depth, CFMutableSetRef seen)
+{
+	char nm[96];
+	id inputs = send0(node, "inputs"), outputs = send0(node, "outputs");
+	long ni = inputs != nil ? ((long (*)(id, SEL))objc_msgSend)(inputs, sel_registerName("count")) : 0;
+	long no = outputs != nil ? ((long (*)(id, SEL))objc_msgSend)(outputs, sel_registerName("count")) : 0;
+	char live_in[40] = "", live_out[40] = "";
+
+	if (node == nil || CFSetContainsValue(seen, (const void *)node)) {
+		return;
+	}
+	CFSetAddValue(seen, (const void *)node);
+	node_name(node, nm, sizeof(nm));
+	for (long j = 0; j < ni && j < 32; j++) {
+		id in = ((id (*)(id, SEL, long))objc_msgSend)(inputs, sel_registerName("objectAtIndex:"), j);
+		live_in[j] = send0(in, "liveFormat") != nil ? 'L' : '.';
+	}
+	for (long j = 0; j < no && j < 32; j++) {
+		id out = ((id (*)(id, SEL, long))objc_msgSend)(outputs, sel_registerName("objectAtIndex:"), j);
+		live_out[j] = send0(out, "liveFormat") != nil ? 'L' : '.';
+	}
+	say("hakios: mediaserverd: %*s%s \"%s\": inputs [%s] outputs [%s] (L live, . ended)\n", 2 * depth + 2, "", class_of(node), nm,
+	    live_in, live_out);
+	if (depth >= 8) {
+		return;
+	}
+	for (long j = 0; j < ni; j++) {
+		id in = ((id (*)(id, SEL, long))objc_msgSend)(inputs, sel_registerName("objectAtIndex:"), j);
+
+		walk_up(upstream_node(in), depth + 1, seen);
+	}
+}
+
+static void
+log_active_sinks(id self, SEL selector)
+{
+	Ivar iv = class_getInstanceVariable(object_getClass(self), "_sinkNodes");
+	id sinks = iv != NULL ? object_getIvar(self, iv) : nil;
+	CFMutableSetRef seen = CFSetCreateMutable(NULL, 0, NULL);
+
+	(void)selector;
+	say("hakios: mediaserverd: the graph's stop timed out; the sinks still live, and every node above them:\n");
+	if (sinks == nil || seen == NULL) {
+		return;
+	}
+	long n = ((long (*)(id, SEL))objc_msgSend)(sinks, sel_registerName("count"));
+
+	for (long i = 0; i < n; i++) {
+		id node = ((id (*)(id, SEL, long))objc_msgSend)(sinks, sel_registerName("objectAtIndex:"), i);
+		id inputs = send0(node, "inputs");
+		long ni = inputs != nil ? ((long (*)(id, SEL))objc_msgSend)(inputs, sel_registerName("count")) : 0;
+		bool live = false;
+
+		for (long j = 0; j < ni; j++) {
+			id in = ((id (*)(id, SEL, long))objc_msgSend)(inputs, sel_registerName("objectAtIndex:"), j);
+			live = live || send0(in, "liveFormat") != nil;
+		}
+		if (live) {
+			walk_up(node, 0, seen);
+		}
+	}
+	CFRelease(seen);
+}
+
 static void
 register_hevc_encoder(void)
 {
@@ -782,6 +1037,7 @@ keep_metal_from_the_capture_stack(void)
  * may be after this process starts; a thread waits a minute for it and goes.
  */
 extern void hakios_mfc_decoder_register(void);
+extern void hakios_mfc_encoder_register(void);
 
 static void *
 wait_for_mfc(void *unused)
@@ -797,12 +1053,346 @@ wait_for_mfc(void *unused)
 	return NULL;
 }
 
+
+/*
+ * The microphone's source node does not mark its outputs ended when the graph stops it (seen 14 November 2026, at the stop's
+ * timeout: the movie's staging node had its video input ended and its audio input -- Audio Splitter (Back), from
+ * BWAudioSourceNode -- still live, so the movie file sink never went idle, the graph waited its ten seconds and trapped, and the
+ * movie was never finished). Its stop is wrapped: half a second after the node's own stop, every output of it still live is
+ * marked ended. A node that ended its outputs itself is left as it is.
+ */
+static IMP original_audio_source_stop;
+
+static const void *
+kept_retain(__unused CFAllocatorRef allocator, const void *value)
+{
+	return CFRetain(value);
+}
+
+static void
+kept_release(__unused CFAllocatorRef allocator, const void *value)
+{
+	CFRelease(value);
+}
+
+static void
+audio_source_end(void *context)
+{
+	id node = (id)context;
+	id outputs = send0(node, "outputs");
+	long n = outputs != nil ? ((long (*)(id, SEL))objc_msgSend)(outputs, sel_registerName("count")) : 0, ended = 0;
+
+	for (long i = 0; i < n; i++) {
+		id out = ((id (*)(id, SEL, long))objc_msgSend)(outputs, sel_registerName("objectAtIndex:"), i);
+
+		if (send0(out, "liveFormat") != nil) {
+			pthread_mutex_lock(&ended_lock);
+			if (ended_outputs == NULL) {
+				/*
+				 * Each output kept (retained) while in the set: a node freed with its graph and another's output made
+				 * at the same address would have had its buffers dropped (the video's, after a photo<->video switch).
+				 */
+				static const CFSetCallBacks kept = { 0, kept_retain, kept_release, NULL, NULL, NULL };
+
+				ended_outputs = CFSetCreateMutable(NULL, 0, &kept);
+			}
+			CFSetAddValue(ended_outputs, (const void *)out);
+			if (ends_owed == NULL) {
+				ends_owed = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, NULL);
+			}
+			CFDictionarySetValue(ends_owed, (const void *)out,
+			    (const void *)((uintptr_t)CFDictionaryGetValue(ends_owed, (const void *)out) + 1));
+			pthread_mutex_unlock(&ended_lock);
+			ending_here = true;
+			((void (*)(id, SEL))objc_msgSend)(out, sel_registerName("markEndOfLiveOutput"));
+			ending_here = false;
+			ended++;
+		}
+	}
+	say("hakios: mediaserverd: the audio source stopped: %ld of its %ld outputs still live, marked ended\n", ended, n);
+	CFRelease((CFTypeRef)node);
+}
+
+static BOOL
+audio_source_stop(id self, SEL selector, id *error)
+{
+	BOOL r = ((BOOL (*)(id, SEL, id *))original_audio_source_stop)(self, selector, error);
+
+	/*
+	 * At once, inside the stop, while the graph is still whole: a delayed end (it was half a second) landed after a quick
+	 * photo/video switch had torn the graph down, and its end-of-data marker went to a freed node (SIGSEGV, 14 November).
+	 */
+	pthread_mutex_lock(&ended_lock);
+	if (stopped_sources == NULL) {
+		stopped_sources = CFSetCreateMutable(NULL, 0, NULL);
+	}
+	CFSetAddValue(stopped_sources, (const void *)self);
+	pthread_mutex_unlock(&ended_lock);
+	CFRetain((CFTypeRef)self);
+	audio_source_end((void *)self);
+	/*
+	 * The node's own "stopped" flag (_endOfDataMarkerSent, which its stop's block sets after ending the outputs -- run some 15 s
+	 * late on the node's queue here) set now: everything still queued for the node checks it first and does nothing. Without
+	 * it the silence path ran on a stopped node, read its _auOutputFormatDescription, already NULL, and died (SIGSEGV in a
+	 * CMAudioFormatDescriptionGetStreamBasicDescription caller, 14 s into a recording, step 86, 16 November). Nothing in
+	 * CMCapture ever clears the flag: a node stopped is not started again (a new graph makes new nodes).
+	 */
+	{
+		Ivar flag = class_getInstanceVariable(object_getClass(self), "_endOfDataMarkerSent");
+		static bool said;
+
+		if (flag != NULL) {
+			__atomic_store_n((uint8_t *)((uintptr_t)self + (uintptr_t)ivar_getOffset(flag)), 1, __ATOMIC_RELEASE);
+		}
+		if (!said) {
+			said = true;
+			say("hakios: mediaserverd: the audio source's _endOfDataMarkerSent set at its stop (%s)\n", flag != NULL ? "done" :
+			    "no such ivar: left alone");
+		}
+	}
+	return r;
+}
+
+
+/*
+ * The source node's sample generator (-[BWAudioSourceNode _generateSamples], run by a timer) kept running after the stop and
+ * emitted into a graph already torn down -- the next session's start found mediaserverd dead of SIGSEGV in the emit (15
+ * November). A node stopped and not started again generates nothing.
+ */
+static IMP original_generate_samples;
+
+static void
+generate_samples(id self, SEL selector)
+{
+	bool stopped;
+
+	pthread_mutex_lock(&ended_lock);
+	stopped = stopped_sources != NULL && CFSetContainsValue(stopped_sources, (const void *)self);
+	pthread_mutex_unlock(&ended_lock);
+	if (stopped) {
+		static bool said;
+
+		if (!said) {
+			said = true;
+			say("hakios: mediaserverd: the audio source's generator ran after its stop: nothing generated\n");
+		}
+		return;
+	}
+	((void (*)(id, SEL))original_generate_samples)(self, selector);
+}
+
+/*
+ * With the microphone working (abox_mic=1), the node's audio unit still delivers a buffer or two after the stop, and each one
+ * runs -[BWAudioSourceNode makeOutputsLiveIfNeeded], which, on a queue of its own, makes the outputs live again -- the outputs
+ * audio_source_end has just ended -- and sends the live message to the node downstream, which the graph has freed by then
+ * (SIGSEGV in objc_msgSend from -[BWNodeOutput makeConfiguredFormatLive], a second after a 10 s recording's stop, 15 November;
+ * the movie never finished). A node stopped and not started again makes nothing live.
+ */
+static IMP original_make_outputs_live;
+
+static void
+make_outputs_live(id self, SEL selector)
+{
+	bool stopped;
+
+	pthread_mutex_lock(&ended_lock);
+	stopped = stopped_sources != NULL && CFSetContainsValue(stopped_sources, (const void *)self);
+	pthread_mutex_unlock(&ended_lock);
+	if (stopped) {
+		static int said;
+
+		if (said++ < 3) {
+			say("hakios: mediaserverd: the audio source was asked to make its outputs live after its stop: not done\n");
+		}
+		return;
+	}
+	((void (*)(id, SEL))original_make_outputs_live)(self, selector);
+}
+
+/*
+ * Not enough, that (step 84, 15 November): a makeOutputsLiveIfNeeded queued BEFORE the stop still runs after it; its block
+ * (0x1a1efda18) finds the outputs audio_source_end has just ended -- liveFormat nil -- and calls -[BWNodeOutput
+ * makeConfiguredFormatLive] on each, which sends consumeMessage:fromOutput: to the freed node downstream (SIGABRT,
+ * "-[__NSCFType consumeMessage:fromOutput:]: unrecognized selector", 3 s after a recording's stop: mediaserverd died
+ * while the movie was still being written, and the file was left without its moov atom -- the gray, unplayable movie).
+ * So an output this file ended stays ended: its makeConfiguredFormatLive does nothing until its node is started again
+ * (audio_source_start takes its outputs out of ended_outputs).
+ */
+/*
+ * And the node ends its outputs itself, after all: -[BWAudioSourceNode stop:] dispatches a block (0x1a1f51d38) that calls
+ * markEndOfLiveOutput on each of them -- on the node's queue, which ran it some 15 s after the stop here (step 85, 15
+ * November): the photo session's audio node, stopped when the camera switched to video, ended its outputs in the middle
+ * of the recording, a second time (audio_source_end had ended them at the stop), and the end-of-data message went to
+ * the freed node downstream (SIGSEGV in -[BWNodeOutput markEndOfLiveOutput]; the recording "stopped by itself" at 9 s,
+ * the movie unfinished). So for every end audio_source_end made first, the node's own later end of that output is
+ * swallowed, once; an end of an output we did not end goes through.
+ */
+static IMP original_end_live_output;
+
+static void
+end_live_output(id self, SEL selector)
+{
+	bool swallow = false;
+
+	if (!ending_here) {
+		pthread_mutex_lock(&ended_lock);
+		uintptr_t owed = ends_owed != NULL ? (uintptr_t)CFDictionaryGetValue(ends_owed, (const void *)self) : 0;
+
+		if (owed != 0) {
+			swallow = true;
+			if (owed == 1) {
+				CFDictionaryRemoveValue(ends_owed, (const void *)self);
+			} else {
+				CFDictionarySetValue(ends_owed, (const void *)self, (const void *)(owed - 1));
+			}
+		}
+		pthread_mutex_unlock(&ended_lock);
+	}
+	if (swallow) {
+		static int said;
+
+		if (said++ < 5) {
+			say("hakios: mediaserverd: the audio source's own late end of an output we had ended: swallowed\n");
+		}
+		return;
+	}
+	((void (*)(id, SEL))original_end_live_output)(self, selector);
+}
+
+static IMP original_make_format_live;
+
+static void
+make_format_live(id self, SEL selector)
+{
+	bool ended = false;
+
+	pthread_mutex_lock(&ended_lock);
+	ended = ended_outputs != NULL && CFSetContainsValue(ended_outputs, (const void *)self);
+	pthread_mutex_unlock(&ended_lock);
+	if (ended) {
+		static int said;
+
+		if (said++ < 3) {
+			say("hakios: mediaserverd: an output we ended was to be made live again (a block queued before the stop): not done\n");
+		}
+		return;
+	}
+	((void (*)(id, SEL))original_make_format_live)(self, selector);
+}
+
+/* the audio source's interruptions, said (the record sound may interrupt the capture's audio: hypothesis, step 89) */
+static IMP original_begin_interruption, original_set_interrupted;
+
+static void
+begin_interruption(id self, SEL selector)
+{
+	say("hakios: mediaserverd: the audio source %p: didBeginInterruption\n", (void *)self);
+	((void (*)(id, SEL))original_begin_interruption)(self, selector);
+}
+
+static void
+set_interrupted(id self, SEL selector, BOOL value)
+{
+	say("hakios: mediaserverd: the audio source %p: setInterrupted:%d\n", (void *)self, value);
+	((void (*)(id, SEL, BOOL))original_set_interrupted)(self, selector, value);
+}
+
+static void
+wrap_audio_source_stop(void)
+{
+	static bool done;
+	Class cls;
+	Method m;
+	SEL sel = sel_registerName("stop:");
+
+	if (done || (cls = objc_getClass("BWAudioSourceNode")) == Nil || (m = class_getInstanceMethod(cls, sel)) == NULL) {
+		return;
+	}
+	done = true;
+	original_audio_source_stop = method_getImplementation(m);
+	/* on BWAudioSourceNode itself (added there if it inherits stop:), never on its superclass */
+	class_replaceMethod(cls, sel, (IMP)audio_source_stop, method_getTypeEncoding(m));
+	say("hakios: mediaserverd: -[BWAudioSourceNode stop:] wrapped (its outputs marked ended after a stop)\n");
+	{
+		SEL g = sel_registerName("_generateSamples");
+		Method gm = class_getInstanceMethod(cls, g);
+		const char *types = gm != NULL ? method_getTypeEncoding(gm) : NULL;
+
+		const char *colon = types != NULL ? strchr(types, ':') : NULL;
+		bool no_args = colon != NULL && colon[1] != 0 && strspn(colon + 1, "0123456789") == strlen(colon + 1);
+
+		if (gm != NULL && types != NULL && types[0] == 'v' && no_args) {
+			original_generate_samples = method_getImplementation(gm);
+			class_replaceMethod(cls, g, (IMP)generate_samples, types);
+			say("hakios: mediaserverd: -[BWAudioSourceNode _generateSamples] (%s) wrapped: nothing after a stop\n", types);
+		} else {
+			say("hakios: mediaserverd: -[BWAudioSourceNode _generateSamples]: %s; left alone\n", gm ? types : "not there");
+		}
+	}
+	{
+		SEL l = sel_registerName("makeOutputsLiveIfNeeded");
+		Method lm = class_getInstanceMethod(cls, l);
+		const char *types = lm != NULL ? method_getTypeEncoding(lm) : NULL;
+
+		if (types != NULL && types[0] == 'v' && strchr(types, ':') != NULL && strspn(strchr(types, ':') + 1, "0123456789") ==
+		    strlen(strchr(types, ':') + 1)) {
+			original_make_outputs_live = method_getImplementation(lm);
+			class_replaceMethod(cls, l, (IMP)make_outputs_live, types);
+			say("hakios: mediaserverd: -[BWAudioSourceNode makeOutputsLiveIfNeeded] (%s) wrapped: nothing after a stop\n", types);
+		} else {
+			say("hakios: mediaserverd: -[BWAudioSourceNode makeOutputsLiveIfNeeded]: %s; left alone\n", lm ? types : "not there");
+		}
+	}
+	{
+		Method bm = class_getInstanceMethod(cls, sel_registerName("didBeginInterruption"));
+		Method im = class_getInstanceMethod(cls, sel_registerName("setInterrupted:"));
+
+		if (bm != NULL && strcmp(method_getTypeEncoding(bm), "v16@0:8") == 0) {
+			original_begin_interruption = method_getImplementation(bm);
+			class_replaceMethod(cls, sel_registerName("didBeginInterruption"), (IMP)begin_interruption, "v16@0:8");
+		}
+		if (im != NULL && strcmp(method_getTypeEncoding(im), "v20@0:8B16") == 0) {
+			original_set_interrupted = method_getImplementation(im);
+			class_replaceMethod(cls, sel_registerName("setInterrupted:"), (IMP)set_interrupted, "v20@0:8B16");
+		}
+		say("hakios: mediaserverd: the audio source's interruptions said (didBeginInterruption %s, setInterrupted: %s)\n",
+		    bm ? method_getTypeEncoding(bm) : "none", im ? method_getTypeEncoding(im) : "none");
+	}
+	{
+		Class oc = objc_getClass("BWNodeOutput");
+		SEL f = sel_registerName("makeConfiguredFormatLive");
+		Method fm = oc != Nil ? class_getInstanceMethod(oc, f) : NULL;
+		const char *types = fm != NULL ? method_getTypeEncoding(fm) : NULL;
+
+		if (types != NULL && types[0] == 'v' && strspn(strchr(types, ':') + 1, "0123456789") == strlen(strchr(types, ':') + 1)) {
+			original_make_format_live = method_getImplementation(fm);
+			class_replaceMethod(oc, f, (IMP)make_format_live, types);
+			say("hakios: mediaserverd: -[BWNodeOutput makeConfiguredFormatLive] (%s) wrapped: an output we ended stays ended\n", types);
+		} else {
+			say("hakios: mediaserverd: -[BWNodeOutput makeConfiguredFormatLive]: %s; left alone\n", fm ? types : "not there");
+		}
+		SEL m = sel_registerName("markEndOfLiveOutput");
+		Method mm = oc != Nil ? class_getInstanceMethod(oc, m) : NULL;
+		const char *mt = mm != NULL ? method_getTypeEncoding(mm) : NULL;
+
+		if (mt != NULL && mt[0] == 'v' && strspn(strchr(mt, ':') + 1, "0123456789") == strlen(strchr(mt, ':') + 1)) {
+			original_end_live_output = method_getImplementation(mm);
+			class_replaceMethod(oc, m, (IMP)end_live_output, mt);
+			say("hakios: mediaserverd: -[BWNodeOutput markEndOfLiveOutput] (%s) wrapped: the node's own late end swallowed "
+			    "where we ended first\n", mt);
+		} else {
+			say("hakios: mediaserverd: -[BWNodeOutput markEndOfLiveOutput]: %s; left alone\n", mm ? mt : "not there");
+		}
+	}
+}
+
 static void
 image_added(__unused const struct mach_header *header, __unused intptr_t image_slide)
 {
 	/* before anything of the image that was just added runs, and this is the only place in this
 	 * library that is told about a new image at all */
 	keep_metal_from_the_capture_stack();
+	wrap_audio_source_stop();
 	for (size_t i = 0; i < sizeof(replacements) / sizeof(replacements[0]); i++) {
 		struct replacement *r = &replacements[i];
 		Class cls;
@@ -1084,6 +1674,7 @@ hakios_media_init(void)
 		register_hevc_encoder();
 		front_camera_focus_hooks();
 	}
+	hakios_mfc_encoder_register();          /* (after VCPHEVC's: an HEVC session not a video's size is handed to it) */
 	if (boot_arg("mfc=")) {
 		pthread_t waiter;
 

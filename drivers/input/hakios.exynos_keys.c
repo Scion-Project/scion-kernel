@@ -74,11 +74,47 @@ key_held(const struct key *k, uint32_t gpa0, uint32_t gpa2)
 	return (((k->bank == BANK_GPA0 ? gpa0 : gpa2) >> k->pin) & 1) == 0;
 }
 
+/*
+ * The way out by the keys (step 107): Bixby and volume-down held together for three seconds end the run as the five
+ * fingers do (hakios.input.c: the data volume synced, then the loader), so that the log is kept. Twice (steps 104, 106)
+ * the screen stayed black after the Apple logo with the touch screen dead -- no five fingers -- and only the forced
+ * restart (volume-down and power) was left, which loses the log. Power is not part of it: that chord is the forced
+ * restart's. Read straight from the pins here, whatever iOS does with the presses.
+ */
+#define KEY_EXIT_TICKS  (3000 / POLL_MS)
+
+extern void loader_return(void);
+extern void hakios_var_save_on_return(void);
+
+static void
+keys_exit_check(uint32_t gpa0)
+{
+	static unsigned held_ticks;
+	static bool done;
+	bool both = ((gpa0 >> 6) & 1) == 0 && ((gpa0 >> 4) & 1) == 0;      /* Bixby gpa0-6, volume-down gpa0-4 */
+
+	if (done) {
+		return;
+	}
+	held_ticks = both ? held_ticks + 1 : 0;
+	if (held_ticks == KEY_EXIT_TICKS / 3) {
+		say("exynos_keys: Bixby and volume-down held: two seconds more and back to the loader\n");
+	}
+	if (held_ticks >= KEY_EXIT_TICKS) {
+		done = true;
+		say("\n--- exynos_keys: Bixby and volume-down held for %u ms: back to the loader (the log kept) ---\n",
+		    KEY_EXIT_TICKS * POLL_MS);
+		hakios_var_save_on_return();
+		loader_return();
+	}
+}
+
 static void
 keys_poll(void)
 {
 	uint32_t gpa0 = rd(BANK_GPA0 + BANK_DAT), gpa2 = rd(BANK_GPA2 + BANK_DAT);
 
+	keys_exit_check(gpa0);
 	for (unsigned i = 0; i < NKEYS; i++) {
 		struct key *k = &keys[i];
 		bool now = key_held(k, gpa0, gpa2);

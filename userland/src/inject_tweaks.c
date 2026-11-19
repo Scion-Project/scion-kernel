@@ -37,6 +37,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/mount.h>
+#include <sys/attr.h>
 #include <unistd.h>
 
 /*
@@ -319,3 +321,404 @@ hakios_tweaks_init(void)
 	}
 	load_the_tweaks();
 }
+
+/*
+ * Settings' storage (General > iPhone Storage) takes the phone's capacity from MobileGestalt's DiskUsage, which counts the
+ * root volume's container: here the system image (about 4 GB), with /private/var a volume of its own (HFS Plus, all of
+ * USERDATA: ~118 GB) that the iPhone's single APFS container would have held. So the answer is given the data volume's
+ * numbers (and the two together as the disk's), when /private/var is that kept volume; otherwise it is left as it is.
+ */
+extern CFTypeRef MGCopyAnswer(CFStringRef key, CFDictionaryRef options);
+extern CFTypeRef MGCopyAnswerWithError(CFStringRef key, CFDictionaryRef options, int *error);
+
+static void
+set_i64(CFMutableDictionaryRef d, CFStringRef key, long long v)
+{
+	CFNumberRef n = CFNumberCreate(NULL, kCFNumberLongLongType, &v);
+
+	if (n != NULL) {
+		CFDictionarySetValue(d, key, n);
+		CFRelease(n);
+	}
+}
+
+static CFNumberRef
+i64(long long v)
+{
+	return CFNumberCreate(NULL, kCFNumberLongLongType, &v);
+}
+
+/* the kept volume's numbers: 0 when /private/var is not it */
+static int
+kept_sizes(long long *data_cap, long long *data_free, long long *sys_cap, long long *sys_free)
+{
+	struct statfs root, var;
+
+	if (statfs("/private/var", &var) != 0 || strcmp(var.f_fstypename, "hfs") != 0 || statfs("/", &root) != 0) {
+		return 0;
+	}
+	*data_cap = (long long)var.f_blocks * var.f_bsize;
+	*data_free = (long long)var.f_bavail * var.f_bsize;
+	*sys_cap = (long long)root.f_blocks * root.f_bsize;
+	*sys_free = (long long)root.f_bavail * root.f_bsize;
+	return 1;
+}
+
+static void
+say_key_once(CFStringRef key, const char *how)
+{
+	static CFMutableSetRef said;
+	char name[96] = "";
+
+	if (said == NULL) {
+		said = CFSetCreateMutable(NULL, 0, &kCFTypeSetCallBacks);
+	}
+	if (said == NULL || CFSetContainsValue(said, key)) {
+		return;
+	}
+	CFSetAddValue(said, key);
+	CFStringGetCString(key, name, sizeof(name), kCFStringEncodingUTF8);
+	say("hakios: tweaks: MobileGestalt asked for %s (%s) in %s\n", name, how, getprogname());
+}
+
+/* the answer to give instead, or NULL to give the real one */
+static CFTypeRef
+disk_answer(CFStringRef key, CFTypeRef real)
+{
+	long long dc, df, sc, sf;
+
+	if (key == NULL || CFGetTypeID(key) != CFStringGetTypeID()) {
+		return NULL;
+	}
+	if (CFStringFind(key, CFSTR("Disk"), 0).location != kCFNotFound || CFStringFind(key, CFSTR("Capacity"), 0).location !=
+	    kCFNotFound || CFStringFind(key, CFSTR("Available"), 0).location != kCFNotFound) {
+		say_key_once(key, real != NULL ? "answered" : "no answer");
+	}
+	if (!kept_sizes(&dc, &df, &sc, &sf)) {
+		return NULL;
+	}
+	if (CFEqual(key, CFSTR("DiskUsage")) && real != NULL && CFGetTypeID(real) == CFDictionaryGetTypeID()) {
+		CFMutableDictionaryRef d = CFDictionaryCreateMutableCopy(NULL, 0, real);
+
+		if (d == NULL) {
+			return NULL;
+		}
+		set_i64(d, CFSTR("TotalDataCapacity"), dc);
+		set_i64(d, CFSTR("TotalDataAvailable"), df);
+		set_i64(d, CFSTR("AmountDataAvailable"), df);
+		set_i64(d, CFSTR("TotalSystemCapacity"), sc);
+		set_i64(d, CFSTR("TotalSystemAvailable"), sf);
+		set_i64(d, CFSTR("TotalDiskCapacity"), dc + sc);
+		return d;
+	}
+	if (CFEqual(key, CFSTR("TotalDiskCapacity"))) {
+		return i64(dc + sc);
+	}
+	if (CFEqual(key, CFSTR("TotalDataCapacity"))) {
+		return i64(dc);
+	}
+	if (CFEqual(key, CFSTR("TotalDataAvailable")) || CFEqual(key, CFSTR("AmountDataAvailable"))) {
+		return i64(df);
+	}
+	if (CFEqual(key, CFSTR("TotalSystemCapacity"))) {
+		return i64(sc);
+	}
+	if (CFEqual(key, CFSTR("TotalSystemAvailable"))) {
+		return i64(sf);
+	}
+	return NULL;
+}
+
+/*
+ * Settings' storage (General > iPhone Storage) takes the capacity from MobileGestalt, which counts the root volume's
+ * container: the system image here (about 4 GB). /private/var is a volume of its own (HFS Plus, all of USERDATA, ~118 GB)
+ * that the iPhone's one APFS container would have held. So the disk's answers are the two volumes' together, when
+ * /private/var is that kept volume; every key with Disk, Capacity or Available in its name is said once, for finding
+ * the one that is read.
+ */
+static CFTypeRef
+my_MGCopyAnswer(CFStringRef key, CFDictionaryRef options)
+{
+	CFTypeRef v = MGCopyAnswer(key, options), w = disk_answer(key, v);
+
+	if (w != NULL) {
+		if (v != NULL) {
+			CFRelease(v);
+		}
+		return w;
+	}
+	return v;
+}
+
+static CFTypeRef
+my_MGCopyAnswerWithError(CFStringRef key, CFDictionaryRef options, int *error)
+{
+	CFTypeRef v = MGCopyAnswerWithError(key, options, error), w = disk_answer(key, v);
+
+	if (w != NULL) {
+		if (v != NULL) {
+			CFRelease(v);
+		}
+		if (error != NULL) {
+			*error = 0;
+		}
+		return w;
+	}
+	return v;
+}
+
+__attribute__((constructor)) static void
+hakios_tweaks_mg_hello(void)
+{
+	say("hakios: tweaks: in %s (MobileGestalt's disk answers watched)\n", getprogname());
+}
+
+__attribute__((used)) static const struct { const void *replacement, *replacee; } hakios_mg_interposers[]
+    __attribute__((section("__DATA,__interpose"))) = {
+	{ (const void *)my_MGCopyAnswer, (const void *)MGCopyAnswer },
+	{ (const void *)my_MGCopyAnswerWithError, (const void *)MGCopyAnswerWithError },
+};
+
+/*
+ * MobileGestalt was not asked (seen 14 November 2026): Settings' storage reads the root volume's size from the file system.
+ * In Settings alone, a statfs that lands on the root volume (the system image) is given the disk's size as the iPhone's one
+ * container would have it: both volumes' blocks, and the kept volume's free space. Every path asked is said once.
+ */
+extern int statfs(const char *, struct statfs *);
+extern int fstatfs(int, struct statfs *);
+
+static int
+in_settings(void)
+{
+	static int is = -1;
+
+	if (is < 0) {
+		const char *name = getprogname();
+
+		is = name != NULL && strcmp(name, "Preferences") == 0;
+	}
+	return is;
+}
+
+static void
+fix_root(const char *what, struct statfs *sf)
+{
+	static CFMutableSetRef said;
+	struct statfs var;
+
+	if (!in_settings() || strcmp(sf->f_mntonname, "/") != 0) {
+		return;
+	}
+	if (said == NULL) {
+		said = CFSetCreateMutable(NULL, 0, &kCFTypeSetCallBacks);
+	}
+	if (said != NULL && what != NULL) {
+		CFStringRef k = CFStringCreateWithCString(NULL, what, kCFStringEncodingUTF8);
+
+		if (k != NULL && !CFSetContainsValue(said, k)) {
+			CFSetAddValue(said, k);
+			say("hakios: tweaks: Settings asks the size of the root volume through %s\n", what);
+		}
+		if (k != NULL) {
+			CFRelease(k);
+		}
+	}
+	if (statfs("/private/var", &var) != 0 || strcmp(var.f_fstypename, "hfs") != 0 || sf->f_bsize == 0) {
+		return;
+	}
+	unsigned long long var_blocks = (unsigned long long)var.f_blocks * var.f_bsize / sf->f_bsize;
+	unsigned long long var_free = (unsigned long long)var.f_bavail * var.f_bsize / sf->f_bsize;
+
+	sf->f_blocks += var_blocks;
+	sf->f_bfree = var_free;
+	sf->f_bavail = var_free;
+}
+
+static int
+my_statfs(const char *path, struct statfs *sf)
+{
+	int r = statfs(path, sf);
+
+	if (r == 0) {
+		fix_root(path, sf);
+	}
+	return r;
+}
+
+static int
+my_fstatfs(int fd, struct statfs *sf)
+{
+	int r = fstatfs(fd, sf);
+
+	if (r == 0) {
+		fix_root("fstatfs", sf);
+	}
+	return r;
+}
+
+__attribute__((used)) static const struct { const void *replacement, *replacee; } hakios_statfs_interposers[]
+    __attribute__((section("__DATA,__interpose"))) = {
+	{ (const void *)my_statfs, (const void *)statfs },
+	{ (const void *)my_fstatfs, (const void *)fstatfs },
+};
+
+/*
+ * statfs was fixed and the header still said 4 GB (14 November 2026): the capacity comes through getattrlist (NSURL's volume
+ * capacity keys). In Settings alone, a getattrlist of a volume's space on the root volume gets the same both-volumes answer.
+ * Only the common case is touched: no common attributes but ATTR_CMN_RETURNED_ATTRS, and volume attributes of known sizes;
+ * anything else is said once and left as it is.
+ */
+extern int getattrlist(const char *, void *, void *, size_t, unsigned int);
+extern int fgetattrlist(int, void *, void *, size_t, unsigned int);
+
+/* the size in the packed buffer of each volume attribute bit (0: unknown here), in bit order */
+static int
+vol_attr_size(uint32_t bit)
+{
+	switch (bit) {
+	case ATTR_VOL_FSTYPE: case ATTR_VOL_SIGNATURE: case ATTR_VOL_IOBLOCKSIZE: case ATTR_VOL_OBJCOUNT:
+	case ATTR_VOL_FILECOUNT: case ATTR_VOL_DIRCOUNT: case ATTR_VOL_MAXOBJCOUNT: case ATTR_VOL_MOUNTFLAGS:
+		return 4;
+	case ATTR_VOL_SIZE: case ATTR_VOL_SPACEFREE: case ATTR_VOL_SPACEAVAIL: case ATTR_VOL_MINALLOCATION:
+	case ATTR_VOL_ALLOCATIONCLUMP: case ATTR_VOL_ENCODINGSUSED:
+#ifdef ATTR_VOL_SPACEUSED
+	case ATTR_VOL_SPACEUSED:
+#endif
+		return 8;
+	case ATTR_VOL_MOUNTPOINT: case ATTR_VOL_NAME: case ATTR_VOL_MOUNTEDDEVICE:
+		return (int)sizeof(attrreference_t);
+	case ATTR_VOL_CAPABILITIES:
+		return (int)sizeof(vol_capabilities_attr_t);
+	case ATTR_VOL_ATTRIBUTES:
+		return (int)sizeof(vol_attributes_attr_t);
+	case ATTR_VOL_INFO:
+		return -1;      /* asks for nothing itself */
+	default:
+		return 0;
+	}
+}
+
+static void
+fix_attrs(const char *what, int on_root, struct attrlist *al, void *buf, size_t size)
+{
+	static uint32_t said_masks[16];
+	static int nsaid;
+	struct statfs var, root;
+	uint8_t *p = buf, *end = (uint8_t *)buf + size;
+	uint32_t vol, cmn;
+	int known = 1;
+
+	if (!in_settings() || !on_root || al == NULL || buf == NULL || al->bitmapcount != ATTR_BIT_MAP_COUNT || al->volattr == 0) {
+		return;
+	}
+	cmn = al->commonattr;
+	vol = al->volattr;
+	if (cmn & ~(uint32_t)ATTR_CMN_RETURNED_ATTRS) {
+		known = 0;
+	}
+	if (size < 4) {
+		return;
+	}
+	p += 4;                                 /* the length */
+	if (cmn & ATTR_CMN_RETURNED_ATTRS) {
+		attribute_set_t set;
+
+		if (p + sizeof(set) > end) {
+			return;
+		}
+		memcpy(&set, p, sizeof(set));
+		vol = set.volattr;              /* only what came back is packed */
+		p += sizeof(set);
+	}
+	for (uint32_t bit = 1; bit != 0 && known; bit <<= 1) {
+		if ((vol & bit) && vol_attr_size(bit) == 0) {
+			known = 0;
+		}
+	}
+	int seen = 0;
+
+	for (int i = 0; i < nsaid; i++) {
+		seen |= said_masks[i] == (al->volattr ^ (known ? 0 : 0x80000000u));
+	}
+	if (!seen && nsaid < 16) {
+		said_masks[nsaid++] = al->volattr ^ (known ? 0 : 0x80000000u);
+		say("hakios: tweaks: Settings asks volume attributes %#x (common %#x) of the root volume through %s%s\n", al->volattr,
+		    al->commonattr, what, known ? "" : ": a layout not handled, left as it is");
+	}
+	if (!known || statfs("/private/var", &var) != 0 || strcmp(var.f_fstypename, "hfs") != 0 || statfs("/", &root) != 0) {
+		return;
+	}
+	long long data_cap = (long long)var.f_blocks * var.f_bsize, data_free = (long long)var.f_bavail * var.f_bsize;
+	long long sys_cap = (long long)root.f_blocks * root.f_bsize, sys_used = sys_cap - (long long)root.f_bfree * root.f_bsize;
+
+	for (uint32_t bit = 1; bit != 0; bit <<= 1) {
+		int n;
+		long long v;
+
+		if (!(vol & bit)) {
+			continue;
+		}
+		n = vol_attr_size(bit);
+		if (n < 0) {
+			continue;
+		}
+		if (p + n > end) {
+			return;
+		}
+		if (n == 8 && (bit == ATTR_VOL_SIZE || bit == ATTR_VOL_SPACEFREE || bit == ATTR_VOL_SPACEAVAIL
+#ifdef ATTR_VOL_SPACEUSED
+		    || bit == ATTR_VOL_SPACEUSED
+#endif
+		    )) {
+			v = bit == ATTR_VOL_SIZE ? data_cap + sys_cap : (bit == ATTR_VOL_SPACEFREE || bit == ATTR_VOL_SPACEAVAIL) ?
+			    data_free : data_cap + sys_cap - data_free;
+			(void)sys_used;
+			memcpy(p, &v, 8);
+		}
+		p += n;
+	}
+}
+
+static int
+on_root_path(const char *path)
+{
+	struct statfs sf;
+
+	return path != NULL && statfs(path, &sf) == 0 && strcmp(sf.f_mntonname, "/") == 0;
+}
+
+static int
+on_root_fd(int fd)
+{
+	struct statfs sf;
+
+	return fstatfs(fd, &sf) == 0 && strcmp(sf.f_mntonname, "/") == 0;
+}
+
+static int
+my_getattrlist(const char *path, void *al, void *buf, size_t size, unsigned int options)
+{
+	int r = getattrlist(path, al, buf, size, options);
+
+	if (r == 0 && in_settings()) {
+		fix_attrs("getattrlist", on_root_path(path), al, buf, size);
+	}
+	return r;
+}
+
+static int
+my_fgetattrlist(int fd, void *al, void *buf, size_t size, unsigned int options)
+{
+	int r = fgetattrlist(fd, al, buf, size, options);
+
+	if (r == 0 && in_settings()) {
+		fix_attrs("fgetattrlist", on_root_fd(fd), al, buf, size);
+	}
+	return r;
+}
+
+__attribute__((used)) static const struct { const void *replacement, *replacee; } hakios_attr_interposers[]
+    __attribute__((section("__DATA,__interpose"))) = {
+	{ (const void *)my_getattrlist, (const void *)getattrlist },
+	{ (const void *)my_fgetattrlist, (const void *)fgetattrlist },
+};

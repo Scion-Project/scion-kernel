@@ -238,8 +238,15 @@ void hakios_max98512_quiesce(void) {}
 #ifndef HAKIOS_S6E3HA8
 void hakios_s6e3ha8_init(void) {}
 bool hakios_s6e3ha8_blank(__unused int (*say)(const char *, ...)) { return false; }      /* "not blanked" */
+bool hakios_panel_touch_blocked(__unused uint32_t type, __unused uint32_t finger) { return false; }
+bool hakios_panel_asleep(void) { return false; }    /* no panel driver: never asleep */
 int hakios_s6e3ha8_power(bool on);
 int hakios_s6e3ha8_power(__unused bool on) { return ENODEV; }    /* no panel driver: the screen as iOS draws it */
+#endif
+
+#ifndef HAKIOS_W9018
+void hakios_w9018_init(void) {}            /* no S Pen driver built */
+bool hakios_spen_near(__unused uint32_t *x, __unused uint32_t *y) { return false; }     /* no pen, no palm */
 #endif
 
 #ifndef HAKIOS_EXYNOS_POWEROFF
@@ -263,6 +270,8 @@ int hakios_scanout_flip(__unused unsigned index) { return -1; }
 int hakios_scanout_latched(void) { return 1; }
 void hakios_scanout_detach(__unused const char *why) {}
 uint32_t hakios_scanout_refreshes(void) { return 0; }
+void hakios_scanout_hold(int hold);
+void hakios_scanout_hold(__unused int hold) {}
 int hakios_scanout_carve(uint64_t bytes, uint64_t *phys);
 void hakios_scanout_uncarve(uint64_t phys);
 int hakios_scanout_carved(uint64_t phys);

@@ -494,3 +494,29 @@ hakios_input_console_touch(const char *arg)
 	thread_set_thread_name(thread, "touch-console");
 	thread_deallocate(thread);
 }
+
+/*
+ * kern.hakios.ustacks: a process name written here has every thread of that process printed (ustacks_now(): pc, lr, the
+ * return addresses, the thread's name) -- for a daemon to have itself looked at when something it measures goes wrong
+ * (mediaserverd when its audio falls behind: userland/src/inject_media.c). Writable by anybody: it only prints.
+ */
+#include <sys/sysctl.h>
+
+SYSCTL_DECL(_kern_hakios);
+extern void ustacks_now(const char *name);
+
+static int
+hakios_sysctl_ustacks(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	char name[32] = "";
+	int error = sysctl_io_string(req, name, sizeof(name), 0, NULL);
+
+	if (error != 0 || req->newptr == USER_ADDR_NULL || name[0] == 0) {
+		return error;
+	}
+	ustacks_now(name);
+	return 0;
+}
+
+SYSCTL_PROC(_kern_hakios, OID_AUTO, ustacks, CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_ANYBODY | CTLFLAG_LOCKED, NULL, 0,
+    hakios_sysctl_ustacks, "A", "write a process name: every thread of it printed (ustacks:)");

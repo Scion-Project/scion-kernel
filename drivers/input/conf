@@ -34,3 +34,9 @@ driver SSP
 	help    magnetometer, barometer, light and proximity sensors read into /dev/hakios-sensors (shub=N, 6 steps: 1 a look,
 	help    2 powered, 3 the ROM's version, 4 the firmware, 5 SSP, 6 the sensors on). Needs fw/bcm_sensorhub_a1.bin
 	help    (devices/starlte/firmware/sensorhub/) for step 4
+
+driver W9018
+	file    bsd/dev/hakios.w9018.c
+	requires EXYNOS_HSI2C
+	help    the Galaxy Note9's S Pen: a Wacom W9018 on the HSI2C of USI09, its contact given to Darwin as a touch
+	help    (spen=N: 1 the query, 2 sampling, 3 touches; 3 by default on the Note9)

@@ -146,6 +146,20 @@ extern kern_return_t kernel_thread_start_priority(thread_continue_t continuation
 /* s6sy761_trace=N: say the first N finger events, with their time (ms, from the 24 MHz counter), to measure the rate */
 static uint32_t trace_left;
 
+/* hakios_touch_post() unless the panel is dark and touch_blank=1 says a touch is not to wake it (hakios.s6e3ha8.c) */
+extern bool hakios_panel_touch_blocked(uint32_t type, uint32_t finger);
+extern void hakios_w9018_init(void);
+extern bool hakios_spen_near(uint32_t *x, uint32_t *y);
+static uint32_t palm_said;
+
+static void
+touch_post_gated(uint32_t type, uint32_t finger, uint32_t x, uint32_t y)
+{
+	if (!hakios_panel_touch_blocked(type, finger)) {
+		hakios_touch_post(type, finger, x, y);
+	}
+}
+
 /* kern.hakios.touch_events: finger events read from the chip since boot; the first-boot report (userland/src/selftest.c) prints it */
 static uint32_t touch_events;
 SYSCTL_DECL(_kern_hakios);
@@ -171,7 +185,7 @@ all_up(void)
 	for (uint32_t f = 0; f < FINGERS; f++) {
 		if (finger_down[f]) {
 			finger_down[f] = false;
-			hakios_touch_post(HAKIOS_TOUCH_UP, f, 0, 0);
+			touch_post_gated(HAKIOS_TOUCH_UP, f, 0, 0);
 		}
 	}
 	fingers_changed();
@@ -202,19 +216,35 @@ handle_event(const uint8_t *e)
 		nx = x >= res_x - 1 ? 65535 : x * 65535 / (res_x - 1);
 		ny = y >= res_y - 1 ? 65535 : y * 65535 / (res_y - 1);
 		stats.events++;
+		{
+			/* palm rejection: the S Pen near, a finger is the hand holding it (hakios.w9018.c) */
+			uint32_t px, py;
+
+			if (hakios_spen_near(&px, &py)) {
+				if (palm_said < 12) {
+					palm_said++;
+					say("s6sy761: finger %u dropped at %u,%u, the S Pen near at %u,%u (of 65535)\n", id, nx, ny, px, py);
+				}
+				if (finger_down[id]) {
+					finger_down[id] = false;
+					touch_post_gated(HAKIOS_TOUCH_UP, id, nx, ny);
+				}
+				return;
+			}
+		}
 		if (state == 3) {
 			if (finger_down[id]) {
 				finger_down[id] = false;
 				fingers_changed();
-				hakios_touch_post(HAKIOS_TOUCH_UP, id, nx, ny);
+				touch_post_gated(HAKIOS_TOUCH_UP, id, nx, ny);
 			}
 		} else if (!finger_down[id]) {
 			finger_down[id] = true;
 			fingers_changed();
 			stats.downs++;
-			hakios_touch_post(HAKIOS_TOUCH_DOWN, id, nx, ny);
+			touch_post_gated(HAKIOS_TOUCH_DOWN, id, nx, ny);
 		} else {
-			hakios_touch_post(HAKIOS_TOUCH_MOVE, id, nx, ny);
+			touch_post_gated(HAKIOS_TOUCH_MOVE, id, nx, ny);
 		}
 	} else if (kind == 1) {
 		uint32_t type = (e[0] >> 2) & 0xf, sid = e[1];
@@ -475,6 +505,8 @@ hakios_s6sy761_init(void)
 {
 	uint32_t enabled = 0, steps = 6;
 	thread_t thread;
+
+	hakios_w9018_init();            /* the Note9's S Pen (hakios.w9018.c), started from here: hakios.input.c is patched */
 
 	if (!PE_parse_boot_argn("s6sy761", &enabled, sizeof(enabled)) || enabled == 0) {
 		return;

@@ -390,7 +390,9 @@ write_checked(const struct amp *a, uint16_t reg, uint8_t value, uint8_t check, b
 	if (broken && !even_broken) {
 		return false;
 	}
-	error = raw_write(a, at, value);
+	uint32_t write_error;
+
+	error = write_error = raw_write(a, at, value);
 	if (r->check == 0) {
 		return true;                    /* SOFT_RESET: it clears itself; reset() looks whether it took */
 	}
@@ -426,8 +428,8 @@ write_checked(const struct amp *a, uint16_t reg, uint8_t value, uint8_t check, b
 		}
 	}
 	if (error != 0 || ((back ^ value) & check & r->check) != 0) {
-		say("max98512: %s (%#x): register %#x (%#x in the chip): wrote %#x, read back %#x (bus %#x): no more writing "
-		    "for this run\n", a->name, a->addr, reg, at, value, back, error);
+		say("max98512: %s (%#x): register %#x (%#x in the chip): wrote %#x (bus %#x), read back %#x (bus %#x): no more "
+		    "writing for this run\n", a->name, a->addr, reg, at, value, write_error, back, error);
 		broken = true;
 		return false;
 	}
@@ -575,6 +577,7 @@ reset(const struct amp *a)
 {
 	uint8_t id = 0, shdn = 0xff, en = 0xff;
 	uint64_t deadline;
+	bool cleared = false;
 
 	if (!write_checked(a, SOFT_RESET, 0x01, 0, false)) {
 		return false;
@@ -590,13 +593,33 @@ reset(const struct amp *a)
 			return false;
 		}
 	}
-	if (get(a, GLOBAL_SHDN, &shdn) != 0 || get(a, AMP_EN, &en) != 0 || (shdn & 1) != 0 || (en & 1) != 0) {
-		say("max98512: %s (%#x): after the software reset GLOBAL_SHDN %#x, AMP_EN %#x: not shut down; no more writing "
-		    "for this run\n", a->name, a->addr, shdn, en);
-		broken = true;
-		return false;
+	/* The shutdown is waited for until the deadline, not read once (a B's REV_ID answers at once). */
+	for (deadline = deadline_us(RESET_US);;) {
+		if (get(a, GLOBAL_SHDN, &shdn) == 0 && get(a, AMP_EN, &en) == 0 && (shdn & 1) == 0) {
+			if ((en & 1) == 0) {
+				return true;
+			}
+			/* The Note9's B keeps AMP_EN's enable bit through the software reset (0x81 before and after, 50 ms
+			   on) while GLOBAL_SHDN reads 0: the chip as a whole is shut down, so nothing is driven. The bit is
+			   cleared here, as mute() does (the same write, shut down), and read again. */
+			if (!cleared) {
+				cleared = true;
+				if (!put_bits(a, AMP_EN, 0x01, 0x00)) {
+					say("max98512: %s (%#x): AMP_EN's enable bit would not clear after the software reset: no more writing "
+					    "for this run\n", a->name, a->addr);
+					broken = true;
+					return false;
+				}
+				continue;
+			}
+		}
+		if (mach_absolute_time() > deadline) {
+			say("max98512: %s (%#x): after the software reset GLOBAL_SHDN %#x, AMP_EN %#x: not shut down; no more writing "
+			    "for this run\n", a->name, a->addr, shdn, en);
+			broken = true;
+			return false;
+		}
 	}
-	return true;
 }
 
 /*

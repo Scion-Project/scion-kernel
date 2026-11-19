@@ -217,9 +217,9 @@ struct device {
 	UInt32 output_channels, input_channels;
 	/* its clock, running while anybody does I/O */
 	unsigned running;               /* how many clients have started I/O */
-	UInt64 anchor;                  /* mach_absolute_time() when the first of them did */
-	UInt64 periods;                 /* whole timestamp periods since */
 };
+
+static UInt64 clock_anchor;     /* every device's clock: mach_absolute_time() at the run's first I/O (get_zero_time_stamp) */
 
 static struct device devices[] = {
 	{ .object = OBJECT_SPEAKER, .uid = CFSTR("Speaker"), .output = OBJECT_SPEAKER_OUTPUT, .input = OBJECT_SPEAKER_INPUT,
@@ -242,6 +242,7 @@ static struct device devices[] = {
 #define MANUFACTURER            CFSTR("redwood")
 /* how often a device says where its clock is, in frames: also the largest I/O buffer the HAL will use */
 #define TIMESTAMP_PERIOD        16384
+#define CLOCK_DOMAIN            0x686b6f73      /* 'hkos': one domain for every device of this plug-in */
 
 static AudioServerPlugInHostRef host;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -597,6 +598,15 @@ property(AudioObjectID object, const AudioObjectPropertyAddress *address, UInt32
 			WORD(d->object);
 			break;
 		case kAudioDevicePropertyClockDomain:
+			/*
+			 * One clock domain for all of ours, not 0 ("unknown"): every device here plays and records by the same clock
+			 * (clock_anchor, mach_absolute_time). With 0 the virtual audio device's aggregate of the microphone (Codec) and
+			 * the speaker took them for two clocks and corrected their drift: the camera's audio reached its node one
+			 * buffer every 280 ms of 21 ms cycles here, its times advancing at half its length, and among them buffers of
+			 * 10 000 s (step 100) -- the movie never finished.
+			 */
+			WORD(CLOCK_DOMAIN);
+			break;
 		case kAudioDevicePropertyLatency:
 		case kAudioDevicePropertySafetyOffset:
 		case kAudioDevicePropertyIsHidden:
@@ -948,8 +958,9 @@ start_io(__unused AudioServerPlugInDriverRef driver, AudioObjectID object, __unu
 	}
 	pthread_mutex_lock(&lock);
 	if (d->running++ == 0) {
-		d->anchor = mach_absolute_time();
-		d->periods = 0;
+		if (clock_anchor == 0) {
+			clock_anchor = mach_absolute_time();
+		}
 		if (d->output != 0) {
 			written = refused = 0;
 			say("hakios: audio: playing%s\n", level_start());
@@ -983,7 +994,18 @@ stop_io(__unused AudioServerPlugInDriverRef driver, AudioObjectID object, __unus
 	return 0;
 }
 
-/* Where the device's clock was last at a multiple of TIMESTAMP_PERIOD frames, and when. */
+/*
+ * Where the device's clock was last at a multiple of TIMESTAMP_PERIOD frames, and when.
+ *
+ * One clock for every device, started at the first I/O of the run and never restarted. Each device had its own, restarted
+ * at sample time 0 whenever its first client started: the camera records through an aggregate of the microphone and the
+ * speaker, and when the recording's start sound played (the speaker's I/O starting from nobody) the speaker's clock went
+ * back to 0 under the running microphone -- every audio buffer of the recording after it had a presentation time some
+ * 10 000 s before the host clock's, running ever faster to catch up (step 87, 16 November: "lag: audio buffer 101: pts
+ * -10014 s"; video 0.03 s), and the movie's writer could not put the two together (the moov never written). All of them
+ * play by mach_absolute_time() anyway: one timeline is the truth for all.
+ */
+
 static OSStatus
 get_zero_time_stamp(__unused AudioServerPlugInDriverRef driver, AudioObjectID object, __unused UInt32 client,
     Float64 *sample_time, UInt64 *host_time, UInt64 *seed)
@@ -996,11 +1018,13 @@ get_zero_time_stamp(__unused AudioServerPlugInDriverRef driver, AudioObjectID ob
 		return kAudioHardwareBadObjectError;
 	}
 	pthread_mutex_lock(&lock);
-	while (now >= d->anchor + (UInt64)((Float64)(d->periods + 1) * ticks_per_period)) {
-		d->periods++;
+	if (clock_anchor == 0) {
+		clock_anchor = now;
 	}
-	*sample_time = (Float64)d->periods * TIMESTAMP_PERIOD;
-	*host_time = d->anchor + (UInt64)((Float64)d->periods * ticks_per_period);
+	UInt64 periods = now > clock_anchor ? (UInt64)((Float64)(now - clock_anchor) / ticks_per_period) : 0;
+
+	*sample_time = (Float64)periods * TIMESTAMP_PERIOD;
+	*host_time = clock_anchor + (UInt64)((Float64)periods * ticks_per_period);
 	*seed = 1;
 	pthread_mutex_unlock(&lock);
 	return 0;
@@ -1059,7 +1083,7 @@ actuator_write(const int16_t *samples, UInt32 frames)
 
 static OSStatus
 do_io_operation(__unused AudioServerPlugInDriverRef driver, __unused AudioObjectID object, AudioObjectID stream,
-    __unused UInt32 client, UInt32 operation, UInt32 frames, __unused const AudioServerPlugInIOCycleInfo *cycle, void *buffer,
+    __unused UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle, void *buffer,
     __unused void *secondary)
 {
 	const struct device *d = device_of(stream);
@@ -1068,6 +1092,48 @@ do_io_operation(__unused AudioServerPlugInDriverRef driver, __unused AudioObject
 		return kAudioHardwareBadObjectError;
 	}
 	if (operation == kAudioServerPlugInIOOperationReadInput && stream == OBJECT_CODEC_INPUT) {
+		/*
+		 * The microphone's I/O as the HAL runs it, said every 5 s: how many cycles, how many frames, against the time that
+		 * went by (step 98: the camera's audio reached its node at a tenth of real time while the kernel was read in real
+		 * time -- where between here and the node is it lost?).
+		 */
+		static UInt64 since, calls, framed;
+		UInt64 now = mach_absolute_time();
+
+		if (since == 0) {
+			since = now;
+		}
+		calls++;
+		framed += frames;
+		/*
+		 * The first cycles' times as the HAL gives them (step 99: the camera's audio node made buffers of 448 039 462
+		 * frames, 10 159 s long, from a gap it saw in its input's times): sample time, host time (and that in seconds),
+		 * the flags, and where our own zero time stamp is.
+		 */
+		{
+			static unsigned told;
+
+			if (cycle != NULL && told++ < 24) {
+				Float64 sample = 0;
+				UInt64 host = 0, seed = 0;
+
+				(void)get_zero_time_stamp(NULL, OBJECT_CODEC, 0, &sample, &host, &seed);
+				say("hakios: audio: mic cycle %u: input sample %.0f host %llu (%.6f s) flags %x; output sample %.0f host %llu; "
+				    "zero %.0f at %llu; now %llu\n", told, cycle->mInputTime.mSampleTime,
+				    (unsigned long long)cycle->mInputTime.mHostTime,
+				    (Float64)cycle->mInputTime.mHostTime / (HAKIOS_AUDIO_RATE * ticks_per_frame), (unsigned)cycle->mInputTime.mFlags,
+				    cycle->mOutputTime.mSampleTime, (unsigned long long)cycle->mOutputTime.mHostTime, sample,
+				    (unsigned long long)host, (unsigned long long)now);
+			}
+		}
+		if ((Float64)(now - since) >= 5.0 * HAKIOS_AUDIO_RATE * ticks_per_frame) {
+			Float64 seconds = (Float64)(now - since) / (HAKIOS_AUDIO_RATE * ticks_per_frame);
+
+			say("hakios: audio: mic I/O: %llu cycles, %llu frames in %.2f s (%.0f frames a second; %u a cycle; input time %.0f)\n",
+			    calls, framed, seconds, (Float64)framed / seconds, (unsigned)frames, cycle != NULL ? cycle->mInputTime.mSampleTime : -1.0);
+			since = now;
+			calls = framed = 0;
+		}
 		codec_read(buffer, frames);
 	} else if (operation == kAudioServerPlugInIOOperationReadInput) {
 		/* the speaker's and Hawking's inputs: silence */

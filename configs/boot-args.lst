@@ -350,7 +350,7 @@ ksample	k
 ksample_us	k
 lga_dpu	k
 lga_kick	k
-loader_platform	l
+loader_platform	klu
 loader_return_after	kl
 m2v_utrace	u
 m3_diag	k
@@ -460,6 +460,7 @@ ocp_guard	k
 ocp_guard_flags	k
 pan	k
 panel	k
+panel_blank	u
 panel_brightness	k
 panel_gamma	k
 panel_gamma_log	k
@@ -587,6 +588,7 @@ torch_code_max	k
 torch_flash_ms	k
 torch_max_s	k
 torch_secs	k
+touch_blank	k
 touch_coalesce	k
 touch_fault	u
 touch_flip	k

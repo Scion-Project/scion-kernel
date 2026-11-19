@@ -973,7 +973,8 @@ choose_window(const struct payload_info *pi)
 	win_base = best_base;
 	win_size = best_size;
 	if (extra_ram_wanted(pi->cmdline)) {
-		extra_ram_keep_mfc = PLAT->extra_ram == exynos9810_extra_ram && mfc_wanted(pi->cmdline);
+		extra_ram_keep_mfc = (PLAT->extra_ram == exynos9810_extra_ram || PLAT->extra_ram == exynos9810_extra_ram_crown) &&
+		    mfc_wanted(pi->cmdline);
 		extra_ram_claim();
 	}
 	return 1;

@@ -32,6 +32,7 @@ The whole root is 7.9 GB and the kernel on the phone has about 4 GB of RAM for e
     for all languages: they are how CoreFoundation knows which languages a bundle has, and
     without them every string comes out as its key.
 """
+import os
 import re
 import stat
 import sys
@@ -175,7 +176,7 @@ BIG_CATALOGS = ('System/Library/PrivateFrameworks/SFSymbols.framework/',)
 # (/Library is the wallpapers and a few tables of regional settings, apart from the sounds)
 HEALTH = 'System/Library/Health/'
 SKIP_PREFIX = ('usr/share/tokenizer/', 'usr/share/firmware/', 'usr/share/mecabra/',
-               'usr/standalone/', 'Library/Audio/', 'Library/Ringtones/',
+               'usr/standalone/', 'Library/Audio/',
                HEALTH + 'Assets/FitnessUIAssets.bundle/') + \
     tuple(f'System/Library/{name}/' for name in SKIP_SYSTEM_LIBRARY)
 # ... but these parts of the directories skipped above are wanted all the same, whole (docs/system-selection.md):
@@ -192,11 +193,19 @@ BIG_PROGRAM = 10 << 20           # daemons bigger than this (lskdd, ...) are not
 # -- Weather and its widget, Maps, the clock's cities' local weather -- and every app that asks for one
 # waits on a lookup that fails (userland/mkjobs.py runs it on demand; Scion gives it the phone's position)
 BIG_KEEP = ('usr/libexec/locationd',)
+# the executable of a daemon that lives inside a framework's bundle is not small (identityservicesd, 12 MB, past
+# SMALL): without it launchd's job for it points at nothing, and everything that looks up the identity services
+# (iMessage, FaceTime, the Apple ID's device registration) gets "No such process"
+KEEP_FRAMEWORK_EXEC = ('System/Library/PrivateFrameworks/IDS.framework/identityservicesd.app/identityservicesd',)
 # sound, outside the directories above: the virtual audio device, a plug-in that all of mediaserverd's
 # audio goes through, with its tunings (signal processing chains) for this model and for any, and the
 # system's own sounds. Not the neural networks among the tunings, nor the sounds of the watch.
 AUDIO = ('Library/Audio/Plug-Ins/', 'Library/Audio/Tunings/D22/', 'Library/Audio/Tunings/Generic/',
-         'System/Library/Audio/UISounds/')
+         'System/Library/Audio/UISounds/',
+         # the Bluetooth audio device (A2DP): bluetoothd publishes each paired speaker to it over the mach service
+         # com.apple.BTAudioHALPlugin.xpc, and without it there is nobody to take the audio device ("no available xpc
+         # client connections"): the Note9's sound stayed on the speaker
+         'System/Library/Audio/Plug-Ins/HAL/BTAudioHALPlugin.driver/')
 SKIP_AUDIO = ('System/Library/Audio/UISounds/nano/',)
 KEEP_LANG = ('en', 'Base', 'English', 'en_US', 'en_GB')
 
@@ -237,6 +246,25 @@ def mode_bits(text):
     return mode
 
 
+# SYSTEM_FULL=1 in the environment: as much of iOS as fits the SYSTEM partition (6.54 GiB), for a phone whose flash holds
+# the image (not a RAM boot). The caps are raised, Korean is kept beside English, machine-learning models and the
+# metal libraries come in, and only the watch's and the carriers' data stay out (devices/crownlte; measured ~5.4 GB raw,
+# an image near 5 GB). The S9's daily image is unchanged (the variable is set for the Note9 build alone).
+FULL = bool(os.environ.get('SYSTEM_FULL'))
+if FULL:
+    KEEP_LANG = KEEP_LANG + ('ko', 'ko_KR', 'Korean')
+    SMALL = 32 << 20
+    MAX_ASSET_CATALOG = 32 << 20
+    MAX_STRING_TABLE = 32 << 20
+    MAX_METALLIB = 64 << 20
+    BIG_PROGRAM = 64 << 20
+    MAX_FONT = 200 << 20
+    _DROP = ('NanoTimeKit', 'NanoPreferenceBundles', 'Carrier Bundles')
+    SKIP_SYSTEM_LIBRARY = _DROP
+    SKIP_PREFIX = ('usr/share/firmware/', 'usr/standalone/', HEALTH + 'Assets/FitnessUIAssets.bundle/') + \
+        tuple('System/Library/%s/' % name for name in _DROP)
+
+
 def wanted_file(path, size):
     lproj = re.search(r'/([^/]+)\.lproj/', path)
     if lproj and lproj.group(1) not in KEEP_LANG:
@@ -254,8 +282,10 @@ def wanted_file(path, size):
     if path.startswith(('usr/libexec/', 'usr/sbin/')):
         return size <= BIG_PROGRAM or path in BIG_KEEP
     if path.startswith(('Applications/', HEALTH)):
-        return not path.lower().endswith(SKIP_APP_EXT) and '.mlmodelc/' not in path
+        return not path.lower().endswith(SKIP_APP_EXT) and (FULL or '.mlmodelc/' not in path)
     if path.startswith(FRAMEWORKS):
+        if path in KEEP_FRAMEWORK_EXEC:
+            return True
         if path in KEEP_METALLIB or (path.endswith('.metallib') and size <= MAX_METALLIB):
             return True
         if path.startswith(KEEP_MODELS) or path in KEEP_DAEMONS:
@@ -263,14 +293,14 @@ def wanted_file(path, size):
         if PLUGIN_EXECUTABLE.search(path):
             return size <= MAX_PLUGIN
         if re.search(r'/(XPCServices|Support|Helpers)/', path):
-            return size <= 32 << 20 and not path.lower().endswith(('.png', '.car', '.loctable', '.caml'))
+            return size <= (64 << 20 if FULL else 32 << 20) and not path.lower().endswith(('.png', '.car', '.loctable', '.caml'))
         if path.endswith('.car'):
             return size <= MAX_ASSET_CATALOG or path.startswith(BIG_CATALOGS)
         if path.endswith('.loctable'):
             return size <= MAX_STRING_TABLE
         if path.startswith(DATA_FRAMEWORKS) and path.lower().endswith(('.dat', '.bin')):
             return size <= SMALL
-        return size <= SMALL and not path.lower().endswith(SKIP_EXT) and '.mlmodelc/' not in path
+        return size <= SMALL and not path.lower().endswith(SKIP_EXT) and (FULL or '.mlmodelc/' not in path)
     return path.startswith(WHOLE)
 
 

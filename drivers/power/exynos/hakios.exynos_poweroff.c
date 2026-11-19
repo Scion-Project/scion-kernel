@@ -83,7 +83,14 @@ hakios_exynos_halt_off(boolean_t reboot)
 {
 	uint32_t level = 0;
 
-	if (reboot || !PE_parse_boot_argn("halt_off", &level, sizeof(level)) || level == 0) {
+	if (!reboot && !PE_parse_boot_argn("halt_off", &level, sizeof(level))) {
+		char platform[24] = "";
+
+		/* the Note9 (the S9's SoC, PMU and panel): on by default, its boot line has no room for halt_off=1 */
+		(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+		level = strcmp(platform, "crownlte") == 0 ? 1 : 0;
+	}
+	if (reboot || level == 0) {
 		return;
 	}
 	say("\n--- halt_off=%u: the panel blanked, %sthen the phone powered off (PS_HOLD) ---\n", level,

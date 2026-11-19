@@ -2585,7 +2585,7 @@ hakios_ufs_summary(const char *when, int how)
 		nufs_summary_line(how, "ufs: nufs: summary: refused #%u: %s\n", i + 1, nufs_sum.refusal[i]);
 	}
 	if (ufs_nufs_on) {
-		char speed[320];
+		char speed[448];
 
 		if (ufshc_speed(speed, sizeof(speed))) {
 			nufs_summary_line(how, "%s", speed);

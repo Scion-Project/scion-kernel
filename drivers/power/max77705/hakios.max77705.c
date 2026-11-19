@@ -5,8 +5,9 @@
  * hakios_battery_report() (drivers/power/hakios.battery.c). Only with boot-arg max77705=1: every address below belongs
  * to this phone.
  *
- * THIS DRIVER ONLY READS THE CHIP, with one exception that is off by default (max77705_wdt=1, below). The MAX77705 is the
- * phone's charger: a wrong write there changes how the battery is charged. Nothing else is written to it, not even the latches its interrupt handler would clear on Android (the interrupt
+ * THIS DRIVER ONLY READS THE CHIP, but for the charger's two currents (charger_tune, max77705_chg=0 to leave them) and the
+ * watchdog's kick (max77705_wdt=1, off by default). The MAX77705 is the phone's charger: a wrong write there changes how
+ * the battery is charged. Nothing else is written to it, not even the latches its interrupt handler would clear on Android (the interrupt
  * registers are not read at all: reading them clears them). What is written is the bus's own: the clock gates of
  * CMGP's USI03, its mode word, the controller (drivers/soc/exynos/hakios.exynos_hsi2c.c).
  *
@@ -846,6 +847,92 @@ haptic_start(void)
 }
 
 /*
+ * The charger's two currents, set when a charger is on the USB input (max77705_chg, on by default; max77705_chg=0 leaves the
+ * charger exactly as the boot loader left it, as before). With nothing setting them, the MAX77705 stayed at its own input
+ * limit: 1 to 2 W from a wall charger (seen 15 November 2026). Only these are written, read back, and written again
+ * should the chip lose them (its watchdog, a replug): the input's limit, CNFG_09 [6:0] (mA / 25 - 1), and the fast-charge
+ * current, CNFG_02 [5:0] (mA / 50), behind CHGPROT, CNFG_06 [3:2] = 3; and, when the watchdog is on (CNFG_00 bit 4),
+ * its clear, CNFG_06 [1:0] = 1, at every poll. The float voltage (CNFG_04) and the mode are never touched.
+ * Values: a wall charger or a charging host (BC_STATUS [1:0] 3 or 2) 2000 mA in, 2000 mA into the battery (10 W at 5 V,
+ * 0.5 C of the Note9's 4000 mAh; 9 V adaptive charging, for 15 W, is not negotiated here); a plain USB host (1), or no type
+ * yet: left as it is. The battery under 0 or over 45 C: 500 mA into it.
+ * Facts from Samsung's drivers/battery_v2/max77705_charger.c and include/linux/mfd/max77705-private.h of the S9's kernel
+ * (LineageOS android_kernel_samsung_exynos9810): read for the registers and formulas, not copied.
+ */
+#define CHG_CNFG_02     0xB9
+#define CHG_CNFG_09     0xC0
+#define CHG_IN_MA       2000
+#define CHG_CC_MA       2000
+#define CHG_CC_TEMP_MA  500
+
+static bool chg_enabled = true;
+static int chg_said;
+
+/* the charger's bits under mask, read back; under the bus's lock */
+static bool
+chg_bits(uint8_t reg, uint8_t mask, uint8_t value, uint8_t *was)
+{
+	uint8_t now = 0, back = 0, buf[2];
+	bool ok;
+
+	lck_mtx_lock(bus_lock);
+	ok = hakios_hsi2c_read_reg(&bus, CHARGER, reg, &now, 1) == 0;
+	if (ok && (now & mask) != (value & mask)) {
+		buf[0] = reg;
+		buf[1] = (uint8_t)((now & ~mask) | (value & mask));
+		ok = hakios_hsi2c_message(&bus, CHARGER, false, buf, 2, true) == 0 &&
+		    hakios_hsi2c_read_reg(&bus, CHARGER, reg, &back, 1) == 0 && (back & mask) == (value & mask);
+	}
+	lck_mtx_unlock(bus_lock);
+	if (was != NULL) {
+		*was = now;
+	}
+	return ok;
+}
+
+static void
+charger_tune(const struct hakios_battery_state *b)
+{
+	uint8_t bc = 0, cnfg00 = 0, in_now = 0, cc_now = 0;
+	uint32_t in_ma, cc_ma;
+
+	if (!chg_enabled || !b->external) {
+		return;
+	}
+	if (read8(CHARGER, CHG_CNFG_00, &cnfg00) == 0 && (cnfg00 & 0x10)) {
+		(void)chg_bits(CHG_CNFG_06, 0x0C, 0x0C, NULL);
+		(void)chg_bits(CHG_CNFG_06, 0x03, 0x01, NULL);  /* the watchdog's clear (self-clearing) */
+	}
+	if (read8(MUIC, MUIC_BC_STATUS, &bc) != 0 || ((bc & 3) != 2 && (bc & 3) != 3)) {
+		if (chg_said == 0) {
+			chg_said = 1;
+			say("max77705: charger: the input's type %u (BC_STATUS %#x): its currents left as they are\n", bc & 3, bc);
+		}
+		return;
+	}
+	in_ma = CHG_IN_MA;
+	cc_ma = b->temperature_hundredths < 0 || b->temperature_hundredths > 4500 ? CHG_CC_TEMP_MA : CHG_CC_MA;
+	uint8_t in_code = (uint8_t)(in_ma / 25 - 1), cc_code = (uint8_t)(cc_ma / 50);
+
+	if (read8(CHARGER, CHG_CNFG_09, &in_now) != 0 || read8(CHARGER, CHG_CNFG_02, &cc_now) != 0) {
+		return;
+	}
+	if ((in_now & 0x7F) == in_code && (cc_now & 0x3F) == cc_code) {
+		return;
+	}
+	bool ok = chg_bits(CHG_CNFG_06, 0x0C, 0x0C, NULL) && chg_bits(CHG_CNFG_09, 0x7F, in_code, NULL) &&
+	    chg_bits(CHG_CNFG_02, 0x3F, cc_code, NULL);
+
+	if (chg_said < 12) {
+		chg_said = chg_said < 2 ? 2 : chg_said + 1;
+		say("max77705: charger: type %u: input limit %u -> %u mA, fast charge %u -> %u mA (battery %d.%02d C, watchdog %s): %s\n",
+		    bc & 3, (in_now & 0x7F) <= 3 ? 100 : ((in_now & 0x7F) + 1) * 25, in_ma, (cc_now & 0x3F) <= 2 ? 100 : (cc_now & 0x3F) * 50,
+		    cc_ma, b->temperature_hundredths / 100, (b->temperature_hundredths < 0 ? -b->temperature_hundredths : b->temperature_hundredths) % 100,
+		    (cnfg00 & 0x10) ? "on, cleared every poll" : "off", ok ? "written" : "NOT TAKEN");
+	}
+}
+
+/*
  * max77705_diag=1: the charger's registers 0xB2-0xC5, raw, in one line, and what they say (only reads; see the top of
  * this file). A register that does not answer reads "--".
  */
@@ -1050,6 +1137,7 @@ battery_thread(void *arg, __unused wait_result_t result)
 		if (battery_read(&b)) {
 			failed = 0;
 			hakios_battery_report(&b);
+			charger_tune(&b);
 			if (tick % 60 == 0) {
 				say_state("every 5 minutes", &b);
 				if (chg_diag) {
@@ -1084,6 +1172,12 @@ hakios_max77705_init(void)
 		return;
 	}
 	PE_parse_boot_argn("max77705_steps", &steps, sizeof(steps));
+	{
+		uint32_t chg = 1;
+
+		PE_parse_boot_argn("max77705_chg", &chg, sizeof(chg));
+		chg_enabled = chg != 0;
+	}
 	PE_parse_boot_argn("max77705_ipclk", &bus.ipclk_mhz, sizeof(bus.ipclk_mhz));
 	if (steps == 0 || bus.ipclk_mhz < 26 || bus.ipclk_mhz > 400) {
 		return;

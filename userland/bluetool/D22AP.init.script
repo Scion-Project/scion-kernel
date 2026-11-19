@@ -1,4 +1,4 @@
 # BlueTool's "init" for the Galaxy S9 (see D22AP.boot.script): nothing to set up beyond what the kernel has done; the
-# chip opened and asked its version again.
+# chip opened. ("hci info" left out here, 15 November: each script run took exactly 10 s, and init is what every
+# power-on from Settings runs; boot still asks the version, so the two runs' times tell which part the 10 s is.)
 device -D -S
-hci info

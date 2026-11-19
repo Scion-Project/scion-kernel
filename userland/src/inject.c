@@ -793,7 +793,7 @@ extern void IOHIDEventSetIntegerValue(IOHIDEventRef event, uint32_t field, CFInd
 #define FIELD_IS_BUILT_IN               0x4
 #define FIELD_DIGITIZER_DISPLAY_INTEGRATED 0xb0019
 
-#define MAX_FINGERS     10
+#define MAX_FINGERS     12      /* 0-9 the touch screen, 11 the S Pen (hakios.w9018.c) */
 
 /*
  * A finger that lands this close to an edge of the screen (a fraction of the width or the height)
@@ -1578,6 +1578,25 @@ sensors_thread(void *arg)
 		case HAKIOS_SENSOR_ACCEL: {
 			double k = (s.scale > 0 ? s.scale : 8) / 32768.0;
 			double x = -s.v[0] * k, y = -s.v[1] * k, z = -s.v[2] * k;  /* Android's sign to iOS's */
+			static int mirrored = -1;
+
+			/*
+			 * The Note9 (loader_platform=crownlte): with the S9's sensor position told to the hub, landscape came out
+			 * the wrong way round (seen 10 November 2026: the picture turned only when the phone was turned the other
+			 * way), portrait right. Its x is the other way: turned here.
+			 */
+			if (mirrored < 0) {
+				char arguments[1024] = "";
+				size_t size = sizeof(arguments) - 1;
+
+				mirrored = sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0 &&
+				    strstr(arguments, "loader_platform=crownlte") != NULL;
+			}
+			if (mirrored) {
+				/* both in-plane axes: held upright, the S9's y said upside down (seen 10 November 2026, step 55) */
+				x = -x;
+				y = -y;
+			}
 
 			orientation_from(x, y, z, now_us);
 			if (sensor.accel != NULL && sensor_due(sensor.accel_made, now_us)) {

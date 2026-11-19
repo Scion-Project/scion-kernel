@@ -613,6 +613,40 @@ setup_scaler(vm_offset_t d, uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh)
 }
 
 /*
+ * The DECON's frames held (its HW trigger, TE, masked) or let go again: for the panel driver while it sends commands
+ * around a sleep (hakios.s6e3ha8.c), so that no frame is in flight on the link while the panel is put to sleep, woken
+ * and set up again -- Samsung's suspend and resume stop the DECON before they talk to the panel. Held: the frame
+ * already started ends first (waited for: a frame and more). Hypothesis S2 of step 95: commands sent in the middle of a
+ * frame's transfer left the woken panel with black lines.
+ */
+void hakios_scanout_hold(int hold);
+
+void
+hakios_scanout_hold(int hold)
+{
+	uint32_t trig;
+
+	if (probed <= 0) {
+		return;
+	}
+	trig = rd(decon, TRIG_CONTROL);
+	if (hold) {
+		wr(decon, TRIG_CONTROL, trig | HW_TRIG_MASKED);
+		IOSleep(20);            /* (a frame at 60 Hz, and more: the one under way finished) */
+	} else {
+		wr(decon, TRIG_CONTROL, trig & ~HW_TRIG_MASKED);
+	}
+	{
+		static int said;
+
+		if (said++ < 6) {
+			say("exynos_dpu: the DECON's frames %s (trigger %x -> %x)\n", hold ? "held (TE masked)" : "let go", trig,
+			    rd(decon, TRIG_CONTROL));
+		}
+	}
+}
+
+/*
  * fb_planes: two of the DECON's windows (MiniIOMobileFramebuffer.cpp, planeShow()). CoreAnimation hands the display a
  * layer it detached from its picture (a CAMetalLayer's drawable) under the window server's surface, which is clear over
  * it. The window server's surface stays where fb_zc puts it, on the boot loader's window (5, the top one) and VGF0, now

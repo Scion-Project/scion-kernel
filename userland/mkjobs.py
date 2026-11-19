@@ -248,12 +248,16 @@ DENY = ('watchdog', 'CommCenter', 'wifi', 'WiFi', 'bluetooth', 'BTServer', 'soft
         # these start, crash and are asked for again, over and over. (aggregated, which was among them, is where
         # Darwin userland 16 keeps its power log -- com.apple.powerlog.plxpclogger.xpc and the rest -- that Settings > Battery
         # waits for; it now runs through a session.)
-        'homed', 'routined', 'com.apple.dmd', 'syncdefaultsd', 'photoanalysisd', 'avconferenced',
+        'homed', 'routined', 'duetexpertd', 'com.apple.dmd', 'syncdefaultsd', 'photoanalysisd', 'avconferenced',
         'com.apple.atc',
         # Apple's gpsd: its Mach service, com.apple.gpsd, is where locationd asks for GNSS, and here it is our
         # com.hakios.gnssd that answers it (src/gnssd.m, docs/gnssd.md): two jobs cannot claim one service, and Apple's
         # drives GNSS hardware of Apple's own (GnssHalCommUart/Spi, the AOP's passthrough) that this phone has not got.
-        'com.apple.gpsd')
+        'com.apple.gpsd',
+        # (Note9, 10 November 2026) vmd, the voicemail daemon, looked up CommCenter in a loop and kept a core at 100 %;
+        # amsengagementd asks for fairplayd, which this kernel cannot give. fairplayd.H2 exits 0 the moment it starts (no
+        # FairPlay user client in this kernel) and KeepAlive brought it back every 10 s (14 November 2026).
+        'voicemail', 'amsengagementd', 'fairplayd')
 
 # ALLOW="word ..." in the environment lets jobs through that DENY would stop: for trying one out
 DENY = tuple(word for word in DENY if word not in os.environ.get('ALLOW', '').split())

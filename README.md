@@ -1,3 +1,118 @@
+# This fork: the Galaxy Note9 (`crownlte`, SM-N960N) brought up
+
+> 한국어: [README.ko.md](README.ko.md)
+
+The original README (below) says the Note9 was "written, never run". On this fork's `note9` branch it **runs**: iOS 16.5 boots on a
+Galaxy Note9 SM-N960N (Korean model, Exynos 9810) through scion-installer's TWRP installer, and is used day to day for testing.
+Every change here was made and checked on that one phone, a round at a time, from the kernel's own log (`/proc/last_kmsg`
+pulled in TWRP). Nothing here carries Apple's files, keys or any device's identity: the iOS system image is built, as upstream,
+from an IPSW you supply yourself, and the installer zip that build makes is **yours only and never to be shared**.
+
+## What works on the Note9
+
+| Area | State | Where |
+|---|---|---|
+| Boot, 8 cores, GPU (Mali), Wi-Fi, battery | works | upstream S9 drivers, `crownlte` boot-args |
+| Display (S6E3HA8 "crown") | works, brightness slider | `drivers/gpu/hakios.s6e3ha8.c` |
+| **Screen off with the side button** (really dark) and back on, no lines or smudges | works | `hakios.s6e3ha8.c` (below) |
+| **Auto-Lock** (Settings > Display) | works | `userland/src/inject_sb.c` |
+| Touch screen, palm rejection while the S Pen is near | works | `hakios.s6sy761.c` |
+| **S Pen** (Wacom W9018) with pressure | works | `drivers/input/hakios.w9018.c`, `inject.c` (finger slot 11) |
+| Keys: side, volume, Bixby (as Home) | works | `hakios.exynos_keys.c` |
+| **Charging at 10 W** (was 1-2 W) | works | `drivers/power/hakios.max77705.c` |
+| Speakers (MAX98512), microphone (CS47L93) | works | `hakios.max98512.c`, `audio_plugin.c` |
+| Bluetooth: on/off from Settings and Control Center, pairing, A2DP | works | `inject_bluetoothd.c`, `inject_bluetool.c`, `inject_sb.c` |
+| Front camera: preview, photos | works | `hakios.exynos_camera.c`, `camera_device.c` |
+| **Video recording** (hardware H.264 encoder, MFC) | saves and plays; recorded **audio stutters** | `hakios.exynos_mfc.c`, `mfc_encoder.c`, `inject_media.c` |
+| Hardware video decoding (MFC) | works | `hakios.exynos_mfc.c` |
+| Persistent `/private/var` on USERDATA (HFS+), Sileo | works | `hakios.ufs.c`, `hakios.ufshc.c` |
+| Sensors (sensor hub: accelerometer, gyro, light, proximity, compass), rotation | works | `inject.c` |
+
+**Does not work / not attempted:** cellular (Shannon modem; no CommCenter), rear cameras, NFC, Apple ID sign-in (Apple's
+device check rejects this port; nothing here forges a device identity), FairPlay-protected content (not implemented, by choice),
+Face ID.
+
+## What was changed, and why
+
+### Screen off and on (`drivers/gpu/hakios.s6e3ha8.c`)
+- Display-off alone (DCS 28) left the panel faintly lit. Off is now 28 + sleep-in, with the DECON's frames held
+  (`hakios_scanout_hold`, `drivers/gpu/hakios.exynos_dpu.c`) so nothing is sent to a sleeping panel.
+- This panel cannot be woken from a bare sleep-in: it came back with black horizontal lines and smudges. Samsung's own kernel
+  (and so TWRP) never does that: every blank is a power-down, every unblank a full power-up and init. The wake now does the
+  same as Samsung's `_dsim_enable` / `panel_drv.c`:
+  1. the reset line (`gpa3-4`) is held low while the panel sleeps;
+  2. at the wake, the DSI clock lane is taken to LP-11 (stop state) **before** the reset is released;
+  3. it goes back to HS, then Samsung's whole init follows (DSC + PPS, sleep-out, scaler/CASET/PASET, SET_AREA, TE, the
+     boot loader's FFC/ISC/edge-dimming/brightness registers);
+  4. `disp_det` (`gpg2-2`) and DCS 0A are checked. If the panel is not up it is reset again, up to three times, and if it
+     never comes up the run goes back to the loader with the log kept.
+- The panel answers a DCS read with an acknowledge-and-error report first and its data a moment later. Reads gave up too early,
+  and the next read took the leftover data, so values were shifted one read along. Those wrong values, written into a freshly
+  reset panel, left it "up" and black after the Apple logo. Reads now wait for the data. The boot loader's registers are read
+  with no frame going out, twice, and kept only when both reads agree, and every write-back is read back.
+- A second screen-off while already asleep (seen after a backboardd restart at boot) now sends nothing; before, it broke the
+  asleep state and the panel was never woken.
+- `MiniIOMobileFramebuffer.cpp`: while the panel sleeps there is no TE, so a flip not taken is no longer taken for a broken
+  scan-out (which used to drop the scaler path for good: ghosting and stutter after every screen-off).
+
+### Auto-Lock (`userland/src/inject_sb.c`)
+With no CommCenter (no cellular), SpringBoard's `SBTelephonyManager` retried every second
+(`_handleTelephonyDaemonRestart` → `handleCallControlFailure:` → `updateCalls` → `resetIdleTimer`), and every retry reset
+the idle timer, so the screen never locked. The resets made inside that retry are dropped; the retry itself, and every other
+reset (touch, buttons), are left alone. Log-only hooks of SpringBoard's idle timer stay in (`hakios: idle:` lines).
+
+### Charging (`drivers/power/hakios.max77705.c`)
+The charger was only read, never set, so iOS charged at 1-2 W. The driver now sets CNFG_09 (input limit) and CNFG_02 (charge
+current) to 2000 mA behind CHGPROT, clears the watchdog, and limits the charge to 500 mA outside 0-45 °C.
+`max77705_chg=0` turns it off.
+
+### Bluetooth
+- `inject_bluetoothd.c`: a missing H4 transport callback crashed bluetoothd at power-off; it is filled with a no-op.
+- `userland/bluetool/D22AP.deepsleep.script`: there was none, so bluetoothd waited for a timeout after every power-off.
+- `inject_bluetool.c`: answers to slow MobileGestalt questions are cached, which takes power-on to about 0.7 s.
+- `inject_sb.c`: Control Center's Bluetooth button read a BluetoothManager of its own that never attached (grey button). It is
+  given the shared one.
+
+### Video recording (`mfc_encoder.c`, `inject_media.c`, `hakios.exynos_mfc.c`)
+- The software HEVC encoder could not keep up, and hooking VideoToolbox through `__interpose` or the GOT never reaches
+  shared-cache callers. The MFC is registered as a real VideoToolbox encoder plugin for `avc1`/`hvc1` instead.
+- mediaserverd's capture graph is kept from crashing after the stop, and audio buffers longer than a second (garbage
+  timestamps from the audio node) are dropped, so the movie is finished and plays.
+- Known: the recorded sound ticks/stutters. Still being worked on.
+
+### Also
+- S Pen: `inject.c` handled 10 fingers and the pen is finger 11. Ghost touches around the pen tip are dropped while the pen is
+  near.
+- Storage: larger UFS slot buffers, sleeping waits, and 30-second write statistics (`hakios.ufshc.c`).
+- Keys: **Bixby + volume-down held for 3 s** ends the run and goes back to the loader with the log kept. This is the way
+  out when the screen is dark and the touch screen dead. (Volume-down + power is the phone's forced restart, which loses the
+  log.)
+- `kern.hakios.ustacks` (`hakios.input.c`): write a process name to dump its user stacks to the log.
+
+## Building it
+
+As upstream (scion-installer), with this fork's `note9` branch as the kernel and the Note9's boot-args:
+
+```sh
+./build-installer.sh --ipsw <your iPhone10,3/10,6 16.5 IPSW> --device all --kernel-ref <commit of this branch> \
+  -- -N -t 0 -a "crownlte=exynos_keys=1 s6sy761=1 mali=9 fb_zc=1 fb_dpp=1 cpus=8 m3_prep=3 isa_floor=1 pan=0 \
+max77705=1 max77705_haptic=1 wifi=1 wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 brcmfmac_tcm_idx=1 mali_gov=1 cpufreq_gov=1 \
+tmu_stop=90 ufs=3 panel=1 panel_gamma=0 backlight=2 abox=8 max98512=3 bt=7 cam=5 cam_s9=7 mfc=5 cs47l93=6 abox_mic=1 \
+shub=6 ufs_write=1 var_hfs=ufs_USERDATA_data"
+```
+
+with the environment `SYSTEM_FULL=1 FRAGMENTS="panel9 mfc9 sense9"`. `var_hfs` keeps `/private/var` on USERDATA, which must
+have been formatted as HFS+ once (this **erases Android's data**; see scion-installer's `--format-userdata`). Back up Boot,
+System and EFS in TWRP first. The loader's boot-argument line has a length limit past which it is cut silently, so check the
+log's "Boot args" line after changing it.
+
+Testing: pull `/proc/last_kmsg` in TWRP after each run. End a run with five fingers held on the screen for 1.5 s, or with
+Bixby + volume-down for 3 s. A forced restart loses the log.
+
+---
+
+*The original Scion README follows, unchanged.*
+
 # Scion
 
 English · [中文](README.zh.md) · [Українська](README.uk.md)
@@ -259,4 +374,3 @@ owners:
 Rhaenja Hun（杭润嘉） — Developer / Sponsor
 
 tym sicilium for the sources!
-

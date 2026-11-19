@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define FROM "/etc/bluetool/"
@@ -100,13 +101,48 @@ my_open(const char *path, int flags, ...)
 	return open(moved(path, b, sizeof(b)), flags, mode);
 }
 
+/*
+ * Every script run asks MobileGestalt for WifiVendor three times (before and after the script), and on this phone each of those
+ * answers nothing after exactly 5 s ("MGCopyAnswer kMGQWifiVendor", then "Manufacturer is -1", 15 November): 15 s of every
+ * Bluetooth power-on. WifiVendor is answered "nothing" here at once, as MobileGestalt answers it anyway; and any other key that
+ * once took a second or more to come back empty is answered empty at once from then on, its name said once.
+ */
+#define SLOW_MAX 16
+static CFStringRef slow_keys[SLOW_MAX];
+static unsigned slow_count;
+
 static CFTypeRef
 my_MGCopyAnswer(CFStringRef key, CFDictionaryRef options)
 {
+	char name[96] = "?";
+
 	if (key != NULL && CFEqual(key, CFSTR("ReleaseType"))) {
 		return CFRetain(CFSTR("Vendor"));
 	}
-	return MGCopyAnswer(key, options);
+	if (key != NULL && (CFEqual(key, CFSTR("WifiVendor")) || CFEqual(key, CFSTR("wifi-vendor")))) {
+		return NULL;
+	}
+	for (unsigned i = 0; key != NULL && i < slow_count; i++) {
+		if (CFEqual(key, slow_keys[i])) {
+			return NULL;
+		}
+	}
+	struct timespec t0, t1;
+
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	CFTypeRef answer = MGCopyAnswer(key, options);
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	long ms = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+
+	if (ms >= 1000 && key != NULL) {
+		CFStringGetCString(key, name, sizeof(name), kCFStringEncodingUTF8);
+		say("libhakios.bluetool: MobileGestalt took %ld ms for \"%s\" (%s)%s\n", ms, name, answer != NULL ? "an answer" : "nothing",
+		    answer == NULL && slow_count < SLOW_MAX ? ": answered nothing at once from now on" : "");
+		if (answer == NULL && slow_count < SLOW_MAX) {
+			slow_keys[slow_count++] = CFStringCreateCopy(NULL, key);
+		}
+	}
+	return answer;
 }
 
 __attribute__((used)) static const struct { const void *replacement, *replacee; } interposers[]

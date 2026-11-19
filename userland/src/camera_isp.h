@@ -71,6 +71,7 @@ struct isp_tuning {
 struct isp {
 	float           wb[3];          /* the white balance's gains, green 1 */
 	float           digital;        /* more gain, for what AE cannot reach with the sensor's */
+	float           bias;           /* the brightness slider: the aim times this (1: as it is) */
 	float           zoom;           /* the picture is the middle 1/zoom of the sensor each way (1: the whole of it) */
 	float           lens_zoom;      /* the lens's own over the camera's (the telephoto for the back camera: 2; 0 as 1) */
 	bool            turned;         /* the picture turned half round (a sensor mounted the other way up) */
@@ -79,6 +80,8 @@ struct isp {
 	uint8_t         gamma[4096];    /* linear (959 above black is 3836) to 8 bits, sRGB's curve */
 	uint32_t        asked_lines, asked_gain, asked_frame_lines;     /* what AE asked for last */
 	bool            asked;
+	uint32_t        stale;          /* frames in a row that did not carry what was asked */
+	uint32_t        stale_said;
 	uint32_t        max_frame_lines;        /* the longest frame AE may ask for (0: twice the shortest) */
 	struct isp_tuning *tuning;              /* isp_load_tuning()'s, or none */
 };
@@ -93,6 +96,7 @@ float isp_sharpness(const struct hakios_camera_frame *f, const uint8_t *raw, flo
 /* the levels, from every 4th cell of every 4th pair of lines (with the processor's lens shading and white balance, if isp) */
 void isp_measure(const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw, struct isp_stats *s);
 /* the exposure for the frames to come: true, and the command filled in, when it should change */
+extern void (*isp_say)(const char *format, ...);      /* where isp_ae says what it must (NULL: stderr) */
 bool isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_stats *s, struct hakios_camera_command *c);
 /*
  * The white balance: grey world -- of the nearly grey, when enough is -- kept to the line of the

@@ -436,6 +436,7 @@ OCP_GUARD	arg	ocp_guard	User space	k	hakios.exynos_cpufreq.c	the over-current gu
 OCP_GUARD_FLAGS	arg	ocp_guard_flags	User space	k	hakios.exynos_cpufreq.c	with ocp_guard: also the S2MPS18's INT5 read each second (BUCK2 at its current limit)
 PAN	arg	pan	CPU, memory and boot	k	(patch)	
 PANEL	arg	panel	GPU and display	k	hakios.s6e3ha8.c	the driver: without it nothing here runs
+PANEL_BLANK	arg	panel_blank	User space	u	inject_sb.c	
 PANEL_BRIGHTNESS	arg	panel_brightness	GPU and display	k	hakios.s6e3ha8.c	a brightness of 0-255 set once at start
 PANEL_GAMMA	arg	panel_gamma	GPU and display	k	hakios.s6e3ha8.c	gamma and AOR sent (the default)
 PANEL_GAMMA_LOG	arg	panel_gamma_log	GPU and display	k	hakios.s6e3ha8.c	all 74 rows in the log, as Android's kernel prints them at start ("gamma[nits] : ...") to set beside Android's log of the same phone
@@ -555,6 +556,7 @@ TORCH	arg	torch	Haptics and torch	kl	hakios.exynos_iris.c,hakios.s2mpb02_torch.c
 TORCH_CODE_MAX	arg	torch_code_max	Haptics and torch	k	hakios.s2mpb02_torch.c	the torch current code iOS's full level maps to (1-9, default 3: the S9's 60 mA)
 TORCH_MAX_S	arg	torch_max_s	Haptics and torch	k	hakios.s2mpb02_torch.c,hakios.torch.c	
 TORCH_SECS	arg	torch_secs	Haptics and torch	k	hakios.s2mpb02_torch.c,hakios.torch.c	
+TOUCH_BLANK	arg	touch_blank	GPU and display	k	hakios.s6e3ha8.c	
 TOUCH_COALESCE	arg	touch_coalesce	Touch and buttons	k	hakios.input.c	a reader that falls behind gets the newest pending MOVE of a finger, never a lost DOWN/UP. Off by default
 TOUCH_FAULT	arg	touch_fault	User space	u	inject.c	the touch screen first made answers no "PrimaryUsagePage" (tests the remake)
 TOUCH_FLIP	arg	touch_flip	Touch and buttons	k	hakios.goodix.c	
@@ -603,7 +605,7 @@ USTACKS_COUNT	arg	ustacks_count	Debugging	k	user_exception_trace.c
 USTACKS_MS	arg	ustacks_ms	Debugging	k	user_exception_trace.c	
 USTACKS_THREADS	arg	ustacks_threads	Debugging	k	user_exception_trace.c	
 USTACKS_TNAME	arg	ustacks_tname	Debugging	k	user_exception_trace.c	
-VAR_HFS	arg	var_hfs	User space	u	init.c	
+VAR_HFS	arg	var_hfs	User space	u	init.c,var_check.c	
 VAR_SAVE_MS	arg	var_save_ms	Storage and APFS	k	hakios.ufs.c	
 VAR_SEED	arg	var_seed	User space	u	init.c	the data volume starts from the seed in this image, share/var.seed, not from the empty template
 VBLUR	arg	vblur	GPU and display	u	eagl.c	

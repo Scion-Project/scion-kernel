@@ -1,4 +1,3 @@
-#define HAKIOS_SOC_FIXED
 /*
  * The Galaxy S9's panel brightness (starlte, Exynos 9810): a Samsung S6E3HA8 AMOLED in MIPI command mode (4 lanes, DSC)
  * on DSIM0 (0x16080000), sent its brightness through the DSIM's command FIFO while the DECON keeps showing what the
@@ -23,7 +22,7 @@
  *   F0           the level-2 key: opens Samsung's registers and closes them again. Samsung sends it around every change
  *                of brightness, and this driver did already.
  *   28, 10       display off and sleep-in, only for a halt that powers the phone off (halt_off=N: hakios_s6e3ha8_blank(),
- *                drivers/power/exynos/hakios.exynos_poweroff.c), each between the level-1 key as Samsung sends them; the
+ *                drivers/power/hakios.exynos_poweroff.c), each between the level-1 key as Samsung sends them; the
  *                panel's supplies then go with PS_HOLD.
  *   9F, FC       the level-1 and level-3 keys, only around the reads at start (and 9F around the halt's 28 and 10):
  *                Samsung's resource-init sequence opens all three for the same reads at every start of the panel
@@ -87,9 +86,6 @@
  *   panel_gamma=2       gamma and AOR sent (the default)
  *   panel_gamma=1       the panel read and its gamma worked out and logged; the AOR alone sent
  *   panel_gamma=0       the AOR alone, nothing read: the driver as it was
- *   panel_write=0       read and calculate, but send no brightness packets (diagnostic override; writes default on)
- *   panel_sleep=1       the screen's off and on from iOS sleep and wake the panel (hakios_s6e3ha8_power(), below;
- *                       off by default: the screen is then dark by its brightness alone, as before)
  *   panel_gamma_log=1   all 74 rows in the log, as Android's kernel prints them at start ("gamma[nits] : ...")
  *                       to set beside Android's log of the same phone
  *
@@ -107,24 +103,39 @@
  */
 #include <kern/clock.h>
 #include <kern/locks.h>
+#include <kern/thread_call.h>
 #include <libkern/libkern.h>
 #include <mach/mach_time.h>
 #include <mach/mach_types.h>
 #include <pexpert/pexpert.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
-#include <sys/hakios.exynos_soc.h>
-#include "hakios.s6e3ha8_gamma.h"
-#include <sys/hakios.log.h>
-#include <sys/hakios.xnu.h>
-#include <dev/hakios.drivers.h>
-#include "hakios.dev_strict.h"
 
+#include "hakios.s6e3ha8_gamma.h"
+
+extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+extern void delay(int usec);
+extern void loader_log_line(const char *line);
 extern int hakios_panel_register(const char *name, int (*set)(int level));     /* hakios.backlight.cpp */
 
 SYSCTL_DECL(_kern_hakios);
 
-#define DSIM_PA         EXYNOS_DSIM0_PA
+static int say(const char *format, ...) __printflike(1, 2);
+
+static int
+say(const char *format, ...)
+{
+	char line[300];
+	va_list list;
+
+	va_start(list, format);
+	vsnprintf(line, sizeof(line), format, list);
+	va_end(list);
+	loader_log_line(line);
+	return printf("%s", line);
+}
+
+#define DSIM_PA         0x16080000UL
 #define DSIM_CONFIG     0x4C
 #define  PER_FRAME_READ (1u << 8)       /* (a read only once a frame; Samsung leaves it off) */
 #define DSIM_INTSRC     0x50
@@ -168,8 +179,11 @@ SYSCTL_DECL(_kern_hakios);
 static vm_offset_t dsim;
 static lck_mtx_t *panel_lock;
 static int panel_level = -1;
-static uint32_t panel_failures, read_failures, panel_id;
-static int panel_write = 1;
+static volatile bool panel_asleep;      /* put to sleep by panel_display(): the next on wakes it first */
+static int panel_wanted = -1;   /* the last level asked for (panel_set), sent or not: what a wake puts back */
+static bool panel_send_level(int level, uint32_t *aor_out);
+static int panel_set_said(int level, uint32_t aor, bool ok);
+static uint32_t panel_failures, read_failures;
 
 /* the gamma, once worked out from the MTP at start (read only after) */
 static struct ha8_work gamma_work;
@@ -258,7 +272,7 @@ rx_pop(uint32_t *word, uint64_t us)
 static bool
 dsim_read(uint8_t reg, uint8_t *buf, uint32_t len)
 {
-	uint32_t word = 0, first = 0, got = 0, words = 0, stale = 0, intsrc;
+	uint32_t word = 0, first = 0, got = 0, words = 0, stale = 0, intsrc, ack_error = 0;
 	const char *why = NULL;
 	uint64_t deadline;
 
@@ -277,15 +291,19 @@ dsim_read(uint8_t reg, uint8_t *buf, uint32_t len)
 	}
 	/* (an answer in the FIFO is read even without RX data done: whether INTSRC shows that bit while it is masked is
 	 * for the phone to say) */
-	while (why == NULL && words < RX_WORDS && rx_pop(&word, words == 0 ? 1000 : 0)) {
+	/*
+	 * (step 107: the panel's answer came as an acknowledge-and-error report first -- 0x02, errors 0x3080 -- and its data a
+	 * moment later; the FIFO looked empty in between, the read gave up as "another length", and the data was left in the
+	 * FIFO for the next read to take as its own: values shifted one read along. After a report, the data is waited for,
+	 * and the report alone no longer fails a read that does get its data)
+	 */
+	while (why == NULL && words < RX_WORDS && got == 0 && rx_pop(&word, words == 0 || (first & 0xff) == RX_ACK_ERROR ? 1000 : 0)) {
 		uint32_t size;
 
 		first = words++ == 0 ? word : first;
 		switch (word & 0xff) {
 		case RX_ACK_ERROR:
-			if ((word >> 8) & RX_ERRORS) {
-				why = "the panel reported an error";
-			}
+			ack_error = (word >> 8) & 0xffff;
 			break;
 		case RX_EOT:
 			break;
@@ -321,7 +339,14 @@ dsim_read(uint8_t reg, uint8_t *buf, uint32_t len)
 		}
 	}
 	if (why == NULL && got != len) {
-		why = words == 0 ? "no answer" : "an answer of another length";
+		why = words == 0 ? "no answer" : ack_error != 0 ? "only the panel's error report" : "an answer of another length";
+	}
+	if (ack_error != 0 && why == NULL) {
+		static unsigned said_ack;
+
+		if (said_ack++ < 4) {
+			say("s6e3ha8: read %02X: the panel's error report %04x came first; its data followed and was taken\n", reg, ack_error);
+		}
 	}
 out:
 	intsrc = rd(DSIM_INTSRC);
@@ -381,7 +406,7 @@ panel_gamma_init(uint32_t mode)
 {
 	uint8_t id[3] = { 0 }, mtp[2][HA8_CA], ca[HA8_CA], aor[2];
 	bool have_id, keys, have_mtp = false, have_ca = false, have_aor = false, same = true, repeated = true;
-	uint32_t clamped, show_all = 0;
+	uint32_t panel_id, clamped, show_all = 0;
 	const char *refused = NULL;
 	int match = -1;
 
@@ -397,8 +422,7 @@ panel_gamma_init(uint32_t mode)
 	lck_mtx_unlock(panel_lock);
 
 	panel_id = (uint32_t)id[0] << 16 | (uint32_t)id[1] << 8 | id[2];
-	bool star2 = strcmp(HAKIOS_DEVICE, "star2lte") == 0;
-	gamma_panel = ha8_panel_of_device(panel_id, star2);
+	gamma_panel = ha8_panel_of(panel_id);
 	say("s6e3ha8: ID %06x%s: Samsung's tables for the %s panel; keys %s; DSIM CONFIG %x (per-frame read %s)\n",
 	    panel_id, have_id ? "" : " (NOT READ)", gamma_panel->name, keys ? "opened and closed" : "NOT ALL SENT",
 	    rd(DSIM_CONFIG), (rd(DSIM_CONFIG) & PER_FRAME_READ) ? "on" : "off");
@@ -462,26 +486,53 @@ panel_gamma_init(uint32_t mode)
 static int
 panel_set(int level)
 {
-	static const uint8_t key_on[] = { 0xF0, 0x5A, 0x5A }, take[] = { 0xF7, 0x03 }, key_off[] = { 0xF0, 0xA5, 0xA5 };
-	uint8_t gamma[1 + HA8_CA] = { REG_GAMMA };
 	uint32_t aor;
 	bool ok;
 
 	if (dsim == 0 || level < 0 || level > 255) {
 		return EINVAL;
 	}
-	if (!panel_write) {
-		static uint64_t said_at;
-		uint64_t now = mach_absolute_time(), second;
+	lck_mtx_lock(panel_lock);
+	panel_wanted = level;
+	/*
+	 * Not to a panel asleep: iOS lowers the level to 0 just after the screen goes off, which reached the panel after its
+	 * sleep-in -- AOR and F7 03 (take the registers) written into a sleeping panel, at every screen-off of steps 89-99,
+	 * and the woken panel showed black lines whatever the wake sent (none in step 94, where it never slept). Hypothesis
+	 * S5. Kept as the level asked for; the wake sends it (panel_wanted).
+	 */
+	if (panel_asleep) {
+		lck_mtx_unlock(panel_lock);
+		{
+			static int said;
 
-		panel_level = level;
-		nanoseconds_to_absolutetime(NSEC_PER_SEC, &second);
-		if (said_at == 0 || now - said_at >= second) {
-			say("s6e3ha8: brightness %d requested; panel_write=0, no panel packet sent\n", level);
-			said_at = now;
+			if (said++ < 4) {
+				say("s6e3ha8: brightness %d asked for while the panel sleeps: kept for the wake, not sent\n", level);
+			}
 		}
 		return 0;
 	}
+	ok = panel_send_level(level, &aor);
+	if (ok) {
+		panel_level = level;
+	} else {
+		panel_failures++;
+	}
+	lck_mtx_unlock(panel_lock);
+	return panel_set_said(level, aor, ok);
+}
+
+/*
+ * The level's packets, panel_lock held: gamma row and AOR, or (the fallback) the AOR alone, the light made to follow the
+ * level's square (a dim end that is usable). Its AOR in *aor_out.
+ */
+static bool
+panel_send_level(int level, uint32_t *aor_out)
+{
+	static const uint8_t key_on[] = { 0xF0, 0x5A, 0x5A }, take[] = { 0xF7, 0x03 }, key_off[] = { 0xF0, 0xA5, 0xA5 };
+	uint8_t gamma[1 + HA8_CA] = { REG_GAMMA };
+	uint32_t aor;
+	bool ok;
+
 	if (gamma_ready) {
 		int row = ha8_row_of_level(level);
 
@@ -499,17 +550,18 @@ panel_set(int level)
 	}
 	uint8_t aor_packet[] = { REG_AOR, (uint8_t)(aor >> 8), (uint8_t)aor };
 
-	lck_mtx_lock(panel_lock);
 	ok = dsim_send(key_on, sizeof(key_on));
 	ok = ok && (!gamma_ready || dsim_send(gamma, sizeof(gamma)));
 	ok = ok && dsim_send(aor_packet, sizeof(aor_packet)) && dsim_send(take, sizeof(take));
 	ok = dsim_send(key_off, sizeof(key_off)) && ok;         /* (the key off whatever happened) */
-	if (ok) {
-		panel_level = level;
-	} else {
-		panel_failures++;
-	}
-	lck_mtx_unlock(panel_lock);
+	*aor_out = aor;
+	return ok;
+}
+
+/* panel_set's line (not under the lock) */
+static int
+panel_set_said(int level, uint32_t aor, bool ok)
+{
 	if (!ok && panel_failures <= 3) {
 		say("s6e3ha8: brightness %d (%s, AOR 0x%x) not sent: the DSIM's FIFO did not take it "
 		    "(FIFOCTRL %x, INTSRC %x)\n", level, gamma_ready ? "gamma row and AOR" : "AOR alone", aor,
@@ -533,13 +585,6 @@ panel_set(int level)
 	return ok ? 0 : EIO;
 }
 
-/*
- * hakios_dev_strict=1 (drivers/core/hakios.platform.c): the brightness is set only by root and by SpringBoard and
- * backboardd (inject_sb.c's slider), panel_write only by root. Read by anybody, as before.
- */
-static const char *const brightness_programs[] = { "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
-	                                           "/usr/libexec/backboardd", NULL };
-
 static int
 panel_sysctl_brightness(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
@@ -549,43 +594,697 @@ panel_sysctl_brightness(__unused struct sysctl_oid *oidp, __unused void *arg1, _
 	if (error != 0 || req->newptr == 0) {
 		return error;
 	}
-	if ((error = hakios_dev_open_check("kern.hakios.brightness", brightness_programs)) != 0) {
-		return error;
-	}
 	return panel_set(value);
-}
-
-static int
-panel_sysctl_write(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
-{
-	int value = panel_write, error;
-
-	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
-	if (error != 0 || req->newptr == 0) {
-		return error;
-	}
-	if ((error = hakios_dev_strict_root("kern.hakios.panel_write")) != 0) {
-		return error;
-	}
-	panel_write = value;
-	return 0;
 }
 
 SYSCTL_PROC(_kern_hakios, OID_AUTO, brightness, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY | CTLFLAG_KERN,
     NULL, 0,
     panel_sysctl_brightness, "I", "the panel's brightness, 0-255 (-1: never set); writing sets it (Galaxy S9, panel=1)");
-SYSCTL_PROC(_kern_hakios, OID_AUTO, panel_write, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY | CTLFLAG_KERN,
-    NULL, 0, panel_sysctl_write, "I", "allow S6E3HA8 brightness packets (defaults on; set 0 for read-only diagnostics)");
-SYSCTL_UINT(_kern_hakios, OID_AUTO, panel_id, CTLFLAG_RD | CTLFLAG_LOCKED | CTLFLAG_KERN, &panel_id, 0,
-    "S6E3HA8 panel ID read at startup");
-SYSCTL_UINT(_kern_hakios, OID_AUTO, panel_failures, CTLFLAG_RD | CTLFLAG_LOCKED | CTLFLAG_KERN, &panel_failures, 0,
-    "S6E3HA8 brightness packet failures");
-SYSCTL_UINT(_kern_hakios, OID_AUTO, panel_read_failures, CTLFLAG_RD | CTLFLAG_LOCKED | CTLFLAG_KERN, &read_failures, 0,
-    "S6E3HA8 read failures");
+
+/*
+ * kern.hakios.display: 0 the panel's output off (DCS 28), 1 on again (DCS 29), between Samsung's keys as for the display
+ * off of blank() above -- and no sleep-in: a panel in command mode keeps what it shows in its own memory, so what 29
+ * brings back needs no power-on sequence. For a screen that iOS has blanked (userland/src/inject_sb.c, panel_blank=1):
+ * the brightness alone leaves the panel lit at its lowest level. -1 read: never set.
+ */
+static int panel_display_state = -1;
+
+/*
+ * Sleep-in with display-off, so that the screen is really off (28 alone left it faintly lit). The panel woke from it with
+ * black bands top and bottom and stuttered (15 November): it does not keep what the boot loader set up. Samsung's own init
+ * for this panel (drivers/video/fbdev/exynos/panel/s6e3ha8/s6e3ha8_crown_a3_s0_panel.h of the S9/Note9 kernel) sends, after
+ * the sleep-out: the scaler, CASET and PASET of the mode (the panel's default rows are 2560 -- PASET 0x9FF -- where the
+ * DECON sends 2960: the bands; and, the panel being in command mode, the rows outside the window it took kept their
+ * picture from before the sleep: the ghosting), SET_AREA, TE on (the frames are paced by TE: the stutter), then the brightness. Those are
+ * sent again here at every wake (panel_restore), for the mode the DECON drives, 1440x2960 (scaler off). On by default
+ * again; kern.hakios.panel_sleep=0 goes back to 28/29 alone.
+ */
+static int panel_sleep = 1;     /* (step 94's A/B: off, no lines; on again in step 95 to count the link's errors with the lines) */
+
+/*
+ * Whether the panel is asleep -- from the sleep-in until its display-on after the wake. While it is, it sends no TE, so the
+ * DECON takes no flip: MiniIOMobileFramebuffer's scanLatch must not take that for a broken scan-out. It did (step 89, 16
+ * November: "a flip not taken in 100 ms" at the first blank after boot), gave the scaler path up for good and drew every
+ * frame into the boot framebuffer by the processor from then on -- the ghosting and the stutter seen after every screen-off.
+ */
+bool hakios_panel_asleep(void);
+extern void hakios_scanout_hold(int hold);    /* hakios.exynos_dpu.c (or the stub) */
+
+bool
+hakios_panel_asleep(void)
+{
+	return panel_asleep;
+}
+SYSCTL_INT(_kern_hakios, OID_AUTO, panel_sleep, CTLFLAG_RW | CTLFLAG_LOCKED, &panel_sleep, 0, "display-off also sleeps the panel");
+
+/*
+ * Before the sleep-out, panel_lock held: the compression (DSC) the panel decodes the DECON's stream with -- MIPI's
+ * Compression Mode (data type 0x07: on) and the Picture Parameter Set (0x0A, 128 bytes) -- as Samsung's init sends them
+ * first (level-1 key, DSC, PPS, key off, then SLEEP_OUT). Without them the woken panel showed black lines and smudges
+ * (step 91, 16 November): it decoded with what it had after the sleep. The PPS is crown_a3_s0_pps_table's row for
+ * 1440x2960 ("DSU MODE 1 ... Slice Info : 720x40"; bytes 6-9: 2960 rows, 1440 columns), the mode the DECON drives.
+ */
+static bool
+panel_dsc(void)
+{
+	static const uint8_t l1_on[] = { 0x9F, 0xA5, 0xA5 }, l1_off[] = { 0x9F, 0x5A, 0x5A };
+	static const uint8_t pps[128] = {
+		0x11, 0x00, 0x00, 0x89, 0x30, 0x80, 0x0B, 0x90, 0x05, 0xA0, 0x00, 0x28, 0x02, 0xD0, 0x02, 0xD0,
+		0x02, 0x00, 0x02, 0x68, 0x00, 0x20, 0x04, 0x6C, 0x00, 0x0A, 0x00, 0x0C, 0x02, 0x77, 0x01, 0xE9,
+		0x18, 0x00, 0x10, 0xF0, 0x03, 0x0C, 0x20, 0x00, 0x06, 0x0B, 0x0B, 0x33, 0x0E, 0x1C, 0x2A, 0x38,
+		0x46, 0x54, 0x62, 0x69, 0x70, 0x77, 0x79, 0x7B, 0x7D, 0x7E, 0x01, 0x02, 0x01, 0x00, 0x09, 0x40,
+		0x09, 0xBE, 0x19, 0xFC, 0x19, 0xFA, 0x19, 0xF8, 0x1A, 0x38, 0x1A, 0x78, 0x1A, 0xB6, 0x2A, 0xF6,
+		0x2B, 0x34, 0x2B, 0x74, 0x3B, 0x74, 0x6B, 0xF4,
+	};
+	bool ok;
+
+	ok = dsim_send(l1_on, sizeof(l1_on));
+	ok = ok && dsim_packet(0x07 | 0x01u << 8, NULL, 0);                                 /* Compression Mode: DSC on */
+	ok = ok && dsim_packet(0x0A | (uint32_t)(sizeof(pps) & 0xff) << 8 | (uint32_t)(sizeof(pps) >> 8) << 16, pps, sizeof(pps));
+	ok = dsim_send(l1_off, sizeof(l1_off)) && ok;
+	return ok;
+}
+
+/*
+ * What the boot loader set in the panel, read before its first sleep and written back at every wake: the registers of
+ * Samsung's init that are not sent here otherwise, whose values depend on the link (FFC: the panel's receiver for this
+ * DSI clock) or on the panel (ISC, edge dimming, the error flag's mode, the touch sync, the scaler). The woken panel
+ * showed black horizontal lines and filled gaps between them, pixels fully off (step 92, 16 November), with DSC, PPS,
+ * CASET/PASET and TE all sent again: something else of the boot loader's was gone. Reading them is also how their
+ * values here are known at all (they are logged next to Samsung's defaults for crown_a3_s0).
+ */
+static struct panel_reg {
+	uint8_t reg, len;               /* the register and its parameters' bytes (Samsung's arrays less the opcode) */
+	const char *what;
+	uint8_t val[96];
+	bool have;
+} panel_regs[] = {
+	{ 0xC5, 5, "FFC (Samsung C5 0D 10 B4 3E 01)", { 0 }, false },
+	{ 0xF6, 1, "ISC (F6 43)", { 0 }, false },
+	{ 0xC2, 6, "edge dimming (C2 09 00 D8 D8 F4 F4)", { 0 }, false },
+	{ 0xED, 1, "ERR_FG (ED 4C)", { 0 }, false },
+	{ 0xB9, 9, "TSP_HSYNC (B9 01 B0 91 09 00 00 00 11 03)", { 0 }, false },
+	{ 0xBA, 5, "scaler (BA 01 26 08 08 F3)", { 0 }, false },
+	/*
+	 * And Samsung's brightness sequence (PANEL_SET_BL_SEQ of crown_a3_s0: gamma, AOR, TSET/MPS/ELVSS, ELVSS temperature,
+	 * VGH/VINT, ACL control and dim frames, ACL on/off, IRC value and on, POC compensation, then F7 03), of which only
+	 * the AOR was sent again here (panel_gamma=0). Read long enough to take the parameters Samsung writes at an offset
+	 * (ACL dim frames at 0x0F of B4, POC at 0x06 of B1 and 0x53 of B8, ELVSS and IRC at offsets of B5 and B8): step 96's
+	 * black lines stayed with the mode, DSC, TE and the link all good, the panel's emission settings being what is left.
+	 */
+	{ 0xCA, 37, "gamma (CA 07 80 80 ...)", { 0 }, false },
+	{ 0xB1, 16, "AOR and POC (B1 00 0C, POC at 06)", { 0 }, false },
+	{ 0xB5, 32, "TSET/MPS/ELVSS (B5 19 DC 0A, temperature further on)", { 0 }, false },
+	{ 0xF4, 8, "VGH/VINT (F4 EB 23)", { 0 }, false },
+	{ 0xB4, 16, "ACL control and dim frames (B4 00 44 80 65 26 00, 20 at 0F)", { 0 }, false },
+	{ 0x55, 1, "ACL on/off (55 00)", { 0 }, false },
+	{ 0xB8, 88, "IRC and POC (B8 20 69 E7 ..., 0F FF at 53)", { 0 }, false },
+};
+static bool panel_regs_taken;
+
+/*
+ * kern.hakios.panel_restore: what a wake sends besides sleep-out, 29 and the brightness. 0 (the default since step 99):
+ * nothing else. Steps 89-98 sent DSC/PPS, the mode, SET_AREA, TE and the boot loader's registers -- on the guess that the
+ * panel had lost them, from the black bands of a wake in step 76; those bands were the framebuffer falling back to the boot
+ * window (the scan-out dropped, fixed in step 91), and the black lines stayed whatever was sent. Hypothesis S4: something
+ * sent there makes them. 1 sends it all again, as in step 98.
+ */
+static int panel_restore_all;
+
+/*
+ * kern.hakios.panel_reset (1, the default since step 101): the panel held in reset while it sleeps, as Samsung's suspend
+ * leaves it (lcd-reset low, then its regulators off -- those, on the S2DOS05 at 0x60 of hsi2c@14350000, are left on
+ * here), and brought out of it at the wake with the whole of Samsung's init sent again. Every wake that only sent things
+ * to a panel slept-in and slept-out (steps 89-100) left black horizontal lines; one never put to sleep (step 94) had none:
+ * this panel is not to be woken from a sleep-in without a reset. The pin: crown26.dts's panel_drv gpio,lcd-reset =
+ * <gpa3 4 active-low>, gpa3 of ALIVE's GPIO at 0x14050000 + 0x080 (as hakios.w9018.c reads its pins there).
+ */
+static int panel_reset_mode = 1;      /* (off in step 102 after step 101's black wake; on again in step 103 with the DSIM's lanes
+                                         in LP-11 over the reset, disp_det watched, retries, and the loader if all fail) */
+static bool panel_was_reset;
+static vm_offset_t alive_gpio;
+SYSCTL_INT(_kern_hakios, OID_AUTO, panel_reset, CTLFLAG_RW | CTLFLAG_LOCKED, &panel_reset_mode, 0,
+    "the panel held in reset while asleep and fully set up again at the wake (1), or slept-in and out only (0)");
+
+#define ALIVE_GPIO_PA   0x14050000UL
+#define GPA3_CON        0x080
+#define GPA3_DAT        0x084
+#define LCD_RESET_PIN   4
+
+/* the reset line: high, the panel running; low, held in reset. Its pin made an output first if it is not one. */
+static bool
+panel_reset_line(int high)
+{
+	volatile uint32_t *con, *dat;
+	uint32_t c0, d0;
+	static int said;
+
+	if (alive_gpio == 0) {
+		alive_gpio = ml_io_map(ALIVE_GPIO_PA, 0x1000);
+	}
+	if (alive_gpio == 0) {
+		return false;
+	}
+	con = (volatile uint32_t *)(alive_gpio + GPA3_CON);
+	dat = (volatile uint32_t *)(alive_gpio + GPA3_DAT);
+	c0 = *con;
+	d0 = *dat;
+	if (((c0 >> (4 * LCD_RESET_PIN)) & 0xf) != 1) {
+		*con = (c0 & ~(0xfu << (4 * LCD_RESET_PIN))) | (1u << (4 * LCD_RESET_PIN));
+	}
+	*dat = high ? (d0 | (1u << LCD_RESET_PIN)) : (d0 & ~(1u << LCD_RESET_PIN));
+	__asm__ volatile ("dsb sy" ::: "memory");
+	if (said++ < 6) {
+		say("s6e3ha8: the panel's reset line (gpa3-4) %s: CON %08x -> %08x, DAT %02x -> %02x\n", high ? "high (running)" :
+		    "low (in reset)", c0, *con, d0 & 0xff, *dat & 0xff);
+	}
+	return true;
+}
+/*
+ * Step 101's wake out of the reset left the panel black: the reset line went high with the DSIM running as ever, its
+ * clock lane in HS. Samsung's (dsim_drv.c of the 9810 kernel, _dsim_enable, which TWRP's kernel runs at every unblank)
+ * brings the panel out of reset with the D-PHY held in reset and then sets the link up again, so that the lanes are in
+ * LP-11 (stop state) when the panel's receiver starts, and only then sends the init; its suspend (_dsim_disable) takes
+ * the clock lane out of HS (dsim_reg_stop) before the reset line goes low. Here the clock lane is taken to LP and its
+ * stop state waited for around the reset, and back to HS before the init. DSIM_CLK_CTRL / DSIM_DPHY_STATUS: regs-dsim.h.
+ */
+#define DSIM_DPHY_STATUS        0x1C
+#define  TX_READY_HS_CLK        (1u << 10)
+#define  STOP_STATE_CLK         (1u << 8)
+#define  STOP_STATE_DAT         0xFu
+#define DSIM_CLK_CTRL           0x20
+#define  NONCONT_CLOCK_LANE     (1u << 25)
+#define  TX_REQUEST_HSCLK       (1u << 20)
+
+/* the clock lane in HS (on) or back in LP with every lane in its stop state (off): true when the D-PHY says so in 5 ms */
+static bool
+dsim_hs_clock(bool on)
+{
+	uint32_t c = rd(DSIM_CLK_CTRL);
+	uint64_t deadline = deadline_us(5000);
+
+	if (on) {
+		wr(DSIM_CLK_CTRL, c | TX_REQUEST_HSCLK);
+		if (c & NONCONT_CLOCK_LANE) {
+			return true;
+		}
+		while (!(rd(DSIM_DPHY_STATUS) & TX_READY_HS_CLK) && mach_absolute_time() < deadline) {
+		}
+		return (rd(DSIM_DPHY_STATUS) & TX_READY_HS_CLK) != 0;
+	}
+	wr(DSIM_CLK_CTRL, c & ~TX_REQUEST_HSCLK);
+	while ((rd(DSIM_DPHY_STATUS) & (STOP_STATE_CLK | STOP_STATE_DAT)) != (STOP_STATE_CLK | STOP_STATE_DAT) &&
+	    mach_absolute_time() < deadline) {
+	}
+	return (rd(DSIM_DPHY_STATUS) & STOP_STATE_CLK) != 0;
+}
+
+/*
+ * The panel's disp_det: high while it runs (crown26.dts panel_drv gpio,disp-det = <gpg2 2>, gpg2 the seventh bank of
+ * pinctrl@10430000: CON 0x0C0, DAT 0x0C4). Samsung's __panel_seq_init waits up to 200 x 100 us after its init for it to
+ * go high and, if it does not, powers the panel off, waits 100 ms and tries again (panel_sleep_out, up to 30 times).
+ * -1: not mapped. disp_det_on: what it read with the panel on, before its first sleep (only a 1 there makes it a test).
+ */
+#define DISP_DET_GPIO_PA        0x10430000UL
+#define GPG2_CON                0x0C0
+#define GPG2_DAT                0x0C4
+#define DISP_DET_PIN            2
+
+static vm_offset_t disp_det_gpio;
+static int disp_det_on = -1;
+
+static int
+panel_disp_det(void)
+{
+	static bool said;
+
+	if (disp_det_gpio == 0) {
+		disp_det_gpio = ml_io_map(DISP_DET_GPIO_PA, 0x1000);
+	}
+	if (disp_det_gpio == 0) {
+		return -1;
+	}
+	uint32_t con = *(volatile uint32_t *)(disp_det_gpio + GPG2_CON), dat = *(volatile uint32_t *)(disp_det_gpio + GPG2_DAT);
+
+	if (!said) {
+		said = true;
+		say("s6e3ha8: disp_det (gpg2-2): CON %08x (function %x), DAT %02x\n", con, (con >> (4 * DISP_DET_PIN)) & 0xf,
+		    dat & 0xff);
+	}
+	return (int)((dat >> DISP_DET_PIN) & 1);
+}
+
+/* panel_lock held (let go over the waits): out of the reset, the lanes in LP-11 as it starts. True when it answers 0A. */
+static bool
+panel_out_of_reset(int attempt)
+{
+	uint32_t cc0 = rd(DSIM_CLK_CTRL), st0 = rd(DSIM_DPHY_STATUS), st1;
+	bool lp = dsim_hs_clock(false), hs;
+	int det0 = panel_disp_det(), det1;
+	uint8_t pm = 0xff;
+	bool answered;
+
+	st1 = rd(DSIM_DPHY_STATUS);
+	(void)panel_reset_line(1);
+	lck_mtx_unlock(panel_lock);
+	delay(10 * 1000);               /* (Samsung: the reset high, 5 ms, then its init's own 5 ms) */
+	lck_mtx_lock(panel_lock);
+	det1 = panel_disp_det();
+	hs = dsim_hs_clock(true);
+	lck_mtx_unlock(panel_lock);
+	delay(5 * 1000);
+	lck_mtx_lock(panel_lock);
+	answered = panel_read(0x0A, &pm, 1);
+	say("s6e3ha8: wake %d out of reset: CLK_CTRL %08x, DPHY_STATUS %08x -> LP %s (%08x); disp_det in reset %d, 10 ms out %d; "
+	    "HS %s (%08x); 0A %s%02x\n", attempt, cc0, st0, lp ? "ok" : "NOT IN STOP STATE", st1, det0, det1, hs ? "ok" : "NOT READY",
+	    rd(DSIM_DPHY_STATUS), answered ? "" : "(NO ANSWER) ", pm);
+	return answered;
+}
+
+/* the run handed back to the loader -- as the five fingers do -- when the panel did not come back: the log kept */
+extern void loader_return(void);
+extern void hakios_var_save_on_return(void);
+
+static void
+panel_give_up(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
+{
+	delay(3 * 1000 * 1000);
+	say("\n--- s6e3ha8: the panel did not come back out of its reset: back to the loader (the log kept) ---\n");
+	hakios_var_save_on_return();
+	loader_return();
+}
+
+SYSCTL_INT(_kern_hakios, OID_AUTO, panel_restore, CTLFLAG_RW | CTLFLAG_LOCKED, &panel_restore_all, 0,
+    "a wake sends the mode, DSC/PPS, TE and the boot loader's registers again (1) or only sleep-out and 29 (0)");
+
+/* panel_lock held, the panel awake and as the boot loader left it */
+static void
+panel_regs_take(void)
+{
+	char line[300];
+
+	panel_regs_taken = true;
+	if (!panel_keys(true)) {
+		(void)panel_keys(false);
+		say("s6e3ha8: the boot loader's registers not read (the keys not opened)\n");
+		return;
+	}
+	for (size_t i = 0; i < sizeof(panel_regs) / sizeof(panel_regs[0]); i++) {
+		struct panel_reg *r = &panel_regs[i];
+		size_t at = 0;
+
+		/*
+		 * Read twice, kept only when both agree (step 106: twice the screen stayed black after the Apple logo, with the
+		 * panel taken out of reset at the boot's first screen-off and these values written into it; reads made while
+		 * frames went out came back of the wrong length -- a value read wrong and written back would leave the panel
+		 * "up" and dark, which nothing here would notice)
+		 */
+		uint8_t again[sizeof(r->val)];
+		bool first = panel_read(r->reg, r->val, r->len), second = first && panel_read(r->reg, again, r->len);
+
+		r->have = first && second && memcmp(r->val, again, r->len) == 0;
+		if (first && second && !r->have) {
+			say("s6e3ha8: the boot loader's %02X read twice, two answers: NOT written back\n", r->reg);
+		}
+		for (uint32_t k = 0; r->have && k < r->len && at + 4 < sizeof(line); k++) {
+			at += (size_t)snprintf(line + at, sizeof(line) - at, " %02X", r->val[k]);
+		}
+		say("s6e3ha8: the boot loader's %02X, %s:%s\n", r->reg, r->what, r->have ? line : " NOT READ (not written back)");
+	}
+	(void)panel_keys(false);
+}
+
+/* panel_lock held, after a sleep-out: what panel_regs_take read, written back */
+static bool
+panel_regs_put(void)
+{
+	bool ok;
+
+	if (!panel_regs_taken) {
+		return true;
+	}
+	ok = panel_keys(true);
+	for (size_t i = 0; ok && i < sizeof(panel_regs) / sizeof(panel_regs[0]); i++) {
+		uint8_t buf[1 + sizeof(panel_regs[0].val)];
+
+		if (!panel_regs[i].have) {
+			continue;
+		}
+		buf[0] = panel_regs[i].reg;
+		memcpy(buf + 1, panel_regs[i].val, panel_regs[i].len);
+		ok = dsim_send(buf, 1u + panel_regs[i].len) && ok;
+	}
+	{
+		static const uint8_t update[] = { 0xF7, 0x03 };    /* (the brightness registers taken: Samsung's sequence ends so) */
+
+		ok = dsim_send(update, sizeof(update)) && ok;
+	}
+	/* what the panel holds now, read back (no frame going out yet at a wake): a register that differs is logged */
+	{
+		unsigned same = 0, differ = 0, unread = 0;
+
+		for (size_t i = 0; i < sizeof(panel_regs) / sizeof(panel_regs[0]); i++) {
+			uint8_t now[sizeof(panel_regs[0].val)];
+
+			if (!panel_regs[i].have) {
+				continue;
+			}
+			if (!panel_read(panel_regs[i].reg, now, panel_regs[i].len)) {
+				unread++;
+			} else if (memcmp(now, panel_regs[i].val, panel_regs[i].len) == 0) {
+				same++;
+			} else {
+				differ++;
+				say("s6e3ha8: written back %02X, read back otherwise: %02X %02X %02X %02X (written %02X %02X %02X %02X)\n",
+				    panel_regs[i].reg, now[0], now[1], now[2], now[3], panel_regs[i].val[0], panel_regs[i].val[1],
+				    panel_regs[i].val[2], panel_regs[i].val[3]);
+			}
+		}
+		say("s6e3ha8: the boot loader's registers read back: %u as written, %u otherwise, %u not read\n", same, differ, unread);
+	}
+	ok = panel_keys(false) && ok;
+	{
+		char line[300];
+		size_t at = 0;
+
+		for (size_t i = 0; i < sizeof(panel_regs) / sizeof(panel_regs[0]) && at + 40 < sizeof(line); i++) {
+			at += (size_t)snprintf(line + at, sizeof(line) - at, " %02X:", panel_regs[i].reg);
+			for (uint32_t k = 0; k < panel_regs[i].len && k < 6 && at + 4 < sizeof(line); k++) {
+				at += (size_t)snprintf(line + at, sizeof(line) - at, panel_regs[i].have ? "%02X" : "--", panel_regs[i].val[k]);
+			}
+		}
+		say("s6e3ha8: the boot loader's registers written back:%s\n", line);
+	}
+	return ok;
+}
+
+/* after a sleep-out, panel_lock held: what Samsung's init sets after its own sleep-out, for 1440x2960 */
+static bool
+panel_restore(void)
+{
+	static const uint8_t l1_on[] = { 0x9F, 0xA5, 0xA5 }, l1_off[] = { 0x9F, 0x5A, 0x5A };
+	static const uint8_t l2_on[] = { 0xF0, 0x5A, 0x5A }, l2_off[] = { 0xF0, 0xA5, 0xA5 };
+	static const uint8_t scaler[] = { 0xBA, 0x01, 0x26, 0x08, 0x08, 0xF3 };         /* 1440x2960: scaler off */
+	static const uint8_t caset[] = { 0x2A, 0x00, 0x00, 0x05, 0x9F };               /* columns 0..1439 */
+	static const uint8_t paset[] = { 0x2B, 0x00, 0x00, 0x0B, 0x8F };               /* rows 0..2959 */
+	static const uint8_t set_area[] = { 0x1A, 0x1F, 0x00, 0x00, 0x00, 0x00 };
+	static const uint8_t te_on[] = { 0x35, 0x00 };
+	bool ok;
+
+	ok = dsim_send(l2_on, sizeof(l2_on)) && dsim_send(scaler, sizeof(scaler));
+	ok = dsim_send(l2_off, sizeof(l2_off)) && ok;
+	ok = dsim_send(caset, sizeof(caset)) && dsim_send(paset, sizeof(paset)) && ok;
+	ok = dsim_send(l1_on, sizeof(l1_on)) && dsim_send(set_area, sizeof(set_area)) && dsim_send(te_on, sizeof(te_on)) && ok;
+	ok = dsim_send(l1_off, sizeof(l1_off)) && ok;
+	return ok;
+}
+
+static int
+panel_display(int on)
+{
+	static const uint8_t key_on[] = { 0x9F, 0xA5, 0xA5 }, key_off[] = { 0x9F, 0x5A, 0x5A };
+	static const uint8_t display_off[] = { 0x28 }, display_on[] = { 0x29 };
+	bool ok, shown = false;
+
+	uint8_t before = 0xff, after = 0xff, mode_before = 0xff, mode_after = 0xff;
+	bool read_before, read_after;
+
+	if (dsim == 0 || panel_lock == NULL) {
+		return ENODEV;
+	}
+	lck_mtx_lock(panel_lock);
+	/*
+	 * Off again while already asleep (step 108, 18 November: backboardd crashed at boot just after iOS's first screen-off,
+	 * and its successor turned the screen off a second time): the panel is in reset, its clock lane in LP. That second
+	 * screen-off sent 28 and 10 to a panel that cannot take them, filled the DSIM's FIFO, and left "asleep" false with the
+	 * panel still in reset -- so the screen-on that followed sent 29 alone and the panel was never brought back: black
+	 * after the Apple logo, for good. Already off is off: nothing is sent.
+	 */
+	if (!on && panel_asleep) {
+		lck_mtx_unlock(panel_lock);
+		panel_display_state = 0;
+		say("s6e3ha8: display off asked for while the panel already sleeps%s: nothing sent\n", panel_was_reset ? " in reset" : "");
+		return 0;
+	}
+	/* what the panel says of itself, before and 30 ms after: DCS 0A (power mode: bit 2 display on, bit 3 normal mode,
+	   bit 4 sleep out) and 0D (display mode): whether 28 changed anything there */
+	read_before = !(on && (panel_was_reset || panel_asleep)) && panel_read(0x0A, &before, 1) && panel_read(0x0D, &mode_before, 1);
+	/*
+	 * DCS 05 (get_error_count_on_DSI: bit 7 overflow, bits 6-0 the count of DSI errors the panel has seen since it was last
+	 * read): before this change (the errors over the time the screen was on) and after it. With sleep-in the woken panel
+	 * shows black lines (steps 89-93), without it none (step 94): whether the link itself fails after a wake.
+	 */
+	uint8_t dsi_errors_before = 0xff, dsi_errors_after = 0xff;
+	bool errors_read_before = !(on && (panel_was_reset || panel_asleep)) && panel_read(0x05, &dsi_errors_before, 1);
+	/*
+	 * Display-off alone (28) left the panel faintly lit (14-15 November: the screen grey-black, not off): its circuits
+	 * stay up. Off is now 28 then sleep-in (10), as Samsung's suspend sends them; on is sleep-out (11), its 120 ms, what
+	 * the panel lost in the sleep (panel_restore: it does NOT keep its mode and TE, as was first assumed), then 29.
+	 */
+	if (on && panel_asleep) {
+		static const uint8_t sleep_out[] = { 0x11 };
+		/* (the DECON's frames held while the panel is woken and set up: S2 of step 95; let go after 29) */
+		lck_mtx_unlock(panel_lock);
+		hakios_scanout_hold(1);
+		lck_mtx_lock(panel_lock);
+		bool full = panel_restore_all || panel_was_reset, was_reset = panel_was_reset, alive = true;
+		bool dsc = true, restored = true, put = true;
+
+		/* (out of the reset, Samsung's way, up to three times: back into it for 100 ms when the panel did not come up) */
+		for (int attempt = 1; ; attempt++) {
+		bool answered = was_reset ? panel_out_of_reset(attempt) : true;
+
+		dsc = full ? panel_dsc() : true;
+
+		/* (the sleep-out whatever became of the DSC packets: a panel left asleep is worse than one decoding badly) */
+		ok = dsim_send(key_on, sizeof(key_on)) && dsim_send(sleep_out, 1);
+		ok = dsc && ok;
+		ok = dsim_send(key_off, sizeof(key_off)) && ok;
+		lck_mtx_unlock(panel_lock);
+		delay(120 * 1000);              /* the sleep-out's own wait before the next command */
+		lck_mtx_lock(panel_lock);
+		restored = full ? panel_restore() : true;
+		put = full ? panel_regs_put() : true;      /* (after panel_restore: the boot loader's scaler wins) */
+		if (!was_reset) {
+			break;
+		}
+		{
+			int det = panel_disp_det();
+			uint8_t pm = 0xff;
+
+			for (int i = 0; i < 200 && det == 0; i++) {     /* Samsung's 200 x 100 us */
+				delay(100);
+				det = panel_disp_det();
+			}
+			bool read = panel_read(0x0A, &pm, 1);
+
+			alive = answered && read && (pm & 0x10) && (disp_det_on != 1 || det == 1);
+			say("s6e3ha8: wake %d after the init: disp_det %d (on before the sleep: %d), 0A %s%02x (sleep-out bit %s): %s\n",
+			    attempt, det, disp_det_on, read ? "" : "(NO ANSWER) ", pm, (pm & 0x10) ? "set" : "NOT SET",
+			    alive ? "the panel is up" : attempt < 3 ? "NOT UP: back into reset for 100 ms" : "NOT UP, three times");
+		}
+		if (alive || attempt >= 3) {
+			break;
+		}
+		(void)dsim_hs_clock(false);
+		(void)panel_reset_line(0);
+		lck_mtx_unlock(panel_lock);
+		delay(100 * 1000);
+		lck_mtx_lock(panel_lock);
+		}
+
+		ok = restored && ok;
+		/* the brightness again (panel_set takes the lock itself) */
+		/*
+		 * The level asked for LAST, sent here under the lock. It was a copy taken before the wake, sent with the lock let go:
+		 * iOS's own level for the screen coming back (89) got in meanwhile and the stale 0 of the screen-off went out over
+		 * it -- the panel at its dimmest AOR (0x0B76) for good, and that duty showed as black horizontal lines (steps 89-97;
+		 * none in step 94, without the wake, where 89 stayed).
+		 */
+		if (panel_wanted >= 0) {
+			uint32_t aor;
+
+			if (panel_send_level(panel_wanted, &aor)) {
+				panel_level = panel_wanted;
+			}
+		}
+		delay(20 * 1000);               /* a frame with the settings in before the output goes on */
+		shown = dsim_send(key_on, sizeof(key_on)) && dsim_send(display_on, 1);
+		ok = shown && ok;
+		ok = dsim_send(key_off, sizeof(key_off)) && ok;
+		hakios_scanout_hold(0);
+		panel_asleep = false;
+		panel_was_reset = false;
+		if (!alive) {
+			static thread_call_t give_up;
+
+			panel_reset_mode = 0;   /* (the next sleeps without the reset, should the loader not take over) */
+			if (give_up == NULL) {
+				give_up = thread_call_allocate(panel_give_up, NULL);
+				if (give_up != NULL) {
+					(void)thread_call_enter(give_up);
+				}
+			}
+		}
+		say("s6e3ha8: woken (%s): DSC and PPS %s; scaler, CASET/PASET 1440x2960, SET_AREA, TE on %s; the boot loader's registers %s; "
+		    "brightness %d again (the last asked for)\n", was_reset ? (alive ? "out of reset: all set up again" :
+		    "out of reset: NOT UP, to the loader in 3 s") : full ? "all restored" : "sleep-out and 29 only: nothing below sent",
+		    dsc ? "sent" : "NOT SENT", restored ? "sent" : "NOT ALL SENT",
+		    !panel_regs_taken ? "not read" : put ? "written back" : "NOT ALL WRITTEN", panel_wanted);
+	} else if (!on && panel_sleep) {
+		static const uint8_t sleep_in[] = { 0x10 };
+
+		/*
+		 * (no frame in flight while it is turned off and put to sleep; held until the wake has set it up again. "Asleep"
+		 * from now on, before the hold: the framebuffer must not take a flip the held DECON does not take for a broken
+		 * scan-out -- the step 89 drop)
+		 */
+		panel_asleep = true;
+		lck_mtx_unlock(panel_lock);
+		hakios_scanout_hold(1);
+		if (!panel_regs_taken) {
+			delay(20 * 1000);       /* (the frame in flight out, before anything is read) */
+		}
+		lck_mtx_lock(panel_lock);
+		if (!panel_regs_taken) {
+			/* (the first sleep of the run: the panel still as the boot loader set it up; read with no frame going out) */
+			panel_regs_take();
+			disp_det_on = panel_disp_det();
+			say("s6e3ha8: disp_det with the panel on: %d\n", disp_det_on);
+		}
+
+		ok = dsim_send(key_on, sizeof(key_on)) && dsim_send(display_off, 1);
+		ok = dsim_send(key_off, sizeof(key_off)) && ok;
+		lck_mtx_unlock(panel_lock);
+		delay(20 * 1000);               /* a frame and more at 60 Hz */
+		lck_mtx_lock(panel_lock);
+		ok = dsim_send(key_on, sizeof(key_on)) && dsim_send(sleep_in, 1) && ok;
+		ok = dsim_send(key_off, sizeof(key_off)) && ok;
+		panel_asleep = ok;
+		if (!ok) {
+			hakios_scanout_hold(0);         /* (not asleep after all: its frames again) */
+		} else if (panel_reset_mode && panel_regs_taken) {
+			/* (Samsung waits after its sleep-in before the reset line goes low; the boot loader's registers are known, to
+			 * set the panel up again from nothing) */
+			lck_mtx_unlock(panel_lock);
+			delay(100 * 1000);
+			lck_mtx_lock(panel_lock);
+			bool lp = dsim_hs_clock(false);     /* (Samsung's dsim_reg_stop: HS off before the reset goes low) */
+
+			panel_was_reset = panel_reset_line(0);
+			lck_mtx_unlock(panel_lock);
+			delay(5 * 1000);
+			lck_mtx_lock(panel_lock);
+			say("s6e3ha8: asleep in reset: clock lane to LP %s (DPHY_STATUS %08x), disp_det %d\n", lp ? "ok" : "NOT IN STOP STATE",
+			    rd(DSIM_DPHY_STATUS), panel_disp_det());
+		}
+	} else {
+		/* 28 or 29 alone (the default: a panel woken from sleep-in came back with black bands top and bottom, 15 Nov) */
+		ok = dsim_send(key_on, sizeof(key_on)) && dsim_send(on ? display_on : display_off, 1);
+		ok = dsim_send(key_off, sizeof(key_off)) && ok;
+	}
+	/*
+	 * The state the touch screen's gate reads (hakios_panel_touch_blocked): on as soon as 29 went out, whatever else of
+	 * the wake did not -- one packet of the restore failing left it "off" and every touch was dropped until the next
+	 * screen-off (step 92: touch dead after a wake, the five-finger exit too).
+	 */
+	if (ok || (on && shown)) {
+		panel_display_state = on ? 1 : 0;
+	}
+	delay(30 * 1000);
+	/* (not asked of a panel just put in reset: it cannot answer, and the three tries of each read cost 0.6 s, step 103) */
+	bool in_reset = !on && panel_was_reset;
+
+	read_after = !in_reset && panel_read(0x0A, &after, 1) && panel_read(0x0D, &mode_after, 1);
+	bool errors_read_after = !in_reset && panel_read(0x05, &dsi_errors_after, 1);
+	lck_mtx_unlock(panel_lock);
+	say("s6e3ha8: the panel's DSI errors (DCS 05): before the %s %s%u%s, 30 ms after %s%u%s\n", on ? "wake" : "screen-off",
+	    errors_read_before ? "" : "(NOT READ) ", dsi_errors_before & 0x7f, (dsi_errors_before & 0x80) && errors_read_before ? "+" : "",
+	    errors_read_after ? "" : "(NOT READ) ", dsi_errors_after & 0x7f, (dsi_errors_after & 0x80) && errors_read_after ? "+" : "");
+	say("s6e3ha8: display %s (%s) (FIFOCTRL %x, INTSRC %x); power mode 0A/0D before %s%02x/%02x, 30 ms after %s%02x/%02x\n",
+	    on ? "on" : "off", ok ? "sent" : "NOT SENT", rd(DSIM_FIFOCTRL), rd(DSIM_INTSRC),
+	    read_before ? "" : "(NOT READ) ", before, mode_before, read_after ? "" : "(NOT READ) ", after, mode_after);
+	return ok ? 0 : EIO;
+}
+
+/*
+ * Upstream's entry for the screen's power (Scion's S9 panel_sleep: the framebuffer or user space calls it at iOS's
+ * screen-off and screen-on). On this driver it is the Note9's own sequence -- sleep-in with the panel held in reset, and
+ * Samsung's whole bring-up at the wake (panel_display) -- not a bare sleep-in/out, which leaves this panel with black lines
+ * (steps 89-100). ENODEV without panel_sleep, as upstream's.
+ */
+int hakios_s6e3ha8_power(bool on);
+
+int
+hakios_s6e3ha8_power(bool on)
+{
+	return panel_sleep ? panel_display(on ? 1 : 0) : ENODEV;
+}
+
+/*
+ * Boot-arg touch_blank=1: while the panel's output is off (kern.hakios.display=0, userland/src/inject_sb.c's
+ * panel_blank=1), the touch screen's new touches are not passed on (hakios.s6sy761.c asks before each) -- a screen that
+ * iOS has blanked is not woken by a touch (a pocket, a finger on the way past); the side button still does it. A finger
+ * already down when the screen went dark is passed on to its lifting, so that iOS is not left with a finger that
+ * never leaves. (Not in hakios.input.c: patch 1203 is made against that file.)
+ * type: 1 down, 2 move, 3 up (sys/hakios.input.h). True: not to be passed on.
+ */
+bool hakios_panel_touch_blocked(uint32_t type, uint32_t finger);
+
+bool
+hakios_panel_touch_blocked(uint32_t type, uint32_t finger)
+{
+	static int gate = -1;
+	static uint32_t down;                   /* fingers passed on and not yet lifted (bit = finger) */
+	uint32_t on = 0, bit = finger < 32 ? 1u << finger : 0;
+	bool dark;
+
+	if (gate < 0) {
+		char platform[24] = "";
+
+		/* on by default on the Note9 (its boot line has no room for touch_blank=1); touch_blank=0 turns it off */
+		(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+		if (PE_parse_boot_argn("touch_blank", &on, sizeof(on))) {
+			gate = on != 0;
+		} else {
+			gate = strcmp(platform, "crownlte") == 0;
+		}
+	}
+	dark = gate && panel_display_state == 0;
+	if (type == 1) {                        /* a finger lands: passed on unless the screen is dark */
+		if (!dark) {
+			down |= bit;
+		}
+		return dark;
+	}
+	if (type == 3) {                        /* a finger lifts: passed on if its landing was */
+		bool known = (down & bit) != 0;
+
+		down &= ~bit;
+		return dark && !known;
+	}
+	return !(down & bit) && dark;           /* a move: passed on for a finger that was */
+}
+
+static int
+panel_sysctl_display(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	int value = panel_display_state, error;
+
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	return value == 0 || value == 1 ? panel_display(value) : EINVAL;
+}
+
+SYSCTL_PROC(_kern_hakios, OID_AUTO, display, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY | CTLFLAG_KERN,
+    NULL, 0,
+    panel_sysctl_display, "I", "the panel's output: 0 off, 1 on (-1: never set); writing sets it (panel=1)");
 
 
 /*
- * The panel dark, for a halt that powers the phone off (drivers/power/exynos/hakios.exynos_poweroff.c, halt_off=N): Samsung's
+ * The panel dark, for a halt that powers the phone off (drivers/power/hakios.exynos_poweroff.c, halt_off=N): Samsung's
  * display-off sequence (9F A5 A5, 28, 9F 5A 5A: star_a3_s0_display_off_cmdtbl) and then its exit sequence's sleep-in
  * (9F A5 A5, 10, 9F 5A 5A, and its 100 ms: star_a3_s0_exit_cmdtbl, star_a3_s0_wait_sleep_in), with a frame's time between
  * the two, as when Android turns the screen off. Without panel=1 too: the DSIM is mapped here if the driver never started.
@@ -629,79 +1328,10 @@ hakios_s6e3ha8_blank(int (*say_as)(const char *, ...))
 }
 
 
-/*
- * panel_sleep=1 (off by default; with panel=1): the screen's off and on from iOS (backboardd's power request to the
- * display service, MiniIOMobileFramebuffer.cpp, through hakios_display_power() in GenericARMPE.cpp) reach the panel:
- *   off  9F A5 A5, 28 (display off), 9F 5A 5A; a frame; 9F A5 A5, 10 (sleep-in), 9F 5A 5A; Samsung's wait after sleep-in
- *        (star_a3_s0_display_off_cmdtbl, then the sleep-in of star_a3_s0_exit_cmdtbl). The supplies stay on, and with
- *        them what the panel was set to: its DSC and PPS, TE, the gamma.
- *   on   9F A5 A5, 11 (sleep-out), 9F 5A 5A; Samsung's 10 ms after sleep-out (star_a3_s0_wait_sleep_out) and a frame more;
- *        the brightness last set, again; then 9F A5 A5, 29 (display on), 9F 5A 5A (star_a3_s0_display_on_cmdtbl).
- * Android goes further on its screen-off (the supplies off, the panel reset, and its whole init sequence at the next
- * screen-on: DSC, PPS, sleep-out, TE on, ...). Here nothing of that init is sent again; whether the S6E3HA8 keeps all of
- * it through a sleep-in is for the phone to show (if the picture comes back wrong or not at all: panel_sleep=0, and the
- * screen as before -- dark only by its brightness). 0 sent, ENODEV without panel_sleep=1 (or panel=1), EIO if the DSIM
- * did not take a packet.
- */
-static uint32_t panel_sleep;
-static bool panel_asleep;
-
-int hakios_s6e3ha8_power(bool on);
-
-int
-hakios_s6e3ha8_power(bool on)
-{
-	static const uint8_t key1_on[] = { 0x9F, 0xA5, 0xA5 }, key1_off[] = { 0x9F, 0x5A, 0x5A };
-	static const uint8_t display_off[] = { 0x28 }, sleep_in[] = { 0x10 }, sleep_out[] = { 0x11 }, display_on[] = { 0x29 };
-	bool first, second;
-	int level;
-
-	if (!panel_sleep || dsim == 0 || panel_lock == NULL) {
-		return ENODEV;
-	}
-	lck_mtx_lock(panel_lock);
-	if (on == !panel_asleep) {
-		lck_mtx_unlock(panel_lock);
-		return 0;                       /* (already so) */
-	}
-	if (!on) {
-		first = dsim_send(key1_on, sizeof(key1_on)) && dsim_send(display_off, sizeof(display_off));
-		first = dsim_send(key1_off, sizeof(key1_off)) && first;
-		delay(20 * 1000);               /* a frame and more at 60 Hz */
-		second = dsim_send(key1_on, sizeof(key1_on)) && dsim_send(sleep_in, sizeof(sleep_in));
-		second = dsim_send(key1_off, sizeof(key1_off)) && second;
-		delay(100 * 1000);              /* Samsung's wait after sleep-in */
-		panel_asleep = true;
-		level = panel_level;
-	} else {
-		first = dsim_send(key1_on, sizeof(key1_on)) && dsim_send(sleep_out, sizeof(sleep_out));
-		first = dsim_send(key1_off, sizeof(key1_off)) && first;
-		delay(30 * 1000);               /* Samsung's 10 ms, and a frame more */
-		panel_asleep = false;
-		level = panel_level;
-		second = true;
-	}
-	lck_mtx_unlock(panel_lock);
-	if (on) {
-		if (level >= 0) {
-			(void)panel_set(level);         /* (logs itself) */
-		}
-		lck_mtx_lock(panel_lock);
-		delay(20 * 1000);
-		second = dsim_send(key1_on, sizeof(key1_on)) && dsim_send(display_on, sizeof(display_on));
-		second = dsim_send(key1_off, sizeof(key1_off)) && second;
-		lck_mtx_unlock(panel_lock);
-	}
-	say("s6e3ha8: panel_sleep: %s: %s %s, %s %s (brightness %d; FIFOCTRL %x, INTSRC %x)\n", on ? "screen on" : "screen off",
-	    on ? "sleep-out (11)" : "display off (28)", first ? "sent" : "NOT SENT", on ? "display on (29)" : "sleep-in (10)",
-	    second ? "sent" : "NOT SENT", level, rd(DSIM_FIFOCTRL), rd(DSIM_INTSRC));
-	return first && second ? 0 : EIO;
-}
-
 void
 hakios_s6e3ha8_init(void)
 {
-	uint32_t enabled = 0, level = 0, mode = 2, write_arg;
+	uint32_t enabled = 0, level = 0, mode = 2;
 
 	if (!PE_parse_boot_argn("panel", &enabled, sizeof(enabled)) || enabled == 0) {
 		return;
@@ -713,21 +1343,12 @@ hakios_s6e3ha8_init(void)
 		return;
 	}
 	(void)PE_parse_boot_argn("panel_gamma", &mode, sizeof(mode));
-	panel_write = 1;
-	if (PE_parse_boot_argn("panel_write", &write_arg, sizeof(write_arg))) {
-		panel_write = write_arg != 0;
-	}
-	say("s6e3ha8: DSIM0: FIFOCTRL %x, INTSRC %x; panel_gamma=%u; panel_write=%d; kern.hakios.brightness sets the panel's brightness\n",
-	    rd(DSIM_FIFOCTRL), rd(DSIM_INTSRC), mode, panel_write);
+	say("s6e3ha8: DSIM0: FIFOCTRL %x, INTSRC %x; panel_gamma=%u; kern.hakios.brightness sets the panel's brightness\n",
+	    rd(DSIM_FIFOCTRL), rd(DSIM_INTSRC), mode);
 	if (mode >= 1) {
 		panel_gamma_init(mode);
 	}
 	(void)hakios_panel_register("s6e3ha8", panel_set);
-	(void)PE_parse_boot_argn("panel_sleep", &panel_sleep, sizeof(panel_sleep));
-	if (panel_sleep) {
-		say("s6e3ha8: panel_sleep=%u: the screen's off from iOS puts the panel to sleep (28, 10), its on wakes it (11, 29)\n",
-		    panel_sleep);
-	}
 	if (PE_parse_boot_argn("panel_brightness", &level, sizeof(level))) {
 		int error = panel_set((int)level);
 

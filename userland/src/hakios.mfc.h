@@ -48,4 +48,39 @@ struct hakios_mfc_decode {
 #define HAKIOS_MFC_OPEN         _IOWR('M', 1, struct hakios_mfc_open)
 #define HAKIOS_MFC_DECODE       _IOWR('M', 2, struct hakios_mfc_decode)
 
+/*
+ * /dev/hakios-mfcenc: the same block's H.264 and HEVC encoder (one client at a time, beside the decoder's). HAKIOS_MFC_ENC_OPEN with the size,
+ * the rate and the bitrate gives back the parameter sets (SPS and PPS, Annex B); then HAKIOS_MFC_ENC_FRAME with each picture's NV12 planes
+ * gives back its access unit (Annex B), in the same order: no B frames, one picture in, one out. Close ends the instance.
+ */
+struct hakios_mfc_enc_open {
+	uint32_t width, height;         /* in: even, at most 4096 */
+	uint32_t fps;                   /* in: frames a second (30 if 0) */
+	uint32_t bitrate;               /* in: bits a second (10 Mb/s if 0) */
+	uint32_t gop;                   /* in: frames from one key frame to the next (fps if 0) */
+	uint32_t profile;               /* in: HAKIOS_MFC_ENC_BASELINE, _MAIN, _HIGH */
+	uint32_t level;                 /* in: 40 for 4.0 (40 if 0) */
+	uint32_t header_room;           /* in: bytes at header */
+	uint64_t header;                /* in: where the parameter sets go */
+	uint32_t header_bytes;          /* out */
+	uint32_t codec;                 /* in: HAKIOS_MFC_H264 or HAKIOS_MFC_HEVC (profile then: 0 Main) */
+};
+
+struct hakios_mfc_enc_frame {
+	uint64_t y, uv;                 /* in: the picture's planes */
+	uint32_t y_stride, uv_stride;   /* in */
+	uint32_t key;                   /* in: a key frame asked for; out: it is one */
+	uint32_t stream_room;           /* in: bytes at stream */
+	uint64_t stream;                /* in: where the access unit goes */
+	uint32_t bytes;                 /* out */
+	uint32_t us;                    /* out: the block's time for it, microseconds */
+};
+
+#define HAKIOS_MFC_ENC_BASELINE 0
+#define HAKIOS_MFC_ENC_MAIN     1
+#define HAKIOS_MFC_ENC_HIGH     2
+
+#define HAKIOS_MFC_ENC_OPEN     _IOWR('M', 3, struct hakios_mfc_enc_open)
+#define HAKIOS_MFC_ENC_FRAME    _IOWR('M', 4, struct hakios_mfc_enc_frame)
+
 #endif /* _SYS_HAKIOS_MFC_H_ */

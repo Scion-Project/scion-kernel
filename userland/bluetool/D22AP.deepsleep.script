@@ -1,0 +1,5 @@
+# BlueTool's "deepsleep" for the Galaxy S9/Note9: what bluetoothd asks for after a power-off from Settings. Without this
+# file BlueTool ran Apple's own sequence, wrote to a device it had not opened ("Error writing bytes ... Device not
+# configured"), bluetoothd waited 5 s ("BlueTool timed out running deepsleep script!", "Clean power off failed") and
+# aborted (step 91, 16 November). The chip's power is the kernel's (bt=7): opened, and nothing else.
+device -D -S

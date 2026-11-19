@@ -978,9 +978,30 @@ surface_changed(struct eagl *e, struct image *image)
 		return false;
 	}
 	image->looked = e->frames + 1;
-	for (size_t at = 0; at + 8 <= size; at += 8) {
-		memcpy(&word, base + at, 8);
-		sum = (sum ^ word) * 0x9e3779b97f4a7c15ull;
+	/* four independent chains (the multiply's latency hides behind the other three; the one chain of
+	   xor-multiply-shift per word took ~4 ms for a 10 MB surface on a little core), folded at the end */
+	{
+		uint64_t h0 = sum, h1 = sum + 1, h2 = sum + 2, h3 = sum + 3, w0, w1, w2, w3;
+		size_t at = 0;
+
+		for (; at + 32 <= size; at += 32) {
+			memcpy(&w0, base + at, 8);
+			memcpy(&w1, base + at + 8, 8);
+			memcpy(&w2, base + at + 16, 8);
+			memcpy(&w3, base + at + 24, 8);
+			h0 = (h0 ^ w0) * 0x9e3779b97f4a7c15ull;
+			h1 = (h1 ^ w1) * 0x9e3779b97f4a7c15ull;
+			h2 = (h2 ^ w2) * 0x9e3779b97f4a7c15ull;
+			h3 = (h3 ^ w3) * 0x9e3779b97f4a7c15ull;
+		}
+		for (; at + 8 <= size; at += 8) {
+			memcpy(&word, base + at, 8);
+			h0 = (h0 ^ word) * 0x9e3779b97f4a7c15ull;
+		}
+		sum = h0;
+		sum = (sum ^ (sum >> 29) ^ h1) * 0x9e3779b97f4a7c15ull;
+		sum = (sum ^ (sum >> 29) ^ h2) * 0x9e3779b97f4a7c15ull;
+		sum = (sum ^ (sum >> 29) ^ h3) * 0x9e3779b97f4a7c15ull;
 		sum ^= sum >> 29;
 	}
 	if (sum == image->sum) {
@@ -1345,8 +1366,8 @@ show_texture(struct eagl *e, struct image *image)
  */
 #define PROF_SLOTS      8192
 #define PROF_DUMP       4000
-#define PROF_SHOWN      30
-#define PROF_DEPTH      9                       /* the program counter, the link register, seven callers from the frame chain */
+#define PROF_SHOWN      200
+#define PROF_DEPTH      4                       /* the program counter, the link register, seven callers from the frame chain */
 static unsigned prof_us;                        /* 0: no profile */
 static thread_t prof_thread;                    /* the drawing thread, the first that begins a frame */
 static struct {

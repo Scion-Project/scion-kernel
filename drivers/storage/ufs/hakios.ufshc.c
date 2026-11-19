@@ -486,7 +486,7 @@ SYSCTL_QUAD(_kern_hakios, OID_AUTO, ufs_native_write_bytes, CTLFLAG_RD | CTLFLAG
  * end, into the loader's log directly (hakios_ufs_quiesce; printf is not for that moment).
  */
 #define KEPT_LINES          64
-#define LINE                320
+#define LINE                448
 static char hc_kept[KEPT_LINES][LINE];
 static uint32_t hc_kept_count;
 
@@ -1169,6 +1169,14 @@ hc_off(void)
  *   - (own mode) its UTRLCNR bit set (hc_cnr_on: cleared before the doorbell, so a set bit is this request's);
  *   - (own mode) its descriptor written back (OCS not f) with a response UPIU of its task tag in its command
  *     descriptor (both made invalid by hc_place before the doorbell).
+ * Seen on the phone (ufs-rw8, 4375 requests): the doorbell bit dropped by itself on about two in three; on the
+ * rest it stayed, the descriptor written back (OCS 0), the response there (21, status 00) and IS's UTRCS set,
+ * with UTRLCNR 0 as long as the poller looked (100 ms) -- 00000004 only read after UTRLCLR. So the descriptor
+ * is the sign that holds on this controller, and the clean-up after it (hc_finish) is: IS acknowledged
+ * (written with ones), the UTRLCNR bit written, and, if the doorbell bit is still set, that slot cleared with
+ * UTRLCLR (clear_with_ones: on the Exynos a one clears, as the safety net did in rw7 and rw8; UFSHCI's own
+ * sense is a zero) and the bit confirmed clear. A waiter spins (hc_spin_us, 2 ms: a 4 KB read is done in well under that) and then sleeps
+ * in 100 us steps; no poller thread, no 100 ms tick.
  */
 static void hc_stuck(struct hc_slot *s);
 static uint32_t hc_spin_us = 2000;              /* boot-arg ufs_native_spin */
@@ -1356,7 +1364,11 @@ hc_wait(struct hc_slot *s, const char *what, bool count)
 			slept = true;
 			os_atomic_inc(&hc_sleeps, relaxed);
 		}
-		IOSleep(1);
+		/*
+		 * 100 us steps, not IOSleep(1)'s millisecond and more: a 256 KB write is done in one or two milliseconds, and
+		 * each request waited the step out, one request at a time.
+		 */
+		delay_for_interval_with_leeway(100, 25, NSEC_PER_USEC);
 		polls++;
 	}
 	s->done_at = mach_absolute_time();
@@ -1397,7 +1409,7 @@ hc_wait(struct hc_slot *s, const char *what, bool count)
  */
 #define HC_WIN 32
 static struct {
-	uint64_t sec, rd, wr;
+	uint64_t sec, rd, wr, nwr, wr_us, busy_us;     /* bytes read, written; writes, their doorbell-to-done, every request's */
 } hc_win[HC_WIN];
 static uint64_t hc_lat_n, hc_lat_sum_us, hc_lat_max_us, hc_lat4k_n, hc_lat4k_sum_us, hc_lat4k_max_us;
 
@@ -1422,9 +1434,15 @@ hc_speed_add(struct hc_slot *s, bool write, uint64_t bytes)
 		hc_win[sec % HC_WIN].sec = sec;
 		hc_win[sec % HC_WIN].rd = 0;
 		hc_win[sec % HC_WIN].wr = 0;
+		hc_win[sec % HC_WIN].nwr = 0;
+		hc_win[sec % HC_WIN].wr_us = 0;
+		hc_win[sec % HC_WIN].busy_us = 0;
 	}
+	hc_win[sec % HC_WIN].busy_us += us;
 	if (write) {
 		hc_win[sec % HC_WIN].wr += bytes;
+		hc_win[sec % HC_WIN].nwr++;
+		hc_win[sec % HC_WIN].wr_us += us;
 	} else {
 		hc_win[sec % HC_WIN].rd += bytes;
 	}
@@ -1450,12 +1468,16 @@ hc_speed_add(struct hc_slot *s, bool write, uint64_t bytes)
 static void
 hc_speed_line(char *buf, size_t size)
 {
-	uint64_t now = hc_now_s(), rd = 0, wr = 0, n, sum, max, n4, sum4, max4, rkb, wkb;
+	uint64_t now = hc_now_s(), rd = 0, wr = 0, nwr = 0, wr_us = 0, busy = 0, n, sum, max, n4, sum4, max4, rkb, wkb;
+	size_t at;
 
 	for (uint32_t i = 0; i < HC_WIN; i++) {
 		if (hc_win[i].sec + 30 > now && hc_win[i].sec <= now) {
 			rd += hc_win[i].rd;
 			wr += hc_win[i].wr;
+			nwr += hc_win[i].nwr;
+			wr_us += hc_win[i].wr_us;
+			busy += hc_win[i].busy_us;
 		}
 	}
 	n = hc_lat_n;
@@ -1470,6 +1492,12 @@ hc_speed_line(char *buf, size_t size)
 	    "(%llu MB); doorbell to done: %llu requests, average %llu us, at most %llu us; 4 KB reads: %llu, average %llu "
 	    "us, at most %llu us\n", rkb / 1000, rkb % 1000 / 100, rd >> 20, wkb / 1000, wkb % 1000 / 100, wr >> 20, n,
 	    n ? sum / n : 0, max, n4, n4 ? sum4 / n4 : 0, max4);
+	/* the same 30 s: the writes (how many, how big, how long each), and how much of the time a request was in flight */
+	at = strlen(buf);
+	if (at > 0 && at < size && buf[at - 1] == '\n') {
+		snprintf(buf + at - 1, size - at + 1, "; writes %llu, %llu KB each, %llu us each; the device busy %llu%%\n", nwr,
+		    nwr ? wr / nwr / 1024 : 0, nwr ? wr_us / nwr : 0, busy / 300000);
+	}
 }
 
 /* A slot whose doorbell bit did not clear: everything that tells what the controller made of it */
@@ -2438,7 +2466,7 @@ hc_report(const char *when, bool late)
 		    "3-4 %llu, 5-8 %llu, 9-16 %llu, more %llu\n", when, hc_polls, hc_requests ? hc_polls / hc_requests : 0,
 		    hc_slot_waits, wait_ns / 1000000, lock_ns / 1000000, hc_flight_hist[0], hc_flight_hist[1],
 		    hc_flight_hist[2], hc_flight_hist[3], hc_flight_hist[4], hc_flight_hist[5]);
-		(late ? hc_say_late : hc_say)("ufs: native: %s: waiters spin %u us, then sleep in 1 ms steps: %llu slept\n",
+		(late ? hc_say_late : hc_say)("ufs: native: %s: waiters spin %u us, then sleep in 100 us steps: %llu slept\n",
 		    when, hc_spin_us, hc_sleeps);
 		{
 			uint64_t copy_ns, flush_ns;
@@ -2453,7 +2481,7 @@ hc_report(const char *when, bool late)
 		    "%llu\n", when, hc_done_by[HC_BY_DB], hc_done_by[HC_BY_CNR], hc_cnr_broken ? "NOT USED: a bit did not clear" :
 		    hc_cnr_on() ? "used" : "not used", hc_done_by[HC_BY_OCS], hc_cleared, hc_finish_failed);
 		{
-			char line[320];
+			char line[448];
 
 			hc_speed_line(line, sizeof(line));
 			(late ? hc_say_late : hc_say)("%s", line);

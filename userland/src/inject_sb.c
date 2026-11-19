@@ -37,6 +37,9 @@
  *     that have no window (chronod's, where the home screen's widgets are drawn: rc.jobs.widgets).
  */
 #include <CoreFoundation/CoreFoundation.h>
+#include <execinfo.h>
+#include <dlfcn.h>
+#include <mach-o/dyld.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <IOSurface/IOSurfaceRef.h>
 #include <time.h>
@@ -822,6 +825,518 @@ battery_post_notifications(void)
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
 		battery_post_notifications();
 	});
+}
+
+/*
+ * Bluetooth in Control Center: its button stays greyed out whatever bluetoothd's state (step 87, 16 November), while Settings
+ * switches it. Control Center's module asks BluetoothManager (BluetoothManager.framework), so what that says is logged: at
+ * 20 s, then every 30 s for five minutes, and whenever it changes -- available, enabled, powered, and its state number.
+ */
+/*
+ * Control Center's Bluetooth button, from the inside (it stayed grey in step 96 while BluetoothManager here said state 3,
+ * which its -_enabledForState: takes for enabled): what state it is given (-_updateWithState:) and whether a tap reaches
+ * it (-_toggleState). Hooked once its bundle (ConnectivityModule) is loaded, from bt_watch.
+ */
+static IMP original_cc_bt_update, original_cc_bt_toggle;
+
+static void
+cc_bt_update(id self, SEL selector, int state)
+{
+	static int said;
+	Ivar iv = class_getInstanceVariable(object_getClass(self), "_bluetoothManager");
+	id held = iv != NULL ? object_getIvar(self, iv) : nil;
+	Class bm = objc_getClass("BluetoothManager");
+	id shared = bm != Nil ? ((id (*)(Class, SEL))objc_msgSend)(bm, sel_registerName("sharedInstance")) : nil;
+	int real = shared != nil ? (int)((long (*)(id, SEL))objc_msgSend)(shared, sel_registerName("bluetoothState")) : -1;
+
+	if (said++ < 12) {
+		say("hakios: bluetooth: Control Center's Bluetooth button: -_updateWithState:%d; its _bluetoothManager %p, the shared "
+		    "one %p (state %d)\n", state, (void *)held, (void *)shared, real);
+	}
+	/*
+	 * Step 97: the button was given state 0 (inoperative: grey, taps not taken) while BluetoothManager's shared instance
+	 * said 3. Its own _bluetoothManager is what it reads: if that is not the shared one (nil, or another that never
+	 * attached), the shared one is put there, and the state given is the shared one's.
+	 */
+	if (iv != NULL && shared != nil && held != shared) {
+		object_setIvarWithStrongDefault(self, iv, shared);
+		say("hakios: bluetooth: Control Center's Bluetooth button: its _bluetoothManager was %p: the shared one put there\n",
+		    (void *)held);
+	}
+	if (state == 0 && real > 0) {
+		state = real;
+	}
+	((void (*)(id, SEL, int))original_cc_bt_update)(self, selector, state);
+}
+
+static void
+cc_bt_toggle(id self, SEL selector)
+{
+	say("hakios: bluetooth: Control Center's Bluetooth button: -_toggleState (a tap)\n");
+	((void (*)(id, SEL))original_cc_bt_toggle)(self, selector);
+}
+
+static void
+cc_bt_hook(void)
+{
+	static bool done;
+	Class c;
+
+	if (done || (c = objc_getClass("CCUIConnectivityBluetoothViewController")) == Nil) {
+		return;
+	}
+	done = true;
+	Method u = class_getInstanceMethod(c, sel_registerName("_updateWithState:"));
+	Method t = class_getInstanceMethod(c, sel_registerName("_toggleState"));
+
+	if (u != NULL) {
+		original_cc_bt_update = method_getImplementation(u);
+		class_replaceMethod(c, sel_registerName("_updateWithState:"), (IMP)cc_bt_update, method_getTypeEncoding(u));
+	}
+	if (t != NULL) {
+		original_cc_bt_toggle = method_getImplementation(t);
+		class_replaceMethod(c, sel_registerName("_toggleState"), (IMP)cc_bt_toggle, method_getTypeEncoding(t));
+	}
+	say("hakios: bluetooth: Control Center's Bluetooth button hooked (_updateWithState: %s, _toggleState %s)\n",
+	    u ? method_getTypeEncoding(u) : "none", t ? method_getTypeEncoding(t) : "none");
+}
+
+/*
+ * Auto-lock (step 103, 18 November): set to 30 s, the screen never went off by itself; the side button works. What
+ * SpringBoard's idle timer is told is logged here (log only, every original called as it was): the timer descriptor it
+ * is given and why, the assertions that disable it and their reasons, its resets (counted by reason: who keeps it from
+ * running out), the attention-aware timer's resets "for user attention" (iPhone X's Attention Aware Features: the face
+ * seen by the TrueDepth camera this phone does not have), its warn (the dim) and its expiry (the lock).
+ * Types from SpringBoard's method lists (the shared cache).
+ */
+static IMP o_set_desc, o_acquire, o_src_enabled, o_reset_reason, o_reset_nc, o_reset_plain, o_bl_reset_att, o_bl_set_desc,
+    o_bl_att_lost, o_px_expire, o_px_warn;
+static unsigned idle_resets, idle_att_resets;
+static char idle_last_reason[96];
+
+static const char *
+idle_text(id object, char *buf, size_t size)
+{
+	id d = object != nil ? ((id (*)(id, SEL))objc_msgSend)(object, sel_registerName("description")) : nil;
+	const char *c = d != nil ? ((const char *(*)(id, SEL))objc_msgSend)(d, sel_registerName("UTF8String")) : NULL;
+
+	strlcpy(buf, c != NULL ? c : "(nil)", size);
+	for (char *q = buf; *q; q++) {
+		if (*q == '\n') {
+			*q = ' ';
+		}
+	}
+	return buf;
+}
+
+static void
+idle_set_desc(id self, SEL sel, id descriptor, id reason)
+{
+	char a[400], b[120];
+
+	say("hakios: idle: coordinator _setIdleTimerWithDescriptor: %s forReason: %s\n", idle_text(descriptor, a, sizeof(a)),
+	    idle_text(reason, b, sizeof(b)));
+	((void (*)(id, SEL, id, id))o_set_desc)(self, sel, descriptor, reason);
+}
+
+static id
+idle_acquire(id self, SEL sel, id reason)
+{
+	char b[160];
+
+	say("hakios: idle: idle-timer DISABLE assertion acquired for: %s\n", idle_text(reason, b, sizeof(b)));
+	return ((id (*)(id, SEL, id))o_acquire)(self, sel, reason);
+}
+
+static void
+idle_src_enabled(id self, SEL sel, BOOL enabled, id reason)
+{
+	char b[160];
+
+	say("hakios: idle: idle-timer source %s for: %s\n", enabled ? "ENABLED" : "DISABLED", idle_text(reason, b, sizeof(b)));
+	((void (*)(id, SEL, BOOL, id))o_src_enabled)(self, sel, enabled, reason);
+}
+
+static void
+idle_count_reset(const char *how, id reason)
+{
+	char b[96];
+
+	idle_text(reason, b, sizeof(b));
+	if (idle_resets++ < 20 || idle_resets % 100 == 0 || (strcmp(b, idle_last_reason) != 0 && strcmp(b, "IdleTimerReset") != 0 &&
+	    strcmp(b, "(nil)") != 0)) {
+		say("hakios: idle: reset #%u (%s) for: %s\n", idle_resets, how, b);
+	}
+	strlcpy(idle_last_reason, b, sizeof(idle_last_reason));
+}
+
+static void
+idle_reset_reason(id self, SEL sel, id reason)
+{
+	idle_count_reset("resetIdleTimerForReason:", reason);
+	((void (*)(id, SEL, id))o_reset_reason)(self, sel, reason);
+}
+
+static void
+idle_reset_nc(id self, SEL sel, id source, id reason)
+{
+	idle_count_reset("resetIdleTimerIfNonConsecutiveSource:", reason);
+	((void (*)(id, SEL, id, id))o_reset_nc)(self, sel, source, reason);
+}
+
+/*
+ * Step 104: resetIdleTimer (no reason) about once a second for the whole run, from boot -- the timer never reaches its 20 s
+ * warn. Who calls it: the return addresses of the first calls (and one in 30 after), each with its image and its
+ * address in the shared cache as built (unslid: the image's header is at its unslid address less the slide), to be
+ * named offline (dsc-tools objc.py).
+ */
+static void
+idle_who(const char *what)
+{
+	static unsigned calls;
+	void *frames[8];
+	int n;
+	char line[700];
+	size_t at = 0;
+
+	if (!(calls++ < 12 || calls % 30 == 0)) {
+		return;
+	}
+	n = backtrace(frames, 8);
+	for (int i = 2; i < n && at + 90 < sizeof(line); i++) {
+		Dl_info info;
+		const char *image = "?";
+		uintptr_t unslid = (uintptr_t)frames[i];
+
+		if (dladdr(frames[i], &info) != 0 && info.dli_fname != NULL) {
+			const char *slash = strrchr(info.dli_fname, '/');
+
+			image = slash != NULL ? slash + 1 : info.dli_fname;
+			for (uint32_t k = 0; k < _dyld_image_count(); k++) {
+				if (_dyld_get_image_header(k) == info.dli_fbase) {
+					unslid = (uintptr_t)frames[i] - (uintptr_t)_dyld_get_image_vmaddr_slide(k);
+					break;
+				}
+			}
+		}
+		at += (size_t)snprintf(line + at, sizeof(line) - at, " %s:0x%lx", image, (unsigned long)unslid);
+	}
+	say("hakios: idle: %s call %u from:%s\n", what, calls, line);
+}
+
+/*
+ * Step 105 found who: -[SBTelephonyManager _handleTelephonyDaemonRestart] -> handleCallControlFailure: -> updateCalls ->
+ * resetIdleTimer, once a second for the whole run. There is no CommCenter here (no cellular: launchd's "failed lookup:
+ * com.apple.commcenter.xpc ... No such process" for SpringBoard), so SpringBoard takes the telephony daemon for restarting,
+ * tries again a second later, and every try resets the idle timer: the auto-lock never comes. The tries go on as they
+ * did; only the idle-timer reset made from inside one is not passed on (a real call cannot happen without CommCenter).
+ */
+static IMP o_tel_restart;
+static __thread bool in_tel_restart;
+static unsigned tel_resets_dropped;
+
+static void
+idle_tel_restart(id self, SEL sel, id arg)
+{
+	in_tel_restart = true;
+	((void (*)(id, SEL, id))o_tel_restart)(self, sel, arg);
+	in_tel_restart = false;
+}
+
+static void
+idle_reset_plain(id self, SEL sel)
+{
+	if (in_tel_restart) {
+		if (tel_resets_dropped++ < 3 || tel_resets_dropped % 300 == 0) {
+			say("hakios: idle: reset #%u from SBTelephonyManager's retry for a CommCenter that is not there: not passed on\n",
+			    tel_resets_dropped);
+		}
+		return;
+	}
+	idle_who("resetIdleTimer");
+	idle_count_reset("resetIdleTimer", nil);
+	((void (*)(id, SEL))o_reset_plain)(self, sel);
+}
+
+static void
+idle_bl_reset_att(id self, SEL sel, id timer, unsigned long long attention, double at)
+{
+	if (idle_att_resets++ < 20 || idle_att_resets % 50 == 0) {
+		say("hakios: idle: backlight timer reset for user attention #%u (attention %llu, at %.1f)\n", idle_att_resets, attention, at);
+	}
+	((void (*)(id, SEL, id, unsigned long long, double))o_bl_reset_att)(self, sel, timer, attention, at);
+}
+
+static void
+idle_bl_set_desc(id self, SEL sel, id descriptor)
+{
+	char a[400];
+
+	say("hakios: idle: backlight timer descriptor: %s\n", idle_text(descriptor, a, sizeof(a)));
+	((void (*)(id, SEL, id))o_bl_set_desc)(self, sel, descriptor);
+}
+
+static void
+idle_bl_att_lost(id self, SEL sel, id timer, id timeout)
+{
+	char a[160];
+
+	say("hakios: idle: backlight timer: attention-lost timeout expired: %s\n", idle_text(timeout, a, sizeof(a)));
+	((void (*)(id, SEL, id, id))o_bl_att_lost)(self, sel, timer, timeout);
+}
+
+static void
+idle_px_expire(id self, SEL sel, id timer)
+{
+	say("hakios: idle: idle timer EXPIRED (the lock)\n");
+	((void (*)(id, SEL, id))o_px_expire)(self, sel, timer);
+}
+
+static void
+idle_px_warn(id self, SEL sel, id timer)
+{
+	say("hakios: idle: idle timer warned (the dim)\n");
+	((void (*)(id, SEL, id))o_px_warn)(self, sel, timer);
+}
+
+static void
+idle_hook1(const char *cls, const char *selector, IMP replacement, IMP *original)
+{
+	Class c = objc_getClass(cls);
+	Method m = c != Nil ? class_getInstanceMethod(c, sel_registerName(selector)) : NULL;
+
+	if (m == NULL) {
+		say("hakios: idle: -[%s %s] not found: not hooked\n", cls, selector);
+		return;
+	}
+	*original = method_getImplementation(m);
+	class_replaceMethod(c, sel_registerName(selector), replacement, method_getTypeEncoding(m));
+}
+
+static void
+idle_watch(int round)
+{
+	if (round == 0) {
+		idle_hook1("SBIdleTimerGlobalCoordinator", "_setIdleTimerWithDescriptor:forReason:", (IMP)idle_set_desc, &o_set_desc);
+		idle_hook1("SBIdleTimerGlobalCoordinator", "acquireIdleTimerDisableAssertionForReason:", (IMP)idle_acquire, &o_acquire);
+		idle_hook1("SBIdleTimerGlobalCoordinator", "_setIdleTimerSourceEnabled:forReason:", (IMP)idle_src_enabled, &o_src_enabled);
+		idle_hook1("SBIdleTimerGlobalCoordinator", "resetIdleTimerForReason:", (IMP)idle_reset_reason, &o_reset_reason);
+		idle_hook1("SBIdleTimerGlobalCoordinator", "resetIdleTimerIfNonConsecutiveSource:forReason:", (IMP)idle_reset_nc, &o_reset_nc);
+		idle_hook1("SBIdleTimerGlobalCoordinator", "resetIdleTimer", (IMP)idle_reset_plain, &o_reset_plain);
+		idle_hook1("SBBacklightIdleTimer", "idleTimerDidReset:forUserAttention:at:", (IMP)idle_bl_reset_att, &o_bl_reset_att);
+		idle_hook1("SBBacklightIdleTimer", "setDescriptor:", (IMP)idle_bl_set_desc, &o_bl_set_desc);
+		idle_hook1("SBBacklightIdleTimer", "idleTimer:attentionLostTimeoutDidExpire:", (IMP)idle_bl_att_lost, &o_bl_att_lost);
+		idle_hook1("SBIdleTimerProxy", "idleTimerDidExpire:", (IMP)idle_px_expire, &o_px_expire);
+		idle_hook1("SBIdleTimerProxy", "idleTimerDidWarn:", (IMP)idle_px_warn, &o_px_warn);
+		idle_hook1("SBTelephonyManager", "_handleTelephonyDaemonRestart", (IMP)idle_tel_restart, &o_tel_restart);
+		say("hakios: idle: SpringBoard's idle timer watched\n");
+	}
+	Class gc = objc_getClass("SBIdleTimerGlobalCoordinator");
+	id g = gc != Nil ? ((id (*)(Class, SEL))objc_msgSend)(gc, sel_registerName("sharedInstance")) : nil;
+	if (g != nil) {
+		SEL has = sel_registerName("_hasIdleTimerDisableAssertions"), list = sel_registerName("_idleTimerDisableAssertions"),
+		    timer = sel_registerName("idleTimer");
+		char a[400], t[300];
+		BOOL h = class_respondsToSelector(object_getClass(g), has) ? ((BOOL (*)(id, SEL))objc_msgSend)(g, has) : NO;
+		id l = class_respondsToSelector(object_getClass(g), list) ? ((id (*)(id, SEL))objc_msgSend)(g, list) : nil;
+		id it = class_respondsToSelector(object_getClass(g), timer) ? ((id (*)(id, SEL))objc_msgSend)(g, timer) : nil;
+
+		say("hakios: idle: %us: disable assertions %s: %s; timer %s; resets so far %u, for user attention %u, telephony's dropped %u\n",
+		    round * 10, h ? "YES" : "no", idle_text(l, a, sizeof(a)), idle_text(it, t, sizeof(t)), idle_resets, idle_att_resets,
+		    tel_resets_dropped);
+	}
+	if (round < 60) {
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+			idle_watch(round + 1);
+		});
+	}
+}
+
+/*
+ * Letterboxing (19 November): App Store apps (YouTube, Instagram) ran letterboxed at about 16:9 while the system apps and
+ * Sileo filled the screen. SpringBoard runs a third-party app in a "classic mode" (an older iPhone's screen, scaled into
+ * this one) unless the app says it supports this screen: -[SBApplication _classicModeFromSupportedTypes] (0: none, the
+ * whole screen; system apps and view services bypass it). No app knows this screen -- 1125x2313 is no iPhone's -- so every
+ * third-party app fell back to a 16:9 phone's. Every app gets "none" here: it lays itself out on the screen as it is, with
+ * the safe area the system apps get. What SpringBoard would have chosen is logged per app.
+ */
+static IMP o_classic_from_types;
+
+static long
+classic_none(id self, SEL sel)
+{
+	static unsigned said;
+	long was = ((long (*)(id, SEL))o_classic_from_types)(self, sel);
+
+	if (was != 0 && said++ < 40) {
+		id bid = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("bundleIdentifier"));
+		const char *b = bid != nil ? ((const char *(*)(id, SEL))objc_msgSend)(bid, sel_registerName("UTF8String")) : "?";
+
+		say("hakios: classic: %s would run in classic mode %ld (letterboxed): full screen instead\n", b ? b : "?", was);
+	}
+	return 0;
+}
+
+/*
+ * View services for App Store apps (19 November): YouTube's Google sign-in sheet (SafariViewService, through
+ * ASWebAuthenticationSession) never opened -- FrontBoard refused the launch: FBSOpenApplicationErrorDomain 3, "Un-trusted
+ * clients may not open applications in the background". -[FBSystemService _isTrustedRequest:...] lets an app without the
+ * launch entitlements open another in the background only when the target's FBSApplicationInfo -hasViewServicesEntitlement
+ * (com.apple.UIKit.vends-view-services), and that is read from LaunchServices' record, which here has no entitlements for
+ * the system's apps. SafariViewService's own signature has the entitlement. A system application (under /Applications)
+ * that declares its view-service Mach service in its Info.plist (SBMachServices: com.apple.uikit.viewservice.<its id>, as
+ * every view service does) is taken for one.
+ */
+static IMP o_has_vs;
+
+static BOOL
+has_view_services(id self, SEL sel)
+{
+	static unsigned said;
+	BOOL has = ((BOOL (*)(id, SEL))o_has_vs)(self, sel);
+
+	if (has) {
+		return YES;
+	}
+	id bid = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("bundleIdentifier"));
+	id url = class_respondsToSelector(object_getClass(self), sel_registerName("bundleURL")) ?
+	    ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("bundleURL")) : nil;
+	const char *b = bid != nil ? ((const char *(*)(id, SEL))objc_msgSend)(bid, sel_registerName("UTF8String")) : NULL;
+	id path = url != nil ? ((id (*)(id, SEL))objc_msgSend)(url, sel_registerName("path")) : nil;
+	const char *pp = path != nil ? ((const char *(*)(id, SEL))objc_msgSend)(path, sel_registerName("UTF8String")) : NULL;
+
+	if (b == NULL || pp == NULL || strncmp(pp, "/Applications/", 14) != 0) {
+		return NO;
+	}
+	char want[256], plist[1100];
+
+	snprintf(want, sizeof(want), "com.apple.uikit.viewservice.%s", b);
+	snprintf(plist, sizeof(plist), "%s/Info.plist", pp);
+	CFURLRef purl = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)plist, (CFIndex)strlen(plist), false);
+	CFReadStreamRef rs = purl != NULL ? CFReadStreamCreateWithFile(NULL, purl) : NULL;
+	CFPropertyListRef info = NULL;
+	BOOL vends = NO;
+
+	if (rs != NULL && CFReadStreamOpen(rs)) {
+		info = CFPropertyListCreateWithStream(NULL, rs, 0, kCFPropertyListImmutable, NULL, NULL);
+		CFReadStreamClose(rs);
+	}
+	if (info != NULL && CFGetTypeID(info) == CFDictionaryGetTypeID()) {
+		CFArrayRef services = CFDictionaryGetValue(info, CFSTR("SBMachServices"));
+		CFStringRef w = CFStringCreateWithCString(NULL, want, kCFStringEncodingUTF8);
+
+		if (services != NULL && CFGetTypeID(services) == CFArrayGetTypeID() && w != NULL) {
+			vends = CFArrayContainsValue(services, CFRangeMake(0, CFArrayGetCount(services)), w);
+		}
+		if (w != NULL) {
+			CFRelease(w);
+		}
+	}
+	if (info != NULL) {
+		CFRelease(info);
+	}
+	if (rs != NULL) {
+		CFRelease(rs);
+	}
+	if (purl != NULL) {
+		CFRelease(purl);
+	}
+	if (vends && said++ < 20) {
+		say("hakios: viewservice: %s has no view-services entitlement in LaunchServices' record; its Info.plist names %s: "
+		    "taken for a view service\n", b, want);
+	}
+	return vends;
+}
+
+static void
+viewservice_hook(void)
+{
+	Class c = objc_getClass("FBSApplicationInfo");
+	SEL sel = sel_registerName("hasViewServicesEntitlement");
+	Method m = c != Nil ? class_getInstanceMethod(c, sel) : NULL;
+
+	if (m == NULL) {
+		say("hakios: viewservice: -[FBSApplicationInfo hasViewServicesEntitlement] not found\n");
+		return;
+	}
+	o_has_vs = method_getImplementation(m);
+	class_replaceMethod(c, sel, (IMP)has_view_services, method_getTypeEncoding(m));
+	say("hakios: viewservice: system view services open for App Store apps (%s)\n", method_getTypeEncoding(m));
+}
+
+static void
+classic_hook(void)
+{
+	Class c = objc_getClass("SBApplication");
+	SEL sel = sel_registerName("_classicModeFromSupportedTypes");
+	Method m = c != Nil ? class_getInstanceMethod(c, sel) : NULL;
+
+	if (m == NULL) {
+		say("hakios: classic: -[SBApplication _classicModeFromSupportedTypes] not found: apps may run letterboxed\n");
+		return;
+	}
+	o_classic_from_types = method_getImplementation(m);
+	class_replaceMethod(c, sel, (IMP)classic_none, method_getTypeEncoding(m));
+	say("hakios: classic: SpringBoard's classic mode (letterboxing) off for every app (%s)\n", method_getTypeEncoding(m));
+}
+
+static void
+bt_watch(int round)
+{
+	cc_bt_hook();
+	if (round == 0) {
+		idle_watch(0);
+	}
+	static char last[160];
+	char line[160];
+	Class bm = objc_getClass("BluetoothManager");
+
+	if (bm == Nil) {
+		dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
+		bm = objc_getClass("BluetoothManager");
+	}
+	id m = bm != Nil ? ((id (*)(Class, SEL))objc_msgSend)(bm, sel_registerName("sharedInstance")) : nil;
+
+	if (m == nil) {
+		snprintf(line, sizeof(line), "no BluetoothManager (%s)", bm == Nil ? "no class" : "no shared instance");
+	} else {
+		SEL av = sel_registerName("available"), en = sel_registerName("enabled"), pw = sel_registerName("powered"),
+		    st = sel_registerName("bluetoothState");
+		int a = class_respondsToSelector(object_getClass(m), av) ? ((BOOL (*)(id, SEL))objc_msgSend)(m, av) : -1;
+		int e = class_respondsToSelector(object_getClass(m), en) ? ((BOOL (*)(id, SEL))objc_msgSend)(m, en) : -1;
+		int p = class_respondsToSelector(object_getClass(m), pw) ? ((BOOL (*)(id, SEL))objc_msgSend)(m, pw) : -1;
+		long t = class_respondsToSelector(object_getClass(m), st) ? ((long (*)(id, SEL))objc_msgSend)(m, st) : -1;
+
+		snprintf(line, sizeof(line), "available %d, enabled %d, powered %d, state %ld", a, e, p, t);
+	}
+	if (round == 0 || round % 10 == 0 || strcmp(line, last) != 0) {
+		say("hakios: bluetooth: BluetoothManager in SpringBoard: %s\n", line);
+		/*
+		 * Control Center's Bluetooth button stayed grey for a whole run (step 95) while BluetoothManager here said available:
+		 * it asked at boot, when BluetoothManager was not available yet (available 0 for the first seconds), and was not told
+		 * of the change; it came alive in step 91 only after a switch in Settings. When it becomes available, its own
+		 * notifications are posted again (what its observers are told on a real change).
+		 */
+		if (m != nil && strncmp(line, "available 1", 11) == 0 && strncmp(last, "available 1", 11) != 0) {
+			Class nc = objc_getClass("NSNotificationCenter");
+			id center = nc != Nil ? ((id (*)(Class, SEL))objc_msgSend)(nc, sel_registerName("defaultCenter")) : nil;
+			SEL post = sel_registerName("postNotificationName:object:");
+
+			if (center != nil) {
+				((void (*)(id, SEL, id, id))objc_msgSend)(center, post, (id)CFSTR("BluetoothAvailabilityChangedNotification"), m);
+				((void (*)(id, SEL, id, id))objc_msgSend)(center, post, (id)CFSTR("BluetoothPowerChangedNotification"), m);
+				((void (*)(id, SEL, id, id))objc_msgSend)(center, post, (id)CFSTR("BluetoothStateChangedNotification"), m);
+				say("hakios: bluetooth: BluetoothManager available now: its availability, power and state notifications posted "
+				    "again for Control Center\n");
+			}
+		}
+		strlcpy(last, line, sizeof(last));
+	}
+	if (round < 400) {
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+			bt_watch(round + 1);
+		});
+	}
 }
 
 /* ---- the lock screen's clock without a GPU ------------------------------------------------------- */
@@ -2408,6 +2923,8 @@ static void (*bks_brightness_set)(float level, long unknown);
 static id brightness_client;            /* a BrightnessSystemClient, when BackBoardServices has not the function */
 static dispatch_queue_t brightness_queue;
 static int brightness_blanked_token = NOTIFY_TOKEN_INVALID;
+static bool panel_blank_on;             /* boot-arg panel_blank=1: the panel's output off while the screen is blanked */
+static int panel_blanked;               /* what kern.hakios.display was last given: 1 off, 0 on */
 /* on brightness_queue only: */
 static int brightness_written = -2, brightness_said = -2, brightness_writes, brightness_calls;
 static float brightness_value = -1, brightness_polled = -2;
@@ -2466,6 +2983,15 @@ brightness_push(void)
 	if (brightness_blanked_token != NOTIFY_TOKEN_INVALID &&
 	    notify_get_state(brightness_blanked_token, &state) == NOTIFY_STATUS_OK && state != 0) {
 		blanked = 1;
+	}
+	if (panel_blank_on && brightness_blanked_token != NOTIFY_TOKEN_INVALID && blanked != panel_blanked) {
+		int on = blanked ? 0 : 1;
+		int display_error = sysctlbyname("kern.hakios.display", NULL, NULL, &on, sizeof(on)) == 0 ? 0 : errno;
+
+		say("hakios: brightness: panel_blank=1: the screen %s: kern.hakios.display=%d %s%s%s\n", blanked ? "is blanked" :
+		    "is back", on, display_error == 0 ? "written" : "refused (", display_error == 0 ? "" : strerror(display_error),
+		    display_error == 0 ? "" : ")");
+		panel_blanked = blanked;        /* (also when refused: not asked again at every tick) */
 	}
 	level = blanked ? 0 : BRIGHTNESS_FLOOR + (int)((255 - BRIGHTNESS_FLOOR) * value * value + 0.5f);
 	if (!blanked && level < BRIGHTNESS_FLOOR) {
@@ -3297,7 +3823,12 @@ brightness_bridge(const char *arguments)
 	while (arg != NULL && arg != arguments && arg[-1] != ' ') {
 		arg = strstr(arg + 1, "brightness_bridge=");
 	}
-	if (arg == NULL || (mode = atoi(arg + 18)) <= 0) {
+	/* the Note9's boot line has no room: there brightness_bridge=2 and panel_blank=1 are the defaults (=0 turns each off) */
+	bool note9 = strstr(arguments, "loader_platform=crownlte") != NULL;
+
+	if (arg == NULL && note9) {
+		mode = 2;
+	} else if (arg == NULL || (mode = atoi(arg + 18)) <= 0) {
 		return;
 	}
 	library = dlopen("/System/Library/PrivateFrameworks/BackBoardServices.framework/BackBoardServices", RTLD_LAZY);
@@ -3312,6 +3843,7 @@ brightness_bridge(const char *arguments)
 			    sel_registerName("alloc")), sel_registerName("init"));
 		}
 	}
+	panel_blank_on = strstr(arguments, "panel_blank=1") != NULL || (note9 && strstr(arguments, "panel_blank=0") == NULL);
 	if (mode >= 2 && notify_register_check("com.apple.springboard.hasBlankedScreen", &brightness_blanked_token) !=
 	    NOTIFY_STATUS_OK) {
 		brightness_blanked_token = NOTIFY_TOKEN_INVALID;
@@ -3932,6 +4464,8 @@ hakios_springboard_init(void)
 	 * we are past UIApplication startup).
 	 */
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+		classic_hook();
+		viewservice_hook();
 		Class uidev = objc_getClass("UIDevice");
 		SEL current = sel_registerName("currentDevice");
 		SEL monitoring = sel_registerName("setBatteryMonitoringEnabled:");
@@ -3953,6 +4487,9 @@ hakios_springboard_init(void)
 		    sysctl_int("kern.hakios.battery_soc"), sysctl_int("kern.hakios.battery_present"),
 		    sysctl_int("kern.hakios.battery_charger_present"), sysctl_int("kern.hakios.battery_charging"));
 		battery_post_notifications();
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+			bt_watch(0);
+		});
 	});
 	notify_register_dispatch("com.hakios.unlock", &token, dispatch_get_main_queue(), ^(__unused int t) {
 		unlock();

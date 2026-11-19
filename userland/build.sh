@@ -227,8 +227,8 @@ SILEO_BIN="chmod cp mkdir mv rm"
 INJECT=${INJECT-"/redwood/lib/libhakios.dylib backboardd containermanagerd containermanagerd_system
 /redwood/lib/libhakios.sb.dylib SpringBoard MobilePhone InCallService
 /redwood/lib/libhakios.media.dylib mediaserverd
-/redwood/lib/libhakios.app.dylib Sileo
-/redwood/lib/libhakios.tweaks.dylib Preferences
+/redwood/lib/libhakios.app.dylib Sileo Instagram YouTube
+/redwood/lib/libhakios.tweaks.dylib Preferences installd
 /redwood/lib/libhakios.locationd.dylib locationd"}
 [ -n "$BT" ] && INJECT="$INJECT
 /redwood/lib/libhakios.bluetool.dylib BlueTool
@@ -375,6 +375,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -framework IOKit -o obj/mali_test src/mali_test.c
 		# which processes take the processors, every few seconds (src/cputop.c; rc.jobs.cputop)
 		$DYN -o obj/cputop src/cputop.c
+		# why /private/var is or is not the kept volume (src/var_check.c; rc.jobs.usage)
+		$DYN -o obj/var_check src/var_check.c
 		# the kept data volume to the flash every few seconds: the phone is reset, never shut down (src/var_sync.c)
 		$DYN -o obj/var_sync src/var_sync.c
 		# the device's name as the computer name, which lockdownd would write: bluetoothd's name, Bonjour's (src/devname.c)
@@ -498,11 +500,11 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			-o obj/libhakios.sb.dylib src/inject_sb.c
 		# ... the tweak loader of the package manager's prefix (src/inject_tweaks.c): it goes into a
 		# program either as the one library the kernel inserts or opened by a library of ours
-		$DYN -dynamiclib -install_name /redwood/lib/libhakios.tweaks.dylib -framework CoreFoundation -lobjc \
+		$DYN -dynamiclib -install_name /redwood/lib/libhakios.tweaks.dylib -framework CoreFoundation -lobjc -lMobileGestalt \
 			-o obj/libhakios.tweaks.dylib src/inject_tweaks.c
 		# ... and inside an application, to say what killed it (src/inject_app.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.app.dylib -lobjc \
-			-o obj/libhakios.app.dylib src/inject_app.c
+			-framework Security -framework CoreFoundation -o obj/libhakios.app.dylib src/inject_app.c
 		# ... and inside BlueTool, so that it runs the Galaxy S9's Bluetooth scripts (BT=1, src/inject_bluetool.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.bluetool.dylib -framework CoreFoundation -lMobileGestalt \
 			-o obj/libhakios.bluetool.dylib src/inject_bluetool.c
@@ -513,8 +515,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.bluetoothd.dylib \
 			-o obj/libhakios.bluetoothd.dylib src/inject_bluetoothd.c
 		$DYN -O2 -dynamiclib -install_name /redwood/lib/libhakios.media.dylib -framework CoreFoundation -framework CoreMedia \
-			-framework CoreVideo -framework IOSurface -lobjc \
-			-o obj/libhakios.media.dylib src/inject_media.c src/camera_device.c src/camera_say.c src/camera_isp.c src/mfc_decoder.c
+			-framework CoreVideo -framework IOSurface -framework VideoToolbox -lobjc \
+			-o obj/libhakios.media.dylib src/inject_media.c src/camera_device.c src/camera_say.c src/camera_isp.c src/mfc_decoder.c src/mfc_encoder.c
 		# the output device of the audio server: a plug-in for CoreAudio's HAL
 		$DYN -bundle -framework CoreFoundation -o obj/HakiosAudio src/audio_plugin.c
 		# the plug-in Metal loads when the kernel names it (boot-arg metal=1): a device, its buffers and the libraries it reads
@@ -686,6 +688,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/passcoded ] && cp obj/passcoded root/bin/
 	[ -f obj/telephonyd ] && cp obj/telephonyd root/bin/
 	[ -f obj/cputop ] && cp obj/cputop root/bin/
+	[ -f obj/var_check ] && cp obj/var_check root/bin/
 	[ -f obj/var_sync ] && cp obj/var_sync root/bin/
 	[ -f obj/devname ] && cp obj/devname root/bin/
 	[ -f obj/poster_retry ] && cp obj/poster_retry root/bin/
