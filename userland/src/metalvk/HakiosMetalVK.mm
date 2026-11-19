@@ -475,6 +475,45 @@ forwardProtocol(Protocol *protocol)
 	free(taken);
 }
 
+/*
+ * What newer apps ask a device that neither this frontend nor iOS 16.5's _MTLDevice answers (merge round 4, 19 November 2026:
+ * Instagram, built with SDK 27, ended on "-[HakiosMetalDevice recommendedMaxWorkingSetSize]: unrecognized selector"). The
+ * answers are a unified-memory phone's: the working set a third of the RAM, nothing allocated counted, no transfer rate.
+ * Added only where the class has no method of the name (class_addMethod refuses a second).
+ */
+static uint64_t
+deviceRecommendedMaxWorkingSetSize(id self, SEL cmd)
+{
+	(void)self;
+	(void)cmd;
+	return [NSProcessInfo processInfo].physicalMemory / 3;
+}
+
+static uint64_t
+deviceZero64(id self, SEL cmd)
+{
+	(void)self;
+	(void)cmd;
+	return 0;
+}
+
+static BOOL
+deviceYes(id self, SEL cmd)
+{
+	(void)self;
+	(void)cmd;
+	return YES;
+}
+
+static void
+addMissingAnswers(Class c)
+{
+	class_addMethod(c, sel_registerName("recommendedMaxWorkingSetSize"), (IMP)deviceRecommendedMaxWorkingSetSize, "Q16@0:8");
+	class_addMethod(c, sel_registerName("currentAllocatedSize"), (IMP)deviceZero64, "Q16@0:8");
+	class_addMethod(c, sel_registerName("maxTransferRate"), (IMP)deviceZero64, "Q16@0:8");
+	class_addMethod(c, sel_registerName("hasUnifiedMemory"), (IMP)deviceYes, "B16@0:8");
+}
+
 __attribute__((constructor)) static void
 registerDevice(void)
 {
@@ -507,6 +546,7 @@ registerDevice(void)
 	forwardProtocol(@protocol(MTLDevice));
 	forwardProtocol(spi);
 	forwardBaseMethods();
+	addMissingAnswers(gClass);
 	objc_registerClassPair(gClass);
 	say("the class HakiosMetalDevice is registered (Metal on Vulkan, opened at first use; %u of _MTLDevice's methods forwarded "
 	    "until then)", gForwardedCount);

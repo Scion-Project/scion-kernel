@@ -13,6 +13,7 @@
 #include <mach/mach_time.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/sysctl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -137,6 +138,27 @@ main(int argc, char **argv)
 				}
 				proc_name(shares[i].pid, name, sizeof(name));
 				printf(" %s[%d] %.0f%%", name, shares[i].pid, percent);
+				/*
+				 * A process that keeps a core or more busy for three looks in a row (mediaserverd at 84-140 % during
+				 * YouTube with the MFC decoding, 19 November 2026): its threads' user stacks into the kernel's log
+				 * (kern.hakios.ustacks), three times a run at the most, a minute apart.
+				 */
+				if (i == 0) {
+					static char hot[64];
+					static unsigned hot_looks, dumps;
+					static uint64_t dumped_at;
+
+					hot_looks = percent >= 80 && strcmp(name, hot) == 0 ? hot_looks + 1 : percent >= 80 ? 1 : 0;
+					strlcpy(hot, name, sizeof(hot));
+					if (hot_looks >= 3 && dumps < 3 && (dumped_at == 0 || (at - dumped_at) * timebase.numer / timebase.denom > 60000000000ull)) {
+						if (sysctlbyname("kern.hakios.ustacks", NULL, NULL, name, strlen(name)) == 0) {
+							dumps++;
+							dumped_at = at;
+							printf(" (its stacks to the log)");
+						}
+						hot_looks = 0;
+					}
+				}
 				shown++;
 			}
 			printf("\n");
