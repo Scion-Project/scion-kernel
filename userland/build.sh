@@ -504,7 +504,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			-o obj/libhakios.tweaks.dylib src/inject_tweaks.c
 		# ... and inside an application, to say what killed it (src/inject_app.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.app.dylib -lobjc \
-			-framework Security -framework CoreFoundation -framework Foundation -o obj/libhakios.app.dylib src/inject_app.c
+			-framework Security -framework CoreFoundation -framework Foundation -framework CoreMedia -framework VideoToolbox -o obj/libhakios.app.dylib src/inject_app.c
 		# ... and inside BlueTool, so that it runs the Galaxy S9's Bluetooth scripts (BT=1, src/inject_bluetool.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.bluetool.dylib -framework CoreFoundation -lMobileGestalt \
 			-o obj/libhakios.bluetool.dylib src/inject_bluetool.c

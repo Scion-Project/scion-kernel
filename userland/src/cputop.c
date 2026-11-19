@@ -21,6 +21,14 @@
 /* libproc's, which the iPhoneOS SDK does not declare (XNU's bsd/sys/proc_info.h, libsyscall/wrappers/libproc) */
 #define PROC_ALL_PIDS           1
 #define PROC_PIDTASKINFO        4
+#define PROC_PIDLISTTHREADS     6
+#define PROC_PIDTHREADINFO      5
+struct proc_threadinfo {
+	uint64_t pth_user_time;         /* nanoseconds */
+	uint64_t pth_system_time;
+	int32_t pth_cpu_usage, pth_policy, pth_run_state, pth_flags, pth_sleep_time, pth_curpri, pth_priority, pth_maxpriority;
+	char pth_name[64];
+};
 struct proc_taskinfo {
 	uint64_t pti_virtual_size;
 	uint64_t pti_resident_size;
@@ -82,6 +90,69 @@ time_before(int pid, int *found)
 	return 0;
 }
 
+/*
+ * The busiest threads of one process, by name: how much of a core each took since the last time it was asked for this process
+ * (proc_pidinfo's PROC_PIDTHREADINFO: pth_user_time + pth_system_time, nanoseconds; pth_name, the thread's own name). For a process
+ * that keeps a core busy (merge round 5: mediaserverd at 40-140 % while YouTube plays with the MFC decoding; the kernel's ustacks
+ * printed nothing), what it is doing shows in its threads' names: the video queue, a pixel transfer, a render thread.
+ */
+static void
+threads_of(int pid, uint64_t span_ns)
+{
+	static uint64_t ids[512], before[512];
+	static int last_pid;
+	static unsigned have;
+	uint64_t tids[512];
+	int bytes = proc_pidinfo(pid, PROC_PIDLISTTHREADS, 0, tids, sizeof(tids));
+	struct { char name[64]; double percent; } top[6];
+	unsigned n = bytes > 0 ? (unsigned)bytes / sizeof(uint64_t) : 0, shown = 0;
+	uint64_t now[512];
+
+	memset(top, 0, sizeof(top));
+	if (pid != last_pid) {
+		have = 0;
+		last_pid = pid;
+	}
+	for (unsigned i = 0; i < n && i < 512; i++) {
+		struct proc_threadinfo info;
+		uint64_t then = 0;
+
+		now[i] = 0;
+		if (proc_pidinfo(pid, PROC_PIDTHREADINFO, tids[i], &info, sizeof(info)) != sizeof(info)) {
+			continue;
+		}
+		now[i] = info.pth_user_time + info.pth_system_time;
+		for (unsigned k = 0; k < have; k++) {
+			if (ids[k] == tids[i]) {
+				then = before[k];
+				break;
+			}
+		}
+		double percent = have != 0 && span_ns != 0 && now[i] > then ? 100.0 * (double)(now[i] - then) / (double)span_ns : 0;
+
+		for (unsigned t = 0; t < 6; t++) {
+			if (percent > top[t].percent) {
+				memmove(&top[t + 1], &top[t], sizeof(top[0]) * (5 - t));
+				strlcpy(top[t].name, info.pth_name[0] ? info.pth_name : "(no name)", sizeof(top[t].name));
+				top[t].percent = percent;
+				break;
+			}
+		}
+	}
+	if (have != 0) {
+		printf("cputop: threads of %d:", pid);
+		for (unsigned t = 0; t < 6 && top[t].percent >= 2; t++, shown++) {
+			printf(" '%s' %.0f%%", top[t].name, top[t].percent);
+		}
+		printf("%s\n", shown == 0 ? " none above 2%" : "");
+	}
+	for (unsigned i = 0; i < n && i < 512; i++) {
+		ids[i] = tids[i];
+		before[i] = now[i];
+	}
+	have = n < 512 ? n : 512;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -97,7 +168,7 @@ main(int argc, char **argv)
 	mach_timebase_info(&timebase);
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	for (unsigned look = 0; looks == 0 || look <= looks; look++) {
-		int bytes = proc_listpids(PROC_ALL_PIDS, 0, pids, sizeof(pids)), count = 0, shown = 0;
+		int bytes = proc_listpids(PROC_ALL_PIDS, 0, pids, sizeof(pids)), count = 0, shown = 0, hot_pid = 0;
 		uint64_t at = mach_absolute_time(), all = 0;
 
 		for (int i = 0; i < bytes / (int)sizeof(int) && count < MAX_PROCS; i++) {
@@ -143,6 +214,10 @@ main(int argc, char **argv)
 				 * YouTube with the MFC decoding, 19 November 2026): its threads' user stacks into the kernel's log
 				 * (kern.hakios.ustacks), three times a run at the most, a minute apart.
 				 */
+				if (i == 0 && percent >= 30) {
+					/* (its threads, below the line) */
+					hot_pid = shares[i].pid;
+				}
 				if (i == 0) {
 					static char hot[64];
 					static unsigned hot_looks, dumps;
@@ -162,6 +237,9 @@ main(int argc, char **argv)
 				shown++;
 			}
 			printf("\n");
+			if (hot_pid > 0) {
+				threads_of(hot_pid, (at - before) * timebase.numer / timebase.denom);
+			}
 		}
 		memcpy(last, now, sizeof(now[0]) * (size_t)count);
 		last_count = count;

@@ -16,6 +16,7 @@
 #include <execinfo.h>
 #include <dlfcn.h>
 #include <Security/Security.h>
+#include <CoreMedia/CoreMedia.h>
 #include <sys/types.h>
 #include <sys/ucontext.h>
 #include <mach/mach.h>
@@ -560,6 +561,67 @@ watched_error_init(id self, SEL cmd, id domain, long code, id info)
 	}
 	return made;
 }
+
+/*
+ * Which codecs an app asks VideoToolbox about, and which it decodes (19 November: YouTube plays H.264 through the MFC; would
+ * it take VP9 if VideoToolbox said VP9 had hardware?): every VTIsHardwareDecodeSupported and its answer, every decompression
+ * session made and its codec and size. Said for the first 40 of each.
+ */
+extern Boolean VTIsHardwareDecodeSupported(uint32_t codecType);
+extern OSStatus VTDecompressionSessionCreate(CFAllocatorRef allocator, CMVideoFormatDescriptionRef format, CFDictionaryRef spec,
+    CFDictionaryRef attributes, const void *callback, void *session);
+
+static void
+fourcc(uint32_t c, char out[5])
+{
+	for (int i = 0; i < 4; i++) {
+		char ch = (char)(c >> (24 - 8 * i));
+		out[i] = ch >= 32 && ch < 127 ? ch : '?';
+	}
+	out[4] = 0;
+}
+
+static Boolean
+watched_hw_supported(uint32_t codec)
+{
+	static unsigned said;
+	Boolean yes = VTIsHardwareDecodeSupported(codec);
+
+	if (said++ < 40) {
+		char line[160], f[5];
+
+		fourcc(codec, f);
+		int n = snprintf(line, sizeof(line), "hakios: %s: VTIsHardwareDecodeSupported('%s') -> %s\n", who, f, yes ? "yes" : "no");
+		say(line, (size_t)n);
+	}
+	return yes;
+}
+
+static OSStatus
+watched_session_create(CFAllocatorRef allocator, CMVideoFormatDescriptionRef format, CFDictionaryRef spec, CFDictionaryRef attributes,
+    const void *callback, void *session)
+{
+	static unsigned said;
+	OSStatus status = VTDecompressionSessionCreate(allocator, format, spec, attributes, callback, session);
+
+	if (said++ < 40) {
+		char line[200], f[5];
+		CMVideoDimensions d = format != NULL ? CMVideoFormatDescriptionGetDimensions(format) : (CMVideoDimensions){ 0, 0 };
+
+		fourcc(format != NULL ? CMFormatDescriptionGetMediaSubType(format) : 0, f);
+		int n = snprintf(line, sizeof(line), "hakios: %s: VTDecompressionSessionCreate '%s' %dx%d -> %d\n", who, f, d.width,
+		    d.height, (int)status);
+		say(line, (size_t)n);
+	}
+	return status;
+}
+
+__attribute__((used)) static struct {
+	const void *ours, *theirs;
+} vt_interpose[] __attribute__((section("__DATA,__interpose"))) = {
+	{ (const void *)watched_hw_supported, (const void *)VTIsHardwareDecodeSupported },
+	{ (const void *)watched_session_create, (const void *)VTDecompressionSessionCreate },
+};
 
 __attribute__((used)) static struct {
 	const void *ours, *theirs;
