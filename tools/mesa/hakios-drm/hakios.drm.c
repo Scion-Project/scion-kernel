@@ -172,6 +172,7 @@ static void forget_mapping(uint32_t handle);
 static void forget_surface_handle(uint32_t handle);
 static int wait_buffer(struct drm_panfrost_wait_bo *request);
 static bool pan_syncobj_ioctl(unsigned number, void *arg, int *error);
+int pan_drmSyncobjExportSyncFile(int fd, uint32_t handle, int *sync_file_fd);    /* (used before it is defined, below) */
 
 int
 drmIoctl(int fd, unsigned long request, void *arg)
