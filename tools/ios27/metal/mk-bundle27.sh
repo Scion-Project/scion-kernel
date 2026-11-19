@@ -14,7 +14,7 @@ rm -rf "$B" && mkdir -p "$B" $W/sym $W/stage
 # the frontend and HotMetal2 are built from a copy with patches/frontend-dexr.diff, hotmetal2-diag.diff, frontend-flush.diff and
 # frontend-turned.diff, frontend-dexr-surfaces.diff, frontend-nocopy-diag.diff, frontend-passlog.diff and frontend-nocopy-readonly.diff applied, in that order (NOPATCH=1: as they are in tools/ios27/metal2)
 rm -rf $W/src27 && mkdir -p $W/src27/tools/ios27 && cp -R tools/ios27/metal2 $W/src27/tools/ios27/
-[ -n "${NOPATCH:-}" ] || for p in frontend-dexr hotmetal2-diag frontend-flush frontend-turned frontend-dexr-surfaces frontend-nocopy-diag frontend-passlog frontend-nocopy-readonly frontend-async-compile hotmetal2-shared-cache; do patch -s -p1 -d $W/src27 < tools/ios27/metal/patches/$p.diff || exit 1; done
+[ -n "${NOPATCH:-}" ] || for p in frontend-dexr hotmetal2-diag frontend-flush frontend-turned frontend-dexr-surfaces frontend-nocopy-diag frontend-passlog frontend-nocopy-readonly; do patch -s -p1 -d $W/src27 < tools/ios27/metal/patches/$p.diff || exit 1; done
 M2=$W/src27/tools/ios27/metal2
 # frontend-turned.diff includes TurnShaders.inc: tools/ios27/metal2/TurnShaders.metal (the pass that writes a turned texture into its
 # surface) compiled by the same Xcode's Metal compiler and held as bytes
