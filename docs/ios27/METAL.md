@@ -94,3 +94,42 @@ profile of the textured case the per-draw path is spread over the runtime (`draw
 thirds of `end_pass` for scissors that differ every draw (it marks the bin grid one tile at a time; a draw whose scissor
 covers the whole pass skips it, as most of CoreAnimation's main-pass draws should). The M1 runs this single-threaded code
 several times faster than the S9's M3 at 1794 MHz.
+
+## Shader compiles: off the UI, bounded, shared and warm (19 Nov 2026)
+
+What an iOS 27 boot on the S9 showed (phone 2, `con-xnu-boot-L4-1118-2103.log`): every Settings open compiled the same 24 522-NIR compute
+shader (250 224 bytes) for 24 to 28 s on one core with the GPU idle and the UI stalled; Preferences then began a fragment shader of 3 023
+NIR instructions that never ended (Preferences at 130 %, launchd at 40 %, for more than three minutes). The causes and what changed:
+
+| Cause | Change |
+|---|---|
+| PanVK compiled on the thread that asked for the pipeline, and the completion-handler `new...PipelineState` calls ran the compile on the caller too | `patches/frontend-async-compile.diff` + `metal2/CompileQueue.h` (second version, 20 Nov): the synchronous calls compile on the calling thread, every time, with no timeout, and return the pipeline or the compile's own error; the completion-handler calls return at once and compile on a worker (at most three at a time, FIFO, at the QoS of the caller), each handler called once; an asynchronous compile that failed after more than 10 s is not started again for 10 minutes. The rules and their host test: `tools/ios27/metal2/tests/run.sh` (also in CI) |
+| A compile with no end: Bifrost's register allocator spills a node (or, past four rounds, up to 32) per round and rebuilds the interference graph each time | `mesa26-panvk-compile-budget.patch`: `STARBITE_PANVK_COMPILE_BUDGET_MS` (default 90 000, 0 = none) is a budget of one compile in the compiling thread's CPU time (not wall time: a compile that only waits for a core is not a runaway); the allocator's rounds, its LCRA solve and its liveness loop check it and leave the compile by `longjmp`; the pipeline fails (`PANVK: ... abandoned after N ms (compile budget)` on the console) |
+| One cache directory per program (`/var/local/m2v-cache/<progname>`), so only backboardd's was ever filled, a sandboxed program fell back to its own caches directory, and Preferences or SpringBoard never saw what another had compiled | `patches/hotmetal2-shared-cache.diff`: one directory per user, `/var/local/m2v-cache/u<uid>` (the runtime's files are owner-only), for every process; `STARBITE_M2V_CACHE=/dir` (mtl2-env) names another |
+| The directory was made by the first process to run, with nobody to ship anything in it | `steps.d/81-m2v-cache.sh` makes `/var/local/m2v-cache` (0777), removes the per-program directories, and installs a warm cache (below) |
+
+**Why the first version was reverted (#397).** It timed the synchronous calls out after `STARBITE_M2V_COMPILE_TIMEOUT_MS` (5000) and
+failed them like a refused pipeline while the compile went on. On phone 2 (19 Nov, `con-xnu-boot-L6-1119-0030.log`) a cold cache made
+backboardd's first render pipelines take longer than that; QuartzCore treats any refused render pipeline as fatal ("Metal failed to
+build render pipeline"), backboardd aborted three times and launchd rebooted, twice. A synchronous Metal call cannot be answered "ask
+again later", so the second version has no timeout at all on that path (CompileQueue.h, rule 1). With the timeout set to 0 (boot
+`-0039.log`) nothing crashed but the screen stayed on the splash after six framebuffer swaps: the kernel's samples of that boot show
+backboardd idle (render server and IOMFB threads in `mach_msg`, no thread in a compile) and SpringBoard's main thread inside a
+synchronous XPC message to chronod (`-[CHSChronoServicesConnection _subscribeToExtensions]`) at 00:41:02 and 00:42:02, so SpringBoard
+committed nothing new; neither SpringBoard nor chronod had opened the Metal device. That stall is not explained by the frontend; the
+phone test of the second version (in its PR) samples chronod too (`sweetsample=`) in case it comes back.
+
+**A warm cache.** The runtime's entries are named by content: translated functions and pipelines under `v1/<build>/` (the build is the
+bridge library's), PanVK's pipeline data in the content directory beside them (named by the SPIR-V, the pipeline state and PanVK's cache
+UUID, `driver.rs`). PanVK itself cannot compile on the Mac for the Mali-G72 (it needs the kernel's GPU), so a warm cache is harvested from a
+phone: boot the bundle that will ship, open Settings, Display, Appearance (Liquid Glass), the app switcher and Control Center until the
+`PANVK: ... NIR instructions` lines stop, copy `/private/var/local/m2v-cache` off, run `tools/ios27/metal2/harvest-m2v-cache.sh PULLED`
+(it keeps the newest build directory and the content directory of each `u<uid>/`, into `tools/ios27/fullroot/warm-m2v`, which is not in git),
+and build the root: step 81 installs it, owner-only, owned by the uid. It holds for that bundle and that PanVK (about 33 MB); another
+build finds none of it and compiles as before.
+
+**Format 500 is `MTLPixelFormatYCBCR8_420_2P`** (metal2vulkan's `generated.rs`), not an unknown format: the runtime has it (`pixel_format_info.rs`,
+`bind/ycbcr_convert`, converted in the shader), and the frontend's texture over an IOSurface passes the surface's YCbCr matrix on. The
+`texture memory fmt 500` line is that path (`how` is "memory" for textures over an IOSurface or a buffer: they have no device upload, by
+design, so no `texture device` line follows), and nothing was refused. Why the reference image did not draw is not in that log: the pipelines that sample it may simply not have been made yet (the compute and
+fragment compiles above were still running), which the two changes above address; a phone run of the new bundle will say.

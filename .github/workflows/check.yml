@@ -64,6 +64,8 @@ jobs:
         run: bash tools/ios27/fullroot/firmware-test.sh
       - name: One iOS 27 root build at a time per work directory and per image (the lock, in a scratch directory)
         run: bash tools/ios27/fullroot/build-lock-test.sh
+      - name: "Metal frontend: a synchronous pipeline call always compiles and returns its result (no timeout refusal), completion handlers run on at most 3 workers, each once (host test of CompileQueue.h)"
+        run: sh tools/ios27/metal2/tests/run.sh
       - name: The backup tool only reads, copies exactly, and proves every copy
         run: python3 tools/backup-partitions-test.py
       - name: Saved var archives use the newest intact slot
