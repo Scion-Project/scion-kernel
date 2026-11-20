@@ -117,6 +117,42 @@ table_itself(void)
 	}
 }
 
+/*
+ * What bluetoothd's parser reads after the status of each answered reply, per iOS build (from the binaries' structure:
+ * every read asserts that its bytes are there; none checks that the reply ends after them). An ANSWER entry must give
+ * at least this many bytes for every build listed, or that build's bluetoothd aborts.
+ */
+static const struct {
+	uint16_t opcode;
+	const char *build;
+	unsigned need;
+} parser_reads[] = {
+	{ 0xFDDA, "24A446", 4 },
+	{ 0xFE3B, "24A446", 208 },      /* 48 x 32 + 8 x 16 bits */
+	{ 0xFE3B, "24B156", 212 },      /* 49 x 32 + 8 x 16 bits */
+};
+
+static void
+reply_lengths(void)
+{
+	for (size_t k = 0; k < sizeof(parser_reads) / sizeof(parser_reads[0]); k++) {
+		bool found = false;
+
+		for (size_t i = 0; i < sizeof(bt_vsc_table) / sizeof(bt_vsc_table[0]); i++) {
+			const struct bt_vsc_rule *r = &bt_vsc_table[i];
+
+			if (r->opcode != parser_reads[k].opcode || r->to != 0) {
+				continue;
+			}
+			found = true;
+			CHECK((unsigned)r->ret_len + r->zeros >= parser_reads[k].need,
+			    "%04x: %u bytes after the status, %s's bluetoothd reads %u", r->opcode, r->ret_len + r->zeros,
+			    parser_reads[k].build, parser_reads[k].need);
+		}
+		CHECK(found, "%04x (%s) has no ANSWER entry", parser_reads[k].opcode, parser_reads[k].build);
+	}
+}
+
 static void
 answers(void)
 {
@@ -166,7 +202,7 @@ answers(void)
 	CHECK(n == sizeof(other_rej) && memcmp(out, other_rej, n) == 0, "a vendor command not in the table: as it is");
 
 	{
-		/* 0xFE3B: 208 zero bytes after the status */
+		/* 0xFE3B: 212 zero bytes after the status (24B156's parser reads 212, 24A446's 208) */
 		static const uint8_t fe3b_cmd[] = { 0x01, 0x3b, 0xfe, 0x01, 0x01 };
 		static const uint8_t fe3b_rej[] = { 0x04, 0x0e, 0x04, 0x01, 0x3b, 0xfe, 0x01 };
 		bool zero = true;
@@ -176,7 +212,7 @@ answers(void)
 		for (size_t i = 7; i < n; i++) {
 			zero &= out[i] == 0;
 		}
-		CHECK(n == 7 + 208 && out[2] == 212 && out[6] == 0 && zero, "0xFE3B: status 00 and 208 zero bytes (%zu)", n);
+		CHECK(n == 7 + 212 && out[2] == 216 && out[6] == 0 && zero, "0xFE3B: status 00 and 212 zero bytes (%zu)", n);
 	}
 
 	/* commands split anywhere, replies a byte at a time: the same */
@@ -396,6 +432,7 @@ int
 main(void)
 {
 	table_itself();
+	reply_lengths();
 	answers();
 	translations();
 	untouched();
