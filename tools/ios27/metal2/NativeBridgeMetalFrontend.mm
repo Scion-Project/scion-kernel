@@ -74,6 +74,7 @@ static void noteFormat(uint32_t format,bool made) {
  for(unsigned i=0;i<gFormatCount;i++)if(gFormats[i]==format)return;
  if(gFormatCount<8)gFormats[gFormatCount++]=format;
 }
+#include "YCbCrTrace.h"
 static NSError *nbError(NSString *why) {
  return [NSError errorWithDomain:@"org.blu-sharky.native-metal" code:-1 userInfo:@{NSLocalizedDescriptionKey:why?:@"refused"}];
 }
@@ -932,6 +933,7 @@ static void waitForResource(id resource) {
   [_commandBuffer.surfaces addObject:t];
   const MTLTextureUsage u=t.usage;
   if(!u || (u&MTLTextureUsageShaderWrite))[_commandBuffer.writtenSurfaces addObject:t];
+  if(sweetYCbCrFormat(t.descriptor.format))sweetYCbCrBound(object_getClassName(self),stage,index,t.descriptor.format,t.surface,t.surfacePlane);
  }
  [self check:nmb_encoder_set_texture(_handle,stage,texture?[(NBTexture *)texture handle]:nullptr,(uint32_t)index) what:"setTexture"];
 }
@@ -2260,6 +2262,7 @@ static uint64_t askAnswer(SEL cmd,NSUInteger arg);
  NBTexture *texture=[NBTexture new];texture.handle=handle;nmb_texture_describe(handle,&descriptor);texture.descriptor=descriptor;
  texture.buffer=buffer;texture.offset=(NSUInteger)offset;texture.rowBytes=(NSUInteger)rowBytes;
  texture.surface=(IOSurfaceRef)CFRetain(surface);texture.surfacePlane=plane;
+ if(sweetYCbCrFormat(descriptor.format))sweetYCbCrMade(descriptor.format,surface,plane);
  return (id<MTLTexture>)texture;
 }
 - (id<MTLLibrary>)newLibraryWithData:(dispatch_data_t)data error:(NSError **)error {
