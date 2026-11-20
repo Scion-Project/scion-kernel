@@ -1,6 +1,6 @@
 diff -ru a/src/panfrost/compiler/bifrost/bi_ra.c b/src/panfrost/compiler/bifrost/bi_ra.c
---- a/src/panfrost/compiler/bifrost/bi_ra.c	2026-11-18 21:34:48
-+++ b/src/panfrost/compiler/bifrost/bi_ra.c	2026-11-18 21:34:48
+--- a/src/panfrost/compiler/bifrost/bi_ra.c
++++ b/src/panfrost/compiler/bifrost/bi_ra.c
 @@ -7,6 +7,7 @@
  #include "bi_debug.h"
  #include "bi_builder.h"
@@ -39,9 +39,9 @@ diff -ru a/src/panfrost/compiler/bifrost/bi_ra.c b/src/panfrost/compiler/bifrost
  
        if (success) {
 diff -ru a/src/panfrost/compiler/pan_compiler.c b/src/panfrost/compiler/pan_compiler.c
---- a/src/panfrost/compiler/pan_compiler.c	2026-11-18 21:34:48
-+++ b/src/panfrost/compiler/pan_compiler.c	2026-11-18 21:34:48
-@@ -4,6 +4,28 @@
+--- a/src/panfrost/compiler/pan_compiler.c
++++ b/src/panfrost/compiler/pan_compiler.c
+@@ -4,6 +4,31 @@
   */
  
  #include "pan_compiler.h"
@@ -57,8 +57,11 @@ diff -ru a/src/panfrost/compiler/pan_compiler.c b/src/panfrost/compiler/pan_comp
 +   if (!pan_compile_abort_jmp || !pan_compile_deadline_ns)
 +      return;
 +
++   /* CPU time of this thread, not wall time: a compile that is only waiting for a core (a
++    * phone at 400 % with daemons, the worker on an A55) is not a runaway one and must not be
++    * abandoned; the caller may be backboardd, for which a failed render pipeline is fatal. */
 +   struct timespec t;
-+   clock_gettime(CLOCK_MONOTONIC, &t);
++   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
 +   uint64_t now = (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
 +   if (now > pan_compile_deadline_ns) {
 +      jmp_buf *target = pan_compile_abort_jmp;
@@ -71,8 +74,8 @@ diff -ru a/src/panfrost/compiler/pan_compiler.c b/src/panfrost/compiler/pan_comp
  
  #include "bifrost/bi_debug.h"
 diff -ru a/src/panfrost/compiler/pan_compiler.h b/src/panfrost/compiler/pan_compiler.h
---- a/src/panfrost/compiler/pan_compiler.h	2026-11-18 21:34:48
-+++ b/src/panfrost/compiler/pan_compiler.h	2026-11-18 21:34:48
+--- a/src/panfrost/compiler/pan_compiler.h
++++ b/src/panfrost/compiler/pan_compiler.h
 @@ -81,6 +81,23 @@
                          struct util_dynarray *binary,
                          struct pan_shader_info *info);
@@ -80,9 +83,9 @@ diff -ru a/src/panfrost/compiler/pan_compiler.h b/src/panfrost/compiler/pan_comp
 +#ifdef __APPLE__
 +#include <setjmp.h>
 +#include <stdint.h>
-+/* Starbite: a wall-clock budget for one compile on the calling thread. A caller that
++/* Starbite: a CPU-time budget for one compile on the calling thread. A caller that
 + * wants one (PanVK's panvk_compile_nir) sets pan_compile_abort_jmp and
-+ * pan_compile_deadline_ns (CLOCK_MONOTONIC, ns) around pan_shader_compile(); the register
++ * pan_compile_deadline_ns (CLOCK_THREAD_CPUTIME_ID, ns) around pan_shader_compile(); the register
 + * allocator, whose spill rounds are what a runaway compile is made of, calls
 + * PAN_COMPILE_CHECK() and past the deadline the compile is left by longjmp (what it
 + * allocated is lost: a few MB, once per abandoned shader). */
@@ -98,26 +101,31 @@ diff -ru a/src/panfrost/compiler/pan_compiler.h b/src/panfrost/compiler/pan_comp
  
  /* Any address with the top bit set is treated OOB by the hardware when
 diff -ru a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
---- a/src/panfrost/vulkan/panvk_vX_shader.c	2026-11-18 21:34:48
-+++ b/src/panfrost/vulkan/panvk_vX_shader.c	2026-11-18 21:34:48
-@@ -1060,8 +1060,44 @@
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -1060,8 +1060,49 @@
     clock_gettime(CLOCK_MONOTONIC, &t0);
  #endif
     struct util_dynarray binary = UTIL_DYNARRAY_INIT;
 +#ifdef __APPLE__
-+   /* Starbite: a compile that runs past STARBITE_PANVK_COMPILE_BUDGET_MS (default 90 s, 0
-+    * for none) is abandoned and its pipeline fails like a refused one (an iOS 27 Preferences
-+    * fragment shader of 3023 NIR instructions never ended, the process at 130% for minutes).
-+    * The Metal frontend compiles on a worker and times its callers out, so what an abandoned
-+    * compile costs is the worker's CPU for the budget, once (the frontend does not retry a
-+    * pipeline that failed after 10 s for 10 minutes). */
++   /* Starbite: a compile that uses more than STARBITE_PANVK_COMPILE_BUDGET_MS (default 90 s,
++    * 0 for none) of its thread's CPU time is abandoned and its pipeline fails with a real
++    * compile error (an iOS 27 Preferences fragment shader of 3023 NIR instructions never
++    * ended, the process at 130% for minutes). CPU time, not wall time: the longest real
++    * compile seen (a 24522-NIR compute shader) took 25 s of CPU, and a compile that is only
++    * starved of a core keeps going. The Metal frontend runs synchronous creation calls on the
++    * caller's thread with no timeout (this error is what such a caller gets, after the
++    * budget) and completion-handler calls on a worker, where a pipeline that failed after
++    * 10 s is not retried for 10 minutes. */
 +   jmp_buf budget_jmp;
 +   {
 +      const char *benv = getenv("STARBITE_PANVK_COMPILE_BUDGET_MS");
 +      unsigned long budget_ms = benv ? strtoul(benv, NULL, 0) : 90000;
 +      if (budget_ms) {
-+         pan_compile_deadline_ns = (uint64_t)t0.tv_sec * 1000000000ull +
-+                                   (uint64_t)t0.tv_nsec + budget_ms * 1000000ull;
++         struct timespec c0;
++         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c0);
++         pan_compile_deadline_ns = (uint64_t)c0.tv_sec * 1000000000ull +
++                                   (uint64_t)c0.tv_nsec + budget_ms * 1000000ull;
 +         if (setjmp(budget_jmp)) {
 +            pan_compile_abort_jmp = NULL;
 +            pan_compile_deadline_ns = 0;
@@ -125,7 +133,7 @@ diff -ru a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_
 +            char msg[160];
 +            int fd = open("/dev/console", O_WRONLY | O_NOCTTY);
 +            int n = snprintf(msg, sizeof(msg),
-+                             "PANVK: %s shader %.60s abandoned after %lu ms (compile budget)\n",
++                             "PANVK: %s shader %.60s abandoned after %lu ms of CPU (compile budget)\n",
 +                             _mesa_shader_stage_to_string(nir->info.stage),
 +                             nir->info.name ? nir->info.name : "?", budget_ms);
 +            if (fd >= 0) {
