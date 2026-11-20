@@ -145,12 +145,16 @@ static const struct bt_vsc_rule bt_vsc_table[] = {
 	  "HDR Control off: done (this chip has no HDR, so it is off); HDR on stays refused" },
 	/*
 	 * 0xFE3B, LE Meta Get LP-Core Statistics (one byte; phone 1 sent 01): the counters of Apple's low-power scan core.
-	 * bluetoothd's parser reads them as 32- and 16-bit words, 48 and 8 of them at most (208 bytes), each asserting that
-	 * it is there; it was the last command refused before each restart on phone 1 (17 November). This chip has no LP
-	 * core, so every counter of it is zero: status 00 and 208 zero bytes. (BT_NO_SCAN_CORE=1 on the root should stop
-	 * bluetoothd asking.)
+	 * bluetoothd's parser (_BCM_LowPowerCoreStatsEventParser, bcm_vsc.c) reads them in order as 32- and 16-bit words,
+	 * each asserting that it is there ("ByteStream_NumReadBytesAvail(*pBs) >= 4" or ">= 2") and none checking that the
+	 * reply ends after them: iOS 27.0.1 (24A446) reads 48 and 8 of them (208 bytes); iOS 27.2.1 (24B156) reads 49 and 8
+	 * (43 x 32, 4 x 16, 2 x 32, 4 x 16, 4 x 32 bits: 212 bytes; its last check is at byte 208). 208 bytes made 24B156's
+	 * bluetoothd abort on that last check and restart, 15-17 times in 15 minutes (phone 2, 19 November). The reply is the
+	 * 212 bytes 24B156 reads, which is also "at least 208" for 24A446; more would only be bytes no parser reads. It was
+	 * the last command refused before each restart on phone 1 (17 November). This chip has no LP core, so every counter
+	 * of it is zero: status 00 and 212 zero bytes. (BT_NO_SCAN_CORE=1 on the root should stop bluetoothd asking.)
 	 */
-	{ 0xFE3B, BT_VSC_ANY, BT_VSC_ANY, 0x00, 0, { 0 }, 208, 0, NULL,
+	{ 0xFE3B, BT_VSC_ANY, BT_VSC_ANY, 0x00, 0, { 0 }, 212, 0, NULL,
 	  "LP-core statistics: all zero (this chip has no LP core)" },
 	/* bluetoothd restarts when this one is refused (phone 1, 17 November): above */
 	{ 0xFE37, BT_VSC_ANY, BT_VSC_ANY, 0, 0, { 0 }, 0, 0x200B, bt_vsc_x_scan_params,
