@@ -1,0 +1,31 @@
+--- a/tools/ios27/metal2/HotMetal2.mm	2026-11-18 21:32:59
++++ b/tools/ios27/metal2/HotMetal2.mm	2026-11-18 21:33:27
+@@ -212,11 +212,24 @@
+ 		setenv("PAN_I_WANT_A_BROKEN_VULKAN_DRIVER", "1", 1);
+ 		/* Bifrost v6 has most of Vulkan 1.2 as extensions but reports 1.0; metal2vulkan's floor is 1.2 */
+ 		setenv("MESA_VK_VERSION_OVERRIDE", "1.2", 0);
++		/*
++		 * One shader cache for every process of a user (not one per program): the translated shaders and PanVK's pipeline data are
++		 * named by their content, so Preferences, SpringBoard and backboardd find what the first of them compiled, and the cache
++		 * a root step ships warm (fullroot/steps.d/81-m2v-cache.sh) is the one they all read. The runtime's files are owner-only,
++		 * so the directory is the user's: /var/local/m2v-cache/u<uid>. STARBITE_M2V_CACHE (mtl2-env) names another directory.
++		 */
+ 		char cache[256];
+-		mkdir("/var/local/m2v-cache", 0777);
+-		chmod("/var/local/m2v-cache", 0777);
+-		snprintf(cache, sizeof(cache), "/var/local/m2v-cache/%s", getprogname());
+-		mkdir(cache, 0777);
++		{
++			const char *named = getenv("STARBITE_M2V_CACHE");
++			if (named && named[0] == '/') {
++				strlcpy(cache, named, sizeof(cache));
++			} else {
++				mkdir("/var/local/m2v-cache", 0777);
++				chmod("/var/local/m2v-cache", 0777);
++				snprintf(cache, sizeof(cache), "/var/local/m2v-cache/u%u", (unsigned)geteuid());
++			}
++			mkdir(cache, 0700);
++		}
+ 		if (access(cache, W_OK) != 0) {
+ 			/* a sandboxed process: its own caches directory */
+ 			char dir[256];
