@@ -84,11 +84,13 @@ fi
 export PATH=$B/venv/bin:$PATH
 
 # the compiler is the kernel's wrapper: it names the target (arm64-apple-ios) and the linker (ld64)
+# -D_DARWIN_C_SOURCE: flex 2.7 puts #define _POSIX_C_SOURCE 1 into its scanners (ir3_lexer.c), which hides
+# Darwin's Dl_info and dladdr() from util/disk_cache.h; with it, Darwin's headers keep their extensions visible.
 cat > cross.ini <<INI
 [binaries]
-c = ['$CC', '-arch', 'arm64', '-isysroot', '$SDK']
-cpp = ['$CC++', '-arch', 'arm64', '-isysroot', '$SDK', '-fuse-cxa-atexit', '-stdlib=libc++']
-objc = ['$CC', '-arch', 'arm64', '-isysroot', '$SDK']
+c = ['$CC', '-arch', 'arm64', '-isysroot', '$SDK', '-D_DARWIN_C_SOURCE']
+cpp = ['$CC++', '-arch', 'arm64', '-isysroot', '$SDK', '-D_DARWIN_C_SOURCE', '-fuse-cxa-atexit', '-stdlib=libc++']
+objc = ['$CC', '-arch', 'arm64', '-isysroot', '$SDK', '-D_DARWIN_C_SOURCE']
 ar = 'llvm-ar'
 ranlib = 'llvm-ranlib'
 strip = 'llvm-strip'
