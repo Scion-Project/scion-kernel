@@ -18,5 +18,7 @@ for a in "$@"; do
     *) args+=("$a");;
   esac
 done
+# newer clang releases make some old warnings errors by default (incompatible pointer types: a Class passed as
+# id, which Apple's clang allows); -w does not silence those, so they are turned back into warnings here.
 exec /usr/bin/$drv -include "$HB/../../hostinc/xnu_clang_compat.h" -target arm64-apple-ios${XNU_SDK_VERSION:-16.5} --ld-path="$HB/ld64" \
-  -w "${extra[@]}" "${args[@]}"
+  -w -Wno-error=incompatible-pointer-types "${extra[@]}" "${args[@]}"
