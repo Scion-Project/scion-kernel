@@ -835,7 +835,7 @@ pan_drmSyncobjWait(int fd, uint32_t *handles, unsigned count, int64_t timeout_ns
  * process; the kernel has none. True when NUMBER is one of them, with what it gave in ERROR (0 or
  * an errno). Panfrost's OpenGL ES uses libdrm's functions only.
  */
-int pan_drmSyncobjSignal(int fd, const uint32_t *handles, uint32_t count);
+int pan_drmSyncobjSignal(int fd, const uint32_t *handles, uint32_t count), pan_drmSyncobjExportSyncFile(int fd, uint32_t handle, int *sync_file_fd), pan_drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd);
 
 static bool
 pan_syncobj_ioctl(unsigned number, void *arg, int *error)
