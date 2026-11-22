@@ -436,6 +436,58 @@ What phone 1 showed with dylib `-28` (18 November, 24B156, rear camera, `cam_tra
   property as Apple's display does (`{PlaneBaseAlignmentLinear = 64}`); not done here, because every process reads that
   property (QuartzCore among them) and it is not the camera's to change. **`-30` not run on a phone** when this was written.
 
+### Dylib `-30` on the phone, and where the picture is lost (20 November, desk work)
+
+Phone 1 booted dylib `-30` on 18 November (15:39, rear camera, the line `c272m`: `cam_trace=1 cam_metal=1`; console
+`scion-phone1/evidence/cd-cam30-metal`, on the build Mac). Read from that console on 20 November, with no phone:
+
+- **Verified in the console.** cameracaptured did not abort. The preview pipeline was built and connected (`Preview Governor`
+  to `BWImageQueueSinkNode`), and every node on the path emitted: the source node's `Preview(PrimaryScaler)` 1504 x 1128
+  `420f`, the stitcher, `Preview Scaler`, `Preview Splitter`, `BWStreamingFilterNode` and `Assistive Overlay` 828 x 1702 `420f`,
+  each an IOSurface, about 8 a second, none dropped. The image queue sink rendered them (300 by 15:42:06) into its image queue
+  (`<CAImageQueue ...>`, fences on). At the sink's first sample backboardd made a texture of format 500 (`YCBCR8_420_2P`,
+  usage ShaderRead) of 828 x 1702 over the surface: `MTL2[57 backboardd]: native-metal: texture memory fmt 500 ...`. Neither
+  process logged a Metal refusal while the camera ran (backboardd had used 18 of its 64 lines, so a refusal would have
+  shown), and no `MISSING ... newSharedEventHandle` (a cross-process shared event, which the bridge does not have). Camera.app
+  logged `DidDisplayFirstPreviewFrame`. The screenshot of the viewfinder is pure black, (0, 0, 0) at every point.
+- **Inferred, not seen.** No second display layer: the framebuffer driver (`SweetFramebuffer.cpp`, the xnu fork) takes up to
+  four layers in a swap but draws only 4-byte (BGRA) surfaces, so a `420f` surface on a layer of its own would be dropped
+  without a line. The console has no `SWEET FB: layer N surface ... at` line (the driver says each position of a layer above
+  the first) and no new framebuffer call after the camera began, so the window server most likely composited the preview
+  with the GPU (hence the format 500 texture), not on a layer of the display. That swap log was used up before the camera
+  ran, so this is not verified.
+- **Inferred: the secure indicator does not blacken it.** iOS 27's CMCapture blackens or counts frames that its ISP marks
+  (`BWInvalidFramesChecker`, the frame metadata's `InvalidDueToNoSensorAccess` and `SensorAccess`). `camera_device.c`'s
+  frames carry neither, so the check sees valid frames. The console has no `blackened` line (CAMLOG takes these only when
+  they name the camera).
+- **Not checked by any trace: what the pictures hold.** The flow trace counts samples and says their size and format. Nothing
+  read a pixel. A zeroed `420f` picture would show green, not black (Y 0 with Cb and Cr 0 converts to green). A black one
+  is Y 0 or 16 with Cb and Cr 128. A YCbCr texture whose conversion never ran reads (0, 0, 0) with alpha 1. So pure black fits
+  three places equally well, and the console cannot tell them apart:
+  1. the pictures handed to the image queue are black (a node in cameracaptured, or its GPU writes not reaching the surfaces);
+  2. backboardd draws the image queue but its format 500 texture reads black (the conversion in metal2vulkan on PanVK, or the
+     surface's bytes as backboardd's GPU reads them);
+  3. backboardd never draws the image queue's surfaces (the layer not drawn, or not by a texture over them).
+
+**The trace that decides it** (this change; trace only, nothing else changes):
+- `camera_pixeltrace.c` (cam.dylib, cameracaptured, with `cam_trace=1`): for the 1st, 30th and 300th sample of every node
+  output, and of the image queue sink, the processor reads the picture through CoreVideo's read lock: a 16 x 16 grid of luma
+  and an 8 x 8 grid of chroma. It reads them once as the cache has them, and once after cleaning and invalidating the
+  picture's lines. Said: `trace: pixels: <node>'s output <name>, sample N: 828x1702 '420f' surface S: Y mean M least L most H,
+  K of 256 above black; Cb B Cr R` (and `; after the cache's clean: ...` where the two differ).
+- `tools/ios27/metal2/YCbCrTrace.h`, in `NativeBridgeMetalFrontend.mm` (StarbiteMetal, every Metal client, always on, at most
+  24 lines a process): the same grid, read in that process, when a two-plane YCbCr texture over an IOSurface is made and
+  when an encoder first binds a texture over each surface: `native-metal: ycbcr texture made: fmt 500 over surface S '420f'
+  828x1702 plane 0: Y mean ...` and
+  `native-metal: ycbcr texture bound (NBRenderEncoder, stage 2, slot N): ...`.
+
+How to read one boot with both: the first `trace: pixels:` line on the path whose grid is black names the node in
+cameracaptured (1). If the sink's pictures hold the room, backboardd's `ycbcr texture made` line for the same surface ID says
+whether its pages hold it too. No `ycbcr texture bound` line means the surface is never sampled (3). Bound, holding the
+picture, and still black on the screen means the conversion or the draw (2). Then the runtime's telemetry
+(`/var/local/mtl2-telemetry` present, the rows in `/var/local/mtl2.log`) is the next thing to read. `TEST-ON-PHONE.md` of
+the desk work (`~/s9/agents/camera-desk-1120` on the build Mac) has the steps. **Built, not run on a phone.**
+
 ### SpringBoard's main-display layout (18 November)
 
 `camera_sbtrace.c` on phone 1 (dylib `-16`, `-17`) shows that SpringBoard does publish its layout: the home screen, the lock

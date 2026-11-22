@@ -13,7 +13,8 @@
  *     stamp is from the host clock's now), and every 10 seconds how many each has emitted;
  *   - every node's dropped samples (the first five of each node, then every 300th), with their reason;
  *   - the preview stitcher's and the image queue sink's first sample, the sink's image queue (nil: nothing to show), and
- *     the sink's own dropped samples.
+ *     the sink's own dropped samples;
+ *   - what the pictures hold (camera_pixeltrace.c): each output's 1st, 30th and 300th sample and the image queue sink's.
  * Each method is wrapped only if the class itself has it with the number of arguments and return type of iOS 27.0.1's
  * CMCapture (24A446's shared cache, read 18 November 2026: names and types only); one that differs is left alone and said.
  * The source node's own output methods (_outputConfigurationForStreamingOutputID:nodeOutput: and its kin) are direct
@@ -168,10 +169,16 @@ scioncam_flow_emit(void *output_object, void *sample_buffer)
 	if (!scioncam_flow_on) {
 		return;
 	}
+	char where[160] = "";
+
 	pthread_mutex_lock(&flow_lock);
 	f = flow_of(output, &fresh);
 	if (f != NULL) {
 		f->emitted++;
+		if (scioncam_pixels_due(f->emitted)) {
+			snprintf(where, sizeof(where), "%s's output %s, sample %llu", f->node ? class_getName(f->node) : "?",
+			    f->output, (unsigned long long)f->emitted);
+		}
 	}
 	if (fresh) {
 		sample_of(sample_buffer, what, sizeof(what));
@@ -180,6 +187,9 @@ scioncam_flow_emit(void *output_object, void *sample_buffer)
 	}
 	summary(mach_absolute_time());
 	pthread_mutex_unlock(&flow_lock);
+	if (where[0] != '\0') {
+		scioncam_pixels(where, sample_buffer);       /* camera_pixeltrace.c: what the picture holds */
+	}
 }
 
 /* ---- the methods wrapped ------------------------------------------------------------------------------------------- */
@@ -229,6 +239,12 @@ w_iq_render(id self, SEL sel, void *sb, id input)
 	bool first = count == 0;
 
 	first_render(self, "the preview's image queue sink", sb, &count);
+	if (scioncam_pixels_due(count)) {
+		char where[80];
+
+		snprintf(where, sizeof(where), "the image queue sink's sample %llu", (unsigned long long)count);
+		scioncam_pixels(where, sb);     /* what the picture handed to the image queue holds */
+	}
 	((void (*)(id, SEL, void *, id))o_iq_render)(self, sel, sb, input);
 	if (first) {
 		char q[160];
