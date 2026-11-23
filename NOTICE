@@ -7,6 +7,9 @@ Where this tree comes from:
   it. The tree, the XNU patch, the loader, user space, tools and device layer started there; "Copyright (c) 2025-2026 the HakiOS
   authors" in LICENSE covers that work, under the licences by directory that LICENSE sets out. Scion's changes are under the same
   licences. The HakiOS authors' notices stay in the files they belong to.
+  From 22 November 2026 also commits of hakios-xnu-kernel's branch `common` (shimoku74 and the other HakiOS authors), ported
+  one by one under their authors' names: in hakios-metal/ (MIT, its LICENSE) and tools/apfs/ (MIT, as the NOTICE.md of
+  `common` sets for its tools/). docs/UPSTREAM-SYNC-2026-11-22.md lists them and what was left out.
 
 In the repository:
 
