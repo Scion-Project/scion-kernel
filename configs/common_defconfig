@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 766 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 767 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1063,7 +1063,7 @@ CONFIG_SOUND=4
 # CONFIG_VIRTIO_SOUND is not set
 
 #
-# Wi-Fi (50)
+# Wi-Fi (51)
 #
 
 # Wi-Fi: the radio, its driver, a connection (also fw-wifi/mac and fw-wifi/network) [needs fw-wifi/ from the phone]
@@ -1101,6 +1101,9 @@ CONFIG_WIFI=y
 
 # read by hakios.lx.c (kernel)
 # CONFIG_WIFI_DMA_AT is not set
+
+# read by lx_bus.c (kernel)
+# CONFIG_WIFI_ENDING is not set
 
 # with wifi=1: the network of fw/network is not joined at the start
 # CONFIG_WIFI_FILE is not set
