@@ -1,0 +1,2434 @@
+# Upstream sync, 22 November 2026: every commit of HakiOS's `common`
+
+One line per commit of oosexgang/hakios-xnu-kernel branch `common` (head `62e09f85`, 22 Nov 2026; 2380 commits
+that are not merges), grouped by the decision and its reason. [UPSTREAM-SYNC-2026-11-22.md](UPSTREAM-SYNC-2026-11-22.md)
+says how they were read. The grouping of the commits marked *not applicable* is by the files each one touches (the
+most of them in one area); it was made by a script (the area of each path), not by reading each commit.
+
+## taken (PR: hakios-metal, tools/apfs): ported (PR, mergeable) (7)
+
+- `4141e978` 2026-11-16 shimoku74: tools/apfs: an unused import, a sum that is always 0, an unused size
+- `81d9794f` 2026-11-16 shimoku74: tools/apfs/bench-qemu: the wait loop's counter is not used
+- `23429141` 2026-11-18 shimoku74: metal: an indirect draw's, an indirect dispatch's and a visibility result's offset bounded by subtraction, so a wrapping offset is refused, not rea...
+- `5d912e88` 2026-11-18 shimoku74: metal: an argument buffer member's offset bounded by subtraction too, so set.offset + member offset cannot wrap past the buffer and pass
+- `b38d5c99` 2026-11-18 shimoku74: metal: a deferred command buffer's job counter is shared, so a buffer freed inside its own completion handler on the deferrer's worker is not writt...
+- `d7d60957` 2026-11-18 shimoku74: apfs: a directory record whose name is empty or has a zero byte or a '/' in it is damage (the census walked into the directory it is in, without en...
+- `ea329fcb` 2026-11-18 shimoku74: metal: a wait that times out with the GPU neither finishing nor reset quarantines the command buffer's memory instead of returning its command BO, ...
+
+## ported, waiting (PR: licence, S9 test): ported (PR waiting: licence and S9 phone test) (23)
+
+- `b2c01c92` 2026-11-17 shimoku74: wifi: an earlier kernel's DSP shut down without stopping this kernel's driver, which closed the radio's registers before its start
+- `d0163e78` 2026-11-17 shimoku74: lx: the rings' thread stopped and the registers closed when the driver's start gives up
+- `07153a4a` 2026-11-18 shimoku74: camera: a photograph counted as given only when a buffer took it
+- `341c9eaf` 2026-11-18 shimoku74: init: a long root_apfs= device, a long name in a walked tree and a long var.skel line refused, not copied over the stack
+- `3df45a05` 2026-11-18 shimoku74: init: background jobs that have ended taken back before each command and while a list sleeps, not left as zombies
+- `4ce94d0d` 2026-11-18 shimoku74: wifi: a match for the radio's stream left by an earlier kernel is taken over and sent to fault, not matched twice; a DSP that gives up or a link be...
+- `54f5cbef` 2026-11-18 shimoku74: eagl: a texture from an IOSurface no bigger than the surface or its plane, and 32-bit pixel types read as such
+- `5cb4e74e` 2026-11-18 shimoku74: var_store: a directory with more names than the store holds fails the save, not saved as nothing over the good slot
+- `5e5e12f9` 2026-11-18 shimoku74: lx: delayed work queued by the ticker before it lets go of the lock, and timer_delete_sync() waits for a timer that fires
+- `70533e91` 2026-11-18 shimoku74: inject_app: the spawn log held to its line however long the arguments
+- `741b7010` 2026-11-18 shimoku74: camera: auto-exposure's gain held to the sensor's most, so the frames' gain is again what was asked
+- `7aecc355` 2026-11-18 shimoku74: camera: a stream finalized taken out of the streams' list the other one looks at
+- `9a02edfc` 2026-11-18 shimoku74: lx: synchronize_rcu() that gives up on readers still looking says so
+- `c57501fa` 2026-11-18 shimoku74: camera: every frame checked against the shape its buffer was sized for, sized anew when it changes
+- `dc1b071c` 2026-11-18 shimoku74: inject_sb: the layer dump held to its line, a gradient of many colours included
+- `e57d5e0d` 2026-11-18 shimoku74: lx: dma_alloc_coherent() of a page or more starts on a page, as Linux's does
+- `e6b95082` 2026-11-18 shimoku74: lx: destroy_workqueue() waits for the queue's work, and a queue that is full says so
+- `e6d02e58` 2026-11-18 shimoku74: var_store: files and directories opened without following a link, and the file saved the one that was looked at
+- `eb393582` 2026-11-18 shimoku74: tweaks: filters as Substrate's: Bundles against every loaded bundle, every kind given by default, Mode Any for one
+- `6f56ed92` 2026-11-19 shimoku74: inject_sb: the layer tree com.hakios.layers prints stops at a depth of 128 and says so (a deeper one, which any program could ask for, overflowed S...
+- `814ee95d` 2026-11-19 shimoku74: var_store: a save writes the slot not holding the newest GOOD archive: the newest slot is read through before the other is written (once, as var_st...
+- `9cebd473` 2026-11-19 shimoku74: lx_80211: the regulatory domain's two letters are printed only as printable ones (they may come from a beacon's country element through the firmwar...
+- `e1afe9aa` 2026-11-19 shimoku74: loader: a write to darwin is good only if the device's cache flush after it is (the flush's answer was thrown away, and a read back from the cache ...
+
+## waiting: conflicts with Scion's diverged copy: port after the licence decision (28)
+
+- `40048f59` 2026-11-16 shimoku74: kernel/deps/host/bin/iig: find to xargs by NUL
+- `0a22ae6e` 2026-11-17 shimoku74: lx_80211: a frame being acted on finished before the station and the interface are freed
+- `1a3a82cf` 2026-11-17 shimoku74: cputop: the line of the busiest processes said empty when none took time, not the stack's bytes
+- `206b0c5d` 2026-11-17 shimoku74: ufs: the partitions the block layer kept are the ones the service offers, a refusal names its number
+- `442e0573` 2026-11-17 shimoku74: lx: a frame Darwin sends counted against the station's leaving, as a received one is
+- `762a2497` 2026-11-17 shimoku74: loader: the identity from the payload, when it carries one
+- `edb67e2a` 2026-11-17 shimoku74: loader: the device tree held to its room, and the identity to half of it
+- `0e04210d` 2026-11-18 shimoku74: lx: a group key renewed under the same number replaces the old one instead of being disabled with it
+- `11f0ccba` 2026-11-18 shimoku74: init: the preferences a boot-arg writes are made new, never through a link restored from the last boot, and handed to mobile by their descriptor (P...
+- `315493a1` 2026-11-18 shimoku74: lx: a stop during the Wi-Fi driver's start waits for it or leaves it to take itself down, and only one caller takes the driver down (it could be fr...
+- `3a937079` 2026-11-18 shimoku74: inject: waitstack=sb says a long turn after SpringBoard's main thread runs again, not while it is stopped
+- `5b813eab` 2026-11-18 shimoku74: metal: a surface whose Buffer is being destroyed has its kernel handle taken over by the new wrap, not wrapped by a second Bo and closed twice
+- `5cfba6b0` 2026-11-18 shimoku74: the clock no longer starts in 1970 when nothing gives the time: the kernel starts it at its own build, and process 1 raises it to the newest time t...
+- `6f242b55` 2026-11-18 shimoku74: lx: a renewed group key copied as it came under the lock, not read by the work while the receive path writes it
+- `8d33595f` 2026-11-18 shimoku74: camera: a worker that ends by itself leaves the stream not running, and the next start makes another
+- `90ba7305` 2026-11-18 shimoku74: wifi: the WPA2 handshake keeps keys only from a message 3 that passed every check (a forged message 1 between the access point's no longer breaks t...
+- `93266210` 2026-11-18 shimoku74: injected libraries: backboardd's QuartzCore addresses are read only once one is checked against the 16.5 build (on 26/27 they were read blind), and...
+- `cb0e6648` 2026-11-18 shimoku74: camera (cameracaptured): a stream's start and stop are one at a time and the frame thread says its own end (two could run, or one outlive its strea...
+- `d4657f0b` 2026-11-18 shimoku74: init: dark=1 and btnolpcore=1 written after the data volume's store is restored, not before it is laid over them
+- `d7170b7f` 2026-11-18 shimoku74: metal: a command queue lives while its command buffers do and the device waits for its queues (a queue freed by its last completion joined its own ...
+- `e76c820a` 2026-11-18 shimoku74: var_store: an attribute named as the store's own access control list not taken from the file
+- `027b5563` 2026-11-19 shimoku74: lx_80211: an authentication answer counts only while authentication is waited for and an association response only while it is (an authentication s...
+- `062a3e30` 2026-11-19 shimoku74: inject: the main image's touch reader in backboardd (inject.c, libhakios.dylib) reads again after a signal, lets go of every finger and button held...
+- `45e0996a` 2026-11-19 shimoku74: var_store: a file's extended attributes are packed up to the count the load reads (4097 tiny ones on one file made every archive unloadable, and th...
+- `490ad345` 2026-11-19 shimoku74: lx: a delayed piece of work already pending, on its queue or waiting for its time, is left as it is and the answer is false, as Linux's (queued aga...
+- `756a74f0` 2026-11-19 shimoku74: camera device: the frame worker frees the sensor's tuning when it ends (each start leaked it), the kernel's EIO is final for the run (every request...
+- `984e334e` 2026-11-19 shimoku74: metal: a draw into another slice or depth layer of a texture begins a pass of its own, a texture's level past its last is its last, the varying lin...
+- `99fad635` 2026-11-19 shimoku74: audio plug-in: a volume of NaN is silence (it passed every clamp and reached the kernel as the loudest), starting the haptic actuator no longer res...
+
+## waiting: needs a decision: a var_store privacy fix (the keychain kept out of the saved /private/var) that also changes the keystore stand-in, which is SEP territory (1)
+
+- `f829a857` 2026-11-18 shimoku74: var_store: the keychain is kept out of the saved /private/var unless var_store_keychain=1 asks for it (its items reached the flash with a key anyon...
+
+## left out: Metal (hakios-metal, the Adreno driver) development: four of its fixes are taken (first group) and three wait (conflicts); the rest is left, as in the 18 Nov sync (193)
+
+- `85c8b55d` 2026-10-27 shimoku74: hakios_metal.h: the core as C for the plug-in (HakiosMetal.m): device, buffers, queue, command buffers with callbacks
+- `90061438` 2026-10-27 shimoku74: hakios-metal: Metal's command model on the Adreno through the kernel's GPU driver, in C++
+- `ce012aa4` 2026-10-27 shimoku74: hakios_metal_cb_fail: a blit the plug-in could not record ends its command buffer in the error state (20 tests)
+- `eb709d4b` 2026-10-27 shimoku74: Copies and fills in packets of 64 Ki words: 4 Mi words in one CP_MEMCPY hung the phone's GPU
+- `1689c385` 2026-10-28 vcvkk: The compute dispatch, as computerator does it, checked by the fake GPU for what holds together; on the phone it hangs
+- `73a970c3` 2026-10-28 vcvkk: The fake GPU fails as the kernel fails, and reads headers with arithmetic of its own
+- `816c2cea` 2026-10-28 vcvkk: The dispatch runs: the TIMESTAMP bit on the end-of-dispatch events was the hang
+- `84104605` 2026-10-28 vcvkk: compute: a constant buffer shorter than ir3's pushed range is fine while the range stays in the object's pages
+- `a5a465e9` 2026-10-28 vcvkk: The image's own kernels, compiled on the phone and run: the first of Apple's shaders through this driver
+- `e940a67b` 2026-10-28 vcvkk: hakios_metal.h: libraries, compiled kernels and dispatch, for the plug-in
+- `0b460c4d` 2026-10-29 vcvkk: fake_gpu: the texture block, 2D descriptors in both tables, sampler checks, and the descriptors read back for the tests
+- `0c59258c` 2026-10-29 vcvkk: command: cut draw tables and program words out of a few buffers
+- `13bebf13` 2026-10-29 vcvkk: compiler: read textures, images and samplers off the NIR into Kernel::textures, numTextureSlots and samplerMask
+- `19d62361` 2026-10-29 vcvkk: texture: MTLTextureUsageRenderTarget is taken, and the target's RB_MRT words are held to the 64x64 literals
+- `1cef08a0` 2026-10-29 vcvkk: texture: A8Unorm, R16Float, RG16Float and RG32Float
+- `21f6b6b5` 2026-10-29 vcvkk: c_api: mip levels, texture copies and generateMipmaps through the C interface
+- `222e06bf` 2026-10-29 vcvkk: render: stencil, the S8 plane of a Depth32Float_Stencil8 texture
+- `23e1ba45` 2026-10-29 vcvkk: render: device buffers in a draw through the 3D pipeline's IBO table
+- `2ec5290c` 2026-10-29 vcvkk: render: the contract for one draw of a triangle, before any of it runs
+- `3771d248` 2026-10-29 vcvkk: render: link, a port of ir3_link_shaders over the Stage tables, with the fixtures linked by hand
+- `37e5f3a3` 2026-10-29 vcvkk: render: blending and the write mask of colour attachment 0, and the blend colour
+- `4b91cde5` 2026-10-29 vcvkk: a6xx: the draw's opcodes, events, marker and enums
+- `4c48aaa0` 2026-10-29 vcvkk: texture, render: mip levels, a copy and a scaled copy by the 2D engine
+- `50a9ac39` 2026-10-29 vcvkk: C interface: a program of two stages, a texture with the render-target usage, and one draw of it
+- `5234d059` 2026-10-29 vcvkk: texture: Metal's private YCbCr8_420_2P over a two-plane IOSurface
+- `5b7a33ef` 2026-10-29 vcvkk: render: encode writes one sysmem draw group by group, and CommandBuffer::draw submits it as one pass
+- `5f0b0dee` 2026-10-29 vcvkk: render: a Depth32Float depth attachment, the depth test and write, its Clear and its flush
+- `61295ce5` 2026-10-29 vcvkk: render: indexed draws with Metal's primitive restart, instances and per-instance attributes
+- `79a8cbf8` 2026-10-29 vcvkk: compiler: specialise a module by the pipeline's function constants
+- `7ae5b76a` 2026-10-29 vcvkk: render: sampled textures in the fragment stage, through the FS_TEX tables and the prefetch
+- `8508d245` 2026-10-29 vcvkk: render: line lists and strips
+- `86033d9d` 2026-10-29 vcvkk: fake GPU: a draw is checked as a dispatch is, and every check has a twin it refuses
+- `87e8789e` 2026-10-29 vcvkk: render: bind the queue's null texture at the front end's reserved slot
+- `912650fa` 2026-10-29 vcvkk: compiler: compileStage and linkProgram, the vertex/fragment road beside the kernel's
+- `926b807d` 2026-10-29 vcvkk: render: the vertex stage's driver params, and a base instance
+- `933e6131` 2026-10-29 vcvkk: render: indexed constant buffers through UBO descriptors, the ldc path
+- `9be41d4b` 2026-10-29 vcvkk: a6xx: the draw's whole-register encoders, the float and guardband helpers, and the first triangle's words as tests
+- `b265ee7c` 2026-10-29 vcvkk: render: what CoreAnimation's widget passes need
+- `bc19f4c6` 2026-10-29 vcvkk: tests: compiler_test compares every tools/kernels/*.ll with its fixture, texture fields included
+- `be1de568` 2026-10-29 vcvkk: texture: Texture and Sampler over the contract, with Mesa's linear layout and Gallium's sampler words
+- `bff9289f` 2026-10-29 vcvkk: compute: the dispatch binds textures and samplers; images at IBO slots, the CS_TEX tables, the TP registers
+- `c19821ee` 2026-10-29 vcvkk: render: up to eight colour targets, each [[color(n)]] into attachment n
+- `c5565cd8` 2026-10-29 vcvkk: render: colour outputs with gaps, and DontCare stores
+- `c716d23c` 2026-10-29 vcvkk: textures: the contract for textures and samplers in compute, before any of it runs
+- `ce62b81c` 2026-10-29 vcvkk: textures over IOSurfaces: the GPU draws into memory other programs and the display read
+- `ce9db968` 2026-10-29 vcvkk: render: a Clear load action through the 2D engine's solid fill, with or without a draw
+- `d8cd568c` 2026-10-29 vcvkk: c_api: stencil attachment and per-draw stencil state
+- `de4767be` 2026-10-29 vcvkk: compute: indexed constant buffers through UBO descriptors, as draws now load them
+- `deb489b9` 2026-10-29 vcvkk: render: a constant buffer read at fixed offsets in either stage, pushed into its constant file
+- `e0080db1` 2026-10-29 vcvkk: a6xx: the registers of one sysmem draw, each with its header line; RB_ALPHA_CONTROL joins the batch-start tail
+- `e0623418` 2026-10-29 vcvkk: c_api: textures, samplers, the texture facts of a kernel's resources, and dispatch2
+- `e4a8f7cf` 2026-10-29 vcvkk: render: a fragment function that reads its own target
+- `e6399f72` 2026-10-29 vcvkk: render: [[stage_in]] attributes through the vertex descriptor, the first vertex fetch
+- `f0e1c58d` 2026-10-29 vcvkk: render, compute: a constant buffer's offset is a multiple of 4
+- `f2db7e8e` 2026-10-29 vcvkk: compiler: a declaration that disagrees with the instructions' class is refused, by both compilers
+- `f3b3a75c` 2026-10-29 vcvkk: render: draws into the same attachments share one pass
+- `f833d557` 2026-10-29 vcvkk: a6xx: the texture and sampler descriptor fields, enums and formats, and the three 2D/sampler encoders
+- `f8ff6e65` 2026-10-29 shimoku74: Darwin, not iOS: the name in the sources and the documentation; make darwin builds into out/darwin
+- `013feb7c` 2026-10-30 vcvkk: Multisampling: 2x and 4x colour targets, drawn and resolved
+- `0251c7eb` 2026-10-30 vcvkk: Bicubic samplers: the TP's cubic filter
+- `04de1ecb` 2026-10-30 vcvkk: Threadgroup memory an encoder sets reaches the kernel's argument
+- `170558c3` 2026-10-30 vcvkk: texture: BGR5A1Unorm and B5G6R5Unorm
+- `34d8ffd8` 2026-10-30 vcvkk: Copy a level onto itself as a memmove
+- `36ff75e4` 2026-10-30 vcvkk: Draws read the null texture at sampled slots left unbound
+- `3e2343ea` 2026-10-30 vcvkk: Multisample depth attachments
+- `40e81013` 2026-10-30 vcvkk: Indirect draws
+- `4d05f793` 2026-10-30 vcvkk: Border colours and mirror-clamp
+- `5270b057` 2026-10-30 vcvkk: Dispatches get private memory and encoder-sized threadgroup memory
+- `53a53d0a` 2026-10-30 vcvkk: Indirect dispatches
+- `5546b4c9` 2026-10-30 vcvkk: render, compute: a pushed constant range off 16 bytes is loaded direct
+- `59220816` 2026-10-30 vcvkk: A four-byte IOSurface reads in any four-byte colour format
+- `5d17539a` 2026-10-30 vcvkk: Kernel stores into 2D-array and 3D textures
+- `5fa9c226` 2026-10-30 vcvkk: A vertex stage's point size no longer refuses a triangle draw
+- `6a8cc4e9` 2026-10-30 vcvkk: Cube textures of one level, sampled
+- `6f68d933` 2026-10-30 vcvkk: Serve textures in the vertex stage
+- `72df926f` 2026-10-30 vcvkk: C interface for multisampling
+- `741f3708` 2026-10-30 vcvkk: C API: a texture's bytes per pixel
+- `763ba257` 2026-10-30 vcvkk: texture: 1D textures
+- `77e5d48d` 2026-10-30 vcvkk: Draw passes with no colour attachment 0
+- `78d61e4c` 2026-10-30 vcvkk: [[point_coord]] as a point-sprite varying, not a system value ir3 lacks
+- `7c91ec32` 2026-10-30 vcvkk: Points: point lists, the vertex stage's point size, point sprites
+- `7d7c1960` 2026-10-30 vcvkk: Integer and snorm colour formats
+- `7f12bd24` 2026-10-30 vcvkk: Multisample textures may be shader-read too
+- `7f7f8510` 2026-10-30 vcvkk: Texture::plan: a texture's layout without its memory
+- `81f046b6` 2026-10-30 vcvkk: A size query does not decide a texture's class
+- `86c8de0c` 2026-10-30 vcvkk: Argument buffers
+- `87e6189a` 2026-10-30 vcvkk: A fragment stage's device buffers sit past the vertex stage's in the IBO table
+- `9026b4a8` 2026-10-30 vcvkk: Serve every 8-, 16- and 32-bit vertex format fd6 fetches
+- `a07f3a9c` 2026-10-30 vcvkk: Face culling, with the winding measured on the phone
+- `a1af28af` 2026-10-30 vcvkk: texture2d_ms reads
+- `abf33030` 2026-10-30 vcvkk: Occlusion queries: a draw counts its samples into a result word
+- `ac416a19` 2026-10-30 vcvkk: texture: luminance masks over a surface ('LA08' as RG8Unorm, 'L008' as R8Unorm)
+- `ae0358c1` 2026-10-30 vcvkk: 2D array textures of one level, sampled
+- `bfaa907c` 2026-10-30 vcvkk: Shadow maps: depth textures sampled, compare samplers, anisotropy
+- `c2a5cd73` 2026-10-30 vcvkk: Texture views of a level, a slice or a run of slices
+- `c6f55b56` 2026-10-30 vcvkk: A surface reads in the colour formats of its FourCC's size
+- `c9364b6a` 2026-10-30 vcvkk: Viewports that reach past the target are clipped, not refused
+- `d0388c9a` 2026-10-30 vcvkk: Copy bytes the command processor cannot move through the 2D engine
+- `d1847bd5` 2026-10-30 vcvkk: Cube arrays and 1D arrays
+- `d38730fe` 2026-10-30 vcvkk: Draw a pipeline at its attachments' sample count
+- `d3cf081b` 2026-10-30 vcvkk: What Resident Evil 4 asks of Metal before its first frame
+- `d52b1401` 2026-10-30 vcvkk: ASTC textures, laid out in blocks as fdl6 lays them
+- `da96ec3e` 2026-10-30 vcvkk: A colour output with no attachment is written nowhere
+- `e1bab487` 2026-10-30 vcvkk: 3D textures of one level, sampled
+- `e2004cf1` 2026-10-30 vcvkk: Draw pipelines that have no fragment function
+- `e4b21149` 2026-10-30 shimoku74: The GPU's chip ID where the kernel gives no GPU number (0x06030500 on the phone); maxThreadsPerThreadgroup 1024, which metal_test read as zero on t...
+- `ee5fd00b` 2026-10-30 vcvkk: CommandBuffer::append: another command buffer's work after this one's
+- `f0777aaf` 2026-10-30 vcvkk: linkProgram's check against ir3_link_shaders adds the point size as turnip does
+- `f1c1ae9a` 2026-10-30 vcvkk: texture: R16Unorm, R16Uint and R16Sint
+- `f441e4bf` 2026-10-30 vcvkk: Draw into a layer, a face or a plane
+- `20ac7090` 2026-10-31 vcvkk: A command buffer may leave a refused piece of work out
+- `2e010290` 2026-10-31 vcvkk: A draw in an open pass writes only the registers that change
+- `3215d9ea` 2026-10-31 vcvkk: 2D copies of formats without an intermediate move their bits as they are
+- `39ebb0d8` 2026-10-31 vcvkk: Compile a stage that spills again without ir3's preamble
+- `4b1adf08` 2026-10-31 vcvkk: A fragment stage may write its depth
+- `4e1acabb` 2026-10-31 vcvkk: Tune GMEM by the pass's place and size; draws of a heavy pass timed
+- `5ff1c8a8` 2026-10-31 vcvkk: Draw passes in tiles in GMEM, as an Adreno is built to
+- `6706d6c0` 2026-10-31 vcvkk: GMEM or sysmem by what each cost; fetch in raster order in GMEM
+- `6abaf318` 2026-10-31 vcvkk: A wider format over a surface; kernels packing halves into bytes
+- `75f48065` 2026-10-31 vcvkk: Argument buffer layouts under the compilers' lock, tested on eight threads
+- `7b6c3347` 2026-10-31 vcvkk: One layer of a depth array as a 2D texture
+- `83f46f75` 2026-10-31 vcvkk: The 2D engine's rotations, measured, and a turned copy
+- `85c34d7d` 2026-10-31 vcvkk: Hardware binning, as far as it goes: the binning pass works, its use hangs
+- `95cc000c` 2026-10-31 vcvkk: Dual-source blending
+- `9991fb88` 2026-10-31 vcvkk: Hardware binning works: let each tile's streams go at RM6_BIN_END_OF_DRAWS
+- `9d454262` 2026-10-31 vcvkk: Decide GMEM at a pass's end; replay draws that only read their buffers
+- `b711c1e1` 2026-10-31 vcvkk: Passes timed by the GPU's own counter
+- `bc417a47` 2026-10-31 vcvkk: compiler_test: the device-buffer writes test wants the compiler, as its neighbours do
+- `c38a0ff2` 2026-10-31 vcvkk: ASTC HDR on the texture unit, PVRTC decoded by the processor
+- `d7ccdc58` 2026-10-31 vcvkk: Count what a command buffer holds, and measure a pass, a draw and the bus
+- `f2fede39` 2026-10-31 vcvkk: Clear in the tiles; leave a DontCare attachment unloaded past the right edge
+- `fed96c1d` 2026-10-31 vcvkk: GMEM for a pass whose like had many draws the frame before
+- `02584012` 2026-11-01 vcvkk: Pass profiles say which colour attachments a GMEM pass has and which its draws touched
+- `0fae4090` 2026-11-01 vcvkk: compileStage: compiled stages kept on disk (HAKIOS_METAL_CACHE=DIR); HAKIOS_METAL_LISTING=0 skips the disassembly
+- `354efc40` 2026-11-01 vcvkk: Compile uber shaders for their configuration; fragment waves of 128
+- `870552a5` 2026-11-01 vcvkk: Leave out a repeated draw's program-and-pass state; pool command buffers' buffers
+- `c63d9e0f` 2026-11-01 vcvkk: tests: the constant-buffer stage and the compressed copy-in want Mesa, and say so without it
+- `cbc070cd` 2026-11-01 vcvkk: Cut a draw's CPU cost: resident programs, a flat register shadow, no dual recording of light passes
+- `fbf14063` 2026-11-01 vcvkk: UBWC textures: compressed for the GPU, rows of their own for the CPU
+- `67ea8769` 2026-11-02 shimoku74: Stage cache keyed by what the compiler is, read-only seed dirs; each sysmem pass says why
+- `5974ea97` 2026-11-03 shimoku74: C interface: deferred recording, a queue's command buffers recorded by a thread of its own (hakios_metal_queue_set_deferred)
+- `2a19f954` 2026-11-05 shimoku74: hakios-metal: another Adreno is refused by name instead of hanging
+- `02a3784c` 2026-11-11 vcvkk: metal: the AIR front end and Mesa's compiler for the phone, from tools/mesa
+- `3dcfcd18` 2026-11-11 vcvkk: fixup! metal: builds in this tree, and for arm64e
+- `3fd37744` 2026-11-11 vcvkk: HakiosMetalCA: iOS 27's Metal, and its window server drawn by the Adreno
+- `625a7806` 2026-11-11 vcvkk: metal: a constant range that runs off its buffer's pages is loaded, not refused
+- `aeddce8b` 2026-11-11 vcvkk: metal/tools/mk-mesa-host.sh: Mesa with the front end for this machine
+- `cdf5f315` 2026-11-11 vcvkk: metal: builds in this tree, and for arm64e
+- `d0a7ab4a` 2026-11-11 vcvkk: air: iOS 26 and 27's read sampler and LLVM's integer min and max
+- `e5711aa2` 2026-11-11 vcvkk: metal/plugin: HakiosMetalCA.m, the plug-in that serves CoreAnimation
+- `0461aebe` 2026-11-12 vcvkk: Metal: GMEM given to the attachments a pass touches
+- `06b8ed5e` 2026-11-12 vcvkk: Metal plug-in: what the last measurements needed, kept as switches
+- `0e890a01` 2026-11-12 vcvkk: Metal plug-in: CoreAnimation's paths blitted only where their mask can be set
+- `243acf85` 2026-11-12 vcvkk: Metal: a draw's words go into streams that keep their memory
+- `29e1664f` 2026-11-12 vcvkk: Metal compiler: each thread compiles with an ir3 compiler of its own
+- `2c451a20` 2026-11-12 vcvkk: Metal: a pass whose like cleared the GMEM bar last time is recorded for tiles alone
+- `4de967cd` 2026-11-12 vcvkk: Metal plug-in: metal_procs shows the device to named processes; texture alignment answered
+- `4e723721` 2026-11-12 vcvkk: Metal plug-in: uber shader variants compile three at a time
+- `5a6f7917` 2026-11-12 vcvkk: Metal: a specialisation of the uber shader compiles in tens of milliseconds
+- `5c7defe7` 2026-11-12 vcvkk: Metal plug-in: a stage's small bytes go in its command buffer's arena
+- `5e087001` 2026-11-12 vcvkk: Metal: a dispatch fills a buffer slot the kernel declares nothing under, instead of refusing it
+- `5eac7993` 2026-11-12 vcvkk: Metal tests: what a draw costs this machine's processor
+- `6edbd4e6` 2026-11-12 vcvkk: Metal: a fetching draw in sysmem keeps its own primitives in raster order
+- `6f5c7f7a` 2026-11-12 vcvkk: Metal: a command buffer's passes and streams keep their memory
+- `72167dbd` 2026-11-12 vcvkk: Metal front end: a call that returns a pointer is translated in place
+- `80ae185d` 2026-11-12 vcvkk: Metal: a stage calls the visible functions its pipeline links
+- `83c5345a` 2026-11-12 vcvkk: Metal tools: CoreAnimation's uber shader specialised on the host
+- `94b5d4e1` 2026-11-12 vcvkk: Metal plug-in: no hardware binning in GMEM passes unless metal_gmem_binning=1
+- `970a5375` 2026-11-12 vcvkk: Metal: switches that time the GMEM fetch barrier, several in one boot
+- `974c82ec` 2026-11-12 vcvkk: Metal: a GMEM fetch's barrier as turnip's, and fetching draws weigh toward GMEM
+- `a3de859f` 2026-11-12 vcvkk: Metal plug-in: memoryless attachments neither stored nor made anew each frame
+- `b42a2026` 2026-11-12 vcvkk: Metal: a GMEM pass cut short by a draw stores what DontCare would drop
+- `c3d0b9ee` 2026-11-12 vcvkk: Metal plug-in: the passes of a heavy frame, and the draws of a slow light pass
+- `de30abf6` 2026-11-12 vcvkk: Metal plug-in: the device answers sharedMemorySize and dedicatedMemorySize
+- `f3565931` 2026-11-12 vcvkk: Metal: a select between two places in one buffer, and a phi of a struct, are compiled
+- `068b0ade` 2026-11-13 vcvkk: Metal: a UBWC render target is drawn in GMEM, cleared, copied, resolved into and fetched
+- `1759cd1f` 2026-11-13 vcvkk: Metal plug-in: metal_handlers=1 says which handlers a process puts on its command buffers
+- `1ed4bc4c` 2026-11-13 vcvkk: Metal: an uber shader is specialised on the bytes that choose its path
+- `3eafdc21` 2026-11-13 vcvkk: Metal: the last surface buffers wrapped are kept for the next wrap
+- `49a35074` 2026-11-13 vcvkk: Metal: a pass with a fetching draw weighs the GMEM bar at least
+- `4d86b443` 2026-11-13 vcvkk: Metal: a placement heap is served, each of its resources an allocation of its own
+- `6d7ddb06` 2026-11-13 vcvkk: Metal: a pass tiled over a corner of the screen is not binned
+- `7b699b6b` 2026-11-13 vcvkk: Metal plug-in: metal_ubwc_rt=1 compresses CoreAnimation's private render targets
+- `85eb6ea8` 2026-11-13 vcvkk: probe: UBWC render targets against linear ones, and what compression saves a pass
+- `8f0f8054` 2026-11-13 vcvkk: tests: a binned GMEM pass and a dispatch over a UBWC render target
+- `c98c458c` 2026-11-13 vcvkk: tests: a pass of a linear and a compressed attachment together
+- `c9fee7b0` 2026-11-13 vcvkk: Metal: GMEM is shared among the attachments a pass's like touched lately
+- `f5768a34` 2026-11-13 vcvkk: Metal plug-in: the timeline says when each heavy buffer was done and, with draws, what each pass drew
+- `6021ed4b` 2026-11-16 shimoku74: components/metal-plugin: the second Metal device beside the first
+- `837501ab` 2026-11-16 shimoku74: components/metal/tools: what is assigned and never read
+- `e141ac70` 2026-11-16 shimoku74: components/metal: the plug-in test reads find's output line by line
+- `f46ddbec` 2026-11-16 shimoku74: Metal: the SDK from DARWIN_SDK, as the kernel's build takes it
+- `f5d98b6d` 2026-11-16 shimoku74: components/metal/plugin: the second Metal device inside Metal's component
+
+## left out: Apple SEP / keystore / AMFI / FairPlay / App Store / Apple ID / IPSW decryption work: excluded by Scion's rules (64)
+
+- `02b752be` 2026-11-14 vcvkk: App Store: the daemon's wait is not ours, and the bag arrives
+- `04517a97` 2026-11-14 vcvkk: App Store: appstored overflowed its stack in our own constructor, and the storefront has a second door
+- `0763b1d1` 2026-11-14 vcvkk: App Store: the restricted-region sync no longer blocks a thread for ever
+- `4b429174` 2026-11-14 vcvkk: App Store: every line of the store library names its process, and appstored is deadlocked
+- `56fc6ac7` 2026-11-14 vcvkk: App Store: the store's libraries on iOS 27, and the app no longer dies at launch
+- `5894da85` 2026-11-14 vcvkk: App Store: the 429 was a malformed request, not throttling, and the region answer is not what blanks the screen
+- `5fc7fd31` 2026-11-14 shimoku74: docs: Darwin 27 in QEMU, and the IPSW decrypted with aea.py
+- `63ce50dd` 2026-11-14 vcvkk: App Store: a connection of its own times out, and the GUID decorations are not where the message comes from
+- `6c0d6151` 2026-11-14 vcvkk: App Store: the daemon's synchronous message is to accountsd
+- `6e6f400e` 2026-11-14 shimoku74: darwin/tools/aea.py: decrypt a Darwin 26/27 IPSW's disk images on Linux
+- `7ade163f` 2026-11-14 vcvkk: App Store: what appstored waits for, and that this phone has no account at all
+- `7bc8ba39` 2026-11-14 vcvkk: App Store: the service naming is a diagnostic again, and appstored overflows its stack when it logs
+- `7eda746a` 2026-11-14 vcvkk: App Store: the catalog needs a token, and the token service answers 429 to this address
+- `857a01e9` 2026-11-14 vcvkk: App Store: the account wait cut on iOS 27, and the bag loads
+- `8e96fedf` 2026-11-14 vcvkk: App Store: nothing is blocked on XPC, and three readings of the log were wrong
+- `9523bf62` 2026-11-14 vcvkk: App Store: the token request is never made, and the headers dump says whose they are
+- `9dc16b30` 2026-11-14 vcvkk: App Store: accountsd watched without being changed, and it is idle
+- `a196116a` 2026-11-14 vcvkk: App Store: the stack overflow in appstored is not explained, and the last commit said it was
+- `d6572e58` 2026-11-14 vcvkk: App Store: where the storefront token is signed, and where it is not
+- `ec9a7162` 2026-11-14 vcvkk: App Store: the account hooks say which process answered, and what with
+- `00697701` 2026-11-15 vcvkk: App Store: the account the store asks a daemon for, and the two shapes the same selector has
+- `0711d84e` 2026-11-15 vcvkk: App Store: with the original asked first, AMS answers the account -- in the application too
+- `140646c7` 2026-11-15 vcvkk: App Store: the migration is not what makes the account types either
+- `15502756` 2026-11-15 vcvkk: store: promise tracker works -- names the stuck bootstrap promises; + resolve tracking
+- `1987c86a` 2026-11-15 vcvkk: App Store: FairPlay never answers, and this phone has no accounts database to speak of
+- `29b4f71b` 2026-11-15 vcvkk: App Store: the refusal has changed from "not authorized" to "not found", and the daemon's account has a storefront already
+- `2c918a0b` 2026-11-15 vcvkk: App Store: what 16.5 knew about the local account, and the account switch made safe by default
+- `337350d6` 2026-11-15 vcvkk: store: value-path force-resolve advances the bootstrap (refines the conclusion)
+- `3828a4e2` 2026-11-15 vcvkk: store: the account refusal, and three doors that are not the one
+- `41e1c750` 2026-11-15 vcvkk: App Store: the store asks for one bag and it is the advertising one, and the Jet daemon is told nothing
+- `4b5d62ad` 2026-11-15 vcvkk: store: name the maker of the refusal inside accountsd, and hand it an account
+- `4c00035f` 2026-11-15 vcvkk: App Store: the types and the account are there on a clean boot, and the screen is still Loading
+- `503b97ff` 2026-11-15 vcvkk: App Store: the real account has no storefront of its own, and the setter for it is written but not yet reached
+- `6278104b` 2026-11-15 vcvkk: store: force-resolve experiment (HAKIOS_FORCE_RESOLVE) -- external promise reject crashes
+- `6a56a2d8` 2026-11-15 vcvkk: App Store: accountsd refuses the client the account type, and that is why there is never an account
+- `6f14c88a` 2026-11-15 vcvkk: App Store: a second database connection never comes back, and the daemon's own one is there for the taking
+- `799349f5` 2026-11-15 vcvkk: store: dead-end dynamic probes + hung-bootstrap thread-dump driver
+- `7ce4af63` 2026-11-15 vcvkk: store: forward the account filter to its backing store; the code-9 wall falls
+- `8165ccf0` 2026-11-15 vcvkk: store: a JetEngine.Promise tracker for the bootstrap (did not fire; the approach's limit)
+- `91cbfdf1` 2026-11-15 vcvkk: App Store: the type was never missing -- this library was asking for a name that does not exist
+- `952433e9` 2026-11-15 vcvkk: store: answer cookie properties empty, without the daemon; the bag-fetch deadlock clears
+- `9b3a487b` 2026-11-15 vcvkk: store: fake the account-flags and region sync (negative result, kept for the record)
+- `9bba8dfa` 2026-11-15 vcvkk: App Store: accountsd's own initializer is reachable, and the next line after it never comes
+- `b0d9c8a5` 2026-11-15 vcvkk: store: track more promise constructors (confirmed: by-address Swift hooks crash the store)
+- `b7448411` 2026-11-15 vcvkk: App Store: our own answer is now what hands the application nothing -- the original is asked first
+- `c16e67bc` 2026-11-15 vcvkk: store: trace the bootstrap phases by address (HAKIOS_TRACE_BOOTSTRAP)
+- `c22028fe` 2026-11-15 vcvkk: App Store: the daemon's connection is not reached through either door that looked obvious
+- `ce23a8c9` 2026-11-15 vcvkk: store: the sync broker call the catalog waited on, and five hooks for it
+- `ce358c4f` 2026-11-15 vcvkk: store: ask the process what bundle it is, and what Security says it is signed as
+- `dac7c790` 2026-11-15 vcvkk: App Store: accountsd builds its own account types, and the account wall is down
+- `ea1bf4df` 2026-11-15 vcvkk: store: a knob to replace the bootstrap prerequisites with the empty array
+- `ecd0124b` 2026-11-15 vcvkk: App Store: nothing calls the method that would make the account types, and what that means
+- `f1d75875` 2026-11-15 vcvkk: store: name the maker of every error, and ask the keybag what jetpackassetd waits on
+- `f57133f5` 2026-11-15 vcvkk: store: correct single-hook JetEngine.Promise tracker + gate the crashing thunk hooks
+- `f6837638` 2026-11-15 vcvkk: App Store: accountsd can make every account type and never runs the code that would
+- `0b30c793` 2026-11-16 shimoku74: components/sep: the Secure Enclave's keystore, as the kernel answers for it
+- `1d9b5463` 2026-11-16 shimoku74: arch/arm64: include/, configs/xnu, tools/; security/ for the AMFI stand-in
+- `1da6de98` 2026-11-16 vcvkk: store: deferred cont-hook install -- app launches but ElleKit still crashes hooking the Swift continuation runtime (definitive dead end)
+- `7e43fbbf` 2026-11-16 shimoku74: components/apple-id: sign-in and the App Store in one place
+- `9da47449` 2026-11-16 vcvkk: store: type-spy -- promise #0 is the bootstrap ROOT (Promise<BaseObjectGraph>); gate is a suspended async await
+- `e0aea8f9` 2026-11-16 vcvkk: mad: port 16.5 hactivation to iOS 27 (device now reports Activated); activation ruled out for catalog
+- `e7cbb970` 2026-11-16 vcvkk: store: continuation tracker (HAKIOS_CONT_SPY) -- hooking the Swift continuation runtime hangs the app
+- `a8cd36cf` 2026-11-18 shimoku74: locationd: -[CLMescalSigner initInSilo:] gives up at once, as Apple's own failure path does, instead of waiting for a fairplayd that never answers ...
+- `bcf92ecf` 2026-11-18 shimoku74: darwin image tools: the Wi-Fi passphrase stays out of the small image with SHARE=1 and is 0600 in it otherwise, an image that carries a secret is 0...
+
+## left out: screenshots of Apple's user interface (docs/*.png, *.jpg): never in Scion repositories (3)
+
+- `5990102e` 2026-10-30 wannq: renoir: HAKIOS 26 on SM7350 without PAC: pacstrip, census, xnu-12377 arm64 build, arm64e acceptance + EL0 emulator, RAM budget, image builder
+- `86bc3540` 2026-11-16 shimoku74: legacy/ goes: what is still used moves out, the first generation's workspace and its screenshots leave the repository
+- `8d3156c1` 2026-11-16 shimoku74: legacy/: the first generation's workspace, under a name that says what it is (was base/)
+
+## left out: also changes the FairPlay daemon's launchd job (fairplayd restarts): kept out with the FairPlay work; its dasd part conflicts anyway (1)
+
+- `c929d836` 2026-11-18 shimoku74: init: a dasd budget file kept from an earlier boot loses its lastModulation from before 2001 before launchd starts (from 1970 dasd walked two milli...
+
+## not applicable: build system, test bench and tools of the new tree's layout (580)
+
+- `1050420f` 2026-10-28 vcvkk: a6xx.hpp: the context state Gallium writes at the start of every batch, as a table, and what the TIMESTAMP bit does
+- `4fdc2129` 2026-10-28 vcvkk: Makefile: sanitizer targets, and the cross build on Linux
+- `80f36d0f` 2026-10-28 vcvkk: The compiler inside the driver: AIR to NIR to ir3 in this process, on the host and on the phone
+- `93ffd385` 2026-10-28 vcvkk: probe: a hash of every buffer a kernel of the image wrote, for a host reference to match
+- `d969b010` 2026-10-28 vcvkk: probe: --recover hangs the GPU on purpose and reports whether the kernel brought it back
+- `dcca7352` 2026-10-28 vcvkk: a6xx.hpp: the registers, packets and descriptor a compute dispatch writes, checked against Mesa's headers by name
+- `e99785d0` 2026-10-28 vcvkk: Kernels of our own, as fixtures: a text ir3 kernel and the same kernel compiled from AIR
+- `117d32d3` 2026-10-29 vcvkk: tools: check-a6xx.py reads the fixed-point multipliers and the deprecated array accessors
+- `55a3b7a5` 2026-10-29 vcvkk: tools/mesa: the fixture writer reads the texture fields off the NIR, and builds itself from the host Mesa build
+- `5681941a` 2026-10-29 vcvkk: compiler: a framebuffer fetch reads its own target, through a slot of its own
+- `6395b6bb` 2026-10-29 vcvkk: build: the iOS Mesa the driver links is hakios's own cross build, not the private tree's
+- `65ee4e50` 2026-10-29 vcvkk: tools/kernels: three AIR kernels for textures, one new mechanism each
+- `6dded830` 2026-10-29 vcvkk: tools/kernels: the four render shaders of the first draw, hand-written AIR with no buffer in either stage
+- `b6c76bcb` 2026-10-29 vcvkk: probe: stage 9, the first draw on the phone, pixel by pixel against the rule the probe computes
+- `bf5df4b0` 2026-10-29 vcvkk: tools/kernels: tex_fill_h, a half image written with exact half values, and the probe stage that reads it back
+- `c01a2050` 2026-10-29 vcvkk: constexpr samplers served, and a sweep of real metallibs through the compiler
+- `e10cb937` 2026-10-29 vcvkk: tools/probe: the texture stages, each a comparison against the kernel's own rule, and --metallib binds textures
+- `fc676015` 2026-10-29 vcvkk: tools/mesa: the fixture writer is stage-aware, and the four render stages' fixtures
+- `173de0f2` 2026-10-30 vcvkk: Test AIR 2.3 buffers, which carry no address-space key
+- `2827a1b7` 2026-10-30 vcvkk: compiler: carry 16-bit varyings at 32 bits
+- `2cd77bf0` 2026-10-30 vcvkk: compiler: a prefetch samples through the sampler its texture is sampled with
+- `42007f63` 2026-10-30 vcvkk: compiler: take a 16-bit derivative at 32 bits
+- `6c730b0e` 2026-10-30 vcvkk: Shader constant data: the driver UBO ir3 reads tables through
+- `789918ad` 2026-10-30 vcvkk: Programs longer than the instruction cache, with Mesa's fetch workaround
+- `7bcec190` 2026-10-30 vcvkk: Quads whole for implicit-level sampling; depth mip levels
+- `a4314217` 2026-10-30 vcvkk: Pointer phis into one buffer: fixture, test and probe
+- `ad6288bd` 2026-10-30 vcvkk: Framebuffer reads take the lowest free texture slot
+- `d24c8163` 2026-10-30 vcvkk: Fixture: tri_shadow_fs's bitcode for the plug-in's render test
+- `f5d2d6d6` 2026-10-30 vcvkk: Probe: clz and a word into bytes, on the GPU against the processor
+- `1eb2d2ed` 2026-10-31 vcvkk: Revert the merge of vcvkk's hakios-metal: on the phone 120 a second again
+- `2262b2fc` 2026-10-31 shimoku74: make check: the tests, then the plug-in on this Mac as built without hakios-metal and with it (plugin/tests/metal-plugin-test.sh, in this tree's la...
+- `307b45f7` 2026-10-31 vcvkk: probe: what a texture's layout costs a blur
+- `30c6cbf4` 2026-10-31 vcvkk: Unwritten outputs are holes, and a Kernel holds ir3's 32 pushed ranges
+- `503244f9` 2026-10-31 vcvkk: undef_phi_id: pointer phis that are undef over one edge, on the GPU
+- `7b9f702c` 2026-10-31 vcvkk: width_id: a kernel's thread execution width, checked on the GPU
+- `938ca792` 2026-10-31 vcvkk: The iOS probe relinks when the front end's archive changes
+- `af11a4cf` 2026-10-31 vcvkk: probe: a fragment stage's depth and a second source colour on the GPU
+- `becf9b50` 2026-10-31 vcvkk: Merge vcvkk's hakios-metal back: the 60 a second was the image, not this
+- `ed1b301b` 2026-10-31 vcvkk: ballot_id: a SIMD-group ballot checked on the GPU
+- `3e26ad16` 2026-11-01 vcvkk: probe: UBWC's two measures say they did not run without Mesa, as the compiler's do
+- `6f161dff` 2026-11-01 vcvkk: probe: the two checks that want the compiler say they did not run, as their neighbours do
+- `7e92730b` 2026-11-01 vcvkk: probe: what sampling costs a full-screen draw
+- `08b5f248` 2026-11-05 shimoku74: The Metal engine built from this tree, on any machine
+- `0fa216ed` 2026-11-11 shimoku74: make compare DEVICE=NAME DTS=FILE
+- `0fcc4e51` 2026-11-11 shimoku74: tests: the memory vote against a model of the RPMh sequencer
+- `0fe92ff1` 2026-11-11 shimoku74: The macOS 13.3 SDK archive is checked against its SHA-256 before unpacking
+- `197fe30f` 2026-11-11 shimoku74: kernel/deps: the build's own pieces under kernel/, host tools bootstrapped
+- `41374199` 2026-11-11 shimoku74: kernel: the FocalTech firmware stub is written in one place
+- `46d5f9d3` 2026-11-11 shimoku74: tests: the fake kernel has cores
+- `4c96bbe6` 2026-11-11 shimoku74: The battery's driver runs on the host, against the page the loader publishes
+- `4e169d51` 2026-11-11 shimoku74: Porting test: the made-up phone gets its keys from its device tree
+- `59288829` 2026-11-11 shimoku74: hakios_i2c_gpio.h: I2C by hand on two pins, once, with a test
+- `593e0c0b` 2026-11-11 shimoku74: device.py export: a package made in a checkout goes to where packages are kept
+- `5c8f64c8` 2026-11-11 shimoku74: tests: the vibration motor's driver, before it writes to the chip
+- `615e7c91` 2026-11-11 shimoku74: The flashlight's driver runs on the host: what it must never do, checked
+- `62a24815` 2026-11-11 shimoku74: tests: hakios_spmi.h by itself against the model of the arbiter
+- `806b22db` 2026-11-11 shimoku74: Battery driver: its barrier compiles on a host; the fake kernel can shorten waits
+- `81ee0001` 2026-11-11 shimoku74: The buttons' driver runs on the host, against a model of the PMIC arbiter
+- `8c84603e` 2026-11-11 vcvkk: check-links: a path may be the document's own directory's
+- `94dde546` 2026-11-11 vcvkk: loader/mkboot.py: a phone's UEFI and a payload as the image fastboot boots
+- `9a8c8df9` 2026-11-11 shimoku74: .gitattributes: Unix line endings, patches left as bytes, the generated reference marked as such
+- `a9292795` 2026-11-11 vcvkk: check-publishable: what git could publish, not what a build left beside it
+- `ae9f38c9` 2026-11-11 shimoku74: tests: the PMIC arbiter's model is a header of its own
+- `c2580c0a` 2026-11-11 shimoku74: tests: the speaker's look on a phone wired otherwise
+- `c868fc8f` 2026-11-11 shimoku74: kernel: an update never runs over work in a tree; the tools tested
+- `cb3932e8` 2026-11-11 shimoku74: hakios_tlmm.h: the SoC's pins, once, with a test
+- `cb934984` 2026-11-11 shimoku74: tests: the CPU frequency driver against a model of the EPSS block
+- `d016e20f` 2026-11-11 shimoku74: tests: the device that speaks I2C is a header, for the drivers' tests too
+- `d0efd9ad` 2026-11-11 shimoku74: Driver tests wait for the driver to settle; editor and pull-request conventions
+- `d763755f` 2026-11-11 shimoku74: tests: the I2C device model takes a second address and two-byte registers
+- `d884ab02` 2026-11-11 shimoku74: Porting test: the package's way to the devices branch and back
+- `ddbb8f78` 2026-11-11 shimoku74: tests: the model of the SoC's pins is a header, for the drivers' tests too
+- `ddff9aae` 2026-11-11 shimoku74: tests: the fake kernel has nodes that cannot be read or written
+- `e396ac39` 2026-11-11 shimoku74: tests: the link checker and the components checker are tested too
+- `e86a6267` 2026-11-11 shimoku74: tests: the command database a test builds is a header, for the drivers' tests too
+- `f4836400` 2026-11-11 shimoku74: hakios_rpmh.h: a request to RPMh, once, with a test; the memory vote sends through it
+- `f9ea013b` 2026-11-11 shimoku74: make check: lint, boards, generated docs and tests in one command
+- `fe16a73f` 2026-11-11 shimoku74: tests: the speaker amplifiers' look, run against two modelled amplifiers
+- `0c328398` 2026-11-12 hxfuxyy: input: port the Synaptics TCM contact decoder
+- `0f937196` 2026-11-12 shimoku74: tests: what the loader and the kernel share is written the same in both
+- `0fe3ded1` 2026-11-12 vcvkk: Kernel build: a Wi-Fi driver object newer than the kernel is linked in
+- `118dcdff` 2026-11-12 shimoku74: tests: a queue's mark and offset whose sum wraps, in a queue that is not a power of two
+- `139fa832` 2026-11-12 shimoku74: tests: the loader's answer to "is this the partition a write may reach?"
+- `16cc8b12` 2026-11-12 shimoku74: tests: the fake kernel's nodes have minor numbers and offsets
+- `1e1a73a4` 2026-11-12 shimoku74: tests: mic_wiring_test, the microphones' blocks and pins from the SoC file
+- `1e7bbd23` 2026-11-12 shimoku74: tests: the two repository checks of the loader count what they mean to
+- `1ee9d71b` 2026-11-12 shimoku74: tests: the input queue's hold is timed with room for a busy machine
+- `22694920` 2026-11-12 shimoku74: loader: an extent of the system image outside userdata is refused, also where start + length wraps
+- `25094930` 2026-11-12 shimoku74: tests: the fake kernel sleeps with a mutex given up (lck_mtx_sleep)
+- `254c4adb` 2026-11-12 shimoku74: tests: the keys' driver: bounce, the count of presses, a bus that stops answering
+- `27822c87` 2026-11-12 shimoku74: xnu-clang: XNU_WARNINGS=1 lets the compiler's warnings through
+- `288cc9e6` 2026-11-12 shimoku74: tests: APFS images and the drivers' firmware lookup in them
+- `2b215134` 2026-11-12 shimoku74: tests: mutate.sh sees a file a test includes through another; a rail's levels end at the first zero
+- `2bb14aa5` 2026-11-12 shimoku74: lint: the iOS side's copies of the kernel's device interfaces are held to them
+- `33465db7` 2026-11-12 shimoku74: tests: the SCMI performance diagnostics run on the host
+- `400296ab` 2026-11-12 shimoku74: tests: the QMI helpers' tests run with make check
+- `4393a1a0` 2026-11-12 shimoku74: tools: qupclocks.py reads a serial engine's clocks out of Linux's clock driver
+- `46f09799` 2026-11-12 shimoku74: kernel/host/llvm: LLVM's linker and libtool in the place of cctools'
+- `4839d359` 2026-11-12 shimoku74: tests: the memory's vote without any one of its three managers, and a rest that is too much
+- `52e4d7b4` 2026-11-12 shimoku74: tests: the audio device's lines are waited for, not the first of them
+- `542889bb` 2026-11-12 shimoku74: tests: the fake kernel has block devices
+- `544fa79d` 2026-11-12 shimoku74: tests: the buttons' summary gets the time a busy machine needs
+- `63aad406` 2026-11-12 shimoku74: kernel/build.sh: theos' cctools or LLVM's Mach-O tools
+- `63b421e4` 2026-11-12 shimoku74: tests: three more tests wait for everything they then check
+- `648fba45` 2026-11-12 shimoku74: tests: the loader's choice of the kernel's memory, with a made-up firmware
+- `64dee635` 2026-11-12 shimoku74: tests: an arbiter that says nothing sensible of its number of channels
+- `6b9ac1be` 2026-11-12 shimoku74: mkimage26: the stage0's own mount point, read from it, not a name in the tool
+- `6c4ae14f` 2026-11-12 shimoku74: tests: iOS's Wi-Fi requests run on the host
+- `6efe960b` 2026-11-12 shimoku74: tests: the battery's page that is not one, is too short, or stops being one
+- `7cdf6f03` 2026-11-12 shimoku74: tests: the battery's test runs its scenarios again; a test that lists none fails
+- `80f43a72` 2026-11-12 shimoku74: tests: the list of drivers, run on every test board
+- `8786d660` 2026-11-12 shimoku74: tests: a group of cores whose table has the fixed 300 MHz and nothing above it
+- `94b69062` 2026-11-12 shimoku74: tests: every barrier and cache instruction says it touches memory
+- `97b85146` 2026-11-12 shimoku74: tests: the fake kernel has the rest of what a storage controller's driver names
+- `9a07edad` 2026-11-12 shimoku74: tests: the backlight's new scenario waits for the command as well as the level shown
+- `a2dca258` 2026-11-12 shimoku74: backlight: a request made just before the thread sleeps is not slept through
+- `a37a7e66` 2026-11-12 shimoku74: tests: the fake kernel answers an ioctl to a character device
+- `a82dc643` 2026-11-12 shimoku74: syntax-check: --analyze, clang's static analyzer over what HakiOS adds
+- `b225e066` 2026-11-12 shimoku74: tests: the flashlight's test waits for everything it then checks
+- `b3d43602` 2026-11-12 shimoku74: tests: the fake kernel makes calls later (thread_call)
+- `b952c0a3` 2026-11-12 shimoku74: tests: mutate.sh breaks a driver on purpose and says which scenario noticed
+- `bd34b1e7` 2026-11-12 shimoku74: tests: the loader's parts, its list and its README stay in step
+- `c5890560` 2026-11-12 shimoku74: tests: EVENTUALLY waits for a condition and checks that very condition
+- `c83894f4` 2026-11-12 shimoku74: tests: syntax-check --analyze lists a planted fault and does not fail on it
+- `d595df9d` 2026-11-12 shimoku74: tests: the iOS image tool's helpers
+- `df108fa5` 2026-11-12 shimoku74: tests: two log lines that come after what was waited for are waited for themselves
+- `e4809eae` 2026-11-12 shimoku74: tests: the thermal driver's test waits for the rows and the panel's limit as well as the step
+- `eaba9e5a` 2026-11-12 shimoku74: make kernel-check: every file compiled and the kernel linked with LLVM's tools
+- `eb09c15a` 2026-11-12 shimoku74: tests: sound_pins_test, the sound driver's pins on a board that is not the first phone's
+- `ef3288cb` 2026-11-12 shimoku74: tests: the APFS suite's steps that need no iOS image run in make check
+- `f538858b` 2026-11-12 shimoku74: tests: the fake kernel has what a storage driver uses
+- `f5fcfe49` 2026-11-12 shimoku74: tests: where the two touch drivers take their wiring from
+- `f93f26c1` 2026-11-12 shimoku74: tests: where the camera driver takes its sensors from
+- `feae308c` 2026-11-12 shimoku74: tests: the loader's plain-C parts, on the host
+- `ff5c8a15` 2026-11-12 shimoku74: tests: the speakers' guard, measured with tones
+- `023b5981` 2026-11-13 shimoku74: qemu-init: ifconfig, the interfaces and an address for one
+- `023e0f00` 2026-11-13 shimoku74: qemu-init: locks, threads adding under one lock through ulock_wait and ulock_wake; threads registered once
+- `02a58246` 2026-11-13 shimoku74: input_queue_test: a sixth finger does not put the way out off; a fault halfway keeps what was read
+- `08ece8c1` 2026-11-13 shimoku74: qemu-init: append, for a line said in one write
+- `0c228708` 2026-11-13 shimoku74: qemu-init: copy_bytes, as there is no memcpy
+- `0d82e025` 2026-11-13 shimoku74: qemu-init: files, descriptors opened up to the kernel's limit
+- `0eef2831` 2026-11-13 shimoku74: scmi_perf_test: a domain's levels start at 0, not at whatever the stack held
+- `1242b20f` 2026-11-13 shimoku74: qemu-init: ioprop, a registry entry's property, as text or bytes
+- `13398cb5` 2026-11-13 shimoku74: ufs test: a partition as large as 64 bits of bytes hold is used
+- `15344a41` 2026-11-13 shimoku74: qemu-init: ls and cat; the root has /etc/motd
+- `16ad74cf` 2026-11-13 shimoku74: qemu-init: threads share four times the work, the time well above what starting them costs
+- `17314ddb` 2026-11-13 shimoku74: camera test: the PM8008i's reset GPIO behind the arbiter: its channel, its five registers, dropped transfers, giving up
+- `18c26a64` 2026-11-13 shimoku74: qemu-init: tone, a sine wave on the sound device, written in time
+- `18ea92a0` 2026-11-13 shimoku74: buttons test: a pin whose only channel is another system's is read through it; no channel looked at past the table
+- `191ffdb4` 2026-11-13 shimoku74: qemu boot test: Mach's counts see the faults of 128 MB of a program's memory
+- `1fb03c65` 2026-11-13 shimoku74: workbench/qemu_host.py: this computer's side of the machine's requests
+- `219addc5` 2026-11-13 shimoku74: make qemu: the kernel's timestamps have six digits of microseconds
+- `28361eb9` 2026-11-13 shimoku74: workbench: sound_pins_test and mic_wiring_test are sound_driver_test and mic_driver_test, as they try more of their drivers
+- `2ad6861c` 2026-11-13 shimoku74: qemu-init: xattr
+- `2b004c27` 2026-11-13 shimoku74: torch_driver_test: a dropped write and a dropped read are asked for again
+- `328e360c` 2026-11-13 shimoku74: qemu-init: ping and serve take counts of more than one digit
+- `3589db29` 2026-11-13 shimoku74: qemu_boot_test: its head's lines rewrapped, the lock among what is tried
+- `35f3b889` 2026-11-13 shimoku74: qemu-root: a /tmp to mount a file system in memory on
+- `397619f2` 2026-11-13 shimoku74: place-kernel.py --program: a static user program from ld64.lld's output
+- `3fe8de96` 2026-11-13 shimoku74: i2c_device_model: reads a test answers, and a register that is a port
+- `4173338f` 2026-11-13 shimoku74: qemu-init: crash, a process stopped by its own mistake, for a parent to see the signal
+- `4296a2d5` 2026-11-13 shimoku74: station test: off while joined, a refused switch, a second standing network, the radio going during a call, its address
+- `43c94c0f` 2026-11-13 shimoku74: qemu-init: one file of 1900 lines becomes seven, by what of the kernel they try
+- `4594f17f` 2026-11-13 shimoku74: mic test: a model of the TX SoundWire master, the link, reads with their ids and a full FIFO; the codec found and set up
+- `45f0981c` 2026-11-13 shimoku74: qemu boot test: a relative path from the shell's own directory
+- `4681432f` 2026-11-13 shimoku74: qemu-init: sysctl NAME=VALUE sets the value first
+- `4b82ec13` 2026-11-13 shimoku74: tools/analyze-userland.sh: the static analyzer on the Darwin side
+- `4c131711` 2026-11-13 shimoku74: qemu-init: alarm, a timer's SIGALRM caught by a handler of its own
+- `4c8094ec` 2026-11-13 shimoku74: UFS whitelist test: units past the eighth are refused whatever the mask, and a refusal is counted and said
+- `4d895634` 2026-11-13 shimoku74: qemu-init: get counts, times and hashes a page of any size as it comes
+- `4dbb0f3c` 2026-11-13 shimoku74: qemu-init: mach, messages to itself through a Mach port, timed
+- `4e1ec5f3` 2026-11-13 shimoku74: mutate.sh: the same OLD and NEW runs the test as it is and shows what fails
+- `505e63dd` 2026-11-13 shimoku74: torch_driver_test: a register that is not one of the six is refused, and nothing written after
+- `5106cf74` 2026-11-13 shimoku74: qemu-kernel.sh: --interactive, the console on this terminal; --window, the screen in a window
+- `523bc4be` 2026-11-13 shimoku74: fakekernel: fake_uiomove_fault_at, a user buffer that faults at a given move
+- `531d298b` 2026-11-13 shimoku74: workbench: the drivers' tests run on the host under the address and undefined-behaviour sanitizers
+- `54edf39a` 2026-11-13 shimoku74: backlight_driver_test: the backend chosen by boot-arg, profiles refused, the bytes least significant first
+- `579c2432` 2026-11-13 shimoku74: tests: the loader booted by a UEFI in QEMU, its identity seen
+- `5f8ca938` 2026-11-13 shimoku74: qemu boot test: a process's limit of descriptors is held to
+- `64f14f11` 2026-11-13 shimoku74: sparse test: blocks of one sector, every one of them in the image
+- `68484562` 2026-11-13 shimoku74: qemu-init: draw, a picture on the screen through IOSurface and the framebuffer's swap
+- `69a24de1` 2026-11-13 shimoku74: qemu-kernel.sh --type: the console typed on, as a person types
+- `6a379f55` 2026-11-13 shimoku74: make qemu: the built kernel booted in QEMU to its first process, checked
+- `6b173842` 2026-11-13 shimoku74: make qemu: the virtio sound device plays a tone of the frequency asked for
+- `6b44f589` 2026-11-13 shimoku74: lint: no %#0Nx in C formats, which says a zero without its 0x
+- `6c0e8add` 2026-11-13 shimoku74: check-publishable: what could be committed, not a build's output
+- `6cab22b0` 2026-11-13 shimoku74: workbench/ for tests/; the last ios in names of ours
+- `6d31a4a4` 2026-11-13 shimoku74: qemu-init: mkdir, write and rm; ramfs mounted to be written
+- `6eaea77a` 2026-11-13 shimoku74: mutate.sh: the changed driver built under the sanitizers, as workbench/run.sh builds it
+- `6f920794` 2026-11-13 shimoku74: fakekernel: the references kernel_thread_start gives, counted with those let go of
+- `736abbf9` 2026-11-13 shimoku74: qemu-init: time, a command's time on the clock and of the processors (getrusage)
+- `7411c5a4` 2026-11-13 shimoku74: qemu-init: serve, a page over HTTP; make qemu holds the network end to end
+- `74f35531` 2026-11-13 shimoku74: qemu-init: help in two columns, whatever a command's length
+- `751389fb` 2026-11-13 shimoku74: haptic_driver_test: Android's waveforms loaded into the chip's RAM, refused, read back wrong; an effect played; a tap and a vibration for Darwin
+- `7ab25347` 2026-11-13 shimoku74: qemu-init: stat, ln, mv and chmod
+- `7de3fd56` 2026-11-13 shimoku74: qemu-init: a shell on the console, and sysctl as the kernel types it
+- `8005dcc6` 2026-11-13 shimoku74: qemu-init: fork, a copy of the process whose memory is its own, or which becomes a program
+- `81213fca` 2026-11-13 shimoku74: qemu-kernel.sh: the machine's virtio devices, and QEMU's own arguments
+- `868dab73` 2026-11-13 shimoku74: qemu-init: ping
+- `8c9b8ad9` 2026-11-13 shimoku74: qemu-init: serve /bytes/N, N bytes made up as they go, for TCP to send a lot
+- `8d10907e` 2026-11-13 shimoku74: buttons_driver_test: the summary two seconds in, not half of one, for the presses to come before it
+- `8dbb0959` 2026-11-13 shimoku74: make qemu: a picture drawn in user space is what the screen shows
+- `8ddbc622` 2026-11-13 shimoku74: tools/qemu-root.sh: a root of nothing of Apple's for the kernel in QEMU
+- `8ef107a9` 2026-11-13 shimoku74: thermal_driver_test: held back and given back over SCMI, and a refused level asked for again
+- `92fc9d76` 2026-11-13 shimoku74: qemu-kernel.sh: typing that keeps up with the shell; --forward, --then, --monitor
+- `98885d45` 2026-11-13 shimoku74: audio_device_test: the guard's and the microphone's recordings, and none
+- `9ae3a29d` 2026-11-13 shimoku74: qemu-init: memory, pages of its own written, read back and given back
+- `9d9dbf62` 2026-11-13 shimoku74: battery_driver_test: an update made while the cache is copied, empty and full, the DSP's report of no battery, battery=0 and an address of 0
+- `ab9ed5a7` 2026-11-13 shimoku74: qemu boot test: a process's time as the kernel keeps it, asleep and filling pages
+- `abdde3d6` 2026-11-13 shimoku74: qemu-kernel.sh --disk: a disk image on the virtio block device
+- `afad8154` 2026-11-13 shimoku74: qemu-kernel.sh --audio: a virtio sound device, played into a WAV file
+- `afcb444c` 2026-11-13 shimoku74: qemu-kernel.sh --qmp: QEMU's QMP on a socket, for touches and buttons
+- `b133a0ff` 2026-11-13 shimoku74: qemu-init: ioreg, IOKit's registry walked in MIG messages, as IOKit.framework asks it
+- `b45dcc8b` 2026-11-13 shimoku74: qemu-init: cd and pwd
+- `b50176f7` 2026-11-13 shimoku74: qemu-init: mount; make qemu reads a second disk through virtio-blk and APFS
+- `b5a2a957` 2026-11-13 shimoku74: qemu-init: hash, a file or a device read to its end, timed and hashed
+- `b5c99c83` 2026-11-13 shimoku74: ufs test: the store's claim taken again by its holder, and a buffer of one block
+- `b7c154ac` 2026-11-13 shimoku74: qemu-init: get, a page asked for over TCP; udp, a datagram and its answer
+- `baf61b51` 2026-11-13 shimoku74: qemu-init: date, sleep, spawn, kill, wait and pipe
+- `bbd3d82c` 2026-11-13 shimoku74: qemu-init: input, what the touch screen and the buttons say
+- `bc3f78ba` 2026-11-13 shimoku74: spmi_model: drop_reads and drop_writes, transfers the arbiter drops
+- `bcb683b0` 2026-11-13 shimoku74: qemu-init: ls without a path lists the directory the shell is in
+- `beed950a` 2026-11-13 shimoku74: workbench: a test of the helpers the QEMU boot test judges the sound and the screen with
+- `bf6c4e6a` 2026-11-13 shimoku74: qemu boot test: a hard link, a rename, a mode and a symbolic link in ramfs
+- `c1a14cf2` 2026-11-13 shimoku74: sound test: the DSP's events about the stream, a write's done and its errors, a refused write, underflows
+- `c2a7fbea` 2026-11-13 shimoku74: mic test: an answer that comes a while after its read, none at all, and how long the codec is waited for
+- `c37f1993` 2026-11-13 shimoku74: make qemu: the kernel's own tests (kernPOST=1), none failing
+- `c5b14e22` 2026-11-13 shimoku74: qemu-init: threads, counting shared out to threads of its own, timed
+- `c654cce3` 2026-11-13 shimoku74: apple80211 test: channels by number alone, rates from both elements that carry them, an element cut off
+- `c6c22664` 2026-11-13 shimoku74: qemu-init: how a process ended is one line, which the kernel's own messages do not cut
+- `c8840eda` 2026-11-13 shimoku74: sound test: the apps SMMU modelled; the DSP's view of the buffers set up, put back, and somebody else's left alone; a bit clock without frames
+- `ca8c283f` 2026-11-13 shimoku74: qemu-init: unix, a file's descriptor sent over a socket pair and read on the other side
+- `caa2490b` 2026-11-13 shimoku74: kernel: a kernel linked by ld64.lld that boots
+- `ce7156a9` 2026-11-13 shimoku74: loader_test: the kernel's entry is as long as its bytes, not three bytes past them
+- `cf9d0717` 2026-11-13 shimoku74: qemu-init: one trap8, in init.h, for processes.c and iokit.c
+- `d25a5779` 2026-11-13 shimoku74: qemu-init: vm says its pages' size, and its pages and faults on two lines that fit the screen
+- `d30dac1f` 2026-11-13 shimoku74: speaker_driver_test: a monitor table of no amplifier passed over, one whose rows run past its end not used
+- `d9963cc9` 2026-11-13 shimoku74: qemu-init: ps and uptime
+- `e14218d6` 2026-11-13 shimoku74: gitignore: qemu-kernel.sh's log where it is run
+- `e28d1509` 2026-11-13 shimoku74: qemu-kernel.sh: a prompt after a cleared screen is a prompt too
+- `e976f667` 2026-11-13 shimoku74: qemu boot test: extended attributes in ramfs, set, replaced, listed and taken away
+- `e9d252be` 2026-11-13 shimoku74: mic test: the DSP's answers, its refusals by name, and the votes given back with their handles
+- `ee4bb7b9` 2026-11-13 shimoku74: qemu-init: help lists the commands by what of the kernel they try
+- `eec9c2c7` 2026-11-13 shimoku74: qemu-init: clear
+- `eecf51d9` 2026-11-13 shimoku74: guard_test: the frames past what the guard is given stay as they were
+- `ef87aa5e` 2026-11-13 shimoku74: qemu-init: mmap, a file's pages against its reads; kevent, a timer and a pipe through kqueue
+- `ef9997d4` 2026-11-13 shimoku74: workbench: the arbiter's model counts reads past the channels it says it has
+- `efbe73c7` 2026-11-13 shimoku74: qemu-init: dmesg and run; a second copy does one command and ends
+- `f2ec04a8` 2026-11-13 shimoku74: qemu-init: the shared system call numbers in order, WORDS said what it is
+- `fa928f63` 2026-11-13 shimoku74: mic test: the run's lines said again at its end, the latest of them when there were more than are kept
+- `fd0a6535` 2026-11-13 shimoku74: workbench: register numbers in the models' messages said as 0x.., zero too
+- `fded0a89` 2026-11-13 shimoku74: qemu-init: vm, the virtual memory's counts through host_statistics64
+- `01a300ea` 2026-11-14 shimoku74: apple80211 test: power asked for, the state and the address, channels' marks, and a passphrase's edges
+- `01cc1ba2` 2026-11-14 shimoku74: qemu boot test: a priority set and read back; a user who is not root may lower theirs, not raise it
+- `03005436` 2026-11-14 shimoku74: UFS whitelist test: a command put into a slot of the test's memory: its PRD table, whole entries, nothing of a refused one
+- `034ff1af` 2026-11-14 shimoku74: qemu boot test: a pipe holds 64 KB, and is writable again with PIPE_BUF read out of it
+- `051d69e4` 2026-11-14 shimoku74: qemu-init: serve reads a request to the end of its headers, however TCP brings it; get sends its request in one write
+- `089d27cc` 2026-11-14 shimoku74: qemu-init: df, the file systems mounted with their size and room
+- `0da48a49` 2026-11-14 shimoku74: camera test: the PM8008i's registers a write may reach
+- `0e98ba2c` 2026-11-14 shimoku74: qemu-init: access, what this process may do with each path
+- `11491c63` 2026-11-14 shimoku74: qemu boot test: a set-user-ID program runs as its owner until another writes it; a sticky directory
+- `14c25379` 2026-11-14 shimoku74: qemu-init: shm, memory shared by name with a forked child
+- `161e82f5` 2026-11-14 shimoku74: qemu SMP test: a directory emptied as it is read, a file watched, a file mapped private, on four processors
+- `171b2eec` 2026-11-14 shimoku74: G-Link queue test: a message's padding stops at its eighth byte
+- `177e4133` 2026-11-14 shimoku74: make qemu: the four processors' test too
+- `17ff3214` 2026-11-14 shimoku74: run.sh: geni_spi_test
+- `19689292` 2026-11-14 shimoku74: bt-uart test: a byte changed in the engine's loopback is not said to be the same
+- `1b9ead44` 2026-11-14 shimoku74: qemu boot test: descriptors on a file of its own; the checks read the shell's lines without the kernel's minutely ones
+- `1c222a7b` 2026-11-14 shimoku74: qemu boot test: a directory and a file made under a mask of 027
+- `1e15eebf` 2026-11-14 shimoku74: touch_fts_reports_test: the FT3658U's reports, decoded and turned into touches
+- `201be378` 2026-11-14 shimoku74: input test: a key let go, the last of the types, is written as well
+- `209f120c` 2026-11-14 shimoku74: qemu boot test: a file not moved or linked across file systems (EXDEV)
+- `211cadf1` 2026-11-14 shimoku74: qemu boot test: open's refusals as BSD has them
+- `2145f85c` 2026-11-14 shimoku74: qemu-init: mmap-coherent the other way too, a write through the mapping read at once with no msync
+- `22051dd4` 2026-11-14 shimoku74: qemu boot test: a file that is not a program is not run (ENOEXEC)
+- `2323766c` 2026-11-14 shimoku74: workbench: geni_spi_test, SPI through a serial engine against a model of it
+- `258971a1` 2026-11-14 shimoku74: workbench: the arbiter's model knows version 8, its tables apart and its channels closer together
+- `2af847e1` 2026-11-14 shimoku74: workbench: the made-up SCMI chip has a PMIC arbiter of version 8
+- `2b1f7ccf` 2026-11-14 shimoku74: qemu boot test: a file not to be changed, and one only to be added to (chflags)
+- `2d125f08` 2026-11-14 shimoku74: qemu boot test: programs are told the processor's crypto extensions
+- `2d18f13b` 2026-11-14 shimoku74: qemu boot test: two threads timed twice, the better taken
+- `2da919a3` 2026-11-14 shimoku74: qemu boot test: a write cut at RLIMIT_FSIZE, and one or a truncate past it refused
+- `2dc6dcf7` 2026-11-14 shimoku74: qemu-init: serve says its first line in one write
+- `30d27153` 2026-11-14 shimoku74: qemu-init: byte-locks says it in a line the screen holds
+- `32972777` 2026-11-14 shimoku74: qemu-init: sysctl says a timeval (kern.boottime) as seconds and microseconds
+- `33bbb98d` 2026-11-14 shimoku74: qemu-init: unix-name, a socket by name in a file system, reached by a child
+- `35ffed83` 2026-11-14 shimoku74: qemu-init: stat says the owner; umask and chown
+- `3638f99f` 2026-11-14 shimoku74: qemu-init: memory.c for mmap, mmap-write and memory; say_failed and struct stat64_head shared
+- `363c8c8a` 2026-11-14 shimoku74: qemu-init: descriptors keeps using a file after its unlink
+- `371b7dcf` 2026-11-14 shimoku74: qemu boot test: paths as BSD has them
+- `385d1bc1` 2026-11-14 shimoku74: qemu boot test: a write to a read-only page ends its process with SIGBUS
+- `39226151` 2026-11-14 shimoku74: geni_spi test: the engine's clock's rate from its RCG's registers
+- `3c8e245f` 2026-11-14 shimoku74: qemu boot test: descriptors marked close-on-exec close as a program starts, and only they
+- `3daa033e` 2026-11-14 shimoku74: qemu boot test: a file renamed onto one of another's two names; the other name keeps the old file
+- `3dee7fda` 2026-11-14 shimoku74: qemu-init: write -a adds to a file's end (O_APPEND)
+- `3e116cdb` 2026-11-14 shimoku74: SCMI performance test: answers a word short, a domain's attributes with none, a top at the level and one under it
+- `3ede0437` 2026-11-14 shimoku74: qemu-init: fill, a file of made-up bytes; mmap-write, a file written through a shared mapping and read back
+- `3f526ea2` 2026-11-14 shimoku74: qemu boot test: no signal from a user to root's process; an orphan becomes the first process's
+- `3fa1629c` 2026-11-14 shimoku74: qemu-init: truncate and touch
+- `4238725d` 2026-11-14 shimoku74: qemu boot test: a blocked signal is held and caught once let through
+- `42902bcb` 2026-11-14 shimoku74: qemu-init: every error said with its name (error 2 (ENOENT))
+- `440d7d13` 2026-11-14 shimoku74: qemu-init: a program that does not start, and a fork that fails, said without parentheses in parentheses
+- `464e0893` 2026-11-14 shimoku74: qemu-init: truncate reads back the first and last 64 KB of a file grown far
+- `46a6237d` 2026-11-14 shimoku74: qemu-init: fds and cloexec
+- `496fa095` 2026-11-14 shimoku74: input test: six fingers and one lifted, a finger numbered 32, fingers before the start, no latency lines unless asked
+- `497a254c` 2026-11-14 shimoku74: scmi_perf test: scmi_perf=0 is off as well
+- `4a11c542` 2026-11-14 shimoku74: qemu-init: fifo and flock
+- `4af966f1` 2026-11-14 shimoku74: qemu boot test: the .. of a file system mounted on a directory leads to its parent
+- `4d9480b2` 2026-11-14 shimoku74: qemu boot test: a named pipe, a lock on a file, a script run through its #! program
+- `4e610320` 2026-11-14 shimoku74: qemu-init: as UID:GID COMMAND, the command as a user who is not root
+- `4e72638a` 2026-11-14 shimoku74: haptic test: the last of the short effects played, and one past them not
+- `4ecdf74b` 2026-11-14 shimoku74: MDT test: each of the header's limits exactly, and a segment at the memory's very end
+- `4f2c90cd` 2026-11-14 shimoku74: qemu boot test: writev and readv; the kernel's random bytes
+- `50a520cc` 2026-11-14 shimoku74: qemu boot test: POSIX shared memory between a process and its child, and its name taken away
+- `51eb2c3c` 2026-11-14 shimoku74: qemu-init: syscall_pipe in init.h, for every file of it
+- `547e608c` 2026-11-14 shimoku74: qemu-init: dir-walk, a directory read a little at a time, and emptied as it is read
+- `564e1749` 2026-11-14 shimoku74: qemu-init: poll, poll and select on a pipe
+- `57149f12` 2026-11-14 shimoku74: ufs whitelist test: what a command's answer must be to be taken
+- `5a05791c` 2026-11-14 shimoku74: qemu SMP test: byte-range locks, a named pipe and a blocked signal between processes on four processors
+- `5a1f9b8d` 2026-11-14 shimoku74: qemu boot test: the mounted file systems listed, and ramfs's room as it is used
+- `5abbb646` 2026-11-14 shimoku74: backlight test: a DSI controller of 2.2, the first with the command FIFO, is used, and one of 2.1 is not
+- `5d9f956b` 2026-11-14 shimoku74: camera test: a sensor's table taken only when it is one, and never read past its end
+- `629adb2e` 2026-11-14 shimoku74: qemu boot test: who may set a file's times, and to what; an owner gives a file to no group of another's
+- `64400d0a` 2026-11-14 shimoku74: qemu-init: opens, what open says of O_EXCL, O_NOFOLLOW, O_DIRECTORY and a directory to write
+- `6872a04f` 2026-11-14 shimoku74: spmi test: an arbiter of version 8, mapped, read and written through, and what of it is not taken
+- `68821846` 2026-11-14 shimoku74: qemu boot test: a file made under a mask of 077 and given to another owner
+- `68e70b1f` 2026-11-14 shimoku74: qemu boot test: datagrams keep their sizes; a send after shutdown is EPIPE, or SIGPIPE
+- `6c24703d` 2026-11-14 shimoku74: qemu-init: random, the kernel's random bytes counted
+- `6d521a57` 2026-11-14 shimoku74: torch test: twenty seconds for the light to become Darwin's, not five
+- `6deb3374` 2026-11-14 shimoku74: speaker test: the edges of the configuration file's shape
+- `6f1a3b15` 2026-11-14 shimoku74: qemu boot test: byte-range locks on a file in ramfs
+- `6fbfe7e4` 2026-11-14 shimoku74: qemu boot test: a file cut, grown, and its times set; neither on the read-only root
+- `6fd453c3` 2026-11-14 shimoku74: qemu boot test: ramfs refuses what BSD refuses, and a file moves between directories
+- `72da1226` 2026-11-14 shimoku74: qemu boot test: poll and select, their timeout and a pipe made readable
+- `739138ca` 2026-11-14 shimoku74: qemu-init: pipe-size, how much a pipe holds and when it is writable again
+- `73cc466f` 2026-11-14 shimoku74: mutate.sh: MUTATE_SECONDS, how long a scenario has to end
+- `742cacd4` 2026-11-14 shimoku74: qemu-init: one FNV-1a, in text.c, for hash, mmap, mmap-write and get
+- `7700b245` 2026-11-14 shimoku74: buttons test: buttons_steps=N stops after step N, not before it
+- `7894ceb9` 2026-11-14 shimoku74: qemu-init: mmap-coherent, a file written while mapped, the mapping seeing it at once
+- `7b90c834` 2026-11-14 shimoku74: touch_reports_test: what the Goodix and FocalTech driver makes of a controller's reports
+- `7ba430d9` 2026-11-14 shimoku74: ufs test: a device numbered one past the loader's list is none
+- `7cc8b053` 2026-11-14 shimoku74: qemu-init: echo-udp, datagrams on a port sent back
+- `7cd761a7` 2026-11-14 shimoku74: qemu-init: write says a write the file system refused
+- `7dacc9e4` 2026-11-14 shimoku74: qemu boot test: what is written through a mapping is read at once
+- `7e2de459` 2026-11-14 shimoku74: qemu boot test: a directory's links counted, and a directory renamed onto an empty one
+- `7f934d3c` 2026-11-14 shimoku74: qemu-init: descriptors, what lseek, pread, pwrite, dup, dup2, O_APPEND and a non-blocking pipe do
+- `8716a881` 2026-11-14 shimoku74: qemu boot test: a directory of 300 files read in pieces, and emptied as it is read
+- `89694fcc` 2026-11-14 shimoku74: sound test: what Darwin writes, through the ring into the periods the DSP plays
+- `8c2508e5` 2026-11-14 shimoku74: qemu boot test: a file used after its unlink; a rename onto another file's name; a directory not moved into itself
+- `90840c84` 2026-11-14 shimoku74: torch test: a battery at 45 C, the hottest it may be, is already too hot for the light
+- `90c9cfce` 2026-11-14 shimoku74: I2C by hand test: a device freed at the ninth clock, and a clock held low for good not waited for for ever
+- `942271b3` 2026-11-14 shimoku74: sound test: the DSP's answers to the driver's commands, by a script
+- `942f73d9` 2026-11-14 shimoku74: qemu boot test: a file of mode 640 to its owner, its group and the rest (access)
+- `95119dd4` 2026-11-14 shimoku74: qemu-init: fork says why its child could not become the program
+- `99c146ae` 2026-11-14 shimoku74: qemu-kernel: a prompt not seen costs one line its three minutes, not every line after
+- `9a330792` 2026-11-14 shimoku74: Bluetooth UART test: refused before anything is written: a supply that is no regulator's, one not in the database, an enable GPIO not ours or no GP...
+- `9b48ad6d` 2026-11-14 shimoku74: qemu-init: crash readonly, a write to a page made read only
+- `9ccd8c63` 2026-11-14 shimoku74: qemu boot test: rename as POSIX has it
+- `9f780296` 2026-11-14 shimoku74: audio device test: the rate of a second's writing said, silence up to a level of 8, rec_sound=0, a full recording takes no more
+- `a19d407a` 2026-11-14 shimoku74: QRTR frame test: a version 2 header alone is a header of a datagram not there
+- `a4105550` 2026-11-14 shimoku74: qemu-init: rm says the error of the call that fits
+- `a4b66372` 2026-11-14 shimoku74: mic test: the ring Darwin's audio server reads
+- `a4bb9495` 2026-11-14 shimoku74: qemu-init: mask, a signal blocked, pending and let through
+- `a678bffd` 2026-11-14 shimoku74: qemu SMP test: a file written while mapped, datagrams and a file size limit, on four processors
+- `ad6faeb7` 2026-11-14 shimoku74: qemu boot test: a set-user-ID program cut by another is no longer one
+- `aed021fb` 2026-11-14 shimoku74: qemu boot test: what a user who is not root may do and may not
+- `af1adfd7` 2026-11-14 shimoku74: haptic test: a vibration played again when the test's own pause stopped it early
+- `b463e6d9` 2026-11-14 shimoku74: qemu-init: errors of exec and of pipes by name (ENOEXEC, E2BIG, EPIPE, EBADARCH, EBADMACHO)
+- `b6cdfa6a` 2026-11-14 shimoku74: qemu boot test: every one of the kernel's sysctl values read, and nothing panics
+- `b7052af7` 2026-11-14 shimoku74: lint: every command of the QEMU shell has its row in docs/qemu.md
+- `b7fe0c34` 2026-11-14 shimoku74: qemu-init: nice N COMMAND, the command in a child of that priority
+- `b8fbe585` 2026-11-14 shimoku74: qemu-init: vectors, a file written in one writev and read in one readv
+- `b9a2b48c` 2026-11-14 shimoku74: qemu boot test: ramfs filled to its last page, refusing more, and its room back once the file goes
+- `ba72031e` 2026-11-14 shimoku74: qemu-kernel.sh: a typed line the kernel lost is killed and typed again; a prompt that does not come back is said
+- `ba829195` 2026-11-14 shimoku74: qemu-kernel.sh: its head says how lines are typed, and typed again
+- `bb93ea46` 2026-11-14 shimoku74: qemu-init: stat and ls say set-user-ID, set-group-ID and sticky (s, S, t, T)
+- `bcd2e860` 2026-11-14 shimoku74: qemu boot test: a socket by name in ramfs, connected to by a child
+- `bd619ec2` 2026-11-14 shimoku74: qemu boot test: a directory moved takes its .. and link along; the shell's directory moved, its path follows
+- `bf71feed` 2026-11-14 shimoku74: qemu-init: say_error, a system call's error by its number and its name
+- `c16b72a1` 2026-11-14 shimoku74: smem test: the area's last byte, a full table of partitions and one past it, an entry at offset 0, items to the byte with a cache line of 16
+- `c4134de1` 2026-11-14 shimoku74: qemu-init: dgram, datagrams through a socket pair, and SIGPIPE in a child
+- `c8d07570` 2026-11-14 shimoku74: qemu boot test: ramfs brings a mapped file's cached pages up to date as it is written
+- `c9050a38` 2026-11-14 shimoku74: qemu boot test: TCP over the loopback between two of its own processes, a million bytes checked
+- `c992b8d4` 2026-11-14 shimoku74: qemu boot test: three megabytes of ramfs mapped private and written: copies of their own, the file untouched
+- `cbf25c54` 2026-11-14 shimoku74: qemu boot test: a file's extended attributes are not another's to set or list
+- `cca1ba7f` 2026-11-14 shimoku74: qemu boot test: a minute for the first page, not ten seconds
+- `cd4a850b` 2026-11-14 shimoku74: workbench: qemu_smp_test, the kernel on four processors
+- `cd896201` 2026-11-14 shimoku74: drivers list test: touchscreen=0 is not asking for a touch screen
+- `ce3d8704` 2026-11-14 shimoku74: qemu-init: mmap-private, a file written through a private mapping and left as it was
+- `d22a62f7` 2026-11-14 shimoku74: qemu boot test: a file in ramfs watched through kqueue, each change said
+- `d27923fa` 2026-11-14 shimoku74: speaker test: a Music profile of 8-bit numbers or values, or a register fewer than its length, is refused
+- `d31d2b72` 2026-11-14 shimoku74: workbench: the RPMh slot set's model keeps which answers were to be waited for when a request went
+- `d392b5b8` 2026-11-14 shimoku74: qemu-init: cat ends a line a file did not, so that the prompt starts one
+- `d52a3bfe` 2026-11-14 shimoku74: lint: every host test is run by a script of workbench/
+- `d7acde6f` 2026-11-14 shimoku74: bt-uart test: bt=2 is looked at after the thread would have had time
+- `daad29bc` 2026-11-14 shimoku74: qemu boot test: the errors expected by name too
+- `db16c3ff` 2026-11-14 shimoku74: qemu-init: syscall_fork in init.h, for the files that fork
+- `db20c706` 2026-11-14 shimoku74: qemu-init: byte-locks, locks on some bytes of a file (fcntl)
+- `dc4cc295` 2026-11-14 shimoku74: qemu-init: sysctl -a [PREFIX], every name the kernel has and the values under PREFIX
+- `dc5023f4` 2026-11-14 shimoku74: qemu boot test: the kernel's boot time is under a quarter of an hour before a file was touched
+- `dc786ed0` 2026-11-14 shimoku74: qemu smp test: the kernel on one processor too
+- `e0274e92` 2026-11-14 shimoku74: qemu-init: cat, hash and xattr say why a file cannot be read
+- `e1223411` 2026-11-14 shimoku74: qemu-init: cp and id
+- `e4ee6134` 2026-11-14 shimoku74: sound test: sound=0 and no sound= start nothing; a board without the amplifiers is said to be one
+- `eb79bcbe` 2026-11-14 shimoku74: qemu boot test: three megabytes in ramfs, as written and as written through a shared mapping
+- `ed262d6a` 2026-11-14 shimoku74: qemu boot test: a file in ramfs grown to 4 GB, sparse, reads as zeros
+- `efe3d807` 2026-11-14 shimoku74: haptic test: a vibration's strength followed down, one cut at the limit, a whisper not played
+- `f040db50` 2026-11-14 shimoku74: qemu-init: watch, a file through kqueue's EVFILT_VNODE as it is changed
+- `f17002da` 2026-11-14 shimoku74: qemu-init: chflags, and stat says a file's flags
+- `f19ebf12` 2026-11-14 shimoku74: thermal test: a clear at the trip, thermal=0 said, the longest period and one too short
+- `f3eeecfe` 2026-11-14 shimoku74: buttons test: power and volume down held at the start, power alone, and touchscreen=0
+- `f4e0bc02` 2026-11-14 shimoku74: qemu-init: fsize, a process's files held to RLIMIT_FSIZE
+- `f940a38d` 2026-11-14 shimoku74: qemu-init: ipc.c and threads.c out of processes.c (pipe, unix, unix-name, shm, mach; threads, locks)
+- `fa487c7e` 2026-11-14 shimoku74: qemu boot test: a datagram over the loopback between two of its processes
+- `fc3df73f` 2026-11-14 shimoku74: buttons test: five seconds before the summary, not two, for the presses to come first
+- `fe5ce66b` 2026-11-14 shimoku74: RPMh test: the answers of all of a request's commands are waited for, and of no other
+- `25cc3dcb` 2026-11-15 shimoku74: fakekernel: thread_terminate returns the thread to its start, not pthread_exit
+- `3b259115` 2026-11-15 shimoku74: check-publishable: read what could be committed, not every file of the tree
+- `93846a1c` 2026-11-15 shimoku74: ufs_driver_test saver_is_asked: the saver's 400 ms in real time
+- `d679e232` 2026-11-15 shimoku74: board/log.h: a driver's line goes to the loader's log whole
+- `0192f575` 2026-11-16 shimoku74: workbench/cpufreq_driver_test: the small cores parked and given back
+- `0a7af1e0` 2026-11-16 shimoku74: workbench/fakekernel: small cores and idle time a test can set
+- `20d3ed6f` 2026-11-16 shimoku74: workbench/thermal_driver_test: four scenarios for what mutants.py found unwatched
+- `298dd184` 2026-11-16 shimoku74: kernel/host/xnu-clang: run the clang the kernel was built with
+- `61bb120b` 2026-11-16 shimoku74: workbench/backlight_driver_test: the thermal cap, bl_auto and the soft backend's run end
+- `654e83d2` 2026-11-16 shimoku74: tools/lint: shellcheck every shell script the repository tracks
+- `68162612` 2026-11-16 shimoku74: build.config.*: what a build is, in files at the top, as Android's kernels keep it
+- `6c53b294` 2026-11-16 shimoku74: tools/lint: pyflakes' checks of every Python script
+- `9d3cfd80` 2026-11-16 shimoku74: workbench/tools_test: cpus is XNU's own argument
+- `a5d4b20b` 2026-11-16 shimoku74: workbench/qmi/run.sh: -fsanitize=address,undefined is one argument
+- `aa6006c4` 2026-11-16 shimoku74: bench: the small image root26-darwin.sh writes is the default
+- `bbb9298a` 2026-11-16 shimoku74: tools/lint: the Python in the shell scripts' here-documents is checked too
+- `bed09825` 2026-11-16 shimoku74: workbench/backlight_driver_test: wait for the command, not only the level
+- `c286a2fd` 2026-11-16 shimoku74: workbench/cpufreq_driver_test: the governor, look by look
+- `e873e0f4` 2026-11-16 shimoku74: cpufreq_driver_test: the governor kept out of what is checked
+- `fab5d536` 2026-11-16 shimoku74: qemu_boot_test: ramfs is filled past half of memory, its room since the merge
+- `037816dd` 2026-11-17 shimoku74: tools/devicetree.py: the frequency block's layout, and Linux's own trees as well as the vendor's
+- `04b6ac81` 2026-11-17 shimoku74: workbench/scmi_perf_test: a channel never freed, an unmapped mailbox, longer answers
+- `06478b5a` 2026-11-17 shimoku74: station_test: join_and_leave waits for the link's going as well as for the leave
+- `09baa67f` 2026-11-17 shimoku74: workbench/ufs_driver_test: which partitions ufs_check takes for an image's
+- `0b835f84` 2026-11-17 shimoku74: workbench/cpufreq_driver_test: the governor's scenarios without the thread that looks
+- `0b8ec1be` 2026-11-17 shimoku74: workbench/smem_test: an item from the top with a spoilt canary, or more padding than item
+- `0b9cfed2` 2026-11-17 shimoku74: workbench/speaker_driver_test: a start before the prepare tries nothing
+- `165b6ed9` 2026-11-17 shimoku74: workbench/bench_test: os is not used
+- `17bdb5f8` 2026-11-17 shimoku74: touch_goodix_poll_test: FocalTech's chip, which follows its reset line -- found running out of reset, not started without firmware
+- `199bb08f` 2026-11-17 shimoku74: maintainers_test: every test of workbench/ is in its README
+- `19d1b2f8` 2026-11-17 shimoku74: workbench/apple80211_test: the radio's power read back
+- `19dbdfa3` 2026-11-17 shimoku74: workbench/mutants.py: MUTANTS_FROM, a long file a part at a time
+- `1cec9988` 2026-11-17 shimoku74: workbench/touch_goodix_poll_test: the chip's description, a command, a reset asked with more bits
+- `1d06a56f` 2026-11-17 shimoku74: scripts/phone-day: no day begun on a machine that is not ready
+- `1f63303a` 2026-11-17 shimoku74: loader_window_test: the line 'oem result' gives, cut at 63 letters, and the log left as it was
+- `1f98bee2` 2026-11-17 shimoku74: workbench/bt_hci_test: H4 lengths, the answers given in the kernel, the controller's packets
+- `1faa4e46` 2026-11-17 shimoku74: tools/lint: a file not yet added is looked at before it is
+- `272b4163` 2026-11-17 shimoku74: bench: a warning before a run of a kernel that does not know the phone
+- `2e03797c` 2026-11-17 shimoku74: setup-ubuntu.sh: the check group has QEMU and the UEFI the loader's test boots
+- `2eaa0253` 2026-11-17 shimoku74: workbench/ddr_driver_test: ddr=1 leaves the empty command slots out
+- `35868207` 2026-11-17 shimoku74: scripts/release.sh: the sources of a release, checked
+- `36d82195` 2026-11-17 shimoku74: apple80211_test: the link as Darwin is told of it, and the edges
+- `3e22e433` 2026-11-17 shimoku74: workbench/loader_test: damaged payloads, a device tree that does not fit, an identity too large
+- `3e5e1916` 2026-11-17 shimoku74: workbench/bt_uart_test: a TX FIFO not empty, a packet that is not an event, the enable GPIO's mode
+- `3ee5a60a` 2026-11-17 shimoku74: tools/logcheck.py: the common drivers' words for a block they do not know count as stopped
+- `3faeec2d` 2026-11-17 shimoku74: workbench/haptic_driver_test: a write longer than the driver's buffer
+- `435532d7` 2026-11-17 shimoku74: workbench/input_queue_test: what the queue prints is in the log the scenarios look at
+- `4401c4b6` 2026-11-17 shimoku74: phone-day: one kernel a session of the loader, a hung kernel counted as failed, and its live log kept
+- `452f59b8` 2026-11-17 shimoku74: workbench/guard_test: the gain has arrived by a block's last frame
+- `46d0488f` 2026-11-17 shimoku74: ddr_driver_test: a bus clock manager's aux too short, and a vote of 0
+- `46ee255b` 2026-11-17 shimoku74: workbench/touch_fts_read_test: the probe -- the application's ID, its work mode
+- `4ab51346` 2026-11-17 shimoku74: workbench, tools/device: the tracked files from tools/files.py
+- `4e641f9d` 2026-11-17 shimoku74: firmware/README.md: what goes into firmware/NAME/, and who reads it
+- `501c90e9` 2026-11-17 shimoku74: tools/qemu-kernel: a file that is not there is said so, and nothing else
+- `544cb427` 2026-11-17 shimoku74: workbench/ufs_driver_test: the way between the loader and this kernel's own driver
+- `55fa453a` 2026-11-17 shimoku74: workbench/mic_driver_test: the codec set up from nothing, ADC1 on
+- `56ddef0e` 2026-11-17 shimoku74: tools/check-links: what the builds make may be named before it is made
+- `5858785c` 2026-11-17 shimoku74: make phone FROM=URL: a phone of one's own, from its package to its kernel
+- `6163dd3b` 2026-11-17 shimoku74: tools: lint, check-publishable and check-links go over tools/files.py's list
+- `61d621c9` 2026-11-17 shimoku74: workbench/touch_goodix_poll_test: the Goodix driver's poll of a report
+- `62a74679` 2026-11-17 shimoku74: tools/lint: the %#0Nx look over tools/files.py's list, not git grep
+- `62d54c95` 2026-11-17 shimoku74: logcheck.py --against OLD: what changed from one run to the other
+- `63a4c8cf` 2026-11-17 shimoku74: tools/device.py update: each package brought in again from where it came
+- `63e1641c` 2026-11-17 shimoku74: mutants.py: no changes to _Static_assert, which no run can notice
+- `64022e5d` 2026-11-17 shimoku74: build.config.release: what a release's tarball is called, where it goes, how hard it is packed
+- `64c049ba` 2026-11-17 shimoku74: make image, images, phone: the kernel bench and phone-ready would take, unless KERNEL is given
+- `64f33063` 2026-11-17 shimoku74: tools/image.py: one image for a phone
+- `671eb91b` 2026-11-17 shimoku74: tools/logcheck.py: what a run's log says, part by part
+- `6912b1b5` 2026-11-17 shimoku74: workbench/speaker_driver_test: a monitor table of temperature rows only
+- `6c214c73` 2026-11-17 shimoku74: tools/image: a loader that does not know the phone is not taken
+- `6dbae4fc` 2026-11-17 shimoku74: tools/kconfig.py: savedefconfig, a prompt's if, two symbols compared and help indented as Linux has them; a loop said
+- `6fe1725b` 2026-11-17 shimoku74: workbench/camera_wiring_test: camcc's whitelist, the titan top power domain, LDO1 and LDO7
+- `707a4920` 2026-11-17 shimoku74: workbench/ufs_driver_test: the write's own checks, a read short of a block, its devices
+- `7114315a` 2026-11-17 shimoku74: bench: a command and its fetch under one lock, a log replaced only by a whole fetch, and 'bench fresh'
+- `71619b06` 2026-11-17 shimoku74: tools/gen_headers.py: every header the build makes, made in one place
+- `727fd491` 2026-11-17 shimoku74: workbench/device_test: a plain string where nothing is put into it
+- `7371829c` 2026-11-17 shimoku74: tests-for.py: the command that runs a driver's test alone, with its source
+- `7770da8d` 2026-11-17 shimoku74: tools/device.py: a phone's package from a repository of its own
+- `77deace0` 2026-11-17 shimoku74: tools/devicetree.py: the frequency block's regs by the parent's cells, and a power-on block switched off not taken
+- `78fc124e` 2026-11-17 shimoku74: workbench/loader_dsu_test: two copies of as many bytes from the same sector, in other extents
+- `7a0d1fbf` 2026-11-17 shimoku74: scripts/release: the list of the tarball's files goes into it
+- `7dac1b0b` 2026-11-17 shimoku74: workbench/torch_driver_test: the register dump, the first generation's alarm, trouble while dark
+- `8228a785` 2026-11-17 shimoku74: workbench/haptic_driver_test: registers compared, the RAM opened, a sample a write
+- `83fb0b7c` 2026-11-17 shimoku74: bt_uart_test: what mutants.py found unheld
+- `85197d76` 2026-11-17 shimoku74: workbench/ufs_native_read_test: the controller held without a race, its threads started once
+- `8f5e97fc` 2026-11-17 shimoku74: fakekernel: requests that do not wait
+- `933cfc3d` 2026-11-17 shimoku74: image.py: a phone with a uefi { } node and no UEFI build here says there is no boot.img, and why
+- `963e998b` 2026-11-17 shimoku74: scripts/phone-ready: the kernel has to know the phone
+- `96c99a69` 2026-11-17 shimoku74: workbench/buttons_driver_test: a key held in the summary, a short silence of the PMIC
+- `9b9bf225` 2026-11-17 shimoku74: maintainers_test: every tool and script is in its README
+- `9c76368b` 2026-11-17 shimoku74: logcheck.py: Bluetooth's look (bt=-1) that went through is ok
+- `a189ccf1` 2026-11-17 shimoku74: workbench: two tests that left their directories behind in /tmp take them away
+- `a2349270` 2026-11-17 shimoku74: tools/image.py diff: what differs between two images
+- `a3b46fb3` 2026-11-17 shimoku74: tools/check-publishable: an image's payload, an identity blob, an IM4P, by name or by bytes
+- `a5bad07b` 2026-11-17 shimoku74: workbench/ufs_native_read_test: this kernel's list in and out, refused, proved, cleared
+- `a60075ef` 2026-11-17 shimoku74: workbench/touch_fts_read_test: the FocalTech driver's reads over SPI
+- `a966000b` 2026-11-17 shimoku74: tools/device: a repository's address that begins with a dash is none
+- `aa44bec6` 2026-11-17 shimoku74: tools/image.py: --identity takes the IPSW itself
+- `abc19fb9` 2026-11-17 shimoku74: tools/kconfig.py: the kernel's configuration as Linux keeps it -- Kconfig, fragments, a .config, a header
+- `acda0476` 2026-11-17 shimoku74: scripts/phone-ready: what a day with the phone needs, looked at first
+- `ade4f2b6` 2026-11-17 shimoku74: backlight_driver_test: a DSI controller said to be at 0 is no DCS profile
+- `ae7a4619` 2026-11-17 shimoku74: workbench/tools_test.py: the drivers' starts counted under their if (CONFIG_...) as well
+- `af8b72fc` 2026-11-17 shimoku74: scripts/phone-day.sh: a day with the phone, run for you
+- `b00ac992` 2026-11-17 shimoku74: workbench/speaker_driver_test: unusable profiles, monitor tables at the edge, a status never ready
+- `b574e7ca` 2026-11-17 shimoku74: make image, make publish, make loader; make phone ends with the image
+- `b5a47a19` 2026-11-17 shimoku74: sparse_driver_test: what follows the image's table looks like an entry
+- `b5eba79d` 2026-11-17 shimoku74: loader_boot_test: the identity a payload carries, as a UEFI boots the loader
+- `b6edefc5` 2026-11-17 shimoku74: workbench/battery_driver_test: full on the charger, and battery_shown=100
+- `b77e9a79` 2026-11-17 shimoku74: MAINTAINERS: each part of the project, its files, tests and documents
+- `bba83330` 2026-11-17 shimoku74: .gitignore: the phone's firmware beside the userland is never committed
+- `bc7d5d5f` 2026-11-17 shimoku74: tools/image: what is published is judged by its bytes, not by its manifest
+- `c33d0ca8` 2026-11-17 shimoku74: loader_test: a payload header that says all the room reserved for one is taken
+- `c696fc88` 2026-11-17 shimoku74: workbench/ufs_driver_test: requests that do not wait
+- `c7751cf4` 2026-11-17 shimoku74: kconfig.h made with the board tables for every build: the kernel's, the loader's, the checks', the tests'
+- `c7a16d03` 2026-11-17 shimoku74: tools/device.py: a phone's repository's own files are not brought in
+- `c7dac9bb` 2026-11-17 shimoku74: bench: BENCH_IDENTITY, the identity carried in the run's payload
+- `c966c182` 2026-11-17 shimoku74: workbench/haptic_driver_test: a vibration the chip does not stop when told
+- `c9e7a680` 2026-11-17 shimoku74: scripts/setup-ubuntu.sh: what the repository needs of an Ubuntu machine
+- `ce2040a0` 2026-11-17 shimoku74: workbench/station_test: the standing network joined again after it was lost
+- `d0ae7153` 2026-11-17 shimoku74: bench run: ends with what each part said (tools/logcheck.py)
+- `d155826b` 2026-11-17 shimoku74: loader_test: the edges of an identity -- a name that fills its 32 bytes, a last property with no value, scale 4, the largest one
+- `d4591a8a` 2026-11-17 shimoku74: tools/image.py build --every-run: one image for each run of a phone
+- `d4e18863` 2026-11-17 shimoku74: Makefile, scripts/README: make ready, and phone-ready.py in the list
+- `d79b1a31` 2026-11-17 shimoku74: .clang-format: the C style of our files, for an editor
+- `d8d68ee5` 2026-11-17 shimoku74: phone-ready: a kernel built before a pull is OLD, whatever the time of the commits the pull brought
+- `dadaed09` 2026-11-17 shimoku74: logcheck.py: which identity the loader gave Darwin
+- `dd40bd40` 2026-11-17 shimoku74: tools/files, tools/device: whether a package is the repository's own is not read off the disk
+- `ddf9c4c6` 2026-11-17 shimoku74: workbench/sound_driver_test: the tone in both channels, sound in one, the guard's line
+- `dea5abba` 2026-11-17 shimoku74: workbench/loader_window_test: a range up to the payload, the payload in the middle, the map said
+- `df1e55f0` 2026-11-17 shimoku74: bt_qca.h: the firmware a Qualcomm Bluetooth controller is given
+- `e020dc69` 2026-11-17 shimoku74: make day, make changed
+- `e1e3efab` 2026-11-17 shimoku74: logcheck: a touch screen that did not start is STOPPED, one only looked at is said
+- `e6cf1783` 2026-11-17 shimoku74: make logcheck, make new-driver, make release
+- `ebce4ed1` 2026-11-17 shimoku74: qemu-kernel.sh --image: an image booted as a phone boots it
+- `ee8077b5` 2026-11-17 shimoku74: gen_headers, syntax-check, make kconfig: a header that needs stdint.h says so, the fresh kconfig.h taken, the build's fragments
+- `f3d544e0` 2026-11-17 shimoku74: build.config.qemu: the emulator, its processor, memory, acceleration, interrupt controller and firmware
+- `f58f9d89` 2026-11-17 shimoku74: build.config.arm64.llvm: the kernel with LLVM's Mach-O tools, the newest LLVM of the machine's
+- `f7067782` 2026-11-17 shimoku74: workbench/ufs_native_read_test: reads in flight in several slots, done out of order
+- `fa5b1107` 2026-11-17 shimoku74: fakekernel: what a kernel event carried, copied, and the last sixteen codes
+- `facb23e5` 2026-11-17 shimoku74: tests-for.py --run: the tests of what changed, run, and which passed
+- `fb57faaa` 2026-11-17 shimoku74: tools/qemu-kernel: --identity FILE, carried in the payload as ./bench carries it
+- `fd110805` 2026-11-17 shimoku74: tools/image: a kernel that does not know the phone is not taken either
+- `ff16b7a0` 2026-11-17 shimoku74: workbench/bt_hci_test: opcodes said as 0x%04x, a zero with its 0x
+- `082c0290` 2026-11-18 shimoku74: ramfs: a file's table of its pages and its extended attributes are charged to the mount's room and given back when cut or removed (a truncate to te...
+- `17121867` 2026-11-18 shimoku74: qemu-kernel.sh: --then runs under the time left of --seconds (a guest that never answers no longer hangs the run), and QEMU's own stderr is shown w...
+- `299eb9c9` 2026-11-18 shimoku74: gic: an interrupt past 1023 (an extended SPI, an LPI) is ended and an extended SPI masked (it was taken and never ended, which stopped the tick and...
+- `419999da` 2026-11-18 shimoku74: new-driver: every change is worked out before any file is written, so a run that cannot extend run.sh leaves nothing behind and the retry works
+- `4836041d` 2026-11-18 shimoku74: bench/logcheck: a failed log fetch is not recorded as a run (no dangling last.log for logcheck to crash on), a staged fetch replaces the good file ...
+- `5f0f79e7` 2026-11-18 shimoku74: torch test: a light that is on is waited for with its line, which is said after it (the check could come between them)
+- `5f3bc0a4` 2026-11-18 shimoku74: image: publish writes a manifest naming only the files put beside it, so a default image (no boot.img) passes verify
+- `619cb920` 2026-11-18 shimoku74: device: a brought-in package is built in a hidden sibling and moved into place, so an interrupted add leaves no half package (boards skips a dot-pr...
+- `6afc821c` 2026-11-18 shimoku74: device: a clone's cache is a flat name under build/device-sources, so a ref like ../../.. removes nothing outside it
+- `7234f617` 2026-11-18 shimoku74: station test: the joins again 2 s apart are waited for with room for a busy computer (a loaded run missed the fourth by a moment)
+- `76302ad2` 2026-11-18 shimoku74: fts test: the power-off is waited for after the line that comes before it (the check could come between them)
+- `8f19473a` 2026-11-18 shimoku74: haptic test: the softening vibration's own line is the one judged (an earlier try a busy computer cut short says it changed 0 times)
+- `b26b7041` 2026-11-18 shimoku74: apple80211: a set request (join, power, disassociate, scan) is root's, as Apple's driver has it (any process could switch the radio off or join a n...
+- `c6de84a8` 2026-11-18 shimoku74: image: verify reports a malformed or hostile manifest per image instead of a traceback, and a manifest can only name plain files of the image, neve...
+- `c719be14` 2026-11-18 shimoku74: bluetooth: the kernel control takes one client at a time (a second connect threw away bluetoothd's half-sent packet, and any socket's bytes and set...
+- `d69daa10` 2026-11-18 shimoku74: a64emu: LDAPUR, STLUR and LDRAA aligned to their size are one access each (copyin_atomic and copyout_atomic: a byte at a time another thread saw ha...
+- `f400edfd` 2026-11-18 shimoku74: adsp: an intent request's answer is the channel's the DSP names (a refusal on its channel 1 failed a send on ours), an intent told again keeps one ...
+- `f5d7f8a5` 2026-11-18 shimoku74: torch test: a refusal after trouble waits for writing to be given up on, which is said after the light goes off (the write could come between them)
+- `c1b05450` 2026-11-19 shimoku74: psci_smp: a core is counted as started before CPU_ON (and uncounted if refused), so one that panics at once does not take itself for the only core,...
+- `f6b15daa` 2026-11-19 shimoku74: logcheck: a part is STOPPED by the lines that now say it gave up in the middle of a run: a DSP that has given up, a handshake that did not come thr...
+- `5f66acc5` 2026-11-20 shimoku74: build: support native macOS kernel builds
+
+## not applicable: documentation of the new tree's layout (542)
+
+- `1473467c` 2026-10-28 vcvkk: README: a Metal program reaches the GPU through the plug-in now, measured on the phone
+- `30d28a27` 2026-10-28 shimoku74: README: what the probe said on the phone's GPU
+- `4af2234d` 2026-10-28 vcvkk: README: the C interface in the table, with what checks it
+- `4ed8cf08` 2026-10-28 vcvkk: README: eight of the image's kernels against LLVM: seven identical, one a unit in the last place apart
+- `f2993026` 2026-10-28 vcvkk: README: the one-ulp difference was the host's, not the GPU's; eight of eight identical
+- `fee1c17e` 2026-10-28 vcvkk: README: what is checked by what, after the first kernels ran on the phone
+- `069e6b3c` 2026-10-29 vcvkk: probe, README: the half kernel compiled on the phone against the host, and the texture measurements recorded
+- `20489cea` 2026-10-29 vcvkk: README: the render path's rows, its line in the diagram, and what is not yet drawn
+- `7ec87343` 2026-10-29 vcvkk: docs: the UBO descriptor path is served; say so where the refusal was listed
+- `84b0ca01` 2026-10-29 shimoku74: README: the common repository is hakios-xnu-kernel (branch hakios); oosexgang/hakios does not exist
+- `8572eea9` 2026-10-29 vcvkk: README: textures and samplers in 2D compute, served on the fake and not yet measured on the phone
+- `a6aa1a8f` 2026-10-29 vcvkk: README: the first draw measured on the phone, through the probe and through Metal's own objects
+- `d2d5893e` 2026-10-29 vcvkk: README: the compute row says the texture path was measured, with the logs
+- `171f5d4d` 2026-10-30 wannq: renoir: 0004 renoir drivers for xnu-12377
+- `a8c18ff6` 2026-10-30 shimoku74: README: the common repository's branch is main
+- `c5eb871a` 2026-10-31 wannq: renoir: HAKIOS 27 from under a frame a second to 10-40
+- `cff8dc47` 2026-10-31 wannq: renoir: boot26.py, HAKIOS 26 from RAM in one command (touch, buttons, 8 cores)
+- `6481cc6b` 2026-11-01 wannq: renoir: align GPU firmware lookup with the Renoir image layout
+- `dd7b07f9` 2026-11-05 shimoku74: 2.3.4: the documents say that hakios-metal is in this tree
+- `0506d76f` 2026-11-11 shimoku74: docs/troubleshooting.md: the vibration motor's messages
+- `05f819a5` 2026-11-11 shimoku74: docs/troubleshooting.md: what a message means and what to do about it
+- `0e014243` 2026-11-11 shimoku74: Adreno: the profile is the board's [gpu], not a C table per phone
+- `105143cd` 2026-11-11 shimoku74: README: a face for the project
+- `1079903d` 2026-11-11 shimoku74: docs: the pins' and RPMh's helpers where a new driver and the changelog name what is shared
+- `1284422c` 2026-11-11 vcvkk: The loader's iPhone identity is made from your IPSW and kept out of the repository
+- `130f53b4` 2026-11-11 shimoku74: The pictures are where they explain: the architecture document, the devices README, the front page
+- `14e794a7` 2026-11-11 shimoku74: README, CONTRIBUTING: the driver guide and troubleshooting where a reader starts
+- `16e3998f` 2026-11-11 shimoku74: Lint checks the documentation: links and repository paths must exist
+- `1806daee` 2026-11-11 shimoku74: renoir: Metal plug-in gate for the 12377 kernel (0024), Liquid Glass plan
+- `19df4660` 2026-11-11 shimoku74: The microphones' driver takes the audio subsystem's blocks from the board
+- `1ab21e88` 2026-11-11 shimoku74: hakios_smp2p.h, and an item of two processors in hakios_smem.h, with tests
+- `1f1fdf3d` 2026-11-11 shimoku74: docs: the memory vote and the measurements in the drivers' table and the boot-argument reference
+- `20823eb2` 2026-11-11 shimoku74: docs/building.md: what the data-driven drivers have and have not been through
+- `20afe9f2` 2026-11-11 shimoku74: docs: the two renamed drivers, and where a patch to a driver's own copy of a helper goes now
+- `21bd98eb` 2026-11-11 shimoku74: soc/README.md, loader/README.md: what a tree gives a SoC file, compare, the storage controller
+- `22dd80f6` 2026-11-11 shimoku74: An example driver and its test, built and run by make check
+- `2a04287e` 2026-11-11 shimoku74: docs/: one place for documentation; a generated reference of every boot-arg
+- `2c52f8bb` 2026-11-11 shimoku74: CHANGELOG: I2C by hand among what is shared, the vibration motor among what is tested
+- `32e4b731` 2026-11-11 shimoku74: CHANGELOG: no count of the overlay's files, which grows
+- `340dbbe9` 2026-11-11 shimoku74: CI: make check and the kernel round trip on every push and pull request
+- `349c2f04` 2026-11-11 shimoku74: CI: a job that hangs is over in minutes
+- `35c2283a` 2026-11-11 shimoku74: docs: the flashlight's and the vibration motor's wiring as data, in the drivers' table and the changelog
+- `384ddcb0` 2026-11-11 shimoku74: README, architecture: what exactly is still an address in a driver's code
+- `3a86429e` 2026-11-11 shimoku74: docs: the migration guide no longer promises a name check that is gone; the READMEs point at the changelog
+- `3af46a24` 2026-11-11 shimoku74: docs/drivers.md: what of the audio DSP is data now
+- `3bee4800` 2026-11-11 shimoku74: docs/drivers.md: a new driver of a PMIC starts from hakios_spmi.h
+- `3d8472e0` 2026-11-11 shimoku74: README: the status command, where porting is summed up
+- `4124f25f` 2026-11-11 shimoku74: tools: the device tree reader is a module of its own
+- `4430441c` 2026-11-11 shimoku74: tests/README.md: the models several tests share
+- `47d5cf26` 2026-11-11 shimoku74: Issue forms: a bug, a new phone, the documentation
+- `49279d29` 2026-11-11 shimoku74: docs/porting.md: where the steps for making a constant data are
+- `49fc7e3d` 2026-11-11 shimoku74: docs: [pins] in the porting notes and in troubleshooting
+- `4c679700` 2026-11-11 vcvkk: Docs: Metal on iOS 27 as it is now, and ios/ without darwin-renoir
+- `4dcaf988` 2026-11-11 shimoku74: docs: [ipc] where the porting notes, troubleshooting and the changelog list the SoC's sections
+- `4ecb2192` 2026-11-11 shimoku74: docs/assets: the boot chain and the way of device data, drawn
+- `4fe02237` 2026-11-11 shimoku74: docs: when the display's clock offsets are needed
+- `511dcb21` 2026-11-11 shimoku74: README, CONTRIBUTING, NOTICE for the new structure; legacy marked as such
+- `553264a5` 2026-11-11 shimoku74: docs: the I/O window belongs to the step that adds [loader]
+- `5dffdd77` 2026-11-11 shimoku74: docs/drivers.md: waits and the clock of a new driver
+- `5e1c5ae2` 2026-11-11 shimoku74: docs: the index names the new READMEs; the porting test covers step 8 too
+- `60a9f73e` 2026-11-11 shimoku74: CHANGELOG.md: what the restructuring changed, for who ports, builds or uses it
+- `61d64f00` 2026-11-11 shimoku74: CI: the tools' installation is tried three times
+- `639725c7` 2026-11-11 shimoku74: README: the header in the project's own colours
+- `6ed6c1a6` 2026-11-11 shimoku74: README: a badge that cannot break while the repository is private
+- `73163a53` 2026-11-11 shimoku74: docs: architecture, porting, building, and a catalog of every driver
+- `7537ac55` 2026-11-11 shimoku74: CHANGELOG: what the drivers share, the split of the frequency driver, the chip's blocks as data
+- `767a4421` 2026-11-11 shimoku74: docs/building.md: the keys' driver has run since its constants became data, on the host
+- `776f0d92` 2026-11-11 shimoku74: The form for a new phone asks what compare says of its files
+- `789cbdb3` 2026-11-11 shimoku74: docs/building.md: the flashlight's driver has run on the host too
+- `7bd334a1` 2026-11-11 shimoku74: components.toml: every external input at its exact version, checked
+- `8a5b7662` 2026-11-11 shimoku74: CHANGELOG: what else a device tree gives, compare, the driver guide, the renamed drivers
+- `8e35a789` 2026-11-11 vcvkk: GenericARMPE: iokit_busy=S says which services keep the registry busy
+- `8e69fe62` 2026-11-11 shimoku74: ios/README.md: each library and tool of iOS's user space, and what each needs
+- `8ed0421b` 2026-11-11 shimoku74: docs/drivers.md: what of the storage driver is one phone's and what is data
+- `91ee1ab0` 2026-11-11 shimoku74: README: porting in one paragraph, with compare, the SoC file's role and the driver guide
+- `95ba8580` 2026-11-11 shimoku74: docs: the flashlight among what a device tree gives a board
+- `98909997` 2026-11-11 shimoku74: docs: what is shared of the way to another processor
+- `9c0f6ed6` 2026-11-11 shimoku74: tests/README.md: what is tested without a phone, and how
+- `9d5bdd64` 2026-11-11 shimoku74: README, renoir/kernel/README.md: the thermal limiter (0025)
+- `9d63c66f` 2026-11-11 shimoku74: docs/troubleshooting.md: the Wi-Fi DSP's memory among what a board must say
+- `9f57858f` 2026-11-11 shimoku74: hakios_cmd_db.h: the lookup in RPMh's command database, once, with a test
+- `9fca1655` 2026-11-11 shimoku74: The repository describes no phone: devices are packages, the tables are build outputs
+- `a149d519` 2026-11-11 shimoku74: docs: [smmu] in the porting notes and in troubleshooting
+- `a18b29b4` 2026-11-11 shimoku74: docs/glossary.md: the words of three worlds, one line each
+- `a4d04e5c` 2026-11-11 shimoku74: The cameras' driver takes the camera subsystem's blocks from the board
+- `a62a35ba` 2026-11-11 shimoku74: CI: the kernel files HakiOS adds are compiled on every push
+- `ac87a016` 2026-11-11 shimoku74: hakios_glink_queue.h: the arithmetic of GLINK's two queues, once, with a test
+- `adc2121d` 2026-11-11 shimoku74: docs: how a driver reads registers, and the one seam its test uses
+- `aea09013` 2026-11-11 shimoku74: docs/architecture.md: what a SoC file says now, what the drivers share, and no counts that go stale
+- `b7a20ec3` 2026-11-11 shimoku74: kernel/import-patch.sh and docs/migrating.md: carrying old-layout work over
+- `befb6557` 2026-11-11 vcvkk: README: redwood's home screen drawn by Metal, and metal/ in the layout
+- `bf511020` 2026-11-11 shimoku74: Fix the lint failure of the previous commit: old paths named on purpose
+- `c55f7154` 2026-11-11 shimoku74: tools/README.md: the tools, one line each
+- `d0caeaa7` 2026-11-11 shimoku74: docs/writing-a-driver.md: the rules and why, what a driver has at hand, the steps
+- `d11ae32e` 2026-11-11 shimoku74: CHANGELOG: the headers drivers share, and the pins read from a device tree
+- `d910c912` 2026-11-11 shimoku74: renoir: backlight.md: what to look for in the first bl_trace=1 boot
+- `db95a155` 2026-11-11 shimoku74: tests: the vibration motor's driver configuring its chip
+- `dc20e0c6` 2026-11-11 shimoku74: kernel/syntax-check.sh: the drivers compile, checked without the Darwin toolchain
+- `de245567` 2026-11-11 shimoku74: docs/drivers.md: asking RPMh for a resource
+- `e07739b1` 2026-11-11 shimoku74: docs/troubleshooting.md: the flashlight's refusals
+- `e528edcf` 2026-11-11 shimoku74: docs: comparing a board with the phone's device tree
+- `e73d2f97` 2026-11-11 shimoku74: docs/porting.md: step 6 points at the driver guide and at a part made data with a test
+- `e7bc10bb` 2026-11-11 shimoku74: CHANGELOG: a paragraph within the line length again
+- `eb2f5604` 2026-11-11 shimoku74: tests: the porting guide, run on a made-up phone
+- `ec45006b` 2026-11-11 shimoku74: docs: which SoC sections the part drivers need
+- `ecb2e7ad` 2026-11-11 vcvkk: README: redwood boots iOS 27.2 to the lock screen
+- `ef7ad5b3` 2026-11-11 shimoku74: docs: [speaker] in the drivers' table, the changelog and troubleshooting
+- `fe6e75d3` 2026-11-11 shimoku74: hakios_smem.h: the processors' shared memory, read once, with a test
+- `00c99536` 2026-11-12 shimoku74: changelog: the pins that became data, the features page, the two fixes in reading memory and the new host tests
+- `0160a4f4` 2026-11-12 shimoku74: docs: the last words of the TOML files
+- `021d1969` 2026-11-12 shimoku74: Guides: the SoC, the panel's kind or the first phone, not a phone's name
+- `05ac51b8` 2026-11-12 shimoku74: kernel/build.sh: with XNU_WARNINGS=1, the warnings of HakiOS' files are listed at the end
+- `05b3a947` 2026-11-12 vcvkk: iOS user space: rc.jobs.fps, frame pacing with something moving
+- `08b9d586` 2026-11-12 shimoku74: tests: starting, the volume and stopping of the speaker amplifiers
+- `09ce826a` 2026-11-12 shimoku74: speaker: a status that could not be read is said as 0xffff, not as what memory held
+- `09fe4c94` 2026-11-12 shimoku74: tests: the Wi-Fi station layer runs on the host
+- `0da7eb8d` 2026-11-12 shimoku74: changelog: the speaker test has 22 scenarios
+- `0e1437b6` 2026-11-12 shimoku74: docs: writing to the storage is [storage] in the board file
+- `17b81398` 2026-11-12 shimoku74: changelog: formats in the syntax check, the touch drivers' log
+- `18a5cc3b` 2026-11-12 shimoku74: docs: migrating says which sections a device package from before lacks
+- `1c15322f` 2026-11-12 shimoku74: kernel: the syntax check also checks what a file prints
+- `1d8beb45` 2026-11-12 shimoku74: changelog: the bounds of what the DSPs and the radio's driver send
+- `1e3723a4` 2026-11-12 shimoku74: tests: writing into the system image stays inside its extents
+- `1e867812` 2026-11-12 vcvkk: Kernel: the small cores parked while the big ones have room
+- `1f6473a0` 2026-11-12 shimoku74: docs: building the kernel without theos, and what that build showed
+- `23079aaf` 2026-11-12 shimoku74: CHANGELOG: the data that left the drivers lately, and the shared headers
+- `2579630a` 2026-11-12 shimoku74: sparse: nothing is read from outside the image on the image's word
+- `259ea6f5` 2026-11-12 shimoku74: docs: where the helper for a serial engine's clocks is named
+- `278f7146` 2026-11-12 shimoku74: docs: troubleshooting a loader that finds no memory for the kernel
+- `2c34e85b` 2026-11-12 shimoku74: drivers.md: what of the sound, microphone and camera drivers is data
+- `321e7af9` 2026-11-12 shimoku74: driver guide: a whole build, and its warnings, are minutes away
+- `345d8356` 2026-11-12 shimoku74: docs: which drivers run on the host, and against what
+- `34f9663d` 2026-11-12 shimoku74: architecture: the shared layer has the way to the other processors, checked once
+- `35ea19ea` 2026-11-12 shimoku74: docs: breaking a driver on purpose is one command
+- `39020f38` 2026-11-12 shimoku74: docs: the copies of the device interfaces, where a driver's author looks
+- `3cbb8af2` 2026-11-12 shimoku74: tests: the speaker amplifiers' temperature and battery monitor
+- `430ba234` 2026-11-12 shimoku74: No phone in the names of a boot argument, a function and two features' notes
+- `44d65941` 2026-11-12 shimoku74: docs: a driver's thread declares its wait, then looks again
+- `463f0d9a` 2026-11-12 shimoku74: Camera: cam_sensor= explained as it works, from the board
+- `46c1e45c` 2026-11-12 shimoku74: Goodix: the high report rate is the chip's, not one maker's
+- `495eac1d` 2026-11-12 shimoku74: driver guide: what hakios_glink_queue.h has now, and its test
+- `4a4f53ff` 2026-11-12 shimoku74: changelog: the paragraph on boards.py new wrapped again
+- `4aa29a46` 2026-11-12 shimoku74: docs, build.sh: a kernel linked by LLVM is a check, not a kernel to boot
+- `52407e31` 2026-11-12 shimoku74: docs: theos is one way to link the kernel, not the only one
+- `53b471b0` 2026-11-12 shimoku74: CHANGELOG: the wiring tests of the cameras, the sound and the microphones
+- `5809a8a3` 2026-11-12 shimoku74: changelog: the barriers
+- `5d2c262b` 2026-11-12 shimoku74: tests: the storage driver runs on the host
+- `5e003ccc` 2026-11-12 shimoku74: tests: the backlight's driver: when a command may go, what is put back, controllers left alone
+- `5f504f89` 2026-11-12 shimoku74: driver guide: the GLINK row's last column is where its data is, not its test
+- `6142ea9b` 2026-11-12 shimoku74: troubleshooting.md: boards.py's refusals quoted as it prints them now
+- `6466016d` 2026-11-12 shimoku74: tests: the audio device runs on the host
+- `66f94bb5` 2026-11-12 shimoku74: tools/rename-image-root.sh: the same renaming, for a tree that has the old names
+- `678a908f` 2026-11-12 shimoku74: glossary: the terms of the sound, the microphones, the Wi-Fi radio and the system image
+- `67aba6cc` 2026-11-12 shimoku74: changelog: the APFS volume limit, the image tool's Mach-O test, the crash line's widths
+- `69afa2df` 2026-11-12 shimoku74: kernel/build.sh: a kernel linked by LLVM is moved aside, so it is not booted by mistake
+- `69c07336` 2026-11-12 shimoku74: kernel/build.sh: the syscall table is generated with GNU awk
+- `725bca4a` 2026-11-12 shimoku74: changelog: the shared memory's items, the board's line
+- `7421c31f` 2026-11-12 shimoku74: loader: LOADER_CFLAGS for a phone whose payload is elsewhere; porting says what the address is
+- `7692ea34` 2026-11-12 shimoku74: tests: how to add one, with what the last hundred taught
+- `7a646920` 2026-11-12 shimoku74: porting guide: what is still tied to redwood's parts, as it is now
+- `8629ed00` 2026-11-12 shimoku74: tests: the thermal driver: steps said, no row written twice, a sensor between two readings
+- `908b4bff` 2026-11-12 shimoku74: loader: what it writes to the phone's storage, in its README and held by a check
+- `91dbb354` 2026-11-12 shimoku74: tests: preparing the speaker amplifiers from a configuration file
+- `9281633d` 2026-11-12 shimoku74: docs: the one place where one phone's values are in the loader, said plainly
+- `95f4deb4` 2026-11-12 shimoku74: Mesa 26 for the iOS 26 user space: userland/tools, libhakios-air, no phone's patch name
+- `95faece4` 2026-11-12 shimoku74: tests: the UFS driver's whitelist, against every operation
+- `99c28fae` 2026-11-12 shimoku74: docs: porting names the three drivers whose wiring became data, and their tests
+- `9aae1da3` 2026-11-12 shimoku74: docs: the tests have three stand-in phones, not two
+- `9ea73c94` 2026-11-12 hxfuxyy: readme: the OnePlus Ace 6T (macan) in the device table
+- `9fd3897f` 2026-11-12 shimoku74: loader: a patch download needs the image it is for; oem read without a wrapping sum
+- `a437ede1` 2026-11-12 shimoku74: docs: a new driver is one line in hakios_drivers.c
+- `a46147c0` 2026-11-12 shimoku74: changelog: the backlight's lost wake-up
+- `a6637761` 2026-11-12 shimoku74: changelog: the speaker amplifiers' driver runs on the host
+- `a824d20b` 2026-11-12 shimoku74: writing-a-driver.md: the four new shared headers in the table a driver starts from
+- `a9feb0a0` 2026-11-12 shimoku74: changelog: the TDM interface is the board's too
+- `b186308b` 2026-11-12 shimoku74: tests: the input queue runs on the host
+- `b5deb849` 2026-11-12 vcvkk: iOS user space: rc.jobs.haptic, gestures iOS answers with its haptics
+- `b6fe5a82` 2026-11-12 shimoku74: tests: the audio recording's bound is held by a writer of one frame at a time
+- `b88403f4` 2026-11-12 vcvkk: Docs: where iOS 27's lock screen spends its GPU time
+- `c119e38d` 2026-11-12 shimoku74: kernel/README: the check with LLVM's tools, and how long a build takes
+- `c5582505` 2026-11-12 shimoku74: CONTRIBUTING: make kernel-check before a kernel change is sent
+- `c8ccf621` 2026-11-12 shimoku74: docs: what each feature needs, from the checker's own tables
+- `ca21b530` 2026-11-12 shimoku74: tests: no driver names an address of a chip
+- `cbd1c1e9` 2026-11-12 shimoku74: docs: the kernel needs clang 19 or newer, and where to say which
+- `cd1e22f9` 2026-11-12 vcvkk: docs: metal-glass.md, the frame rates measured, where the time went, what is next
+- `d298d2ba` 2026-11-12 shimoku74: mkimage26: /redwood as a link to /hakios, while darwin-renoir is not renamed
+- `d9c9c4ec` 2026-11-12 shimoku74: CHANGELOG: iOS's cameras on the board, and the renames as a change
+- `ded8c8b4` 2026-11-12 shimoku74: tests: what the packer writes, the loader reads
+- `e0224142` 2026-11-12 shimoku74: docs: kernel/deps/stage1.sh has been run end to end
+- `e0848a24` 2026-11-12 shimoku74: Undo what the rename got wrong: Android's file names and the naming note
+- `e189ff0b` 2026-11-12 shimoku74: porting.md: what is still tied to a part, and what is data, as it is now
+- `e210c855` 2026-11-12 shimoku74: changelog: what the two DSP drivers share now
+- `e91cf6b9` 2026-11-12 vcvkk: iOS tools: frames.py, frame pacing per gesture
+- `e9c9e614` 2026-11-12 shimoku74: docs: the loader's row of what is verified names its host tests
+- `f34b19e8` 2026-11-12 shimoku74: readme: SM8845's first blocks are in soc/, and the kernel check is a command away
+- `f4e79134` 2026-11-12 shimoku74: changelog: the loader's tests, and what they and the others found
+- `fafb2994` 2026-11-12 shimoku74: troubleshooting: the messages of reading the storage and the RAM disks
+- `fdacd895` 2026-11-12 shimoku74: tests: the flashlight goes out for each fault on its own
+- `ff86bddf` 2026-11-12 shimoku74: docs: the files' format, and their sections as nodes
+- `ff90d1fd` 2026-11-12 shimoku74: docs: a touch controller on other wiring is [touch] in the board file
+- `05d3f912` 2026-11-13 shimoku74: migrating.md: the firmware's directories by their new names only
+- `0884b34f` 2026-11-13 shimoku74: make qemu: a process started and waited for, and the kernel's messages read
+- `09d04a01` 2026-11-13 shimoku74: workbench/README: what the QEMU boot test tries now, and its helpers
+- `10517753` 2026-11-13 shimoku74: make qemu: TCP as a client and UDP both ways; its head lists what is tried
+- `1634b02b` 2026-11-13 shimoku74: migrating.md: the old mount point of the system volume, without the old name
+- `1ae492aa` 2026-11-13 shimoku74: docs (ru): the kernel in QEMU, the kernel's path as build.sh writes it
+- `1c834bd6` 2026-11-13 shimoku74: make qemu: a file written in ramfs, read back and removed; the typed lines listed one by one
+- `215cfdb3` 2026-11-13 shimoku74: make qemu: a mapped file, and kqueue's timer and a pipe's readiness
+- `2324bfb7` 2026-11-13 shimoku74: README: what QEMU tries of the kernel, files and memory too
+- `27641d1a` 2026-11-13 shimoku74: make qemu: the first process within 20 seconds of the kernel's start; input devices counted before the shell
+- `27dedd7b` 2026-11-13 shimoku74: board: the SoC said only when it is named apart from the board
+- `2ad4d733` 2026-11-13 shimoku74: qemu boot test and docs: clear, and the shell's own commands in the table
+- `2d283a3f` 2026-11-13 shimoku74: migrating.md: what keeps Apple's spelling, said without quoting it
+- `2e8a24ed` 2026-11-13 shimoku74: boot-args: the battery's, the DSP's, the camera's, the sound's and Wi-Fi's waits described
+- `2f3edb42` 2026-11-13 shimoku74: docs/qemu.md: time
+- `2fccd450` 2026-11-13 shimoku74: workbench/mutants.py: the simple changes to a driver, each run, those no scenario notices printed
+- `303bf1e2` 2026-11-13 shimoku74: tools/qemu-kernel.sh: a kernel of this repository booted in QEMU
+- `31bd8185` 2026-11-13 shimoku74: boot-args: apfs_cheap's line reads on its own
+- `31fae12a` 2026-11-13 shimoku74: README: the QEMU board runs the current kernel, and what make qemu tests there
+- `343a76b4` 2026-11-13 shimoku74: tools/README: what qemu-kernel.sh and qemu-root.sh do now
+- `38e4865f` 2026-11-13 shimoku74: README: the kernel in QEMU among what is here; the SoC file is soc.dtsi
+- `3ba3b739` 2026-11-13 vcvkk: docs: metal-glass.md, the frame rates now and the presenter's ceiling
+- `40997a08` 2026-11-13 shimoku74: bootargs: the areas name the files where they are now (board/), not the old hakios_ names
+- `459ee1e8` 2026-11-13 shimoku74: components: the pinned inputs in the board files' syntax, not TOML
+- `5268886e` 2026-11-13 shimoku74: boards: a package carries its chip's soc.dtsi; soc/ is gone
+- `5fc2902c` 2026-11-13 shimoku74: apfs: requests taken one by one are said to be that, not a disk in memory
+- `60022916` 2026-11-13 shimoku74: docs: qemu-init is a directory now
+- `64519323` 2026-11-13 shimoku74: docs/qemu.md: files, and the shell's directory in what make qemu checks
+- `6741f1da` 2026-11-13 shimoku74: workbench/README: the host's runs are under the sanitizers
+- `6baae8d2` 2026-11-13 shimoku74: adsp: adsp_listen said where it is read
+- `6d70ed75` 2026-11-13 shimoku74: README (zh-CN): the current kernel boots on the QEMU board, as the English one says
+- `6fe8f862` 2026-11-13 shimoku74: writing-a-driver: the I2C model, mutants.py and the sanitizers in the testing step
+- `78c9ce03` 2026-11-13 shimoku74: example LED test: lets_go_of_its_thread lets the thread finish before the process ends (it could abort under qemu-aarch64)
+- `7c19606b` 2026-11-13 shimoku74: make qemu: signals caught by a handler, and sigreturn back
+- `7d152c6a` 2026-11-13 shimoku74: camera: where camcc has its clocks is the SoC file's camera { }
+- `80664515` 2026-11-13 shimoku74: make qemu: values set through sysctl; curl tries until serve listens, not once
+- `874fb274` 2026-11-13 shimoku74: make qemu: four threads take turns under one lock and lose no count
+- `8863c8f2` 2026-11-13 shimoku74: docs: what the sound, microphone and camera tests model and try now
+- `8e8dd1f7` 2026-11-13 shimoku74: docs: the fourth of the tests' phones, phone-scmi
+- `91d68f22` 2026-11-13 shimoku74: docs/qemu.md: vm
+- `91f8cdc9` 2026-11-13 vcvkk: battery: battery_shown=N shows iOS N percent, for its low-battery alert on purpose
+- `944c0ed9` 2026-11-13 shimoku74: camera: the PLLs' configurations are the SoC file's, the dividers worked out
+- `94df412f` 2026-11-13 shimoku74: make qemu: IOKit's registry answers from user space
+- `98a839b0` 2026-11-13 shimoku74: make qemu: 4 MB over TCP arrive whole, by their hash
+- `99333691` 2026-11-13 shimoku74: make qemu: a bad address and an undefined instruction end a process with SIGSEGV and SIGILL
+- `9b2aee97` 2026-11-13 shimoku74: make qemu: the date, a signal to a process, and a pipe between two
+- `a15dc4f8` 2026-11-13 shimoku74: bootargs: no line about undescribed arguments when there are none
+- `a200a909` 2026-11-13 shimoku74: boot-args: every argument has a description
+- `abb84879` 2026-11-13 shimoku74: docs/qemu.md: xattr
+- `add5eb97` 2026-11-13 shimoku74: docs (ru): make qemu runs the kernel's own tests too
+- `af61d5dc` 2026-11-13 shimoku74: make qemu: 4 MB from the machine to this computer, every byte checked
+- `af880781` 2026-11-13 shimoku74: make qemu: a descriptor through a socket pair reads its file
+- `b27147c1` 2026-11-13 shimoku74: docs/qemu.md: cd, pwd, and ls of this directory
+- `b783e783` 2026-11-13 shimoku74: make qemu: the loader's serial number is the one IOKit gives user space
+- `b80ee111` 2026-11-13 shimoku74: example_led_test: led=0 does nothing; the driver lets go of its thread
+- `bb371e34` 2026-11-13 shimoku74: bootargs: an argument no name= comment speaks of gets the sentence that names it
+- `bbf16bc2` 2026-11-13 shimoku74: make qemu: fork copies memory on write, and execve makes the child another program
+- `bfa817b5` 2026-11-13 shimoku74: boot-args: the touch screen's and the panel scan's arguments described
+- `c05630bf` 2026-11-13 shimoku74: docs: from Ubuntu to Darwin 27, in Russian
+- `c1314c74` 2026-11-13 shimoku74: CHANGELOG: the Mesa cross files and libhakios26's link, not yet built on a Mac
+- `c65e8d41` 2026-11-13 shimoku74: docs: the kernel's shell in QEMU, by hand
+- `c9c3ed8d` 2026-11-13 shimoku74: Documentation: the main branch names no phone
+- `ceb1f782` 2026-11-13 shimoku74: make qemu: the virtio disk read whole and a file in its APFS volume, by their hashes
+- `d4bc15d7` 2026-11-13 shimoku74: make qemu: two threads run on the two processors at once
+- `d729b7b8` 2026-11-13 shimoku74: make qemu: a button and a touch from QEMU reach the input device
+- `e06f6852` 2026-11-13 shimoku74: docs/qemu.md: the kernel in QEMU
+- `e439e546` 2026-11-13 shimoku74: make qemu: memory of its own taken and given back; signals read wherever the line starts
+- `ef0d08f6` 2026-11-13 shimoku74: make qemu: Mach messages through a port come back as they went
+- `f0392f00` 2026-11-13 shimoku74: qemu.md: the shell's commands by area, what make qemu holds as a list
+- `f404345f` 2026-11-13 shimoku74: docs/qemu.md: stat, ln, mv, chmod, and what make qemu checks of them
+- `fde543d3` 2026-11-13 shimoku74: console_screen=1: the console on the screen as well as on the serial port
+- `00e8f226` 2026-11-14 shimoku74: docs/qemu.md: mask, and why it runs in a child
+- `019f75bd` 2026-11-14 shimoku74: docs/qemu.md: opens
+- `02cef8a7` 2026-11-14 shimoku74: docs/qemu.md: echo-udp
+- `02f255ee` 2026-11-14 shimoku74: docs/qemu.md: what the boot test checks of paths and of a file's flags
+- `0572004f` 2026-11-14 shimoku74: README: what the kernel is tried for in QEMU, its own tests, and four processors and one
+- `05d22c35` 2026-11-14 shimoku74: docs/qemu.md: what the four-processor test tries between processes and through ramfs
+- `0de16881` 2026-11-14 shimoku74: workbench README: the arbiter's model and test, version 8 too
+- `1004af98` 2026-11-14 shimoku74: docs/qemu.md: as
+- `10e1f5a6` 2026-11-14 shimoku74: docs/qemu.md: fifo and flock; what the boot test checks of them, of as, nice, truncate and touch
+- `1668f752` 2026-11-14 shimoku74: docs/qemu.md: chflags and write -a
+- `175d0610` 2026-11-14 shimoku74: docs/qemu.md: poll
+- `1ace3eb7` 2026-11-14 shimoku74: docs/qemu.md: fds and cloexec
+- `2288248c` 2026-11-14 shimoku74: docs/qemu.md: where the processes' commands are now
+- `24074597` 2026-11-14 shimoku74: docs/qemu.md: memory.c
+- `27c30503` 2026-11-14 shimoku74: workbench/README.md: MUTATE_SECONDS for a run of mutants.py over a driver whose scenarios wait
+- `2abd2531` 2026-11-14 shimoku74: workbench README: a driver's threads let finish before a scenario returns; mutate.sh with no change runs one test as it is
+- `2ed55849` 2026-11-14 shimoku74: camera test's description, workbench/README.md, docs/drivers.md: the PM8008i's writes and the sensor's tables
+- `344f9d9e` 2026-11-14 shimoku74: docs/qemu.md: random and vectors
+- `4d486f21` 2026-11-14 shimoku74: docs (ru): what make qemu holds now, four processors too
+- `4dc8cc71` 2026-11-14 shimoku74: docs/darwin27-ubuntu.ru.md: the QEMU shell's as, to see what the kernel refuses a user
+- `4f1301a1` 2026-11-14 shimoku74: workbench/README.md: touch_fts_reports_test
+- `50b8caf7` 2026-11-14 shimoku74: docs/qemu.md: truncate and touch
+- `52d146a6` 2026-11-14 shimoku74: docs/qemu.md: mmap-coherent
+- `5b6d147d` 2026-11-14 shimoku74: docs/qemu.md: dgram
+- `6ab0388f` 2026-11-14 shimoku74: docs/qemu.md: byte-locks
+- `6ef2eda9` 2026-11-14 shimoku74: docs/qemu.md: the loopback in what make qemu checks
+- `700d480f` 2026-11-14 shimoku74: docs/qemu.md: what the boot test now checks of processes, files and ramfs
+- `746e91e0` 2026-11-14 shimoku74: docs/qemu.md: the .. of a mounted file system
+- `777bde58` 2026-11-14 shimoku74: workbench/README.md: lint says of a test that nothing runs
+- `7812c270` 2026-11-14 shimoku74: docs/qemu.md: fill and mmap-write
+- `7922908b` 2026-11-14 shimoku74: example_led test: the blinks counted as the driver writes the pin
+- `7f1d4200` 2026-11-14 shimoku74: docs: the four processors' test
+- `829d2df0` 2026-11-14 shimoku74: docs/qemu.md: sysctl -a
+- `98b6fa4f` 2026-11-14 shimoku74: docs/qemu.md: cp and id
+- `995a8d03` 2026-11-14 shimoku74: docs/qemu.md: shm
+- `99c86db7` 2026-11-14 shimoku74: docs/qemu.md: dir-walk
+- `9d1ab313` 2026-11-14 shimoku74: docs/qemu.md: crash readonly, SIGBUS
+- `9e2f6c9d` 2026-11-14 shimoku74: docs/qemu.md: descriptors
+- `a888b2bc` 2026-11-14 shimoku74: docs/qemu.md: mmap-private
+- `b365688f` 2026-11-14 shimoku74: docs/qemu.md: access
+- `b59ed04f` 2026-11-14 shimoku74: docs/qemu.md: watch
+- `bc0ba4ae` 2026-11-14 shimoku74: docs: the processors' test boots on one as well
+- `bd4cace4` 2026-11-14 shimoku74: docs/qemu.md: ramfs's refusals and moves
+- `bd89e29c` 2026-11-14 shimoku74: docs/qemu.md: what the boot test checks of mappings and of rename
+- `c087c4d6` 2026-11-14 shimoku74: docs/qemu.md: nice
+- `c63fe1e0` 2026-11-14 shimoku74: docs/qemu.md: what the boot test checks of set-user-ID programs and sticky directories
+- `ca47892b` 2026-11-14 shimoku74: docs/drivers.md: the touch drivers' report tests, and what the wiring-only tests now cover besides
+- `d9878ecd` 2026-11-14 shimoku74: docs/qemu.md: df
+- `db6aa8ef` 2026-11-14 shimoku74: docs/qemu.md: pipe-size
+- `e74635f6` 2026-11-14 shimoku74: workbench/README.md: touch_reports_test
+- `f59376f2` 2026-11-14 shimoku74: docs/qemu.md: umask and chown; the files' paragraph wrapped again
+- `f6df6f09` 2026-11-14 shimoku74: docs/qemu.md: unix-name
+- `fb441de7` 2026-11-14 shimoku74: docs/qemu.md: descriptors and a file after its unlink
+- `fc24256c` 2026-11-14 shimoku74: docs/qemu.md: mmap-coherent both ways
+- `fd26b1d8` 2026-11-14 shimoku74: docs: geni_spi_test, and what it models
+- `fe4e7bae` 2026-11-14 shimoku74: docs/qemu.md: fsize
+- `0fb55e99` 2026-11-15 shimoku74: metal-glass: Darwin 27's QuartzCore shaders through the frontend
+- `14421093` 2026-11-15 shimoku74: docs/metal-glass: pointer compares, arrays handed back, 32-place phis; Morpheus and MPSNeuralNetwork
+- `455379ce` 2026-11-15 shimoku74: metal-glass: the steps to the phone as they are now
+- `4572bd59` 2026-11-15 shimoku74: metal-glass: the Metal driver in Darwin 27's backboardd under QEMU
+- `4881417b` 2026-11-15 shimoku74: metal-glass: how far the Metal driver gets in Darwin 27 under QEMU
+- `50fa67f0` 2026-11-15 shimoku74: docs/metal-glass: pointers kept in a local as numbers
+- `53abc539` 2026-11-15 shimoku74: docs/metal-glass: what crashed the software path, and constant tables that read zeros
+- `56e0d4e9` 2026-11-15 shimoku74: metal-glass: the sweep again, 3,843 compiled, and tessellation on the open list
+- `56f537d1` 2026-11-15 shimoku74: metal-glass: Darwin 27's QuartzCore and RenderBox shaders through ir3 for the Adreno 642L
+- `692ab065` 2026-11-15 shimoku74: docs/metal-glass: the padding byte, BlinkDetection compiled, why the BVH kernels crash a sweep
+- `6e276173` 2026-11-15 shimoku74: docs/metal-glass: visible function tables, the library's and the driver's halves
+- `7525fb8c` 2026-11-15 shimoku74: metal-glass: every library of Darwin 27 through ir3, and what stays open
+- `76606d8c` 2026-11-15 shimoku74: docs/troubleshooting: ramfs's line when files have half the kernel's shared data range
+- `76778094` 2026-11-15 shimoku74: docs/metal-glass: the night's long tail -- chosen-pointer atomics, pointers through integers, wait and notify, narrow integers
+- `8133de64` 2026-11-15 shimoku74: docs/darwin26-boot: the software path's lock screen with Stripe Yellow under QEMU, and the screendump's padded rows
+- `842e051a` 2026-11-15 shimoku74: mkimage26: METAL=1 keeps MetalPerformanceShaders' kernels and links the driver's bundle
+- `8b05bf0b` 2026-11-15 shimoku74: metal-glass: Darwin 27's entry points, 928 of 1036 through the frontend
+- `8dae9223` 2026-11-15 shimoku74: metal-glass: where the render server's time went under QEMU, and the four changes
+- `900acefe` 2026-11-15 shimoku74: docs/metal-glass: what the driver threw away, and what it keeps now
+- `95fe477d` 2026-11-15 shimoku74: docs/metal-glass: the dynamic wallpapers' fragment shaders compile with VFX's function linked
+- `9ad632ea` 2026-11-15 shimoku74: metal-glass: the QEMU boot after the four changes
+- `a4d9991e` 2026-11-15 shimoku74: docs/metal-glass: the 300 libraries again, 24,244 compiled and what the 3,246 refusals are
+- `a74f6187` 2026-11-15 shimoku74: docs/metal-glass: what two boots under QEMU found, and the boot after
+- `aad2be2b` 2026-11-15 shimoku74: metal-glass: the Linux-built library drew QuartzCore's shader on Darwin 27
+- `b1eddb3e` 2026-11-15 shimoku74: metal-glass: QuartzCore, RenderBox and MercuryPoster clean under memcheck
+- `bfb5b171` 2026-11-15 shimoku74: docs/metal-glass: the wallpaper's extension ended by PosterBoard's watchdog under the emulator
+- `d92a0d4f` 2026-11-15 shimoku74: mkimage26: Stripe Yellow is the first wallpaper; WALLPAPER= picks another colour
+- `e020cba9` 2026-11-15 shimoku74: metal-glass: RenderBox through ir3, 74 of 109 alone and 82 with an effect linked
+- `f24dc9a2` 2026-11-15 shimoku74: docs/metal-glass: the sweep over all 300 libraries, and tessellation
+- `f38f5da1` 2026-11-15 shimoku74: docs/metal-glass: the Mesa patch by its path from the repository's root
+- `018a8454` 2026-11-16 shimoku74: darwin/userland/env.sh: link our libraries with ld64, or as arm64 when there is only LLVM
+- `05026124` 2026-11-16 shimoku74: docs: simdgroup matrices, pointers decoded by address space
+- `30881c12` 2026-11-16 shimoku74: Documentation/building: the LLVM-linked kernel boots in QEMU
+- `3e4ceb07` 2026-11-16 shimoku74: docs: all 1,731 of GESS's MLX simdgroup-matrix kernels compile
+- `43f86136` 2026-11-16 shimoku74: docs: what stays open after simdgroup matrices and control points
+- `4d252d97` 2026-11-16 shimoku74: README.zh-CN.md: the new layout as the English README has it
+- `535e421d` 2026-11-16 shimoku74: Metal under QEMU: the black ground was a run too short, not the asynchronous path
+- `691a1274` 2026-11-16 shimoku74: Documentation: the kernel and Darwin's libraries built again from the new layout
+- `72948721` 2026-11-16 shimoku74: docs/metal-glass: the 300 libraries swept again -- 24,369 compiled, 3,122 refused, 15 crashes
+- `87446baa` 2026-11-16 shimoku74: docs/metal-glass: argument-buffer arrays, textures out of local arrays, RGB9E5, memcheck clean
+- `9686a6fc` 2026-11-16 shimoku74: components/: a directory for the port's subsystems; the pinned inputs are components/upstream.dts
+- `a09079e8` 2026-11-16 shimoku74: Documentation: the defconfigs of a phone's first day
+- `afbd5d6c` 2026-11-16 shimoku74: Documentation/metal: the board's defaults are in its board.dts
+- `b85fb9f6` 2026-11-16 shimoku74: Documentation/troubleshooting: what the Darwin library scripts say when the toolchain is not theos'
+- `bed93ec6` 2026-11-16 shimoku74: docs/metal-glass: the first Metal frame on the screen -- Stripe Yellow, drawn by backboardd through the driver
+- `ccba4123` 2026-11-16 shimoku74: arch/arm64/boot/dts: the boards where Android's kernels keep their device trees
+- `cd08aba7` 2026-11-16 shimoku74: docs/metal-glass: the black lock screen taken apart -- empty layer tree, snapshot timeouts, softpipe's missing framebuffer fetch
+- `d2780087` 2026-11-16 shimoku74: Documentation/: the documents where Linux's tree keeps them
+- `d86fba36` 2026-11-16 shimoku74: docs: argument-buffer texture choices, image reads at a level, softpipe loads
+- `dc5d4ac6` 2026-11-16 shimoku74: tools/README: heredoc-python.py, and what lint.sh checks now
+- `e36b3907` 2026-11-16 shimoku74: The READMEs of the new directories go; Documentation/layout.md says where everything is
+- `f5e2f831` 2026-11-16 shimoku74: docs/metal-glass: control points through [[stage_in]], the Face ID animations' shaders
+- `03c0374a` 2026-11-17 shimoku74: README: where it is, said plainly
+- `056bdbae` 2026-11-17 shimoku74: Documentation/troubleshooting: what the loader says of a damaged payload and a tree too large
+- `06aafdab` 2026-11-17 shimoku74: make images; images.md and the phone test plan name it
+- `09c49786` 2026-11-17 shimoku74: tools/README: the seven tools and three directories it did not name
+- `0d2993e7` 2026-11-17 shimoku74: drivers.md: who reaches the stand-ins' user clients, what is held to what, and a surface anybody can find
+- `0f23398d` 2026-11-17 shimoku74: changelog: the memory floor of five daemons, after the Nord 2 port
+- `0f924be7` 2026-11-17 shimoku74: bt_uart: at bt=2 the controller is given its firmware before Darwin has it
+- `14c82f85` 2026-11-17 shimoku74: CHANGELOG, whats-new: touch, Wi-Fi firmware, cellular, modem, TrustZone and virtio fixes
+- `16e2bf84` 2026-11-17 shimoku74: adreno: gpu_private=1 maps the ring and the fences for the core's privileged accesses alone
+- `1a9036ae` 2026-11-17 shimoku74: memory_floor.h: a floor under the memory limits of lsd, installd, pkd, fileproviderd and containermanagerd
+- `1b369acb` 2026-11-17 shimoku74: workbench/README: the Bluetooth tests, image_test and maintainers_test
+- `1d5bb0ef` 2026-11-17 shimoku74: workbench/speaker_driver_test: a slow fade, and a monitor row's edges
+- `24bfd2a4` 2026-11-17 shimoku74: CHANGELOG: one image, a phone's own repository, Bluetooth, the UFS driver
+- `255d6f7a` 2026-11-17 shimoku74: docs: Wi-Fi's endings, and the race between a frame sent and the station leaving, known and not fixed
+- `28ec6390` 2026-11-17 shimoku74: workbench/README: synaptics_report_test, qupclocks_test, identity_test
+- `2b166b58` 2026-11-17 shimoku74: workbench/scmi_perf_test: the channel at its edges
+- `2b19622b` 2026-11-17 shimoku74: configs: phone_bt, Bluetooth handed to bluetoothd
+- `2b4e8908` 2026-11-17 shimoku74: tools/image.py verify: every image of a phone's repository, as published
+- `2f076745` 2026-11-17 shimoku74: Documentation/phone-test.ru.md: a day with the phone, in Russian
+- `33ad6fa3` 2026-11-17 shimoku74: workbench/README: phone_ready_test.py in the list of tests
+- `341182bc` 2026-11-17 shimoku74: phone-test.ru.md, scripts/README: phone-day.sh
+- `37e609c1` 2026-11-17 shimoku74: changelog: the display's, IOSurface's and the GPU's user clients, fixed
+- `39b85e11` 2026-11-17 shimoku74: changelog: the way a run starts and comes back, fixed
+- `3b04eeb8` 2026-11-17 shimoku74: workbench/README: touch_goodix_poll_test's FocalTech scenarios
+- `3b5d186d` 2026-11-17 shimoku74: samples/my_defconfig: a defconfig of one's own, each line said
+- `3deb36b5` 2026-11-17 shimoku74: workbench/mic_driver_test: the digital codec's version, and the decimator's filter
+- `3e266933` 2026-11-17 shimoku74: Documentation/whats-new.ru.md: what changed, in a page, in Russian
+- `3e473210` 2026-11-17 shimoku74: buttons, chipsets.md: why a power-on block of subtype 3 is left alone; what the thermal limiter does with a group not the hardware's
+- `3f29c61d` 2026-11-17 shimoku74: Documentation: where the phone's firmware goes, said as a path
+- `4000f765` 2026-11-17 shimoku74: Documentation/bluetooth: a full line, turns, sessions, a failed start; and who may talk to it
+- `4006b8eb` 2026-11-17 shimoku74: Documentation/quickstart.ru: make ready and make day after the first boot
+- `41155075` 2026-11-17 shimoku74: troubleshooting: a core left running, a kernel overdue, and the keys of the session's first run
+- `475d504a` 2026-11-17 shimoku74: CHANGELOG, whats-new: the GPU driver's review, device.py's addresses
+- `476aeb6f` 2026-11-17 shimoku74: Documentation/bluetooth.md: Bluetooth for Darwin, in one place
+- `479fb009` 2026-11-17 shimoku74: Documentation/images.md: one image for a phone
+- `498fa5e0` 2026-11-17 shimoku74: Documentation: the loader has to know the phone the image is for
+- `4a7162f7` 2026-11-17 shimoku74: Documentation: Bluetooth's second level, bt=2, and bt_quirks
+- `4e644f7a` 2026-11-17 shimoku74: phone-test.ru.md, tools/README: logcheck --against
+- `535d626e` 2026-11-17 shimoku74: glossary: device repository, identity, image
+- `54fc415d` 2026-11-17 shimoku74: Documentation: qemu-kernel.sh --identity and --image in qemu.md, and in images.md
+- `5509e650` 2026-11-17 shimoku74: phone_look: touchscreen=-1, and backlight=1 said for what it is now
+- `560d57ed` 2026-11-17 shimoku74: CHANGELOG, whats-new: the modem's file service, GLINK and data session; IOKit clients
+- `5640bf97` 2026-11-17 shimoku74: phone-test.ru, scripts/README: one kernel a session, ./bench fresh between runs, the live log of a run that hung
+- `56d3c64a` 2026-11-17 shimoku74: CHANGELOG, whats-new: what the reviews of bt_uart and the UFS driver fixed
+- `57b8da9b` 2026-11-17 shimoku74: samples/device-repo: make ready and make day in a phone's BUILDING.md
+- `57f8862a` 2026-11-17 shimoku74: Documentation/kconfig.md: which drivers a kernel starts, and how it is chosen
+- `5806483b` 2026-11-17 shimoku74: workbench/touch_fts_read_test: the touch screen's SPI clock chosen
+- `58ed6794` 2026-11-17 shimoku74: changelog: phone_perf's drivers, fixed
+- `5946f904` 2026-11-17 shimoku74: workbench/kconfig_test.py: the language, the tree's own Kconfig and fragments, the header, the user headers
+- `59d8aa5a` 2026-11-17 shimoku74: workbench/release_test: a release, and make check's list in its tree
+- `5a4552a4` 2026-11-17 shimoku74: CHANGELOG, whats-new: publishing judged by the bytes
+- `5a554f86` 2026-11-17 shimoku74: CHANGELOG, whats-new: phone-ready.py, the loader check, the firmware kept out
+- `5b0bf84c` 2026-11-17 shimoku74: Documentation: publish judges the bytes; what verify and check-publishable now refuse
+- `5d52c5db` 2026-11-17 shimoku74: bench: the loader where arch/arm64/boot/build.sh makes it
+- `638b58ef` 2026-11-17 shimoku74: ufs: requests that do not wait served by the driver's own threads
+- `6c0bbf45` 2026-11-17 shimoku74: scripts/README, CONTRIBUTING: tests-for.py --run
+- `7367413c` 2026-11-17 shimoku74: tools/device.py init: a phone's own repository, made
+- `74ab129c` 2026-11-17 shimoku74: issue form "A new phone": porting.md where it is (Documentation/, not docs/)
+- `7b74de1a` 2026-11-17 shimoku74: issue form "A run on a phone": what logcheck said, and what was seen
+- `7c9adf7b` 2026-11-17 shimoku74: CHANGELOG, whats-new: the fixes since the common drivers
+- `7fb09080` 2026-11-17 shimoku74: userland: the Bluetooth controller's firmware in the small image
+- `80325427` 2026-11-17 shimoku74: tools/files: the repository's files, with git or without it
+- `81074ebb` 2026-11-17 shimoku74: scripts/: what a person runs by hand, as Linux keeps it
+- `8280250a` 2026-11-17 shimoku74: Documentation: what bt_uart now says of clocks off and of a packet sent in part
+- `876a7887` 2026-11-17 shimoku74: apple80211: RSSI_BOUNDS answered, so that auto-join takes known networks
+- `87888a9c` 2026-11-17 shimoku74: kern_exec: the memory floor applied when one of the five daemons is spawned, or becomes one by an exec
+- `8804a415` 2026-11-17 shimoku74: MAINTAINERS: drivers/board/cpufreq_hw.h with the CPU frequency driver whose layouts it holds
+- `8dbceab0` 2026-11-17 shimoku74: drivers.md: Bluetooth's firmware, sent before the controller is handed over
+- `8f548dff` 2026-11-17 shimoku74: changelog: the tools of a day with the phone, fixed
+- `916fb65f` 2026-11-17 shimoku74: CHANGELOG, whats-new: the loader's sizes bounded
+- `9182d4fc` 2026-11-17 shimoku74: Documentation, scripts/README: make check in a release's tree
+- `93adcc89` 2026-11-17 shimoku74: workbench/bench_test: ./bench against a phone of the test's own
+- `9f99453a` 2026-11-17 shimoku74: NOTICE: other ports of Darwin to phones
+- `a0584f98` 2026-11-17 shimoku74: troubleshooting: a day with the phone, and what logcheck's rows mean
+- `a292a650` 2026-11-17 shimoku74: NOTICE: the Bluetooth firmware's protocol after Linux's btqca.c, and what came through the Nord 2 port
+- `a76d278c` 2026-11-17 shimoku74: SECURITY.md; CONTRIBUTING: reports, and .clang-format
+- `abe00343` 2026-11-17 shimoku74: images.md, quickstart.ru.md: the identity from the IPSW itself
+- `aecfc09f` 2026-11-17 shimoku74: CI: QEMU's system emulator and an aarch64 UEFI, for the loader's boot test
+- `b2a3acff` 2026-11-17 shimoku74: Documentation/quickstart.ru.md: the short way, in Russian
+- `b4a2d191` 2026-11-17 shimoku74: Documentation: the kernel knows the boards it was built with, too
+- `b58eb44d` 2026-11-17 shimoku74: phone_perf: the storage read through the kernel's own UFS driver
+- `b605872e` 2026-11-17 shimoku74: CHANGELOG, whats-new: what the Bluetooth bridge's review fixed
+- `b6291f2c` 2026-11-17 shimoku74: Documentation/drivers: Bluetooth's first stage as it now is
+- `b634c13c` 2026-11-17 shimoku74: touch: touchscreen=-1, a level that only looks
+- `b6638f7d` 2026-11-17 shimoku74: README.ru.md: the project in Russian, for whoever follows it in Russian
+- `b69eaf72` 2026-11-17 shimoku74: troubleshooting: Bluetooth's firmware and channel, images, phones' repositories
+- `b6e4bb4a` 2026-11-17 shimoku74: bluetooth.md: the nodes' writes are said
+- `b9b02e38` 2026-11-17 shimoku74: layout.md: the whole tree, not only the kernel's directories
+- `bae63c49` 2026-11-17 shimoku74: docs: what the CPU frequency drivers read of the table, leave as they are, and give back at the run's end
+- `be10c8da` 2026-11-17 shimoku74: CHANGELOG, whats-new: a kernel that does not know the phone, make check in a release's tree
+- `bfd375b9` 2026-11-17 shimoku74: Documentation/chipsets.md: what the drivers common to every Snapdragon need of a chip, and the kinds of each block they know
+- `c16aa7da` 2026-11-17 shimoku74: scripts/new-driver.py: a new driver, started from the guide's example
+- `c2cf98b8` 2026-11-17 shimoku74: Documentation/porting: the zap shader's memory is these phones' reserved region
+- `d0cb41ce` 2026-11-17 shimoku74: workbench/mic_driver_test: what the DSP says of each read, and reads of one frame
+- `d4ed3a62` 2026-11-17 shimoku74: phone-test.ru.md: a run with gpu_private=1 after the Metal run
+- `d4efaa16` 2026-11-17 shimoku74: Documentation: what the core-count line is for, and to send it from the phone_perf run
+- `d8a1259d` 2026-11-17 shimoku74: tools/README: logcheck.py
+- `d9adea1b` 2026-11-17 shimoku74: workbench/buttons_driver_test: volume up's pin set up otherwise than as an input pulled up
+- `dab8c560` 2026-11-17 shimoku74: CHANGELOG, whats-new: Wi-Fi on a second kernel, GLINK's queue, the loader's reading back
+- `db9059a4` 2026-11-17 shimoku74: README, CONTRIBUTING, scripts/README: MAINTAINERS and tests-for.py
+- `e25fe0bd` 2026-11-17 shimoku74: NOTICE: Linux's Bluetooth driver named, not as a path of this repository
+- `e2961a8a` 2026-11-17 shimoku74: Documentation/release.ru: releasing the sources, in Russian
+- `e2c6eae8` 2026-11-17 shimoku74: .github: a phone run's form asks what make ready said, and takes a day's summary
+- `e3b3ca08` 2026-11-17 shimoku74: workbench/README: logcheck_test and phone_day_test
+- `e5c4d548` 2026-11-17 shimoku74: Documentation: make ready before the phone is connected
+- `e8368238` 2026-11-17 shimoku74: building.md, layout.md: the build's configurations, seven of them, and what reads each
+- `e8a7c62f` 2026-11-17 shimoku74: Documentation: a phone kept in a repository of its own
+- `eae5fb81` 2026-11-17 shimoku74: troubleshooting: lsd and its fellows killed for their memory limit, and memfloor=
+- `ec024341` 2026-11-17 shimoku74: workbench/ufs_native_read_test: how the kernel's own UFS driver reads
+- `ec0ad376` 2026-11-17 shimoku74: changelog: what phone_look wrote, and the loader's commands, fixed
+- `efc03b90` 2026-11-17 shimoku74: CHANGELOG: logcheck, new-driver, device update, image verify, SECURITY
+- `f1562f81` 2026-11-17 shimoku74: changelog: the Wi-Fi fixes, and the race still open
+- `f99d42c1` 2026-11-17 shimoku74: samples/: starting points to copy, as Linux keeps its own
+- `fb01b711` 2026-11-17 shimoku74: BUILDING.md, tools/README: device.py update and init
+- `ffe5521a` 2026-11-17 shimoku74: drivers: a board without a touch controller says the touchscreen= it was asked for
+- `0120df6f` 2026-11-18 shimoku74: CHANGELOG, whats-new: APFS on an untrusted disk, the boot processor's number, the GIC
+- `0d1a3f90` 2026-11-18 shimoku74: CHANGELOG, whats-new.ru: the drivers' review fixes before a phone has run them, and the LSM6DSO orientation
+- `0ed7edf1` 2026-11-18 shimoku74: CHANGELOG, whats-new: the kernel's patches, SMEM past 256 items, sealed APFS nodes
+- `1d34f7f1` 2026-11-18 shimoku74: haptic: haptic_tap_gain=N plays a tap as the shortest of the phone's short waveforms at that fixed gain, at once, where the default takes Android's...
+- `34950626` 2026-11-18 shimoku74: sensor_axes: turn a motion-sensor chip's raw samples onto Darwin's axes (the board's mounting, a signed permutation) and scale its counts to Darwin...
+- `40dc75e4` 2026-11-18 shimoku74: CHANGELOG, whats-new: the thermal limit, the battery's figures and the buttons
+- `41e9deb0` 2026-11-18 shimoku74: cell: only what is for the router goes to the modem (multicast, mDNS, the broadcasts went over the radio), a DHCP request is a whole datagram from ...
+- `44b5fcb5` 2026-11-18 shimoku74: CHANGELOG: the Linux layer under the Wi-Fi driver
+- `469c1ddd` 2026-11-18 shimoku74: CHANGELOG, whats-new: init and the data volume's store, the camera's user side, brightness, tweaks
+- `52f03ea4` 2026-11-18 shimoku74: sensors: the pipeline seam a hub driver calls -- a raw accelerometer sample through the board's mounting and scale into the orientation detector, o...
+- `54b50cc9` 2026-11-18 shimoku74: adreno: the quiesce takes the core's second stream off its match before context 0 stops translating (it was left matched to a context without trans...
+- `5e834485` 2026-11-18 shimoku74: changelog: the review fixes to the Metal driver's core and to the host tools for a day with the phone
+- `860ba2ee` 2026-11-18 shimoku74: user_exception_trace: at most ten reports of programs' exceptions and aborts in ten seconds, the next saying how many were left out (abort() in a l...
+- `87f2f3fb` 2026-11-18 shimoku74: lsm6dso: the facts of an ST LSM6DSO inertial chip apart from any bus (registers, WHO_AM_I, output-byte decode to signed samples, counts per g at ea...
+- `8e881325` 2026-11-18 shimoku74: camera: no frame is timed by a shorter frame than the longest asked for (a long one any process could ask for gave the camera up for the run), the ...
+- `932918cb` 2026-11-18 shimoku74: sandbox: an application extension nobody gave a container is given its HOME, else mobile's home (PlugInKit stopped the document picker's extension ...
+- `9fb3b5d4` 2026-11-18 shimoku74: CHANGELOG, whats-new.ru: the backlight, microphone, touch, motion sensor and APFS fixes
+- `a4102663` 2026-11-18 shimoku74: mpss: the modem's QRTR hello is answered on every opening of the channel (it never learnt of our services after a reopening), an intent told again ...
+- `a83116bb` 2026-11-18 shimoku74: mpss: a file transfer the run's end stops is ended once, its port closed before its buffers go (the link thread could still be sending from them); ...
+- `a9380abf` 2026-11-18 shimoku74: orientation: the integer detector that turns accelerometer samples into a UIDeviceOrientation (low-pass gravity, a dead zone on the diagonal so it ...
+- `aa962365` 2026-11-18 shimoku74: sound: the SMMU match register and context given back are looked for again (the Wi-Fi or the modem may have taken them: their DMA was broken by our...
+- `c36c1692` 2026-11-18 shimoku74: sandbox: a BlastDoor process asking whether it is sandboxed is told it is (sandbox_blastdoor=0 turns it off), where the permissive policy answered ...
+- `c79f533e` 2026-11-18 shimoku74: minicrypto: a key that does not set up leaves no usable context and the AES modes refuse one (a failed or garbage key schedule encrypted as the ide...
+- `c9e24eeb` 2026-11-18 shimoku74: boot-args.md: written again from the sources (the Wi-Fi driver's doorbell and link options read differently now)
+- `cc73dc8c` 2026-11-18 shimoku74: input: only root writes to /dev/hakios-touch, and one program reads it (the first to open it for reading, while it lives; root aside): any applicat...
+- `d02a3a4c` 2026-11-18 shimoku74: apple80211: a join asking for WPA3 (SAE), PSK-SHA256 or an enterprise network alone is refused at once and said by name (it went down as a WPA2 joi...
+- `d0988209` 2026-11-18 shimoku74: CHANGELOG, whats-new.ru: keychain and var_store, init, the image's secrets, ramfs, minicrypto, the GIC and the log's lock, the GPU's quiesce, Wi-Fi...
+- `d14cc92d` 2026-11-18 shimoku74: CHANGELOG, whats-new: the way back to the loader
+- `e9a0483e` 2026-11-18 shimoku74: CHANGELOG, whats-new.ru: mobile data, Apple80211, QMI and the modem's run's end, SCMI, camera, audio, brightness and tweaks
+- `ee3c9ffd` 2026-11-18 shimoku74: mic: a bring-up for Darwin that fails in any way counts as a failure and is retried no sooner than a second later and after Darwin closed (a refuse...
+- `f8607231` 2026-11-18 shimoku74: CHANGELOG: the libraries in Darwin's daemons
+- `0afd3499` 2026-11-19 shimoku74: gpu: a command buffer of more words than an indirect buffer's size field holds (2^20) is refused, where the ring took the count as it was and the G...
+- `0ccbcc96` 2026-11-19 shimoku74: battmgr: between its rounds the charger's being plugged is asked every 500 ms, and a change brings a whole round at once and two more as the charge...
+- `167a6e83` 2026-11-19 shimoku74: motion to Darwin: backboardd's library makes an accelerometer HID service (0xff00/3, as locationd looks for it) and sends the kernel's samples as a...
+- `55d34a5a` 2026-11-19 shimoku74: phone-test.ru.md: what to look at on the phone after this week's fixes: one reader of the touches, the unciphered count of the Wi-Fi station's line...
+- `5a0f8bff` 2026-11-19 shimoku74: goodix: the FocalTech FT3680's fingers are lifted after 250 ms with nothing believable, as the Goodix chip's are (a finger down when it stopped ans...
+- `642d150c` 2026-11-19 shimoku74: inject26: a read of the touches that a signal interrupts is made again, any other failure lets go of every finger and button held and opens the dev...
+- `d11736c3` 2026-11-19 shimoku74: bsd: a persona spawn by a process that is not root may ask only for a uid, gids and groups it has (any other user's identity was given), the identi...
+- `d502c6c7` 2026-11-19 shimoku74: gpu: a buffer named more than once in a submission is pushed out of the cache once (one named 8192 times held every program's GPU work for terabyte...
+- `d7496c4a` 2026-11-19 shimoku74: brightness: a slider value of NaN is ignored and any other clamped before it becomes an integer (NaN and infinity made the panel its dimmest); Post...
+- `07e4555d` 2026-11-20 shimoku74: the gyroscope to Darwin: the LSM6DSO's gyroscope is switched on only when its samples go to Darwin (104 Hz, 2000 dps; gyro_hid=0: not), its rates i...
+- `0f51fa0b` 2026-11-20 shimoku74: README: the line to the Russian quick start removed
+- `448eb5a4` 2026-11-20 shimoku74: porting guide: where the UEFI build goes and that uefi { } is needed, the first run's command, the battery's uefi-charger, the modem under what is ...
+- `5b1f065b` 2026-11-20 shimoku74: the battery says how long: the current averaged over about a minute (begun again when a charger goes in or out), and from the gauge's charge the mi...
+- `740de6e4` 2026-11-20 shimoku74: device packages: add and export take the package only, not the vendor's firmware, build outputs or the Android tree beside it (the sample .gitignor...
+- `9ec68a75` 2026-11-20 shimoku74: touch: FocalTech controllers of the FT5x06 register family on I2C (feature touch-ft5x06, section touch-i2c { }: the bus's two pins, address, interr...
+- `e0820bcc` 2026-11-20 shimoku74: README: the Russian copy removed, and no phone's name in what is seen where
+- `fc10da3c` 2026-11-21 shimoku74: docs: define U-Boot phone profile scope
+
+## not applicable: user space in the new tree's layout (renames and Qualcomm-board work): not read one by one before 14 Nov; see the shared-file list (363)
+
+- `b1b13f64` 2026-10-30 wannq: renoir: mkimage26 --prune (loctables en/Base, heavy and poster apps, AppFonts): 4.16 GB image
+- `c6cf3caa` 2026-10-30 wannq: renoir: arm64e injected libraries (pacstripped) and root26 probe image scripts
+- `e3f6e385` 2026-10-30 wannq: renoir: arm64e Mesa (OSMesa+freedreno) and GL shim for HAKIOS 26, in root26
+- `ffc2ba45` 2026-10-30 wannq: renoir: pacstrip output writable while rewriting; mkimage26 one source per path
+- `466f3a3e` 2026-10-31 wannq: renoir: HAKIOS 26 launchd runs on Renoir
+- `5dc6b008` 2026-10-31 wannq: Merge remote-tracking branch 'origin/main' into renoir
+- `afbd6e04` 2026-10-31 wannq: renoir: HAKIOS 27.2 runs on Renoir: home screen, icons, wallpaper, full CPU speed
+- `fa733338` 2026-10-31 wannq: renoir: HAKIOS 26 boots to SpringBoard's home screen
+- `f2cce861` 2026-11-10 wannq: Prepare XNU 12377 Renoir RAM-only release
+- `02238e51` 2026-11-11 vcvkk: ios/userland/metal.sh: the Metal plug-in for iOS 26/27, into the small image
+- `0d71acaf` 2026-11-11 vcvkk: userland/.gitignore: what the builds leave here, not the old repository's whitelist
+- `10181261` 2026-11-11 shimoku74: kernel: build from the new sources; the old patch and series removed
+- `1acf46b0` 2026-11-11 vcvkk: root26-ios.sh: rwtouch in the small image, and a job list that unlocks
+- `241ebce1` 2026-11-11 shimoku74: ios/: the iOS 26/27 user-space work is not Renoir's; boot defaults in the board file
+- `266ae563` 2026-11-11 vcvkk: root26-ios.sh: wifid among the jobs, and en0 configured when there is a radio
+- `2cf74a34` 2026-11-11 vcvkk: The port's names lose the first phone's: redwood becomes hakios
+- `42d1d37b` 2026-11-11 vcvkk: init: a system image of ours on the flash becomes the root as it is
+- `4b898bef` 2026-11-11 vcvkk: ios/tools: the first generation's choice of system files and its /var template
+- `4d5710b9` 2026-11-11 vcvkk: ios/tools/unpack.sh: an IPSW into the layout the image builders read, without macOS
+- `4f869389` 2026-11-11 shimoku74: renoir: thermal limiter for any device (0025)
+- `694a9582` 2026-11-11 vcvkk: mkimage26: --metal keeps the system's Metal libraries; the plug-in has its link
+- `6a4bb2ed` 2026-11-11 shimoku74: renoir: brightness and Auto-Brightness for any device (0023)
+- `a73fd3cb` 2026-11-11 vcvkk: root26-ios.sh: the RAM part of a boot whose system image is on the flash
+- `b318b334` 2026-11-11 vcvkk: fixup! ios/userland/metal.sh: the Metal plug-in for iOS 26/27, into the small image
+- `bc9adf52` 2026-11-11 vcvkk: ios/tools/darwin-write.py: the system image onto the port's own partition, and nowhere else
+- `c93aaed6` 2026-11-11 vcvkk: root26-ios.sh: init's own checks pass, and no application name with a blank
+- `cff4cefc` 2026-11-11 vcvkk: iOS 26/27 images from this repository alone: no darwin-renoir
+- `cfffad5f` 2026-11-11 vcvkk: HakiosGPU: the caller's own pages as a GPU buffer, and the old driver's checks
+- `db18dc7f` 2026-11-11 shimoku74: lint: shellcheck covers loader/, ios/ and kernel/deps/ too
+- `e4d75066` 2026-11-11 shimoku74: renoir: the panel follows the display mode (hw.backlight.power)
+- `f0a92608` 2026-11-11 shimoku74: ios/tools: three comments say what the code does
+- `f1abbbef` 2026-11-11 shimoku74: Build scripts without one person's home directory; Metal device named by its chip
+- `04cd316c` 2026-11-12 vcvkk: User space: the port's log lines say "hakios:", as the kernel's do
+- `0672b781` 2026-11-12 shimoku74: The small image is mounted on /hakios, not on a phone's name
+- `08b5b65a` 2026-11-12 shimoku74: Image builds: the firmware that is there, not one phone's file names
+- `1442900e` 2026-11-12 shimoku74: Logs and change markers say hakios, not redwood
+- `192fefb8` 2026-11-12 vcvkk: iOS tools: frames.py shows the heat and the battery of each phase
+- `19a5826e` 2026-11-12 vcvkk: iOS tools: Metal's compiled stages carried from one boot to the next
+- `19da1f09` 2026-11-12 vcvkk: iOS user space: rc.jobs.fps with Wi-Fi and the SSH server
+- `1e797af8` 2026-11-12 shimoku74: check-image.py: the programs it runs may be given, apfsck may be left out
+- `1ff1c3a7` 2026-11-12 vcvkk: userland: dyldcount=1 says what makes dyld search for an address in backboardd
+- `39ae8561` 2026-11-12 vcvkk: iOS user space: root26-ios.sh says last when the image has no firmware
+- `3dcbfec5` 2026-11-12 vcvkk: iOS user space: the SSH server lets root in, and scp finds its other half
+- `3e6bbab1` 2026-11-12 vcvkk: iOS user space: the phone says its address to everybody every 5 s
+- `678af770` 2026-11-12 shimoku74: apfs run-tests.sh: step 1c links again
+- `6b52b4ae` 2026-11-12 vcvkk: iOS user space: an SSH server and a shell in the small image
+- `6b77beaf` 2026-11-12 shimoku74: apfs tools: they find the kernel's APFS code where it is now
+- `7faecc32` 2026-11-12 shimoku74: Fix the log prefixes' lengths broken by their rename; no more phone in names
+- `81f4428a` 2026-11-12 shimoku74: Mesa's AIR frontend and patches: the project's name, not a phone's
+- `8f6d13bf` 2026-11-12 vcvkk: iOS images: the bundles' empty English .lproj directories are in the system image
+- `9430abdd` 2026-11-12 shimoku74: camera_test: the board's sensors, however many, named by their chips
+- `9b08b972` 2026-11-12 vcvkk: SpringBoard: the frame rates its display links and animations ask for, as on 16.5
+- `9fc9c135` 2026-11-12 shimoku74: mkimage26.py: a file with the fat magic that is no Mach-O does not stop the build
+- `a2330c59` 2026-11-12 vcvkk: iOS user space: the default wallpaper's stripes rasterized once
+- `b13f8f19` 2026-11-12 shimoku74: userland: no phone's name in what iOS is told or in the examples
+- `b46f1bb4` 2026-11-12 shimoku74: iOS's side: the devices' maker is HakiOS, not a phone
+- `b473b8b1` 2026-11-12 shimoku74: Name the drivers by what they do, not by the first phone
+- `d29dff83` 2026-11-12 shimoku74: userland: no ignore file of the first workspace's
+- `d488a617` 2026-11-12 shimoku74: The small image's libraries are libhakios*, not named after a phone
+- `dd2c1a63` 2026-11-12 vcvkk: iOS tools: frames.py gives the share within one refresh at 120 Hz too
+- `e2b995c5` 2026-11-12 shimoku74: The camera's tools where the build looks for them
+- `e42fba22` 2026-11-12 shimoku74: kern.hakios: the drivers' sysctls under the project's name
+- `e9b7111a` 2026-11-12 shimoku74: inject_store: each count printed against its own hook's name
+- `ef63ddb8` 2026-11-12 hxfuxyy: root26-ios: on iOS 27 the Clock's timers need MobileTimerFlags/core_data on
+- `efe58169` 2026-11-12 shimoku74: unslide.py: a fault line under whatever prefix the log gives it
+- `f2f883d7` 2026-11-12 shimoku74: mkapfs.py: a container holds as many volumes as it says it may
+- `f76d51e8` 2026-11-12 shimoku74: ios/tools: the CPU, not the phone, in what pacstrip and the image are for
+- `1b98e2e5` 2026-11-13 shimoku74: inject: the input services' descriptions let go of what they hold
+- `28f2bad8` 2026-11-13 shimoku74: Metal's feature sets printed without the platform's prefix; a comment's URL said plainly
+- `2acfddc6` 2026-11-13 vcvkk: mkjobs: cameracaptured is let through, the cameras' hardware daemons are not
+- `2b4a113b` 2026-11-13 shimoku74: userland: the Metal driver, the drawable bridge and Mesa's libdrm stand-in by what they are
+- `3c32b48c` 2026-11-13 vcvkk: var_store: a restored data volume brings iOS 27 up
+- `41ddba60` 2026-11-13 shimoku74: camera_test: frames it cannot hold are said, not read into nothing
+- `43ea2519` 2026-11-13 vcvkk: Audio plug-in: iOS 27 records from the phone's microphone
+- `475b6e9e` 2026-11-13 vcvkk: iOS 26/27: the side button's long press is checked on 27.2 as on 16.5
+- `4ed80c79` 2026-11-13 vcvkk: inj26: the snapshot format hook at iOS 27.2's address
+- `53f44f7c` 2026-11-13 vcvkk: var_store: MobileGestalt's cache is made again at every boot
+- `59bc4381` 2026-11-13 vcvkk: wallpaper: the stripes drawn once into a picture, not rasterized by the window server
+- `60895c33` 2026-11-13 shimoku74: Darwin in the names too: darwin/, root26-darwin, rc.darwin, darwin-sensor
+- `6386dd3f` 2026-11-13 shimoku74: To try on a Mac: the Mesa builds and libhakios26 without Apple's platform word
+- `70b993f3` 2026-11-13 vcvkk: userland: waitstack=sb profiles SpringBoard's long run loop turns
+- `9983c7e9` 2026-11-13 vcvkk: userland: waitstack=sbfull says every sample's whole stack of a long turn
+- `a90ae71d` 2026-11-13 vcvkk: userland: waitstack=1 samples where the window server's busy threads stand
+- `b3157bde` 2026-11-13 vcvkk: root26: the small image carries var_store and saves /private/var at the end
+- `b808ced1` 2026-11-13 shimoku74: The system is called Darwin, not iOS
+- `c1f3e99f` 2026-11-13 shimoku74: userland tests: a word of zero said as 0x00000000
+- `d171b497` 2026-11-13 shimoku74: AIR's test modules: the generic Darwin triple
+- `e52b5fc5` 2026-11-13 shimoku74: Darwin in the variables and the image's names as well
+- `ee753b55` 2026-11-13 shimoku74: userland: the launchd jobs' files by the job, in launchd/
+- `efa2cff5` 2026-11-13 shimoku74: The last of the old name: the migration table, the linker's platform, four comments
+- `f8a5df6a` 2026-11-13 vcvkk: cameracaptured: the flashlight and the camera are the kernel's
+- `1945a4d1` 2026-11-14 vcvkk: iOS 27: any application's layer tree on com.hakios.layers (LAYERS=)
+- `1f9ddebb` 2026-11-14 vcvkk: Display: fb_yuv=1 composes a video swap layer under the rest; the camera's frames show
+- `2d2fe414` 2026-11-14 vcvkk: Camera: the Preview Scaler turns the buffer the stitcher used to; fb_yuv logs the layout
+- `2d85e2a0` 2026-11-14 vcvkk: SpringBoard: its com.hakios.layers dump asks only what iOS 27's controller answers
+- `46a7e121` 2026-11-14 vcvkk: Camera: the shutter makes a photograph on iOS 27
+- `5664886f` 2026-11-14 vcvkk: Camera: the session runs and its preview frames reach the screen's queue
+- `7eb2977a` 2026-11-14 vcvkk: Apps: an uncaught exception is named on the console in every application
+- `7fbc5589` 2026-11-14 vcvkk: iOS 27: the poster switcher opens, PosterBoard a launch angel again
+- `8106c4c6` 2026-11-14 vcvkk: iOS 27: the camera's preview frames on the screen by default
+- `842aed5f` 2026-11-14 vcvkk: iOS 27: Sileo opens and shows its repositories; the microphone recorded
+- `a673c377` 2026-11-14 vcvkk: Camera: the preview's whole picture, not bands of it
+- `b064db8b` 2026-11-14 vcvkk: iOS 27: the package manager's prefix, apt and tweaks, as on 16.5
+- `f3d21f15` 2026-11-14 vcvkk: iOS 26/27: no poster switcher, no respring; the wallpaper's extension stays up
+- `f991bb5c` 2026-11-14 vcvkk: Camera: Camera.app's session runs, and the shutter takes a photograph
+- `fa9433c4` 2026-11-14 vcvkk: iOS 27: the modem's firmware in the system image (MODEM_FW=), read there
+- `0008d637` 2026-11-15 shimoku74: air_private.h: air_val_ptr_select and air_call_table_function for the intrinsics
+- `01434c4f` 2026-11-15 shimoku74: tools/air: wordcheck binds a second buffer of known words, and checks ptr_table.ll
+- `0171224c` 2026-11-15 shimoku74: ir3sweep -p: a render pipeline's two stages, linked as the driver links them
+- `05e030e5` 2026-11-15 shimoku74: air_metal: widen_16bit takes the halves of a word, and packs two into one, as bits or as halves by what reads them
+- `08507237` 2026-11-15 shimoku74: tools/air: wordcheck.sh with callee_array.ll, a [4 x float] handed back by a callee
+- `09d543dd` 2026-11-15 shimoku74: tools/air: softpipesweep finds a long-named function's file as metallib.py dump names it
+- `0a13e01e` 2026-11-15 shimoku74: air: an atomic through a pointer chosen at run time
+- `0a2b5a65` 2026-11-15 shimoku74: tools/air: argbufcheck.py runs a phi of two members' pointers
+- `0a7c2ea4` 2026-11-15 shimoku74: air: threadgroup buffers past index 0
+- `0bfc4736` 2026-11-15 shimoku74: ir3sweep: the phone's shader compiler over a whole metallib, on Linux
+- `0df3e9f8` 2026-11-15 shimoku74: air: a callee takes what it reads of its caller as parameters of its own
+- `0e6d5005` 2026-11-15 shimoku74: air: post-tessellation vertex functions, a patch drawn as a grid
+- `10107482` 2026-11-15 shimoku74: air: threads_per_grid from the dispatch, and dispatch_threads_per_threadgroup
+- `11683c08` 2026-11-15 shimoku74: air_metal: on softpipe, a texture past the bound units or one unit sampled as two kinds refused by name, not an assertion
+- `11a84f61` 2026-11-15 shimoku74: tools/air: intrincheck.py has references for ctz, clz and popcount
+- `11e24766` 2026-11-15 shimoku74: air_intrinsics: a rasterization rate map's coordinate mapping as the coordinate itself, the device having none
+- `13808df6` 2026-11-15 shimoku74: air: imageblock slices of any pixel type, a whole-block size, a block left out
+- `145baf5a` 2026-11-15 shimoku74: tools/air: softpipesweep also makes vertex functions, with a float4 vertex descriptor, and kernels
+- `1875fe31` 2026-11-15 shimoku74: air_metal: a render pipeline translated outside the driver's lock, and timed
+- `1960d7a8` 2026-11-15 shimoku74: air_to_nir: a pointer phi among up to thirty-two places, as MPS's RNN kernels choose among their input buffers
+- `19ad158a` 2026-11-15 shimoku74: air: a returned struct with an array of numbers in it
+- `1a839cb9` 2026-11-15 shimoku74: air: say where the struct type puts a value member it disagrees about
+- `1ab966a8` 2026-11-15 shimoku74: air: asinh, acosh and atanh
+- `1bba4416` 2026-11-15 shimoku74: inject26: sample_every=N, a repeated sample of the threads in the Metal library
+- `1d9065ec` 2026-11-15 shimoku74: tools/air: rastcheck.sh clips and clamps depth
+- `1f1e8407` 2026-11-15 shimoku74: tools/air: mipwritecheck.sh also writes the two levels a buffer names
+- `1ffb012e` 2026-11-15 shimoku74: libhakios-air: dispatches whose last groups are partial
+- `200d7675` 2026-11-15 shimoku74: tools/air: mip_buffer.ll, two mip levels read out of a constant buffer
+- `20c5944f` 2026-11-15 shimoku74: mk-metal-linux.sh: the Metal driver, metal_props and metal_drv_test built on Linux
+- `226adbbe` 2026-11-15 shimoku74: air_metal: the stage cache on softpipe too, and finalising after the lookup
+- `2323e107` 2026-11-15 shimoku74: air: texture.fence()
+- `26b3d6e6` 2026-11-15 shimoku74: air: [[quadgroup_index_in_threadgroup]] and a fragment's [[primitive_id]]
+- `27faccdf` 2026-11-15 shimoku74: air: a pointer through an integer and back
+- `2884e62e` 2026-11-15 shimoku74: metal: -dispatchThreads: with a count its groups do not divide
+- `2ab7de16` 2026-11-15 shimoku74: libhakios-air: bind an image's other levels from the image's own slot
+- `2c0824ef` 2026-11-15 shimoku74: air: a threadgroup buffer sized at dispatch goes after the kernel's own
+- `2c2ffe95` 2026-11-15 shimoku74: tools/air: irem.ll, signed remainders of negative dividends, in wordcheck.sh
+- `2ec62f03` 2026-11-15 shimoku74: mk-host.sh: Mesa 26.2.5 with the phone build's patch
+- `2f600004` 2026-11-15 shimoku74: air_metal: on softpipe only local arrays past TGSI's register numbers are refused, not values (CoreAnimation's A3Xghfc was)
+- `302c449f` 2026-11-15 shimoku74: metal_driver: the colour of the first surfaces taken in, too
+- `310f0780` 2026-11-15 shimoku74: air: quad reductions and the bitwise SIMD ones
+- `32b9ef58` 2026-11-15 shimoku74: air: a function table in a local array, called at a computed index
+- `36549c90` 2026-11-15 shimoku74: metal_driver: a command buffer that took over a second, said with its draws, dispatches, blits and the wait for the context
+- `379770ef` 2026-11-15 shimoku74: metal_driver: say what colour the first screen-sized surfaces were written back as
+- `37c51be8` 2026-11-15 shimoku74: libhakios-air on softpipe: the packed normalised conversions as arithmetic
+- `39bd7ac2` 2026-11-15 shimoku74: tools/air: rastcheck.sh, cull modes and windings on softpipe
+- `3a759215` 2026-11-15 shimoku74: mk-mesa26-linux.sh: libhakios-air for Darwin 26/27 built on Linux
+- `3bff39c3` 2026-11-15 shimoku74: air: an image written at a second mip level gets a slot of its own
+- `3e1f3a37` 2026-11-15 shimoku74: nir_air.h, air_private.h: a vertex shader's clip distance count, and an output's clip array
+- `3eb50fc6` 2026-11-15 shimoku74: tools/air: argbufvalcheck.sh, values in argument buffers on softpipe
+- `416415b4` 2026-11-15 shimoku74: air: a mip level that is the whole part of a float a constant buffer holds
+- `41e8251b` 2026-11-15 shimoku74: air: an argument buffer marked air.arg_unused is not declared
+- `42d64951` 2026-11-15 shimoku74: air: clz through the highest set bit, at the argument's own width
+- `43c959b4` 2026-11-15 shimoku74: air: padding inside an argument buffer's struct type is no member
+- `44c4f422` 2026-11-15 shimoku74: air_to_nir: a callee returning an array of numbers, an element a parameter, as for a struct
+- `46675e7c` 2026-11-15 shimoku74: tools/air: ptr_table.ll, a table of two buffers copied in a loop and read at a computed index
+- `466ef59e` 2026-11-15 shimoku74: tools/air: imageblock_size.ll, an 8 by 1 block measured, in wordcheck.sh
+- `46b0f432` 2026-11-15 shimoku74: air_to_nir: eq/ne between two buffer arguments, by the buffers a dispatch binds; the same place at two offsets; two variables never equal
+- `470ba5c5` 2026-11-15 shimoku74: air: a depth texture's queries take no aspect selector -- and no read past a call
+- `49570557` 2026-11-15 shimoku74: air: a struct input its predicate leaves out is a tree of zeros
+- `49fa702a` 2026-11-15 shimoku74: air_metal: translations kept, as compiled stages are
+- `4b04452e` 2026-11-15 shimoku74: tools/air: texatomcheck.sh, a max and an add on texels from sixteen threads
+- `4b4f3c6a` 2026-11-15 shimoku74: air: lower the entry point's own return jumps too
+- `4d3c13d7` 2026-11-15 shimoku74: air: a compute kernel's [[stage_in]], read by the kernel itself
+- `4fa4fa93` 2026-11-15 shimoku74: air: RenderBox's linked functions -- closed branches, function values, static initializers
+- `4ff04bc6` 2026-11-15 shimoku74: tools/air: kernelcheck takes its libraries from DARWIN_ROOTFS, Darwin 27's having all four
+- `50c827e9` 2026-11-15 shimoku74: air: a texture written at a mip level a constant buffer names
+- `57187c83` 2026-11-15 shimoku74: inject_poster: watchdog providers answer no policy, and FrontBoard looked at again 3 and 30 s in, off the main thread
+- `571f0464` 2026-11-15 shimoku74: nir_air.h: level_bias, a constant added to the mip level an image's buffer word gives
+- `58d61b7b` 2026-11-15 shimoku74: tools/air: buffer_compare.ll and pointer_walk.ll, pointer compares MPS and Morpheus make
+- `5954649a` 2026-11-15 shimoku74: tools/air: memcpycheck.sh, 37 bytes copied by a length the shader reads
+- `5a563cca` 2026-11-15 shimoku74: metal driver: hand the library its lock, make render pipelines outside it
+- `5b06a48d` 2026-11-15 shimoku74: tools/air: ptr_return.ll, a pointer chosen and handed back by a callee, in wordcheck.sh
+- `5c64c46e` 2026-11-15 shimoku74: air_metal: an image view's level out of a buffer, with the shader's bias added, refused below the base
+- `5c9b0537` 2026-11-15 shimoku74: air_to_nir: a pointer phi a loop carries to another place, carried as numbers in a register; up to six translations
+- `63ef92bc` 2026-11-15 shimoku74: air: LLVM's saturating adds, bit counts and funnel shifts
+- `642ba7a4` 2026-11-15 shimoku74: air: a store through a pointer chosen at run time
+- `66c0913c` 2026-11-15 shimoku74: air: a lone i8 in a value set's struct is padding
+- `67272037` 2026-11-15 shimoku74: AIR frontend: a cube read and written by texel takes its face as an argument
+- `68369f6a` 2026-11-15 shimoku74: AIR frontend: the SIMD lane, group index and width asked for by a call
+- `6b0bc535` 2026-11-15 shimoku74: air_intrinsics: get_imageblock_width and _height, the threadgroup's x and y
+- `6bace84c` 2026-11-15 shimoku74: air: a caller's value read back in a callee is refused, not a crash
+- `6ed22de7` 2026-11-15 shimoku74: libhakios-air: texture usage bits past Metal's published ones are hints
+- `6f8e1722` 2026-11-15 shimoku74: air: ctz and popcount at the argument's width
+- `6fd8b3a9` 2026-11-15 shimoku74: inject_poster: under software Metal, a watchdog's termination of the poster extension said and not done
+- `7023900a` 2026-11-15 shimoku74: air_to_nir: every initialised constant of the module as constant data, a vector read at a computed element included
+- `708a6214` 2026-11-15 shimoku74: air_metal: link a pipeline's varyings by name, and pack them
+- `70e624bd` 2026-11-15 shimoku74: air_metal_test: --pixel-formats probes RGB10A2Unorm and BGR10A2Unorm
+- `71821741` 2026-11-15 shimoku74: tools/air: gridcheck.sh, 37 threads in groups of 16 on softpipe
+- `72223e5c` 2026-11-15 shimoku74: air: air.quad_shuffle
+- `73b63d00` 2026-11-15 shimoku74: AIR frontend: read a fat metallib's AIR slice
+- `74c7bf73` 2026-11-15 shimoku74: tools/air: ptr_loop.ll, a pointer a loop moves from one buffer to another, in wordcheck.sh
+- `74fe6e7d` 2026-11-15 shimoku74: tools/air: intrincheck.py has references for LLVM's integer intrinsics
+- `75256feb` 2026-11-15 shimoku74: tools/air: imageblockcheck.sh, a 4 x 4 imageblock written to a texture
+- `79b44ea4` 2026-11-15 shimoku74: air2nir --interface: an image's mip level, or where it is read from
+- `7ae7e895` 2026-11-15 shimoku74: tools/air: vftcheck.sh, add1 and mul10 out of a table, by the thread's parity
+- `7c55058f` 2026-11-15 shimoku74: tools/air: importcheck.sh, a caller's struct and local read in callees
+- `7cedce2f` 2026-11-15 shimoku74: metal: -drawPatches: draws each patch as an instance of the library's grid
+- `7e3a26dc` 2026-11-15 shimoku74: tools/air: softpipesweep.sh, every fragment function of a library on softpipe, a process each, the ones that die named
+- `7e533a3c` 2026-11-15 shimoku74: tools/air: const_table.ll also reads an element of a constant vector the shader chooses
+- `7fd10b63` 2026-11-15 shimoku74: tools/air: argbufcheck dispatches a descriptor chosen at run time, which it used to expect refused
+- `81c67598` 2026-11-15 shimoku74: air: a cast of a pointer chosen at run time
+- `833c21b6` 2026-11-15 shimoku74: libhakios-air: the packed 32-bit formats, behind RWA_PACKED32
+- `83a06cc8` 2026-11-15 shimoku74: air: a returned struct's padding, as undefined bytes the caller may take apart
+- `8506e2e5` 2026-11-15 shimoku74: air: a memcpy of any constant length
+- `854e97c0` 2026-11-15 shimoku74: tools/air: vft.ll and two linked functions, a kernel calling out of a visible function table
+- `856855cc` 2026-11-15 shimoku74: metal: say what -setImageblockWidth:height: gets
+- `85b9631f` 2026-11-15 shimoku74: air: the interface reports each argument buffer's length and values
+- `86554523` 2026-11-15 shimoku74: air: a texture's or sampler's handle as an integer is a token of its binding
+- `88a90f56` 2026-11-15 shimoku74: libhakios-air: room for a kernel's imageblock in each dispatch
+- `8e8108a4` 2026-11-15 shimoku74: air_metal: a 64-bit value in private memory as two words of softpipe's local array
+- `8e83efdc` 2026-11-15 shimoku74: tools/samples.py: a console log's thread samples, named
+- `90c113be` 2026-11-15 shimoku74: air: a kernel's explicit imageblock, in threadgroup memory
+- `91ae8cf0` 2026-11-15 shimoku74: tools/air: intrincheck.py has references for the inverse hyperbolics
+- `935a2401` 2026-11-15 shimoku74: air_private.h: the pointer phis a loop carries between places, named for the next translation
+- `940cf6ca` 2026-11-15 shimoku74: nir_air.h: AIR_BUFFER_ID_INPUT and compares_buffers, which buffer indices are one buffer
+- `959b8bf3` 2026-11-15 shimoku74: tools/air: tesscheck.sh draws quad and triangle patches on softpipe
+- `9741319c` 2026-11-15 shimoku74: air: atomic compare-exchange, with a kernel in atomiccheck that can show it wrong
+- `975437f7` 2026-11-15 shimoku74: air_metal: fold which buffer indices are one buffer, and their offsets, into a kernel that compares them
+- `98d1908e` 2026-11-15 shimoku74: metal: indirect draws and dispatches, their arguments read when they run
+- `9a6432a9` 2026-11-15 shimoku74: air_to_nir: a callee returning a pointer, as its two words and the choice among places they name
+- `9cd0119a` 2026-11-15 shimoku74: tools/air: cpuref.py reads hex words and names what it cannot read
+- `9d5e8071` 2026-11-15 shimoku74: tools/air: clipcheck.sh, two clip distances leave a quarter clear on each side
+- `9db49202` 2026-11-15 shimoku74: air_metal: enable as many clip planes as the vertex shader writes clip distances
+- `9e5a2a7a` 2026-11-15 shimoku74: libhakios-air: the tessellation level, and the vertices a patch takes
+- `9fb92172` 2026-11-15 shimoku74: air: integers of two to thirty-one bits that NIR has no width for
+- `a1b87dca` 2026-11-15 shimoku74: air: simd_is_first, simd_shuffle_xor, simd_shuffle_and_fill_{down,up}, sinpi/cospi/tanpi
+- `a23933c1` 2026-11-15 shimoku74: AIR frontend: textures and samplers bound at program scope (air.global_bindings)
+- `a5e462ec` 2026-11-15 shimoku74: tools/air/stageincheck.sh: a [[stage_in]] float3 per thread, both ways
+- `a64ba997` 2026-11-15 shimoku74: air_metal: rwa_stage_in_register, a compute pipeline's stage-in
+- `a8b8d1b1` 2026-11-15 shimoku74: air: one linked function under another name is still the one linked
+- `ad6e15c6` 2026-11-15 shimoku74: air: an array of argument buffers takes one element's length
+- `b13cc1f4` 2026-11-15 shimoku74: air_metal: irem on softpipe as a - (a / b) * b, which nir_to_tgsi has no case for
+- `b1e18f5d` 2026-11-15 shimoku74: tools/air: softpipesweep.c, a fragment function made into a pipeline on softpipe
+- `b26cfa17` 2026-11-15 shimoku74: metal driver: a compute pipeline's stageInputDescriptor, to the library
+- `b29a1506` 2026-11-15 shimoku74: tools/air: tgcheck.sh dispatches a kernel with two threadgroup buffers
+- `b2ac7491` 2026-11-15 shimoku74: nir_air.h: function_tables, the buffer indices that hold visible function tables, and their handles' layout
+- `b4ad877f` 2026-11-15 shimoku74: air: arrays of textures, and a texture taken out of one at a computed index
+- `b4ed49f5` 2026-11-15 shimoku74: air: values in an argument buffer, read through the set's own buffer
+- `b4fadd76` 2026-11-15 shimoku74: libhakios-air on softpipe: narrow values widened, ffma split, demote as terminate
+- `b53c82ae` 2026-11-15 shimoku74: AIR frontend: llvm.minnum/maxnum, llvm.abs and llvm.bitreverse
+- `b6168144` 2026-11-15 shimoku74: metal_driver: visible function tables, a compute pipeline's linked functions, and function handles by their place among them
+- `b80ce492` 2026-11-15 shimoku74: tools/air: bufcmpcheck.sh, two buffers, one buffer twice, one at an offset, and a walk to an end pointer
+- `b99efd04` 2026-11-15 shimoku74: air_to_nir: argument buffer layouts and values copied out of the translation's context before it is freed
+- `b9b90252` 2026-11-15 shimoku74: ir3sweep: link functions into every module (-l, LINK=)
+- `b9bf61dc` 2026-11-15 shimoku74: air: OpenCL's grid queries, and SIMD queries at the width asked for
+- `ba2e2acd` 2026-11-15 shimoku74: libhakios-air: boot-arg rwa_software=1, softpipe for every process of a machine with no GPU
+- `bb3ad164` 2026-11-15 shimoku74: metal: an argument encoder finds members by id and answers values in place
+- `bbd6f812` 2026-11-15 shimoku74: metal: -drawIndexedPatches: is -drawPatches: for the functions the library draws
+- `bcad0f96` 2026-11-15 shimoku74: AIR frontend: sincos, the sine returned and the cosine stored through its pointer
+- `bf66fd59` 2026-11-15 shimoku74: air: an addrspacecast of a pointer is the same pointer
+- `bfa814ae` 2026-11-15 shimoku74: air: get_local_linear_id
+- `bfc06894` 2026-11-15 shimoku74: metal_driver: no rasterization rate maps, said and answered nil
+- `c130d20f` 2026-11-15 shimoku74: tools/air/memcheck.sh: the phone's shader path under valgrind's memcheck
+- `c1861e4f` 2026-11-15 shimoku74: libhakios-air: rwa_threadgroup_memory_at, and bases folded per dispatch
+- `c2386679` 2026-11-15 shimoku74: air_to_nir: a descriptor read out of a set at a computed offset, the choice among the members of its kind by offset
+- `c27e5b65` 2026-11-15 shimoku74: air: memcpy of a run-time length, as a loop of blocks
+- `c28ec82b` 2026-11-15 shimoku74: metal: -setThreadgroupMemoryLength:atIndex: at every index
+- `c647e8ba` 2026-11-15 shimoku74: air: atomic subtract, and a memset of any constant length
+- `c7a1819a` 2026-11-15 shimoku74: air_metal: constant data as a constant buffer on softpipe, and a stage too large for TGSI's 16-bit registers refused by name
+- `c89507b5` 2026-11-15 shimoku74: libhakios-air: argument buffer layouts with values, lengths from the set
+- `c8ba3345` 2026-11-15 shimoku74: air_metal: a stage measured alone has its varyings packed as a linked pair's (MercuryPoster's tori: 41 slots to 13)
+- `c9014459` 2026-11-15 shimoku74: mkimage26: the image tree's files are hard links to the rootfs, not copies
+- `ca585886` 2026-11-15 shimoku74: air: [[thread_index_in_quadgroup]], the lane's place in its quad
+- `cae6ab99` 2026-11-15 shimoku74: air: fast_sinpi, fast_cospi, fast_tanpi
+- `caf77622` 2026-11-15 shimoku74: air_to_nir: a translation that needs pointers in a local as numbers is started again so: (offset, place) words and a choice among the places
+- `cbd322a2` 2026-11-15 shimoku74: mesa26: ir3's prefetched sample takes its sampler's index, not its texture's
+- `cd5fd02d` 2026-11-15 shimoku74: air: air.atomic.fence
+- `cd7de226` 2026-11-15 shimoku74: air: atomic wait and notify, device-coherent loads and stores, yield
+- `cf89fa04` 2026-11-15 shimoku74: air: a vector NIR has no register for is refused by its length
+- `d0714a62` 2026-11-15 shimoku74: metal: -setCullMode:, -setFrontFacingWinding:, -setTriangleFillMode:, depth clip and bias
+- `d089137a` 2026-11-15 shimoku74: rw_null.ll: the driver's stand-in fragment shader as AIR, written by hand
+- `d31e2057` 2026-11-15 shimoku74: air_metal: multisampling pretended with one sample where the screen asks for that
+- `d3a19eac` 2026-11-15 shimoku74: metal driver: a texture over a buffer, as a copy kept in step
+- `d5f5ab80` 2026-11-15 shimoku74: libhakios-air: a draw's cull mode, winding, fill mode, depth clamp and bias
+- `d7453aa8` 2026-11-15 shimoku74: air_intrinsics: quad_all and quad_any by the quad's three swaps
+- `d8cacfd7` 2026-11-15 shimoku74: air_to_nir: clip distances as one compact float[N], an array or a scalar, stored an element each
+- `de572918` 2026-11-15 shimoku74: air_to_nir: a visible function table argument as a buffer of handles, and a call of a linked function taken out of one
+- `dee30057` 2026-11-15 shimoku74: air_metal: private memory as a local array on softpipe
+- `dfdce2ea` 2026-11-15 shimoku74: air_intrinsics: a function out of a bound visible function table, the choice among the linked functions by its handle
+- `e0366c91` 2026-11-15 shimoku74: air: amplification id and count, and a fragment's viewport index
+- `e0df1cf6` 2026-11-15 shimoku74: tools/air/tgcheck.sh: both kinds of threadgroup memory in one kernel
+- `e37075c3` 2026-11-15 shimoku74: air_intrinsics: a mip level out of a buffer plus a constant, and a second such level as an alias
+- `e6766266` 2026-11-15 shimoku74: nir_air.h: the shader's constant data in air_shader_info, and AIR_CONSTANT_DATA_UBO
+- `e73c02a7` 2026-11-15 shimoku74: air: texture atomics
+- `e837e0bd` 2026-11-15 shimoku74: air reader: a call of any number of arguments
+- `ec4e20ea` 2026-11-15 shimoku74: tools/air: const_table.ll, a float and a half table read at computed indices, in wordcheck.sh
+- `ecdd7a23` 2026-11-15 shimoku74: air_to_nir: a module's constant tables as constant data, read with load_constant, folded at known offsets (they read zeros from private memory)
+- `ef6134f7` 2026-11-15 shimoku74: metal driver: a surface drawn into through a copy is written back
+- `ef685430` 2026-11-15 shimoku74: air: an argument buffer's struct type is its parameter's pointee
+- `ef8e268b` 2026-11-15 shimoku74: air_private.h: air_ptr_numeric, pointers in private memory kept as numbers
+- `f068082c` 2026-11-15 shimoku74: tools/air: clip_tri.ll, a quad with two clip distances
+- `f2239aa1` 2026-11-15 shimoku74: mkimage26: METAL=1 keeps RenderBox's shaders too
+- `f24c1e02` 2026-11-15 shimoku74: AIR frontend: nir_air.h, the frontend's interface, written again
+- `f27bc4a9` 2026-11-15 shimoku74: tools/air: mipwritecheck.sh, one texture written at levels 0 and 1
+- `f305e7d8` 2026-11-15 shimoku74: ir3: no predicated branch on a condition from another block
+- `f3cc9454` 2026-11-15 shimoku74: air: a pointer compared with null
+- `f6d2c76a` 2026-11-15 shimoku74: air_metal: a compute pipeline's linked functions, as a render pipeline's
+- `f9d927de` 2026-11-15 shimoku74: tools/air: wordcheck.c, one kernel on softpipe and its first words compared
+- `fa34c9d4` 2026-11-15 shimoku74: libhakios-air: narrow buffer accesses made of dwords on softpipe
+- `ff60776d` 2026-11-15 shimoku74: tools/air: loweringcheck compares a struct phi and a pointer kept in a local against LLVM, which it still expected refused
+- `06bb2059` 2026-11-16 shimoku74: inject_poster: a snapshot request's timeout argument stretched where it is handed over
+- `0c5315df` 2026-11-16 shimoku74: darwin/userland/ssh.sh: build dropbear and mksh as the libraries are built
+- `1541e934` 2026-11-16 shimoku74: bench, darwin: the uefi { } and boot { } nodes by their DTS names
+- `182a25e4` 2026-11-16 shimoku74: air: simdgroup matrices and their 8x8 multiply-accumulate
+- `1b1d2056` 2026-11-16 shimoku74: components/metal: the Metal device and its shader compiler in one place
+- `1bc0eb1e` 2026-11-16 shimoku74: darwin/tools/ram-budget: sys is not used
+- `21637ade` 2026-11-16 shimoku74: air: a texture or sampler out of a local array at a computed index
+- `3043b50b` 2026-11-16 shimoku74: air: a read of the null texture has the result's own width
+- `309fe25c` 2026-11-16 shimoku74: inject_poster: snapshot timeouts sixty times longer with Metal on the processor
+- `403dcd1f` 2026-11-16 shimoku74: metal_driver: forty colour lines of each kind, not eight
+- `41dc13db` 2026-11-16 shimoku74: air: a pointer kept as numbers decodes into its own address space
+- `4330ebb0` 2026-11-16 shimoku74: metal_driver: metal_sync=1 shows a draw's buffers and the pixel it should change
+- `4dca7ccf` 2026-11-16 shimoku74: air: simdgroup matrix load, store, init_diag and init_filled
+- `55528ab9` 2026-11-16 shimoku74: air: quad_active_threads_mask, get_num_samples, and helper invocations ir3 can read
+- `577b557c` 2026-11-16 shimoku74: tools/apfs: the APFS image tools beside the other tools, fs/apfs beside them in the tree
+- `6563c4ea` 2026-11-16 shimoku74: darwin/userland/env.sh: the SDK from DARWIN_SDK, as kernel/build.sh takes it
+- `688653a7` 2026-11-16 shimoku74: air: a texture chosen between two members of an argument buffer
+- `7dfb5231` 2026-11-16 shimoku74: userland/userland/build.sh: quote the system image's source, say the empty lists are empty
+- `7fe90ce5` 2026-11-16 shimoku74: air: arrays in argument buffers
+- `810860e7` 2026-11-16 shimoku74: tools/air/fbfetchdraw: the half case too, into an RGBA16Float target
+- `8b6f4e73` 2026-11-16 shimoku74: air_metal: on softpipe, flush after each draw and dispatch
+- `8c54ce6c` 2026-11-16 shimoku74: components/statusbar and components/tweaks
+- `9126827b` 2026-11-16 shimoku74: components/wallpaper and components/brightness
+- `9941d8b7` 2026-11-16 shimoku74: air_metal: renumber samplerless texture units for compute stages only
+- `9a860f3c` 2026-11-16 shimoku74: metal_driver: metal_sync=1 says the whole of a draw's pass
+- `9b0ee11b` 2026-11-16 shimoku74: components/audio: the audio server's plug-in and its test programs
+- `9b81acc8` 2026-11-16 shimoku74: air_metal: the stage-in layout is part of what a translation is kept by
+- `a4b95a12` 2026-11-16 shimoku74: air: a patch's control points through [[stage_in]]
+- `b72df33c` 2026-11-16 shimoku74: darwin/userland: stop when pacstrip refuses a file
+- `b7dd74e2` 2026-11-16 shimoku74: softpipe: an image load without a format reads the image's own
+- `b9632e82` 2026-11-16 shimoku74: air: a read_write texture is read as well as written
+- `c15d2202` 2026-11-16 shimoku74: darwin/userland/inj26.sh: copy the shared headers from src/board
+- `c5587ab5` 2026-11-16 shimoku74: air: more than four clip distances take two output slots
+- `cd646fb9` 2026-11-16 shimoku74: init/ and lib/: the first programs and their C library at the top, as Linux's tree has them
+- `d06dc819` 2026-11-16 shimoku74: darwin/tools/metal-cache-pull: count the stages with a glob
+- `d5663259` 2026-11-16 shimoku74: inject_poster: any timeout getter of the poster classes, and the snapshot classes' times said
+- `d75f3230` 2026-11-16 shimoku74: air: a texture's handle through an integer in a local stays the texture
+- `dbcd09f2` 2026-11-16 shimoku74: metal: a no-copy buffer follows its caller's pages
+- `dbeb407b` 2026-11-16 shimoku74: air: a texture read at a level other than its base
+- `e107d182` 2026-11-16 shimoku74: air: a mip level written at a float from a buffer plus a whole number
+- `e38a6097` 2026-11-16 shimoku74: metal_drv_test: the first compute kernel's textures in the formats it declares
+- `e45a7364` 2026-11-16 shimoku74: components/camera: the capture device, its picture processor and the camera tools together
+- `e48ff4be` 2026-11-16 shimoku74: air: RGB9E5 unpack and pack
+- `e7137aed` 2026-11-16 shimoku74: inject_poster: every snapshot and render-session timeout getter sixty times longer
+- `ef3559b7` 2026-11-16 shimoku74: air_metal: framebuffer fetch on softpipe, from a copy of the attachment
+- `ef3efec0` 2026-11-16 shimoku74: air_metal: on softpipe a samplerless texture instruction reads its own unit
+- `ff7936a2` 2026-11-16 shimoku74: air: is_function_constant_defined of a constant through a cast
+- `47907493` 2026-11-18 shimoku74: inject26: PosterBoard's dictionary without the protection key autoreleased, not leaked on every retried check
+- `9267a02f` 2026-11-18 shimoku74: drawable: the GPU's connection and the compiler's call looked up once, every thread after the first waiting for them
+- `acb67298` 2026-11-18 shimoku74: brightness: the end of an "off" ramp darkens the panel only if no other transition began since; the mode read at its width
+- `c7237e3c` 2026-11-18 shimoku74: wallpaper, statusbar: each stretched PosterBoard timeout getter holds its own original (one shared getter found a subclass's again through super an...
+- `cfccb7e7` 2026-11-18 shimoku74: inject26: the stacks under 4 MB made big, as said, not those that were big already or whose memory the caller gave
+- `d57366c8` 2026-11-18 shimoku74: brightness: a class hooked late is hooked from the main queue, not inside the runtime's lock (a missing class aborted the process), each original k...
+- `f8143214` 2026-11-18 shimoku74: sensors_probe: a read-only userland tool that shows what Darwin sees of the motion sensors (MobileGestalt keys, CoreLocation heading, CoreMotion av...
+- `fbbc848c` 2026-11-18 shimoku74: userland build.sh: a failed mkapfs fails the build (its / tail hid it), and an image that carries the Wi-Fi passphrase or the host key is readable ...
+- `ce96d70f` 2026-11-19 shimoku74: orientation to Darwin: backboardd's library makes a sensor-page HID service (0x20/0x8a) and sends the kernel's orientation (hw.sensors.orientation)...
+
+## not applicable: drivers and board data of the new tree (Qualcomm/MediaTek boards; Renoir, Redwood and others): no counterpart in Scion's tree (250)
+
+- `06338bd4` 2026-11-11 shimoku74: [camera] in the SoC file: the camera subsystem's blocks
+- `0d701bdc` 2026-11-11 shimoku74: boards.py compare: a panel node that is silent about its light is not taken to say "soft"
+- `0e358583` 2026-11-11 shimoku74: Features say every SoC section their drivers take addresses from
+- `1d040a55` 2026-11-11 shimoku74: [ipc] in the SoC file: the way to the SoC's other processors
+- `252a8921` 2026-11-11 shimoku74: boards.py: the device tree says where the arbiter and the keys are
+- `2d2bf3c5` 2026-11-11 shimoku74: boards.py status: what a board has on and what it can turn on next
+- `2dbd2c64` 2026-11-11 shimoku74: soc/README.md: the chips there are, and what each section of a SoC file is for
+- `32bb6ff1` 2026-11-11 shimoku74: [smmu] in the SoC file: the SMMU between the SoC's devices and memory
+- `3c4c21e7` 2026-11-11 shimoku74: boards.py new: a board started from a tree with a flash module has its [torch]
+- `3e44ae14` 2026-11-11 shimoku74: The I/O window is asked for when the loader is to know the board
+- `40263c79` 2026-11-11 shimoku74: [pins] in the SoC file: where the SoC's own pins are
+- `4c4f0c3d` 2026-11-11 shimoku74: [platform] ufs: where the UFS host controller is, in the SoC file
+- `4dc94ff4` 2026-11-11 shimoku74: The display's clock offsets are asked for by what touches the display
+- `4e226246` 2026-11-11 shimoku74: speaker: the amplifiers' bus, addresses and interrupts are the board's ([speaker])
+- `506e3282` 2026-11-11 shimoku74: Templates: [loader] and [boot] explained, and a SoC file with every key
+- `53116a08` 2026-11-11 shimoku74: [torch] in the board file: which peripherals of the PMIC the flashlight is
+- `5cbd77bb` 2026-11-11 shimoku74: Memory bandwidth vote: the command database and the sequencer come from [rpmh]
+- `6602883f` 2026-11-11 vcvkk: boards.py: HAKIOS_DEVICES is read wherever the module is used
+- `6939356d` 2026-11-11 shimoku74: Adreno: where the GPU's blocks are comes from the SoC file's [adreno]
+- `6e2711ba` 2026-11-11 shimoku74: Status bar shift: the board's [screen] says it, not the name "renoir" in a library
+- `796de91b` 2026-11-11 shimoku74: boards.py compare: a board and its SoC file against a device tree
+- `7e9800a0` 2026-11-11 shimoku74: devices/README.md: every section of the two files, and both generated tables
+- `8839e2c9` 2026-11-11 shimoku74: [adsp] memory: where the audio DSP's reserved memory is, in the board file
+- `8e0a8a3f` 2026-11-11 shimoku74: The boot tool's choice of phone and its boot arguments are tested functions
+- `9420ecba` 2026-11-11 shimoku74: [wifi] dsp_memory: where the Wi-Fi DSP's reserved memory is, in the board file
+- `963ee07c` 2026-11-11 shimoku74: A new package starts with its README, in the form the others have
+- `9a4fc0dc` 2026-11-11 shimoku74: Buttons: the arbiter and the keys' peripherals come from the board table
+- `a16e9ff7` 2026-11-11 shimoku74: virtio: a feature of the emulator's board, not a name the drivers know
+- `a5cdd6c7` 2026-11-11 shimoku74: [haptic] in the board file: which pins the vibration motor's chip is on, and the motor's calibration
+- `a8effbb5` 2026-11-11 shimoku74: [lpass] in the SoC file: the audio subsystem's blocks on the microphones' path
+- `ac345610` 2026-11-11 shimoku74: Boards as data: devices/NAME/board.toml, soc/SOC.toml, one table in the kernel
+- `ac7e906d` 2026-11-11 shimoku74: devices/README.md: how a new kind of board data is added
+- `be688fd4` 2026-11-11 shimoku74: Display scan timing: where the panel's interface is comes from the SoC file
+- `c66b6fae` 2026-11-11 shimoku74: Audio DSP: firmware directory, memory and the gauge's units come from [adsp]
+- `d01bd04b` 2026-11-11 shimoku74: Torch and camera: the arbiter's addresses come from [spmi] too
+- `d3ab6a06` 2026-11-11 shimoku74: devicetree.py: the GPU's blocks are read from a phone's tree
+- `d4597e4e` 2026-11-11 shimoku74: Wi-Fi layer: the radio and its early pool are the board's [wifi]
+- `ddf6d494` 2026-11-11 shimoku74: boards.py status: each feature with the boot argument that starts it
+- `e40ba05e` 2026-11-11 shimoku74: Sound and microphone paths ask for their part too
+- `efb5f304` 2026-11-11 shimoku74: boards.py new: the SoC file it writes explains itself
+- `f0944cea` 2026-11-11 shimoku74: Boards: a [gpu] section and the feature gpu-a660
+- `00406094` 2026-11-12 shimoku74: boardfile.py: typed() in three cases, and no put-back nothing used
+- `0a889d5a` 2026-11-12 shimoku74: boards: the touch controller's reset and interrupt are read from a device tree
+- `0cd685f0` 2026-11-12 hxfuxyy: sm8845: the PMIC arbiter is version 8, with its own tables
+- `1e1aa601` 2026-11-12 shimoku74: boards.py new: the Wi-Fi DSP's memory and the radio's pins from the tree
+- `1e6244c7` 2026-11-12 hxfuxyy: spmi: arbiters of version 8 are read and written
+- `2d3be77a` 2026-11-12 shimoku74: touch: the register the clocks are voted for in is the board's too
+- `307798d9` 2026-11-12 shimoku74: camera: the PM8008's reset GPIO is the board's
+- `33bbf3c5` 2026-11-12 shimoku74: boards.py new: the microphones' codec reset from the tree
+- `4bdfa7d3` 2026-11-12 shimoku74: The board and SoC files' own comments name sections as nodes
+- `4d8925b9` 2026-11-12 shimoku74: lpass { } tx-swr-hctl: the register, as the device tree gives it
+- `55131020` 2026-11-12 shimoku74: Template and metal-glass.md: examples that are no phone's
+- `574a4faa` 2026-11-12 shimoku74: boards.py new writes board.dts and SOC.dtsi itself
+- `5fc616ff` 2026-11-12 shimoku74: boards.py new: the sound's four pins from a whole tree
+- `67b9f535` 2026-11-12 shimoku74: SMMU streams are the SoC file's, not the drivers'
+- `7e43a8c6` 2026-11-12 shimoku74: mic: the codec's reset pin comes from the board
+- `837a9af3` 2026-11-12 hxfuxyy: thermal: SM8845's seven TSENS controllers are read
+- `8941ad9d` 2026-11-12 shimoku74: wifi: the radio's board data and regulatory database are named by the board
+- `907f1b36` 2026-11-12 shimoku74: boards.py speaks of the files as they are written
+- `95bcd2fd` 2026-11-12 shimoku74: sound: which TDM interface the amplifiers are on is the board's
+- `9e7d4220` 2026-11-12 shimoku74: speaker: the sound's four pins and their function come from the board
+- `a1fcc122` 2026-11-12 shimoku74: tests: phone-keys says what it is now
+- `a41271f2` 2026-11-12 shimoku74: wifi: the radio's pins and its supplies' names come from the board
+- `a6eaf1d9` 2026-11-12 shimoku74: boards: [touch], a touch controller's wiring in the board file
+- `a8e2048b` 2026-11-12 shimoku74: boards: [storage], the one partition of a phone's storage that may be written
+- `a9f8227b` 2026-11-12 shimoku74: boards.py new and compare find the SMMU streams and the touch range in a tree
+- `aaea725c` 2026-11-12 shimoku74: docs: where the loader's parts are and which one a change belongs in
+- `ae88a994` 2026-11-12 hxfuxyy: boards: a phone's Bluetooth on a serial engine's UART is board data
+- `b6471032` 2026-11-12 shimoku74: boards.py new finds the microphones' blocks in a tree
+- `b83035e0` 2026-11-12 shimoku74: Boards and SoCs are described in device tree source
+- `b8e6d8d7` 2026-11-12 shimoku74: board: the line that says a board's features has room for all of them
+- `c58417e5` 2026-11-12 shimoku74: camera: the lens motor's supply is the sensor node's; no fixed PMIC reads
+- `d3ab4b89` 2026-11-12 shimoku74: touch: the controller's coordinate range is the board's
+- `e2bd2dff` 2026-11-12 shimoku74: mic: the SoundWire's pins are the SoC file's
+- `e6db0144` 2026-11-12 hxfuxyy: kernel: add board-gated SCMI performance diagnostics for SM8845
+- `e7ab0168` 2026-11-12 shimoku74: camera: the sensors' wiring is the board's [camera]
+- `ec120560` 2026-11-12 shimoku74: Camera for iOS: which sensor is which camera is the board's
+- `fce8e435` 2026-11-12 shimoku74: The camera's feature is camera-sm7325
+- `178aeab9` 2026-11-13 shimoku74: qemu-virt: its disk and sound are virtio devices too
+- `7b5d5e29` 2026-11-13 shimoku74: workbench/devices: phone-scmi, a test phone whose speeds are the firmware's, over SCMI
+- `ade1e15a` 2026-11-14 shimoku74: board test: the features' line in a buffer too small for it, and a features word with bits past the names
+- `4e5ee995` 2026-11-16 shimoku74: drivers/board/mpss: the board file the modem's message names is board.dts
+- `dfb76d4b` 2026-11-16 shimoku74: tools/boards: plain strings where the f-strings had nothing to fill in
+- `e3baf40c` 2026-11-16 shimoku74: workbench: tomllib and sys imported for nothing
+- `017a879d` 2026-11-17 shimoku74: virtio: what the device gives back believed only inside our buffers, and read after its index
+- `05931b65` 2026-11-17 shimoku74: adsp: the page the header was handed to TrustZone in given back after the call
+- `0be48378` 2026-11-17 shimoku74: mpss: a write into the shared memory outside it refused and said
+- `0cf29f37` 2026-11-17 shimoku74: backlight: backlight=1 turns no clock on, and GCC's is put back when the display block is found powered down
+- `0d123db2` 2026-11-17 shimoku74: adsp: the DSP's image given back file by file, each at the size it was read at, and only what was ours
+- `0d334c6e` 2026-11-17 shimoku74: bt: Darwin's side of Bluetooth, for any controller a driver hands over
+- `1063986f` 2026-11-17 shimoku74: bt_uart: its head says the firmware is sent, as it now is
+- `16254b65` 2026-11-17 shimoku74: adreno: no register of a GPU given back; stale_stop by its clocks; bounded waits; quiesce faults the SMMU's streams
+- `1b9e8c3a` 2026-11-17 shimoku74: userland: board/audio.h with the volume's most, as the kernel's says it to programs
+- `1c86f8a5` 2026-11-17 shimoku74: bt_host: a channel without its pools is refused; tx_dropped under the lock
+- `2430c996` 2026-11-17 shimoku74: torch: a light switched on and then given up on is switched off, not left on with its safety timer off
+- `282c9b4a` 2026-11-17 shimoku74: goodix: the pin driven by hand toward the chip at 2 mA, as fts.c drives it
+- `2842bf17` 2026-11-17 shimoku74: bt_uart: bt=2 hands the controller to Darwin once it has answered
+- `2889502f` 2026-11-17 shimoku74: mpss: an intent offered again at another size frees the buffer it had
+- `29d5884a` 2026-11-17 shimoku74: qmi: a reply is its request's only when it is of the same message, not on the transaction number alone
+- `34391232` 2026-11-17 shimoku74: adreno: what step 5 turned on in the global clock controller given back once CX is off
+- `34460db5` 2026-11-17 shimoku74: net: an interface whose thread cannot start is said and its link taken down; the transmit lock destroyed on a failed attach
+- `353795ff` 2026-11-17 shimoku74: mpss: the data format, bind and start sent once though two threads come to them
+- `380e96ec` 2026-11-17 shimoku74: wifi: the radio's SMMU mapping taken away on every ending, or its stream sent to fault
+- `38bbfa10` 2026-11-17 shimoku74: bt_host: a write to the kernel control goes into the line whole or not at all
+- `3e304454` 2026-11-17 shimoku74: thermal: a group's top row held to the table's last, whatever its register reads
+- `3e34b64e` 2026-11-17 shimoku74: adsp: GLINK not taken up again while the link's thread from before still runs
+- `3faf0fb0` 2026-11-17 shimoku74: ufs: a GPT header's size bounded before a sum is taken over it; the list proved after writing
+- `43f9c954` 2026-11-17 shimoku74: cpufreq: each group's rows' core counts said, the turbo rows named
+- `4a3c4cde` 2026-11-17 shimoku74: fts: the chip's all-0xff frame with a finger down is no finger, its lift posted, not a bad report that resets the chip
+- `4b013877` 2026-11-17 shimoku74: gpu: a buffer the GPU may still write keeps its own memory and its surface, not the surface's state page
+- `4c322e85` 2026-11-17 shimoku74: sound: the run's end against the setup, the SMMU's tables made once, what it refused to take put back
+- `4d1d7dc7` 2026-11-17 shimoku74: ipa: the data path stopped before the modem driver votes the IPA's clock off
+- `4d5aedd5` 2026-11-17 shimoku74: battery: one report at a time, and the source looked at again under the lock
+- `4f4b6359` 2026-11-17 shimoku74: board/bt_hci.h: H4 packets, and what bluetoothd is answered in the kernel
+- `51fc677c` 2026-11-17 shimoku74: gpu: a client closed makes nothing more
+- `53a8c0a2` 2026-11-17 shimoku74: sta: a rejoin pending when the station goes is forgotten, not slept to over and over
+- `5588b468` 2026-11-17 shimoku74: ddr: the rpmh helper's "no answer" recognised by its words, not by where the string is
+- `55d59b2c` 2026-11-17 shimoku74: fts: a minute of good reports forgives the recoveries before it, and a mode read that failed is asked again
+- `56c4158a` 2026-11-17 shimoku74: camera: the lens motor's supply voted off at the run's end
+- `5afb52bd` 2026-11-17 shimoku74: wlfw: a reply without its result is not the firmware's success
+- `5cd6895d` 2026-11-17 shimoku74: goodix: the I/O supply's RPMh request sent under the lock the others take
+- `5db56865` 2026-11-17 shimoku74: adsp: GLINK's receive side read in order, a packet too long let go of with its intent, a closed channel reopened afresh
+- `5fb3360b` 2026-11-17 shimoku74: buttons: the power-on block of generations 1 and 2 as well as 3, and the arbiter's versions said as they are
+- `607339a7` 2026-11-17 shimoku74: bt_uart: the loopback's result said, not returned
+- `6230a281` 2026-11-17 shimoku74: camera: the SMMU's pages mapped once, not again every session; a test that could not fail
+- `62d2adbe` 2026-11-17 shimoku74: bt_host: a start that fails takes away what it made
+- `63d99189` 2026-11-17 shimoku74: boards.py status: which Bluetooth firmware a phone sends
+- `6421ea97` 2026-11-17 shimoku74: ufshc: the controller's registers through mmio.h
+- `6572364f` 2026-11-17 shimoku74: ddr: a vote that RPMh did not answer in time is given back at the run's end like one it answered
+- `67b5d559` 2026-11-17 shimoku74: touch: a register block or the command database not mapped is said and stops the driver, not read through
+- `692853d5` 2026-11-17 shimoku74: touch: the clock controller mapped as far as touch { } may reach, and the engine's rate registers held inside it
+- `6b620faf` 2026-11-17 shimoku74: mpss: the modem reads a file it wrote from a copy of its own, not the kept one a later write frees
+- `6bd739f2` 2026-11-17 shimoku74: camera: no frame is judged by the frame's own length, not 1.5 s whatever Darwin asked for
+- `6c259db5` 2026-11-17 shimoku74: tools/boards.py: Bluetooth's levels as features.md has them (bt=2)
+- `6dae32d4` 2026-11-17 shimoku74: scmi_perf: a level sent without an answer that can be read is not known, and put back at the run's end
+- `6db21ee4` 2026-11-17 shimoku74: mpss: the modem's lengths summed in 64 bits, a QRTR datagram's and a GLINK message's
+- `74a0b516` 2026-11-17 shimoku74: bt_hci: what a host wrote, a whole packet at a time
+- `765bb94a` 2026-11-17 shimoku74: gpu: a host buffer's size checked before it is rounded up to pages
+- `76deca8e` 2026-11-17 shimoku74: torch: the run's end never meets a light half lit
+- `7909813d` 2026-11-17 shimoku74: bt_qca: a Command Complete of 0xfc00 for another request is not a segment's answer
+- `7948d1cf` 2026-11-17 shimoku74: mdt: the segment table where TrustZone reads it, one block of hashes right after it, and no segment loaded over another
+- `7a8c76e1` 2026-11-17 shimoku74: mpss: GLINK control messages that find our queue full wait for room and go first, not dropped
+- `7bec1696` 2026-11-17 shimoku74: mpss: TFTP reads end with the empty block a file of whole blocks needs, silent transfers are taken back, writes only under /readwrite/
+- `7e66b7be` 2026-11-17 shimoku74: adsp: the GLINK doorbell no longer listened for once the DSP is shut down
+- `7f207d6c` 2026-11-17 shimoku74: boot-args.md: backlight= and touchscreen= described by their own comments again
+- `8080405d` 2026-11-17 shimoku74: scm: a preempted call resumed as long as TrustZone takes, and one it is busy for asked again 30 ms apart
+- `80a23e36` 2026-11-17 shimoku74: goodix: no analog supply and no pin driven when the chip's I/O supply did not come up
+- `82fc2025` 2026-11-17 shimoku74: mpss: on the way back to the loader the rails are given back only if the sequencer's lock is free, not waited for
+- `840bad88` 2026-11-17 shimoku74: adreno: a GPU address of no size, a submission past the ring and a short zap file not taken as they came
+- `87d175f9` 2026-11-17 shimoku74: virtio: the emulator's devices reset on the way back to the loader, so they write no more into memory about to be reused
+- `88b6d69b` 2026-11-17 shimoku74: ufshc: a list not seen to go back counts as in; short reads, cleared slots, reads before the proof
+- `8c58bb6d` 2026-11-17 shimoku74: mic: the run's end waited for a listen of up to ten minutes, and could be followed by a bring-up
+- `8c91660c` 2026-11-17 shimoku74: mpss: DMS's answers taken only for the request waited for
+- `8e7c9a5e` 2026-11-17 shimoku74: BoardWLAN: started once, a second start() is a no-op
+- `8eddab75` 2026-11-17 shimoku74: camera: the ring's places numbered afresh each session, and the next frame's place kept from readers
+- `95e2d6d2` 2026-11-17 shimoku74: cell: en1 not given its subnet's own or broadcast address, an old lease not confirmed by ARP, and a new address taken through DHCP anew
+- `99ef7b56` 2026-11-17 shimoku74: thermal: the frequency rows held back in the OSM's layout too, what LMh allows by the layout's own mask
+- `9adcbfbf` 2026-11-17 shimoku74: ddr, touch: RPMh requests laid out by the sequencer's own version, as bt_uart.c sends them
+- `a9f71b6c` 2026-11-17 shimoku74: ipa: an event's place in the ring worked out in 64 bits before it is taken for a slot
+- `ac7344c5` 2026-11-17 shimoku74: virtio-blk, sparse: the raw disk read through the kernel's buffer, a timed-out request not followed by another, a block that wraps refused
+- `acf99f62` 2026-11-17 shimoku74: audio, speaker: a volume past any amplifier's lowest refused, and never summed past 32 bits
+- `aed987e8` 2026-11-17 shimoku74: bt_uart: the engine read only while clocked; a failed transmit stopped; waits by the clock
+- `b045a6ca` 2026-11-17 shimoku74: cpufreq: the OSM's layout as well as EPSS's, and a group the hardware is not in charge of left alone
+- `b1f046eb` 2026-11-17 shimoku74: boards: a platform's core count is one to eight, as the loader's table
+- `b2aa494d` 2026-11-17 shimoku74: bt_host: the channel told under the lock, and a session of bluetoothd's starts clean
+- `b3a49516` 2026-11-17 shimoku74: bt_host: a packet of bluetoothd's waits in its slot when the line is full
+- `b449866c` 2026-11-17 shimoku74: camera: a supply's pin past the pins there are refused before it is written
+- `b7ec36c4` 2026-11-17 shimoku74: GenericARMPE: a device tree with no cpus counted still gets one core, said in the log
+- `b9141586` 2026-11-17 shimoku74: tools/boards.py: cpufreq { block; domains; } in a SoC file, checked and carried into the table
+- `b93aa716` 2026-11-17 shimoku74: thermal: a group whose hardware is not in charge of its clock is looked at and never held back
+- `bc6141be` 2026-11-17 shimoku74: cpufreq: the governor's row read from the hardware held inside the frequency table
+- `be014a9e` 2026-11-17 shimoku74: bt_host: what bluetoothd writes to /dev/btwake and its fellows, said
+- `c1e4f565` 2026-11-17 shimoku74: mpss: the shared memory's items walked with the common walk's bounds: padding, size and partition inside what there is
+- `c6126d9a` 2026-11-17 shimoku74: input: a read with no room for one touch refused at once, not slept on and answered as the end of the file
+- `c644e7be` 2026-11-17 shimoku74: mpss: a GLINK channel the modem closes is closed from our side too and its session forgotten, so it opens afresh
+- `c823ac74` 2026-11-17 shimoku74: tools/boards.py: a cpufreq { } the schema has refused is said, not a crash of the checks after it
+- `cae93416` 2026-11-17 shimoku74: wlfw: the registers' place forgotten at each exchange and an address 0 not taken; "off" sent after a mission mode asked for but not answered
+- `cb143852` 2026-11-17 shimoku74: drivers: each driver started only when the configuration has it, and the kernel says what it was made without
+- `ce732645` 2026-11-17 shimoku74: scmi_perf: each domain asked back to the level it was found at, at the run's end
+- `d02651e8` 2026-11-17 shimoku74: ufshc: a line of the log long enough for the list put back
+- `d1014339` 2026-11-17 shimoku74: goodix: fingers lifted at a reset the chip asks for and after reads that keep failing; 480 Hz asked again after the reset
+- `d1a1c334` 2026-11-17 shimoku74: goodix: an AHB clock in hardware gated mode taken as running, as fts.c and Linux do
+- `d1b2cac2` 2026-11-17 shimoku74: goodix: a FocalTech position past the panel kept on it before a mirror, and a panel under two points refused
+- `d1d8e1fa` 2026-11-17 shimoku74: apfs-check: the stall timer stopped before what it reads is freed, and the walk's buffers given back on every way out
+- `d3c23d7c` 2026-11-17 shimoku74: speaker: an amplifier half stopped is powered down, not left running; a monitor table that wraps 32 bits refused
+- `dc03c2e3` 2026-11-17 shimoku74: adreno: a recovery that could not halt the core's bus lets go of the GMU's keep-alive
+- `dd515134` 2026-11-17 shimoku74: sta: a power change that failed leaves the power said as it is, not as it was asked
+- `deb2444c` 2026-11-17 shimoku74: camera: a sensor or mode that cannot be used, asked for by any process, falls back to the one before
+- `e152486a` 2026-11-17 shimoku74: bt_host: a few packets from the controller at a time, then bluetoothd's
+- `e3ab52d4` 2026-11-17 shimoku74: bt_queue.h: the queues between bluetoothd and the controller, tested
+- `e66cce38` 2026-11-17 shimoku74: goodix: FocalTech's firmware looked for with the chip out of reset, and not started when the kernel has none
+- `e8e62307` 2026-11-17 shimoku74: lx: the radio's vectors marked gone and their handlers finished before the lines are let go of
+- `e9d352fc` 2026-11-17 shimoku74: BoardWLAN: a first start that failed leaves the next attach free to try again
+- `ec39719c` 2026-11-17 shimoku74: lx: memory the radio cannot be shown given back, the early pool kept for the next try, and a pool larger than asked for used
+- `eeabea0e` 2026-11-17 shimoku74: backlight: the DMA setup and command mode taken once as the firmware left them, the FIFO emptied before a command
+- `f0e7aa6d` 2026-11-17 shimoku74: mpss: the always-on processor's mailbox checked without a sum its two words can wrap
+- `f43594d1` 2026-11-17 shimoku74: framebuffer: the refresh told to the window server while the port it goes to cannot be let go
+- `f6ba0d20` 2026-11-17 shimoku74: boards: bluetooth { firmware, rampatch, nvm }
+- `f846d9cf` 2026-11-17 shimoku74: haptic: a chip found out of reset is put back into reset at the run's end as well
+- `f995edf7` 2026-11-17 shimoku74: framebuffer: a layer drawn only where its rows lie in its surface's memory
+- `fbf14137` 2026-11-17 shimoku74: bench: the first buffer given back when the second cannot be had
+- `fc83e188` 2026-11-17 shimoku74: adreno, BoardGPU: pages the SMMU's TLB may still hold stay the GPU's, not given back
+- `fcf45b6c` 2026-11-17 shimoku74: adsp: an APR answer kept only for the question waited for, its words published before its flag
+- `fee38db7` 2026-11-17 shimoku74: drivers/board/cpufreq_hw.h: the cores' frequency block in both of its layouts, EPSS's and the OSM's before it
+- `01145872` 2026-11-18 shimoku74: adreno: the 3D core's bus halted at the way back only while it has its power; core_runs cleared where GX goes off
+- `064f00bb` 2026-11-18 shimoku74: input: the RPMh slots' lock is the SoC's, the one the modem's rails take, not a second one for the same slot
+- `066bfb9c` 2026-11-18 shimoku74: smem: an item found by its number past the 256th of its partition, not taken as missing
+- `15d32b94` 2026-11-18 shimoku74: scmi_perf: only a domain raised to its top (scmi_perf=2, answered) is the thermal limiter's to hold back, at the top it reached (scmi_perf=1, which...
+- `15ebbace` 2026-11-18 shimoku74: backlight: a brightness command that could not be sent is tried again (the panel stayed black after a switch-on the controller was not ready for), ...
+- `51b5c274` 2026-11-18 shimoku74: boardfile: numbers in <> read as dtc reads them -- a leading 0 is octal (010 is 8), 08 is no number
+- `595c371b` 2026-11-18 shimoku74: battery: a current beyond 20 A either way is taken as none (60 A into the cell showed 70% as 0%), a temperature outside -40..100 C as not known (an...
+- `59a0ece1` 2026-11-18 shimoku74: fts: the controller is put away at the run's end and on every failure (reset low, both supplies withdrawn, only the clock votes it added given back...
+- `5d5b7e3c` 2026-11-18 shimoku74: thermal: no reading at all holds the step where it is (it was taken as cool, and a hot phone got its rows back a step a second), a sensor that answ...
+- `606a5608` 2026-11-18 shimoku74: speaker: an amplifier counts as powered down only once it reads back so -- a refused or unanswered power-down is retried by stop and on the way out...
+- `6d5139e9` 2026-11-18 shimoku74: rtc: the PMIC's real-time clock is read at boot (read only, a board's rtc { } names its block) and shown as hw.rtc_seconds; process 1 keeps the tim...
+- `6dfe0372` 2026-11-18 shimoku74: adsp: a GLINK intent slot offered again at another size gives its old buffer back instead of dropping it (the DSP picks the sizes, so it could make...
+- `76eee081` 2026-11-18 shimoku74: thermal: the step is applied at every look, so a level the SCMI firmware refused is asked for again -- a jump straight to the critical step is no l...
+- `7d0a1c85` 2026-11-18 shimoku74: adsp: the first APR answer to a question stands -- a second packet with the same token is no longer written over it while the asker copies it out o...
+- `7d80dc23` 2026-11-18 shimoku74: buttons: a key held when the PMIC stops answering is let go when the driver gives up, so Darwin does not keep the side or volume button held for th...
+- `858d9ad0` 2026-11-18 shimoku74: sensors_core: include its two cores by their own names, as the kernel's build finds them -- with the board/ prefix only the host tests resolved them
+- `92d3a104` 2026-11-18 shimoku74: mpss: after a panic the IPA's SMMU streams and context put back without the lock, not left on this kernel's tables
+- `97135f42` 2026-11-18 shimoku74: cache.h: the tests' invalidate is a clean and invalidate (ivac traps at EL0, where the tests run on an aarch64 host under qemu-aarch64)
+- `98b34509` 2026-11-18 shimoku74: battery: a source that stops sending fresh data (the DSP's battery manager gone, the loader no longer polling) is noticed after 60 s -- the tempera...
+- `9d2fa683` 2026-11-18 shimoku74: iosurface: surfaces marked volatile are counted (kern.surfaces_volatile, and a line with the memory report and when memory is short), idle ones apa...
+- `a6c55966` 2026-11-18 shimoku74: sound: when the amplifiers are given up on, Darwin's audio is no longer fed to them -- periods are sent as silence (the guard's SILENT now means wh...
+- `a761a5a6` 2026-11-18 shimoku74: haptic: nothing is played without the waveforms loaded (haptic=5 played whatever the chip's RAM held), an effect's 1 s limit is measured by the clo...
+- `a76b6fb7` 2026-11-18 shimoku74: camera: RPMh votes that were sent but not answered are held and withdrawn (the lens motor's supply as enable, mode and voltage), a mode past 13 MP ...
+- `acaa7f1b` 2026-11-18 shimoku74: buttons: a key held when its peripheral stops answering is let go after a second of failed reads, and pressed anew if it is still held when they co...
+- `ae7a4ee9` 2026-11-18 shimoku74: camera: one picture kept for the host at a time, its header and its pixels from one writer
+- `b0df3b7d` 2026-11-18 shimoku74: apple80211: the run's summary to the loader's log, not the console, which panics with interrupts off on the way back
+- `b12ed454` 2026-11-18 shimoku74: iokit: the user clients hold a reference to their task and refuse calls once closed (a connection handed to another process outlived its owner's ta...
+- `b7d4df5f` 2026-11-18 shimoku74: speaker: a start after a preparation that stopped at the second amplifier no longer powers up and unmutes the first and then says it did not start:...
+- `b894d645` 2026-11-18 shimoku74: imu: a driver for an ST LSM6DSO accelerometer on a board's I2C pins (feature imu-lsm6dso, boot-arg sensors=N): sensors=1 reads its identity only; s...
+- `c09c3ca0` 2026-11-18 shimoku74: adsp: the microphones' path is taken down before the DSP is shut down at the run's end -- its stream, LPASS votes, clocks and codec were left as th...
+- `c2a8ab36` 2026-11-18 shimoku74: qmi: a handle released under a waiting request ends it (-ENETRESET) and waits for its callers to leave before it is freed (the run's end could free...
+- `ceab5da3` 2026-11-18 shimoku74: imu: a run that ends in the middle of a read leaves the I2C bus at rest whether or not the accelerometer was switched on, the pins go back as the r...
+- `d36d7a47` 2026-11-18 shimoku74: torch: putting the light out no longer depends on a read succeeding -- the module and channel enables are written 0 blindly (only those two, only 0...
+- `f47dcf7a` 2026-11-18 shimoku74: scmi_perf: a level not known from the doorbell to the answer, so a core stopped in between leaves it to be put back
+- `fb456cc7` 2026-11-18 shimoku74: goodix: a finger is lifted once no report has been believed for 250 ms (a bus floating high or low held it down for good), the controller is put aw...
+- `fc1d9eed` 2026-11-18 shimoku74: thermal: root's thresholds are held to 0..125 C (a critical of 150 C would switch the protection off), and while the three are tuned out of order t...
+- `0b4843ab` 2026-11-19 shimoku74: framebuffer: a layer's columns and rows are clipped to the panel and one with none on it is not drawn (one wholly off it read the column table outs...
+- `47e3814e` 2026-11-19 shimoku74: ufs: a read whose mailbox attempt fails while this kernel's list is in goes through the list (reads as the list went back in after writing failed w...
+- `6ebc2f59` 2026-11-19 shimoku74: imu: each sample with its number and the time it was read (hw.sensors.sample, the five taken together), and hw.sensors.motion while the samples are...
+- `a4c30760` 2026-11-19 shimoku74: audio: the volume is said in the log when it changes, not at every setting (any process may open /dev/hakios-audio, and the same level set in a loo...
+- `ba8e7a93` 2026-11-19 shimoku74: orientation: a sample that is not about one g long (the zeros read before the chip's first sample, a stuck axis, free fall) is not gravity and move...
+- `f56928e1` 2026-11-19 shimoku74: imu: once the chip stops answering the orientation published is "not known", not the last one held for the rest of the run; tests of the zeros befo...
+- `14b82bc7` 2026-11-20 shimoku74: motion sensor: a second chip, Bosch's BMI160 (feature imu-bmi160, the same imu { } keys): a chip table in imu.c beside the LSM6DSO's row, bmi160_co...
+- `56864597` 2026-11-20 shimoku74: PMIC arbiter version 7 (two SPMI buses behind one arbiter: SM8450, SM8550, SM8650): spmi.h tells it by the version register, counts a bus's channel...
+- `95df9542` 2026-11-20 shimoku74: boards.py: a missing or compiled --dts is refused with what to do, a bad name says which name and its spelling, status of one board is not blocked ...
+- `d0da0dfb` 2026-11-20 shimoku74: PMIC arbiter's buses from the tree: boards.py new --dts reads the arbiter with a node per bus as well as the one with qcom,bus-id, takes the bus th...
+
+## not applicable: XNU source of the new tree: Scion's kernel source is the fork Scion-Project/xnu, not this repository (232)
+
+- `0020c94b` 2026-11-11 shimoku74: CPU frequency: the EPSS block and its groups of cores are board data
+- `01be5a9d` 2026-11-11 shimoku74: hakios_cmd_db.h: a rail's levels, which a request names by position
+- `0645a25e` 2026-11-11 shimoku74: The camera's driver reaches the PMIC through hakios_spmi.h
+- `067b9595` 2026-11-11 shimoku74: The Wi-Fi driver takes RPMh, the pins and the PMIC arbiter from the board
+- `0e1f54dc` 2026-11-11 shimoku74: hakios_mmio.h: rd() and wr() in one place, with the three ways an access is made
+- `14d70ed4` 2026-11-11 shimoku74: The microphone's and the sound driver take the pins' address from the board
+- `174caed9` 2026-11-11 shimoku74: ddr: the vote is written at the slot sets' offset the SoC file gives
+- `1fc8ab52` 2026-11-11 shimoku74: The haptic motor's driver talks I2C through hakios_i2c_gpio.h
+- `21e4364f` 2026-11-11 shimoku74: Drivers: one log helper instead of eleven copies
+- `27303461` 2026-11-11 shimoku74: Drivers start by the board's features, not by a list of phone names
+- `27bd8f26` 2026-11-11 vcvkk: Adreno, IOSurface: sizes summed in 64 bits, and a range freed twice left alone
+- `288f6d9d` 2026-11-11 shimoku74: The camera's driver looks its supplies up through hakios_cmd_db.h
+- `29ddc3cd` 2026-11-11 shimoku74: adreno: the log does not name one chip's command database address
+- `2c3ad265` 2026-11-11 shimoku74: The Wi-Fi driver takes the mailbox, the IPCC, the shared memory and its lock from the board
+- `314d2ac6` 2026-11-11 shimoku74: GPU, audio DSP, Wi-Fi: "is this the phone" is the board's feature, not 0x400000
+- `3746997b` 2026-11-11 shimoku74: hakios_i2c_gpio.h: a device stuck in the middle of a byte is clocked out of it
+- `37e77b4d` 2026-11-11 vcvkk: fixup! IOAcceleratorES: metal=1 names HakiosMetal as Metal's plug-in
+- `39c9d2bf` 2026-11-11 shimoku74: speaker: the volume's next step is computed in one signedness
+- `39f64a85` 2026-11-11 shimoku74: Drivers whose writes are followed by dsb say so: HAKIOS_MMIO_SYNC
+- `41138080` 2026-11-11 shimoku74: The audio DSP's driver takes the address of the DSP's memory from the board
+- `439aee74` 2026-11-11 shimoku74: The touch and speaker drivers look their supplies up through hakios_cmd_db.h
+- `443cb4a2` 2026-11-11 shimoku74: The audio DSP's driver takes SMP2P's shape and an item's lookup from the shared headers
+- `49b2dfd1` 2026-11-11 shimoku74: The touch, speaker and camera drivers take RPMh's addresses from the board
+- `55648a8e` 2026-11-11 shimoku74: FT3658U touch: started by the board's feature alone
+- `5a6732be` 2026-11-11 shimoku74: A driver wired for one phone's parts runs only on a board that lists the part
+- `5afeaa25` 2026-11-11 shimoku74: The Wi-Fi driver moves GLINK's marks through hakios_glink_queue.h
+- `5b065e12` 2026-11-11 shimoku74: The camera's driver takes the SMMU's address from the board
+- `5dc2f4b6` 2026-11-11 shimoku74: The audio DSP's driver moves GLINK's marks through hakios_glink_queue.h
+- `6260834c` 2026-11-11 shimoku74: backlight, thermal: the board's data instead of tables of their own
+- `64708064` 2026-11-11 shimoku74: The flashlight's driver reaches the PMIC through hakios_spmi.h
+- `6752711b` 2026-11-11 shimoku74: The audio DSP's driver takes RPMh's addresses from the board
+- `79220763` 2026-11-11 shimoku74: The Wi-Fi driver takes the DSP's memory from the board
+- `84c4a06d` 2026-11-11 shimoku74: The touch drivers drive their pins through hakios_tlmm.h
+- `8738df2a` 2026-11-11 shimoku74: Six more drivers take their waits and their clock from hakios_time.h
+- `897743ce` 2026-11-11 vcvkk: GenericARMPE publishes IORTC: 30 seconds less at every boot
+- `89b56e40` 2026-11-11 shimoku74: hakios_ipc.h: the mailbox's words and the doorbells' registers, once
+- `8ca28b5f` 2026-11-11 shimoku74: The speaker amplifiers' driver talks I2C through hakios_i2c_gpio.h
+- `8f0fe9f6` 2026-11-11 shimoku74: Part drivers take the pins' and the clock controller's addresses from the board
+- `95d46095` 2026-11-11 shimoku74: The camera's, the haptic motor's and the speaker's drivers take a pin's registers from hakios_tlmm.h
+- `9db2db29` 2026-11-11 shimoku74: The touch drivers ask RPMh for their supplies through hakios_rpmh.h
+- `a219e505` 2026-11-11 shimoku74: The keys' and the flashlight's drivers: registers through hakios_mmio.h, one seam for their tests
+- `a807467d` 2026-11-11 shimoku74: hakios_tlmm.h: the fields of a pin's configuration by name
+- `a94979fc` 2026-11-11 shimoku74: cpufreq: registers through hakios_mmio.h, and every line in both logs
+- `aa8479b8` 2026-11-11 vcvkk: IOAcceleratorES: metal=1 names HakiosMetal as Metal's plug-in
+- `ad64e95c` 2026-11-11 shimoku74: hakios_time.h: a driver's waits and its clock in one place
+- `af8e5ace` 2026-11-11 shimoku74: The memory vote looks its bus clock managers up through hakios_cmd_db.h, and reaches its registers through hakios_mmio.h
+- `b3b7e375` 2026-11-11 shimoku74: kernel: the sources as an overlay and topical patches
+- `bfbe7b12` 2026-11-11 vcvkk: Wi-Fi drivers: the first generation's fixes since the port began, and the SoC's shared locks
+- `bff6218c` 2026-11-11 shimoku74: Drivers of what the hypervisor imitates say so: HAKIOS_MMIO_EXACT
+- `c0b347c6` 2026-11-11 shimoku74: hakios_spmi.h: the PMIC arbiter's registers and one transfer, in one place; the keys' driver uses it
+- `c17939c0` 2026-11-11 shimoku74: The audio DSP's driver takes the mailbox, the IPCC, the shared memory and its lock from the board
+- `c4934e53` 2026-11-11 shimoku74: The audio DSP's driver finds a rail's level through hakios_cmd_db.h
+- `ceb6a15b` 2026-11-11 shimoku74: adreno: the GPU's rails and their levels through hakios_cmd_db.h
+- `cf1aa04b` 2026-11-11 shimoku74: The Wi-Fi driver takes SMP2P's shape and an item's lookup from the shared headers
+- `cf3c32b7` 2026-11-11 shimoku74: The Wi-Fi driver takes the SMMU's address from the board
+- `d6d51b81` 2026-11-11 shimoku74: The Wi-Fi driver reads the PMICs through hakios_spmi.h, one transfer at a time
+- `d95cc4db` 2026-11-11 vcvkk: OSKext on a kernel that loads none: no summaries to walk, no IOKit daemon to wait for
+- `dcdd77f3` 2026-11-11 shimoku74: ufs: the kernel takes the controller's address from the loader
+- `e2e94bb7` 2026-11-11 shimoku74: The audio DSP's driver reads the shared memory through hakios_smem.h
+- `e3e69383` 2026-11-11 shimoku74: The cameras' driver talks I2C through hakios_i2c_gpio.h
+- `e581853f` 2026-11-11 shimoku74: The sound driver takes the SMMU's address from the board
+- `e5a3e241` 2026-11-11 shimoku74: camera, speaker: a refusal goes to the log that is read during a run
+- `e988e817` 2026-11-11 shimoku74: The board's name is looked up in the board code, once
+- `ebedc0e9` 2026-11-11 shimoku74: The Wi-Fi driver reads the shared memory through hakios_smem.h
+- `ee3cbc58` 2026-11-11 shimoku74: haptic: the file's first lines say what is the board's and what is the driver's
+- `f0e9adc9` 2026-11-11 shimoku74: haptic: its refusals go to both logs, as the rest of its lines
+- `f12cbb40` 2026-11-11 shimoku74: hakios_cpufreq.c, hakios_buttons.c: two drivers that work from a board's data are named so
+- `fa213cb2` 2026-11-11 shimoku74: The Wi-Fi driver looks RPMh's resources up through hakios_cmd_db.h
+- `fdcfcd3a` 2026-11-11 shimoku74: One file, three jobs: the cores' clocks, the memory vote and the measurements apart
+- `01b819a5` 2026-11-12 shimoku74: hakios_log.h: a driver's say() in one line
+- `104ae6d2` 2026-11-12 shimoku74: hakios_time.h: one wait that sleeps, or spins on a run's way out
+- `1128bb4e` 2026-11-12 shimoku74: battery: what the driver says reaches the loader's log as it is said
+- `11472cef` 2026-11-12 shimoku74: kernel: one list starts every driver (bsd/dev/hakios_drivers.c)
+- `12966fe8` 2026-11-12 vcvkk: Wi-Fi: the network of the file is joined again when the access point sends us away
+- `1328d625` 2026-11-12 shimoku74: No phone in the loader's serial numbers, the image magic or the GPU's lines
+- `134907b5` 2026-11-12 shimoku74: speaker: the monitor's count of looks cannot come back to zero
+- `1582f7ce` 2026-11-12 shimoku74: hakios_input.h, hakios_audio.h: a touch sample and the volume keep their sizes
+- `1593798a` 2026-11-12 shimoku74: smem: an item is given out only if it lies inside the area
+- `17c1df17` 2026-11-12 hxfuxyy: ramfs: a write over pages it already has allocates none
+- `1a6e3e27` 2026-11-12 shimoku74: mdt: the checks of a DSP's firmware image are written once, and tested
+- `1f2c7415` 2026-11-12 shimoku74: camera: a write whose bytes could not be read says why
+- `2479f86c` 2026-11-12 shimoku74: apple80211: a network's name and elements are never read past their record
+- `29a6b0e9` 2026-11-12 shimoku74: Camera: the sensors' differences are in the board file, whichever phone's
+- `2d74d001` 2026-11-12 shimoku74: loader_return: the crash line prints the ESR and the slide whole
+- `2dd99ab7` 2026-11-12 vcvkk: Adreno: a submission's timing line says when the GPU began it
+- `35410960` 2026-11-12 shimoku74: kernel: every barrier and cache instruction tells the compiler it touches memory
+- `35baf8b7` 2026-11-12 shimoku74: Drivers name the board's sections as the files have them
+- `3b1365ed` 2026-11-12 vcvkk: Battery: the firmware's readings shown to iOS, judged by the voltage
+- `3bc4a145` 2026-11-12 shimoku74: Two comments the marker rename turned into nonsense
+- `3c1c2de0` 2026-11-12 shimoku74: image: a path that does not fit the lookup is not looked up
+- `400e23a8` 2026-11-12 shimoku74: Drivers begin by what they drive and where their data comes from
+- `42795f80` 2026-11-12 shimoku74: hakios_camera.h: the frame's header and a command keep their sizes
+- `462e8ee7` 2026-11-12 hxfuxyy: bt-uart: requests go to RPMh in the sequencer's own layout
+- `4d2d583f` 2026-11-12 vcvkk: cpufreq: each group of cores the kernel has runs at the speed its load needs
+- `4df90d17` 2026-11-12 shimoku74: adreno: the step that powers the core says it needs the GPU's profile
+- `50627c54` 2026-11-12 shimoku74: hakios_smmu.h: the SMMU's registers once, not four times
+- `55d9d924` 2026-11-12 hxfuxyy: ubc: a code-signing blob that cannot be allocated fails the load, not the kernel
+- `5c98fb97` 2026-11-12 shimoku74: Drivers' step logs: no SoC's addresses written into the words
+- `6b28c2ae` 2026-11-12 shimoku74: wlfw: a firmware file is said only once it is known to have four bytes
+- `7a5b2016` 2026-11-12 shimoku74: scmi-perf: its barriers are the processor's on a phone, the compiler's on a host
+- `7a793afe` 2026-11-12 shimoku74: ddr: not a word where nobody asked for the memory's vote
+- `7b5bcd38` 2026-11-12 shimoku74: hakios_virtio.h: the virtio-mmio transport once, not four times
+- `7f4e5d3c` 2026-11-12 vcvkk: Thermal: what the hardware allows each group and the GPU's speed, looked at by default
+- `832554e4` 2026-11-12 shimoku74: sta: the radio's channel count is held to the list's room
+- `845bc903` 2026-11-12 shimoku74: hakios_cache.h: one copy of the cache maintenance and the barrier
+- `86e47399` 2026-11-12 hxfuxyy: bt-uart: a Bluetooth controller on a UART is powered and asked who it is
+- `8871a9c0` 2026-11-12 shimoku74: loader_return: the cleans of what the loader is handed are ordered after its writing
+- `8a691103` 2026-11-12 shimoku74: ipc: whether the always-on processor's mailbox is usable is decided once, and tested
+- `8a899504` 2026-11-12 shimoku74: camera: the wait on ios_open sleeps on its address as a channel
+- `8f96f6da` 2026-11-12 shimoku74: adsp, wifi: a QRTR datagram is checked against its message without a sum that wraps
+- `913f303f` 2026-11-12 vcvkk: GPU: a surface is marked drawn by the submissions that write it, not by those that read it
+- `91731cdd` 2026-11-12 shimoku74: Kernel comments: what the hardware is, not which phone it was seen on
+- `97f9675b` 2026-11-12 hxfuxyy: ramfs: a page it could not get is counted, and said at 1, 2, 4, 8... failures
+- `a064faf8` 2026-11-12 hxfuxyy: ramfs: file pages live in the kernel's shared data range
+- `b6a24100` 2026-11-12 shimoku74: adsp, wifi: a GLINK message's length is worked out in 64 bits
+- `b73b4faf` 2026-11-12 hxfuxyy: rpmh: a sequencer of version 3 or later has its slot sets laid out anew
+- `c003a837` 2026-11-12 shimoku74: hakios_kernel.h: the kernel's private functions declared once
+- `c09947a8` 2026-11-12 shimoku74: Drivers: what kind of source each was written from, not one phone's tree
+- `c5761bc5` 2026-11-12 shimoku74: touch: both drivers take their wiring from the board
+- `c5f93e6c` 2026-11-12 shimoku74: mic: the session's refusal says nothing it was not told
+- `c9b29e35` 2026-11-12 shimoku74: adsp, wifi: the always-on processor's mailbox and the radio's addresses without sums that wrap
+- `cb0380bb` 2026-11-12 hxfuxyy: thermal: SCMI performance domains are held back like EPSS rows
+- `ccf2e604` 2026-11-12 shimoku74: virtio: the emulator's transports are its SoC file's
+- `cdad31ce` 2026-11-12 hxfuxyy: scmi-perf: each domain's attributes are said
+- `d30524f7` 2026-11-12 shimoku74: ufshc: the whitelist's verdict is the first thing its line says
+- `d6ce5edd` 2026-11-12 shimoku74: kernel: three comments name the list the drivers are started from
+- `d742f940` 2026-11-12 shimoku74: qrtr: the framing of a datagram is written once, and tested
+- `da3f04f8` 2026-11-12 shimoku74: The kernel's changes are marked hakios, not after a phone
+- `dbbff84a` 2026-11-12 hxfuxyy: bt-uart: the engine's loopback first, then four ways to ask the controller
+- `e05ff621` 2026-11-12 shimoku74: touch: what the two drivers say reaches the loader's log as it is said
+- `e12bea6b` 2026-11-12 shimoku74: ufs: where the kernel may write is the board's, not the code's
+- `e69810f0` 2026-11-12 shimoku74: ufs: a loader's page no request could be made with is not used
+- `ea4b11c0` 2026-11-12 shimoku74: Touch drivers: their clocks named for what they are, not for a phone's engine
+- `ecd9da6f` 2026-11-12 shimoku74: hakios_scm.h: TrustZone's calls made in one place
+- `f5940bde` 2026-11-12 shimoku74: glink: the commands, the message and its length are written once
+- `fbb2baba` 2026-11-12 shimoku74: Sound: the TDM clock is watched at the board's pins, not at 97 and 100
+- `fd62a716` 2026-11-12 hxfuxyy: loader_return: the memory line says the real jetsam thresholds
+- `0952d375` 2026-11-13 shimoku74: machine_cpuid: half precision in AdvSIMD as the processor says it, not as the kernel was compiled
+- `0a28fdd9` 2026-11-13 shimoku74: MiniIOSurface: a surface whose creation failed at the end is not read after it is gone
+- `0b02d11f` 2026-11-13 vcvkk: cpufreq: l3=1 raises the L3 cache's clock and l3_probe=1 says what it does
+- `0f439329` 2026-11-13 shimoku74: sound: sound_pause said where it is read
+- `1a3bb281` 2026-11-13 shimoku74: MiniIOMobileFramebuffer: the recording's memory has an owner
+- `2270c9a6` 2026-11-13 shimoku74: MiniIOMobileFramebuffer: fb_scan_lead's range and default
+- `26b8c084` 2026-11-13 shimoku74: ufshc: ufs_native_buffer, ufs_native_slots and ufs_native_spin said where they are read
+- `280ff1a8` 2026-11-13 shimoku74: mic: a byte or word said as 0x00 when it is zero, not 0000 (%#0Nx leaves the 0x off a zero)
+- `28f1e11a` 2026-11-13 shimoku74: torch: a byte or word said as 0x00 when it is zero, not 0000 (%#0Nx leaves the 0x off a zero)
+- `30da544e` 2026-11-13 shimoku74: buttons: touchscreen=1 turns the keys on too, said
+- `30f8dc2e` 2026-11-13 shimoku74: adreno: a board without the GPU feature hears nothing of the GPU
+- `3170e513` 2026-11-13 vcvkk: cpufreq: llcc=1 looks at the system cache, llcc=2 turns its processors' slice on
+- `35c59da1` 2026-11-13 vcvkk: Audio DSP: the microphone's path is started again; the speakers' file is looked for in the small image
+- `3ab75055` 2026-11-13 shimoku74: MiniIOSurface: a pixel of zero said as 0x00000000
+- `4336a3fa` 2026-11-13 shimoku74: battery: battery_shared_pa said where it is read
+- `4be2df47` 2026-11-13 shimoku74: bsd_init: two log lines that ran into the next one end with a newline
+- `4c882e41` 2026-11-13 shimoku74: net: while frames come, ask the link again after 200 us, not 2 ms
+- `59f53d2c` 2026-11-13 shimoku74: BoardGPU: a submission with no command buffer of this GPU's kind is refused
+- `619cee2a` 2026-11-13 shimoku74: GenericARMPE: the platform expert is the clock, said as IORTC: no 30-second wait for one at every boot
+- `74939b72` 2026-11-13 shimoku74: BCM2837.h: no Raspberry Pi GPIO and mini-UART registers
+- `784b8fac` 2026-11-13 vcvkk: Display: a video panel's readout followed, frames written behind it
+- `803e0072` 2026-11-13 shimoku74: speaker: a byte or word said as 0x00 when it is zero, not 0000 (%#0Nx leaves the 0x off a zero)
+- `821016ea` 2026-11-13 shimoku74: loader_return: the memory line's comment no longer names a sysctl that is gone
+- `86ac7146` 2026-11-13 shimoku74: IOKitBSDInit: the wait for a file system's driver, skipped for rd=md, said in a comment the docs read
+- `8ab5ce54` 2026-11-13 shimoku74: MiniIOMobileFramebuffer: drawRows() without the right edge it never reads
+- `9030262f` 2026-11-13 vcvkk: Haptics: iOS 27's haptic server starts, and the motor plays what it plays
+- `906c68e4` 2026-11-13 shimoku74: audio: a recording's block header copied in, as it may start on a 4-byte boundary
+- `9bfa4bc4` 2026-11-13 shimoku74: QEMU: the kernel's console on the serial port
+- `a0f00976` 2026-11-13 vcvkk: GPU: a submission that draws into a surface the display is copying waits for the copy
+- `bb35abca` 2026-11-13 shimoku74: mic: an empty kept line is said again without reading before it
+- `c43f91c6` 2026-11-13 shimoku74: haptic: a register that reads zero said as 0x00, not 0000; its test expects so
+- `c8c19c9f` 2026-11-13 shimoku74: kernel: the port's files without the hakios_ prefix
+- `c91e8a30` 2026-11-13 shimoku74: mic: say that the SoundWire reset is written twice on purpose
+- `caecefdf` 2026-11-13 shimoku74: camera: cam_after and cam_frames said where they are read
+- `cc9381e8` 2026-11-13 shimoku74: MiniIOMobileFramebuffer: the modes' dictionaries let go when one cannot be made
+- `cd78a274` 2026-11-13 shimoku74: wlfw: wifi_ready said where it is read
+- `cdcb44c7` 2026-11-13 shimoku74: audio: the DSP's status names in one place (audio.h), not copied into sound.c and mic.c
+- `d070a39e` 2026-11-13 shimoku74: GenericARMPE: no slower cores, no word of them; how many run, a second after the start
+- `d1ff7d36` 2026-11-13 shimoku74: apfs: apfs_ubc_read, apfs_round and apfs_meta_cluster said where they are read
+- `d7c62f57` 2026-11-13 shimoku74: drivers: why touchscreen is read there
+- `dc54f0f2` 2026-11-13 shimoku74: camera: a byte or word said as 0x00 when it is zero, not 0000 (%#0Nx leaves the 0x off a zero)
+- `e15eaceb` 2026-11-13 shimoku74: fts: touchscreen, touch_flip, fts_trace and fts_spi_hz said where they are read
+- `e736e196` 2026-11-13 shimoku74: apfs_check: apfs_volume_at said where it is read
+- `f588f096` 2026-11-13 shimoku74: adsp: adsp_apr_wait said where it is read
+- `f80df982` 2026-11-13 vcvkk: ramfs: /private/var may take half of memory
+- `fc47557a` 2026-11-13 shimoku74: rtclock: microseconds from the timebase's frequency, not from it over a million rounded down
+- `fea19de4` 2026-11-13 shimoku74: apfs: a directory's links and size count its entries, as Apple's APFS says them
+- `ff762893` 2026-11-13 shimoku74: GenericARMPE: one processor running, not one processors
+- `08b51c56` 2026-11-14 vcvkk: Display: fb_yuv says how much of the layer over the video lets it through
+- `1193e458` 2026-11-14 vcvkk: Camera: the frame ring stays until every read out of it is done
+- `190125aa` 2026-11-14 shimoku74: ramfs: a truncate by anybody but root takes set-user-ID and set-group-ID away too
+- `19a736f9` 2026-11-14 shimoku74: ramfs: a directory's read positions stay put when entries before them go
+- `2a88af67` 2026-11-14 vcvkk: Modem: 16.5's drivers are in the iOS 27 kernel (modem=1), not yet run there
+- `2facae03` 2026-11-14 vcvkk: Modem: the steps wait for the modem's image, and go to step 6 on iOS 27
+- `3d789e00` 2026-11-14 shimoku74: touch drivers: SPI through the serial engine in one place (geni_spi.h), not copied into goodix.c and fts.c
+- `49704ed8` 2026-11-14 shimoku74: ramfs: a write by anybody but root takes a file's set-user-ID and set-group-ID away
+- `7963d3e7` 2026-11-14 shimoku74: apfs: one thread, one helper: said in the singular
+- `9267e836` 2026-11-14 shimoku74: touch drivers: the serial engine's clock rate (rcg_rate) in geni_spi.h too
+- `c41e8ff2` 2026-11-14 shimoku74: arm64 commpage: the crypto extensions as the processor says them, where the board configuration does not (AES, PMULL, SHA-1, SHA-256)
+- `e58ceaa9` 2026-11-14 shimoku74: ramfs: named pipes
+- `38c7b808` 2026-11-15 shimoku74: torch: each note takes a slot of its own
+- `4cfb0104` 2026-11-15 shimoku74: MiniIOMobileFramebuffer: the selector trace and the display line by printf, which a serial console shows
+- `8200188d` 2026-11-15 shimoku74: MiniIOMobileFramebuffer: the swap and layer lines by printf too
+- `b04b82f4` 2026-11-15 shimoku74: ramfs: files take at most half of the kernel's shared data range, then the private one, then the shared one up to three quarters
+- `2616f6b2` 2026-11-16 shimoku74: drivers/ and include/: the kernel's drivers and their headers at the top, as Linux's tree has them
+- `6bbb3203` 2026-11-16 shimoku74: arch/arm64/configs: phone_first, a phone's first run
+- `822e7327` 2026-11-16 shimoku74: arch/arm64/kernel, crypto/, fs/: the kernel's own parts where Linux's tree keeps them
+- `893c08ee` 2026-11-16 shimoku74: arch/arm64/configs: phone_look, every part that can only read
+- `b8854982` 2026-11-16 shimoku74: bench: the phone on the bench, under a name that says so (was ./xl)
+- `bf16891a` 2026-11-16 shimoku74: arch/arm64/configs: defconfigs, the boot arguments of each kind of run
+- `d2ba4fdf` 2026-11-16 shimoku74: Kernel: what the merge of appstore-ios27-wip left out, found by linking
+- `05df8e26` 2026-11-17 shimoku74: minisandbox: sandbox extensions issued and consumed
+- `189f0fe1` 2026-11-17 shimoku74: arch/arm64/configs: phone_perf_measure
+- `27b8103d` 2026-11-17 shimoku74: loader_return: interrupts off before the first quiesce, and a panic in one does not run them all again
+- `28811e57` 2026-11-17 shimoku74: arch/arm64/configs: phone_ufs_check and phone_ufs_bench
+- `2eb749b6` 2026-11-17 shimoku74: psci_smp: a core that joins after the others were told to stop switches itself off
+- `41a4ccf6` 2026-11-17 shimoku74: configs: phone_look reads Bluetooth too (bt=-1); phone_bt says the firmware
+- `96f852b3` 2026-11-17 shimoku74: Kconfig: every driver of the kernel's described, common to every Snapdragon or of a particular part, and four fragments
+- `d2ecbd5c` 2026-11-17 shimoku74: kernel/patches: applog_name works on its own
+- `eaa52340` 2026-11-17 shimoku74: apfs: an open that runs out of memory gives back what it made, as every other failed open does
+- `0c57361c` 2026-11-18 shimoku74: apfs: a sealed node's hash kept apart from the Fletcher flag, and with the bytes it began with
+- `10a5bb79` 2026-11-18 shimoku74: GenericARMPE: the boot processor's number from psci_smp, not master_cpu, which this kernel never sets
+- `27a46200` 2026-11-18 shimoku74: signals: a crash report reads the process's memory after its lock is let go of, not under it
+- `3409f9be` 2026-11-18 shimoku74: gic: an unowned extended SPI or LPI not masked through registers that are not its; a signal to a core with Aff0 of 16 or more
+- `390b8555` 2026-11-18 shimoku74: spawn: a non-root caller's persona has no group 0 and no group membership uid 0 among its groups
+- `43d3b245` 2026-11-18 shimoku74: memdev: a boot-arg memory disk of 4 GB or more sized by its pages, shifted before it is cut to 32 bits
+- `4cf3a769` 2026-11-18 shimoku74: apfs: a container's block count that wraps or passes the device refused, the live superblock's too; one vnode an inode
+- `5aa0a237` 2026-11-18 shimoku74: debug: a panic's reason copied into the loader's log only on the first entry, not again from a panic inside it
+- `65bfefa4` 2026-11-18 shimoku74: exec: the identity version kept only for xpcproxy that launchd spawned, not any program by that name
+- `821cb5a5` 2026-11-18 shimoku74: Files: /private/var is named apfs to fileproviderd alone, so "On My iPhone" is there (it keeps files only on a volume it takes for APFS), var_apfs=...
+- `a8247309` 2026-11-18 shimoku74: apfs: a child one level below its parent, a leaf at level 0, and a walk into no more leaves than the tree has nodes
+- `b5296a47` 2026-11-18 shimoku74: apfs: an extended attribute's size off the disk past 2 GB refused, not allocated
+- `c3a08157` 2026-11-18 shimoku74: gic: an SPI past the distributor's lines (GICD_TYPER) refused at attach
+- `ef8f52ad` 2026-11-18 shimoku74: gic: an SPI's group, mode and trigger bits changed under the lock, not undone by another attach
+- `4c697dcc` 2026-11-19 shimoku74: sleh: a user fault's line says whether the IA key is set, not half of it (with the kernel's keys back in, it wrote 64 bits of the kernel's secret i...
+
+## not applicable: other files of the new tree (81)
+
+- `2dad6d79` 2026-10-27 shimoku74: HakiosMetal: with hakios-metal, buffers in the GPU's memory, command buffers and blits done by the GPU
+- `62f74c69` 2026-10-27 shimoku74: Metal, step one: a device that exists (metal=1), and what Metal asks of it first
+- `a57908f4` 2026-10-27 shimoku74: Metal, step two: buffers that hold memory, libraries read from a .metallib, functions with their AIR
+- `b9161185` 2026-10-27 shimoku74: Metal: a command queue and the objects a renderer asks for, as logged stubs; the next wall is a metallib URL
+- `e0abcc91` 2026-10-27 shimoku74: Metal: who is shown the device is a level of metal= (1: metal_test only; 2: all but the window server; 3: all)
+- `2e552fac` 2026-10-29 shimoku74: Darwin, not iOS: the name in the sources, the documentation, the scripts and the files
+- `cc888546` 2026-10-29 shimoku74: The rename's "Darwin userland 16.5 user space" said plainly in the code and the scripts too
+- `bf2ea136` 2026-10-31 shimoku74: The queue let go of without _MTLCommandQueue's -dealloc, whose dispatch queue -init never made: dispatch_release(NULL) faulted on the phone as meta...
+- `0ef60261` 2026-11-11 vcvkk: Wi-Fi: the Linux layer under kernel/lx, as the first generation has it now, linked when built
+- `0fb5cfe3` 2026-11-11 shimoku74: loader/: at the top level, its boards from the same files as the kernel's
+- `25a2a173` 2026-11-11 vcvkk: Loader: the last run's kernel log stays in the log until the next run
+- `2819883d` 2026-11-11 shimoku74: loader: the UFS host controller is where the board's SoC file says
+- `3cb60d3f` 2026-11-11 vcvkk: The loader writes the boot line the kernel reads: 608 bytes
+- `43f1e4c3` 2026-11-11 vcvkk: The display is the identity's iPhone's: its size and scale from the IPSW
+- `7c64ca1d` 2026-11-11 vcvkk: xl: the phone on the bench, for any board, with a state that is asked and not guessed
+- `d6d94ce0` 2026-11-11 vcvkk: Loader: a kernel on another core of a CPU without pointer authentication
+- `e17c87d9` 2026-11-11 vcvkk: xl state: a phone in Android is not "absent" while adb's server starts
+- `03339cc4` 2026-11-12 shimoku74: loader: no free range for the kernel is said, not left to the firmware
+- `186e1e02` 2026-11-12 vcvkk: Wi-Fi: what comes in to everybody, and what the data path drops, is said
+- `1b264371` 2026-11-12 shimoku74: loader: the description of the DSU image read in a part of its own
+- `35ff2a73` 2026-11-12 shimoku74: loader: parts by topic in loader/src, one compilation unit
+- `38e23111` 2026-11-12 shimoku74: porting.md: what is still tied in iOS's camera, as it is now
+- `49885dcb` 2026-11-12 shimoku74: loader: the writer of the system image in a part of its own (src/dsu_write.c)
+- `62ed31e0` 2026-11-12 shimoku74: base/: the first phone's own files go to its package
+- `71d583e0` 2026-11-12 vcvkk: Wi-Fi: a network that ciphers frames to everybody with TKIP is joined
+- `7e49c8ae` 2026-11-12 vcvkk: xl: recording and sound are fetched again
+- `8a240d22` 2026-11-12 shimoku74: loader: its globals, memory and strings apart from what it says (src/base.c, src/console.c)
+- `99d6a01e` 2026-11-12 shimoku74: loader: its barriers and cache instructions tell the compiler they touch memory
+- `a72704f3` 2026-11-12 shimoku74: loader: where a download goes is a part of its own, tested on the host
+- `a8d9478d` 2026-11-12 shimoku74: loader: the storage's shared page and the check of the writable partition in parts of their own
+- `b46719a6` 2026-11-12 shimoku74: Mesa ir3 patch and components.toml: the SoC and the ports, not a phone
+- `bd704d73` 2026-11-12 shimoku74: The last of a phone's name in the code: a variable, an exclusion, three notes
+- `bef1be12` 2026-11-12 shimoku74: Wi-Fi's Linux layer and its build scripts: the kernel's hakios_* headers
+- `d504af6b` 2026-11-12 shimoku74: loader: offset and length of a read or write of the image are not added to be checked
+- `e610b3a8` 2026-11-12 vcvkk: xl: a loader started anew gets its resident image again
+- `e7f75dad` 2026-11-12 shimoku74: loader: which partition a write may reach is the board's, not the code's
+- `ebea2045` 2026-11-12 vcvkk: Wi-Fi: a deauthentication says how long the station was quiet, and action frames are said
+- `f73aad2c` 2026-11-12 shimoku74: base/: the tools of the first phone's kernel go to its package; the UEFI's common part stays
+- `257121e1` 2026-11-13 shimoku74: loader: an extent's sector read a byte at a time, not as an unaligned 64-bit load
+- `4fc55826` 2026-11-13 shimoku74: Serial numbers and the rest of a phone's identity: random, of the real forms, kept per phone
+- `5472bb39` 2026-11-13 shimoku74: loader: the other cores through the PAC keys' step only when there are keys
+- `7400c720` 2026-11-13 shimoku74: kernel/lib.sh: assembled_tree, the tree the repository makes, for assemble.sh and export.sh
+- `7cb4fda8` 2026-11-13 shimoku74: The kernel's compiler: the generic Darwin target, at the SDK's version
+- `8b5f4748` 2026-11-13 shimoku74: export.sh: no export into the repository from a tree assembled before it changed
+- `a0fdc1b6` 2026-11-13 shimoku74: touch.py: QEMU_QMP, a QMP socket instead of the TCP port
+- `f549e550` 2026-11-13 shimoku74: syntax-check.sh --why: each finding of the analyzer with its path
+- `7a77ec86` 2026-11-15 shimoku74: mkidentity.py: takes the IPSW's DeviceTree.*.im4p as it is
+- `d5e026b6` 2026-11-15 shimoku74: loader: LOADER_IDENTITY=FILE builds it with another iPhone's identity
+- `37723d70` 2026-11-16 shimoku74: LICENSES/: preferred/ and other/, each text with its SPDX header, as Linux has them
+- `c2666728` 2026-11-16 shimoku74: arch/arm64/boot/mkboot: the board's uefi { } node, as board.dts writes it
+- `c5cd8737` 2026-11-16 shimoku74: arch/arm64/boot: the loader where Linux's tree keeps what starts an arm64 kernel
+- `05d38340` 2026-11-17 shimoku74: loader: every kernel load command checked before a byte of it is used: sizes, segment bounds, the thread's entry
+- `095dae55` 2026-11-17 shimoku74: pac: chains, sections, __pac_keys and the chained fixups kept inside the kernel image
+- `11317408` 2026-11-17 shimoku74: loader: a free block that ends inside the payload's place keeps what is below it
+- `36c13e9e` 2026-11-17 shimoku74: loader: 'getvar max-download-size' says the room the next download has
+- `3ec40cab` 2026-11-17 shimoku74: loader: 'oem read' into the block buffer, not over the last run's kernel log
+- `3fb57197` 2026-11-17 shimoku74: loader: 'getvar result' formatted apart from the log, which a run leaves full
+- `4386c77c` 2026-11-17 shimoku74: loader: an unaligned physbase refused, and the 32-bit devices' memory not put over the payload
+- `47ee2833` 2026-11-17 shimoku74: loader: a kernel on another core that beats and never comes back is taken for hung, three minutes past its time
+- `48e43fb3` 2026-11-17 shimoku74: othercore: the kernel's log ring believed only inside its bounds
+- `51827205` 2026-11-17 shimoku74: loader: the pointer-authentication keys made once a session and the same for every run -- the second kernel died for them
+- `5519011b` 2026-11-17 shimoku74: loader: no kernel started over a core the last one left running, its own included
+- `6137e50a` 2026-11-17 shimoku74: loader: a copy of the DSU metadata refused half way leaves the table whole, and copies agree extent by extent
+- `6eeab1c6` 2026-11-17 shimoku74: loader: a command's number read whole or refused -- 0x and capitals taken, a letter after the digits not
+- `7da1eaee` 2026-11-17 shimoku74: loader: boot arguments past the kernel's line are refused with a message, not cut
+- `83ab9440` 2026-11-17 shimoku74: loader: 'upload' answers FAIL when its transfer was cut short, and pets the watchdog as it sends
+- `893dd59d` 2026-11-17 shimoku74: loader: every size a payload gives held to what is there
+- `9ee9430e` 2026-11-17 shimoku74: loader: the recordings and the kernel's log believed only inside the kernel's RAM; the kernel's log kept beside the loader's growing log
+- `9ef8f572` 2026-11-17 shimoku74: loader: what 'oem ramdisk', 'oem ramdisk patch' and 'oem dsu patch' ask for is for the next download only
+- `bbc3ab53` 2026-11-17 shimoku74: loader: ufs_probe= and ufs_native= as this run asks, not as a run before it did
+- `d4a68b22` 2026-11-17 shimoku74: syntax-check.skip: bt_host.c, whose Skywalk headers take the network stack's
+- `d5995064` 2026-11-17 shimoku74: loader: a core the kernel starts on drops the instructions and translations of the run before
+- `dd5ecaf5` 2026-11-17 shimoku74: loader: the firmware's list of partitions given back after a partition is looked up by name
+- `e281a639` 2026-11-17 shimoku74: mkidentity.py --blob: the identity as the payload carries it
+- `ec839fef` 2026-11-17 shimoku74: build.config.loader: the loader's compiler, target, linker, load address and flags
+- `33b96b67` 2026-11-19 shimoku74: loader: a DSU patch checks that every piece it is cut into lies on whole blocks before writing any (one was written half), and the DSU commands use...
+- `7b791312` 2026-11-21 shimoku74: loader: stay in USB recovery without payload
+- `958c7733` 2026-11-21 shimoku74: efi: add shared HakiOS USB transport
+- `a6d538c1` 2026-11-21 shimoku74: ui: add HackiOS loader banner
+- `d102b13e` 2026-11-21 shimoku74: boot: add Redwood U-Boot EFI console
+- `62e09f85` 2026-11-22 shimoku74: Prepare Darwin bring-up for companion loader repo
+
+## not applicable: touches only files Scion has not got (new tree, kernel source or their test bench) (11)
+
+- `e6585602` 2026-11-18 shimoku74: metal: the AIR bitcode reader (both copies) bounds every count by the bits left, checks forward references, metadata ids, blob and string lengths a...
+- `0733e3be` 2026-11-19 shimoku74: iosurface: a surface wrapped around the caller's memory with a row longer than the most methodInit advertises (256 KB) is refused (its snapshot was...
+- `079b2ddb` 2026-11-19 shimoku74: check-publishable: a Linux home of somebody's (/home/NAME/, the build machine's /home/user/ aside) is found as a macOS one is; ram-budget.md's exam...
+- `0d4530c5` 2026-11-19 shimoku74: loader: the run's log is written to logdump only if it fits the partition (and its block size is not 0), and only read back as written if the flush...
+- `18e3450d` 2026-11-19 shimoku74: thermal tests: a step past the most with no reading comes back as the most, and the silent sensor's line is said once a silence, again for the next
+- `2af195ce` 2026-11-19 shimoku74: loader tests: the log of exactly the partition's size and its ending zero, GPT partitions only, failed reads, writes and flushes not taken as writt...
+- `47bdec50` 2026-11-19 shimoku74: fakekernel: proc_find(0) finds the kernel's own process, as XNU's does, so a driver that looked a pid of 0 up as nobody is caught (the touch device...
+- `67f26d37` 2026-11-19 shimoku74: var_store tests: the slot check's cache keyed by generation, exactly 4096 attributes packed with the list last, an access list's name not taken fro...
+- `7a9ecefe` 2026-11-19 shimoku74: gpu: a refused request of a client's is said in the log for the first 64 of a boot (any program could fill the kernel's log with one loop of bad su...
+- `a2e35f1f` 2026-11-19 shimoku74: battery: the audio DSP's temperature is rounded half away from 0 (C's division goes toward 0, and +50 made -1.00 C 0 C and -40.00 C -39 C for Darwi...
+- `fc13f9c8` 2026-11-19 shimoku74: loader: a DSU patch armed before is disarmed when the image is not found or its table refused, so the next download does not go by a table that loo...
+
+## not applicable: XNU source of the new tree (IOKit stand-ins): Scion's kernel source is the fork Scion-Project/xnu (1)
+
+- `49f42e6b` 2026-11-17 shimoku74: IOKit: an asynchronous call's wake port given back once it succeeds; the display's refreshes started again when their port comes after them

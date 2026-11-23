@@ -58,10 +58,10 @@ tools/air/kinput.py                                       1451
 tools/air/loweringcheck.py                                 838
 tools/air/metalcheck.py                                   1387
 tools/air/sampcheck.py                                     950
-tools/apfs/apfs-tool.c                                    1790
+tools/apfs/apfs-tool.c                                    1851  # upstream sync 22 Nov: the census's cycle guard (HakiOS d7d60957)
 tools/apfs/apfs.py                                        1205
 tools/apfs/mkapfs.py                                       938
-tools/apfs/write-tests.py                                  933
+tools/apfs/write-tests.py                                  934  # upstream sync 22 Nov (HakiOS d7d60957)
 tools/bcm_shub_test.c                                      921
 tools/hakios-config.py                                    1239
 tools/ios27/ca-gpu/hakios/eagl.c                          4335
