@@ -104,7 +104,14 @@ grid_text(const struct grid *g, bool bgra, char *out, size_t cap)
 void
 scioncam_pixels(const char *where, void *sample_buffer)
 {
-	CVImageBufferRef ib = sample_buffer != NULL ? CMSampleBufferGetImageBuffer((CMSampleBufferRef)sample_buffer) : NULL;
+	scioncam_pixels_of(where, sample_buffer != NULL ? CMSampleBufferGetImageBuffer((CMSampleBufferRef)sample_buffer) : NULL);
+}
+
+/* the picture of a pixel buffer, said with `where` (camera_stitchtrace.c: a transfer's destination before and after) */
+void
+scioncam_pixels_of(const char *where, void *pixel_buffer)
+{
+	CVImageBufferRef ib = pixel_buffer;
 	struct grid before, after;
 	char a[160], b[160];
 

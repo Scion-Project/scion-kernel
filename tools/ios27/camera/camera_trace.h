@@ -23,7 +23,11 @@ void scioncam_flow_next(void *output, const char *node_class, const char *output
 /* camera_pixeltrace.c (with the flow trace): what a sample's picture holds, read by the processor from a grid, said with
    `where`; scioncam_pixels_due says which samples of an output are read (the 1st, 30th, 300th, then every 3000th) */
 void scioncam_pixels(const char *where, void *sample_buffer);
+void scioncam_pixels_of(const char *where, void *pixel_buffer);
 _Bool scioncam_pixels_due(unsigned long long count);
+/* camera_stitchtrace.c (with the flow trace): the preview stitcher's transfer (VTPixelRotationSession), its status, the
+   destination before and after, and what VideoToolbox's choice of a Metal chain rests on */
+void scioncam_trace_stitch(void);
 /* camera_previewtrace.c: the session configuration's preview sinks, said (with the flow trace) */
 void scioncam_trace_preview(void);
 
