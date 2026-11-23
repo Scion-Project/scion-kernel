@@ -488,6 +488,48 @@ picture, and still black on the screen means the conversion or the draw (2). The
 (`/var/local/mtl2-telemetry` present, the rows in `/var/local/mtl2.log`) is the next thing to read. `TEST-ON-PHONE.md` of
 the desk work (`~/s9/agents/camera-desk-1120` on the build Mac) has the steps. **Built, not run on a phone.**
 
+### The preview stitcher writes nothing (22 November test, 23 November desk work)
+
+Phone 2 booted PR 400's pixel trace on 22 November (line `c272m`, root `root-cam`; console
+`scion-phoneB/logs/con-xnu-boot-c272m-1122-2011.log`, `mtl2.log` and cameracaptured's os_log from the root, on the build Mac).
+The source node's `Preview(PrimaryScaler)` pictures are lit (rear: Y mean 13, dim; front: Y mean 99). The stitcher's output
+surface reads `Y 0, Cb 48 Cr 48` at its 1st, 30th and 300th sample, the same as before anything ran: nothing in the stitcher
+writes it. Every node after it reads Y 0, Cb Cr 128, and so does backboardd.
+
+- **Verified in the files.** The compute binding `ycbcr texture bound (NBComputeEncoder, stage 0, slot 0): fmt 540 over
+  surface 293` is not the stitcher writing: it comes after the stitcher's first output and after `Preview Scaler` takes it,
+  and it is a read (usage 0x1). It is the Preview Scaler (VideoToolbox's Metal transfer session) reading the stitcher's
+  output, then writing its own (R8Uint and R16Uint textures, usage 0x2). In cameracaptured no YCbCr texture over the camera's
+  own surfaces was ever made (6 of 12 `ycbcr texture made` lines used, none for them), and no Metal refusal or missing
+  selector was logged while the camera ran.
+- **Verified in the disassembly (24B156 CMCapture and VideoToolbox).** The single-camera stitcher does no Metal of its own.
+  `-[BWPreviewStitcherRenderer _transferPixelBuffer:...]` calls `-[BWPixelBufferTransferRenderer
+  doPixelRotationTransferWithSession:...]`, which for an uncompressed `420f` picture calls `VTPixelRotationSessionRotateSubImage`
+  (rotation and scaling in one step, the 1504 x 1128 picture into the 828 x 1702 one). A nonzero status goes only to a debug
+  assertion: the stitcher emits its output either way. VideoToolbox builds the transfer up to three times, each time allowing
+  one way less: the M2M scaler (IOSurfaceAccelerator, `AppleM2ScalerCSCDriver`, which the S9 does not have), its Metal
+  transfer session, software. The Metal session is allowed only when `VTPixelTransferSessionCanUseMetalInTheBackground` says yes, that is when
+  `proc_can_use_foreground_hw(getpid())` returns 1, or 0 with reason 13 (a daemon with no adopted voucher) or 16 (it adopted the
+  voucher of an app in the background). That is a kernel call (`PROC_INFO_CALL_CANUSEFGHW`).
+- **Inferred.** The Metal chain did not run for the stitcher: its source would have been read through a format 540 texture,
+  as `Preview Scaler`'s is, and none was made. A software chain that ran would have written the picture. So either every
+  attempt failed (a status that is thrown away), or a chain ran and wrote nothing.
+- **Unrelated, inferred.** `Assertion failed _renderPipeline` and `PTEffectRendererSDOF is nil` (three times at 65 s) come from
+  the portrait effect's set-up, before Camera opened. The stitcher's output is black from its first sample, 70 s later.
+  cameracaptured also logged `compute pipeline (adjustEvmPyramidColor) refused: ... Imageblocks` then.
+
+**The trace that decides it** (`camera_stitchtrace.c`, cam.dylib, cameracaptured, with `cam_trace=1`; trace only): at the
+stitcher transfer's 1st, 30th and 300th call, and at the first call that returns each new status, it says
+`trace: stitch: transfer N: status S, session there|NONE; from surface ... rect ... to surface ... rect ..., black fill ...` and
+`trace: stitch: transfer N: proc_can_use_foreground_hw R reason K; VideoToolbox: Metal in the background yes|no, avoid
+hardware ...` (asked on the calling thread, whose voucher the kernel reads), with the destination's grid before and after
+(`trace: pixels: the stitcher's transfer N, destination before|after: ...`). Once: `IOSurfaceAcceleratorCreate: ...`. And
+`trace: stitch: render N into surface ...: M transfers so far` for the stitcher renderer's own calls. How to read it:
+a nonzero status with `Metal in the background no` names the kernel's answer (the reason says which branch); a nonzero
+status with `yes` means the Metal chain itself fails (then the Metal transfer session); status 0 with the grid unchanged
+means a chain that writes nothing; no `transfer` lines with `render` lines means the stitcher returns before its transfer.
+**Built, not run on a phone.**
+
 ### SpringBoard's main-display layout (18 November)
 
 `camera_sbtrace.c` on phone 1 (dylib `-16`, `-17`) shows that SpringBoard does publish its layout: the home screen, the lock

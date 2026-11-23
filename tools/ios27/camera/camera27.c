@@ -312,6 +312,7 @@ image_added(const struct mach_header *header, intptr_t slide)
 		scioncam_trace_state();
 		scioncam_trace_flow();
 		scioncam_trace_metal();         /* camera_metal.c */
+		scioncam_trace_stitch();        /* camera_stitchtrace.c */
 	}
 }
 
