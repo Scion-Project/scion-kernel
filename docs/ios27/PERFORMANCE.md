@@ -532,10 +532,18 @@ With the direct draws on (B1 above), the same script, one fresh boot per line; f
 | boot (B1's root, kernel image of B1 plus) | idle | home-screen flicks | Settings list | what it says |
 |---|---|---|---|---|
 | nothing (B1) | 10.0 | **29.8** | **22.1** | |
-| `sweetfb_frameinfo=1` (PRESENT.md 7) | 10.0 | **14.0** | 19.2 | backboardd takes frame info and the swipes halve (the owner's root without the direct draws: 14.3). Off |
+| `sweetfb_frameinfo=1` (PRESENT.md 7) | 10.0 | 14.0 | 19.2 | backboardd takes frame info; this boot was in the slow mode below (the widget renderer at 27 %), which also came without the argument, so its own effect is NOT known. Off |
 | `sweetfb_cav=1` | 10.0 | 30.1 | 21.8 | `CA power on` the whole time: CoreAnimation's 10 Hz clamp is not in force; CA swaps 27 to 40 a second while flicking. No change. Off |
 | `sweetfb_nowait=1` (PRESENT.md 6) | 10.0 (swap to shown 19 ms against 12.7) | **17.2** | cut (78 C) | CA still swaps 29 to 37 a second, but 61 to 87 frames per 5 s are replaced before a tick finds them done, as on phone 1. Off |
+| nothing (the end boot, plain L6bt line) | 10.0 | **14.5** | 21.8 | the slow mode, below |
 
+- **Two modes of the same swipe.** Nine boots fell into two groups by their 10 s CPU lines while flicking. In the fast one,
+  `WidgetRenderer_Default` uses 6 to 7 % and SpringBoard 33 to 38 %, at 25.9 to 30.1 frames a second (B0, B1, `sweetfb_cav=1`,
+  and `sweetfb_nowait=1` with its own loss). In the slow one, `WidgetRenderer_Default` uses 26 to 29 % and SpringBoard 52 to 59 %,
+  at 14.0 to 16.0 (frame info, both sampler boots, and the plain end boot). The idle minute before was the same in both (no
+  widget work). So the home page's widgets (Weather, Calendar) are being re-rendered while the page moves, and that halves the
+  rate. Which boots do that and why is NOT known (the mode is not set by any of the arguments tried). The Settings list does
+  not depend on it: 19.2 to 22.6 in every B1-root boot.
 - **The idle 10 Hz** is the Clock icon's second hand on the first home page: on the second page (no Clock icon) no frame was
   presented for 25 s; on the first, a frame every sixth tick exactly. It is iOS's content, not a cap. An idle frame costs
   6 chains (about 2.5 ms of GPU with the direct draws, 3.9 ms before) and the 1.7 to 1.8 ms present. backboardd still uses about 23 % of a
@@ -543,8 +551,8 @@ With the direct draws on (B1 above), the same script, one fresh boot per line; f
 - **With the direct draws the GPU is not the limit of a swipe any more**: the frames shown follow CoreAnimation's swaps one
   for one (SwapEnd held 2.3 to 2.9 ms on average), and 96 to 127 of the ~260 ticks of each 5 s window find no new frame
   with nothing on the GPU.
-- **The burst sampler during the flicks** (a diagnostic kernel whose first console swipe starts the sampler's clock; the
-  sampler itself halves the swipe rate, so these are shares of a disturbed run): backboardd's render thread
+- **The burst sampler during the flicks** (a diagnostic kernel whose first console swipe starts the sampler's clock; both
+  sampler boots were in the slow mode, so these are shares of slow-mode flicks): backboardd's render thread
   (`IOMFBServer::thread_body`) ran 31 % of the samples, waited for its display timer 57 % and in SwapEnd 10 %; it is not
   CPU-bound. SpringBoard's main thread ran 44 % of the samples. The flick phase is about 45 % motion, so the main thread is busy for
   about all of each motion: **SpringBoard's main thread is the likely producer limit now** (inferred; the sampler does not
