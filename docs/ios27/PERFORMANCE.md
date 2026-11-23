@@ -525,6 +525,33 @@ fault or `FAILED` line, no backboardd exit, Wi-Fi up, the same crashes as B0 (lo
 `tools/ios27/fullroot/steps.d/metal-ca/80-metal-ca.sh` now writes both switches into mtl2-env (`METAL_CA_PANVK_DIRECT=0` to
 leave them out). The fragment chains did not move: they are what is left of a busy frame (section 9).
 
+### 9.2 What holds a swipe after that (phone 2, 23 November)
+
+With the direct draws on (B1 above), the same script, one fresh boot per line; frames a second from the framebuffer's 5 s windows:
+
+| boot (B1's root, kernel image of B1 plus) | idle | home-screen flicks | Settings list | what it says |
+|---|---|---|---|---|
+| nothing (B1) | 10.0 | **29.8** | **22.1** | |
+| `sweetfb_frameinfo=1` (PRESENT.md 7) | 10.0 | **14.0** | 19.2 | backboardd takes frame info and the swipes halve (the owner's root without the direct draws: 14.3). Off |
+| `sweetfb_cav=1` | 10.0 | 30.1 | 21.8 | `CA power on` the whole time: CoreAnimation's 10 Hz clamp is not in force; CA swaps 27 to 40 a second while flicking. No change. Off |
+| `sweetfb_nowait=1` (PRESENT.md 6) | 10.0 (swap to shown 19 ms against 12.7) | **17.2** | cut (78 C) | CA still swaps 29 to 37 a second, but 61 to 87 frames per 5 s are replaced before a tick finds them done, as on phone 1. Off |
+
+- **The idle 10 Hz** is the Clock icon's second hand on the first home page: on the second page (no Clock icon) no frame was
+  presented for 25 s; on the first, a frame every sixth tick exactly. It is iOS's content, not a cap. An idle frame costs
+  6 chains (about 2.5 ms of GPU with the direct draws, 3.9 ms before) and the 1.7 to 1.8 ms present. backboardd still uses about 23 % of a
+  core with nothing presented (second page); what spins there is NOT known.
+- **With the direct draws the GPU is not the limit of a swipe any more**: the frames shown follow CoreAnimation's swaps one
+  for one (SwapEnd held 2.3 to 2.9 ms on average), and 96 to 127 of the ~260 ticks of each 5 s window find no new frame
+  with nothing on the GPU.
+- **The burst sampler during the flicks** (a diagnostic kernel whose first console swipe starts the sampler's clock; the
+  sampler itself halves the swipe rate, so these are shares of a disturbed run): backboardd's render thread
+  (`IOMFBServer::thread_body`) ran 31 % of the samples, waited for its display timer 57 % and in SwapEnd 10 %; it is not
+  CPU-bound. SpringBoard's main thread ran 44 % of the samples. The flick phase is about 45 % motion, so the main thread is busy for
+  about all of each motion: **SpringBoard's main thread is the likely producer limit now** (inferred; the sampler does not
+  keep the stacks of running samples, so what it runs is NOT known).
+- Settings: Preferences uses 136 % of the CPU while its list scrolls (10 % in the background) and launchd 18 to 36 % with it;
+  the phone reaches 78 C within a minute of it. NOT looked at.
+
 ## 10. Re-pinning the bridge to upstream metal2vulkan (18 November; `M2V_REPIN=1`, opt-in, built)
 
 **How far behind.** The iOS 27 bridge (`tools/ios27/metal2/build-m2v-bridge.sh`) pins metal2vulkan at `720ef1ce`

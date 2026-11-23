@@ -373,7 +373,8 @@ when Presentation_time is enabled.
 **What it may change, and the test.** Without frame info the window server's display timer runs on its own clock (the
 period is right: `AppleInternalDisplay::heartbeat_rate` falls back to 1/60 s, or `IOMFBDisplayRefresh` with `sweetfb_cav=1`),
 and its clients get no presentation feedback. Whether that is what keeps home-screen swipes at two refreshes is NOT shown.
-The phone test: the owner's bench line plus `sweetfb_trace=70 sweetfb_prof=1 sweetfb_frameinfo=1` (then `=3`), the same
+**Run on phone 2 (23 November, PERFORMANCE.md 9.2): it HALVES the home-screen swipe rate (29.8 to 14.0 frames a second
+with PanVK's direct draws; 25.9 to 14.3 without). It stays off.** The phone test as planned: the owner's bench line plus `sweetfb_trace=70 sweetfb_prof=1 sweetfb_frameinfo=1` (then `=3`), the same
 swipes as the measurement above; the console should show `sweetfb_frameinfo=1: frame info offered, 1 key(s)`, backboardd's
 selector 74, `backboardd notifications type 3 on`, `frame info mask 0x1`, then `frame info for swap N: ...` (the first three
 and every thousandth). Read the CoreAnimation swap period's median with the `FBT:` parser: 33.4 ms today; a move toward
