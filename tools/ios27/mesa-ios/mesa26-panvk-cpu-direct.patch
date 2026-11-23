@@ -2,7 +2,8 @@ PanVK (JM), Starbite (iOS): with STARBITE_PANVK_CPU_DIRECT=1 (off by default; wi
 whose index range the CPU found (mesa26-panvk-cpu-minmax's sb_cpu_minmax, which the switch turns on too) is recorded as a
 direct draw: the IDVS (or vertex + tiler) job gets its indices, range and offsets when the draw is recorded, exactly as
 libpan's panlib_draw_indexed_indirect_helper would write them, and no helper compute job, no job-prefetch suppression and no
-dependency come before it. docs/ios27/PERFORMANCE.md section 9. NOT run on a phone. Applied by tools/ios27/metal/mk-panvk27.sh
+dependency come before it. docs/ios27/PERFORMANCE.md section 9.1 (run on phone 2, 23 November: vertex/tiler time -55 %; on by default in the
+root's mtl2-env since, steps.d/metal-ca/80-metal-ca.sh). Applied by tools/ios27/metal/mk-panvk27.sh
 after mesa26-panvk-cpu-minmax.
 
 --- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c	2026-11-18 13:00:27

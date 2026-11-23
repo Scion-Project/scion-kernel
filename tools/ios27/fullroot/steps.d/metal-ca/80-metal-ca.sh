@@ -3,7 +3,11 @@
 #   ENABLE_METAL_CA=1 (default):
 #     - installs this build of StarbiteMetal.bundle (PanVK's kernel shim asks for asynchronous submits and answers timeline
 #       queries truthfully; the frontend has the SWEET_MTL2_FLUSH cache-maintenance policy)
-#     - /private/var/local/mtl2-env: SWEET_MTL2_DEXR=1, SWEET_MTL2_FLUSH=2, STARBITE_DRM_LEAKS=0 (other lines kept)
+#     - /private/var/local/mtl2-env: SWEET_MTL2_DEXR=1, SWEET_MTL2_FLUSH=2, STARBITE_DRM_LEAKS=0 (other lines kept), and
+#       STARBITE_PANVK_CPU_MINMAX=1, STARBITE_PANVK_CPU_DIRECT=1 (PanVK records an indexed draw as a direct draw, without the
+#       helper compute job before it: vertex/tiler GPU time -55 %, home-screen swipes +15 %, a Settings list +37 % on phone 2,
+#       docs/ios27/PERFORMANCE.md 9.1); METAL_CA_PANVK_DIRECT=0 leaves those two out (a PanVK built without
+#       mesa26-panvk-cpu-minmax/-cpu-direct ignores them either way)
 #     - /private/var/local/mtl2-clients = exactly $METAL_CA_CLIENTS (default "backboardd"): the list is the gate, a process
 #       that is not on it gets no Metal device. Every Metal client wires >= 57 MiB of GPU memory when its device is made, so the
 #       poster renderers are NOT on it by default; to give ONE of them Metal: METAL_CA_CLIENTS="backboardd CollectionsPoster".
@@ -38,9 +42,11 @@ if [[ $ON == 1 ]]; then
     put "$F/StarbiteMetal.bundle/Info.plist" "$B/Info.plist" 644
     put "$F/StarbiteMetal.bundle/_CodeSignature/CodeResources" "$B/_CodeSignature/CodeResources" 644
     chown -R 0:0 "$B" 2>/dev/null || true
-    # mtl2-env: these three lines, once each, whatever else is there
-    T=$(mktemp); grep -v '^SWEET_MTL2_DEXR=\|^SWEET_MTL2_FLUSH=\|^STARBITE_DRM_LEAKS=' "$L/mtl2-env" > "$T" || true
+    # mtl2-env: these lines, once each, whatever else is there
+    T=$(mktemp); grep -v '^SWEET_MTL2_DEXR=\|^SWEET_MTL2_FLUSH=\|^STARBITE_DRM_LEAKS=\|^STARBITE_PANVK_CPU_MINMAX=\|^STARBITE_PANVK_CPU_DIRECT=' \
+        "$L/mtl2-env" > "$T" || true
     printf 'SWEET_MTL2_DEXR=1\nSWEET_MTL2_FLUSH=%s\nSTARBITE_DRM_LEAKS=0\n' "${METAL_CA_FLUSH:-2}" >> "$T"
+    [[ ${METAL_CA_PANVK_DIRECT:-1} == 1 ]] && printf 'STARBITE_PANVK_CPU_MINMAX=1\nSTARBITE_PANVK_CPU_DIRECT=1\n' >> "$T"
     cmp -s "$T" "$L/mtl2-env" || cat "$T" > "$L/mtl2-env"; rm -f "$T"
     case " $CLIENTS " in *" backboardd "*) ;; *) CLIENTS="backboardd $CLIENTS";; esac
     same "$CLIENTS" "$L/mtl2-clients"

@@ -499,8 +499,31 @@ The bench numbers of P0 and P2 do not compare: the script's phases fell differen
 **The helper was the vertex/tiler cost.** On the same frames the vertex/tiler chains take 55 % less time and the GPU 30 to
 37 % less in the swipe windows. That is the first change of this series that moves the GPU. The trace's busy swaps in P2
 were held 0 ms at the median, against 14 to 19 ms on every earlier boot: the GPU was no longer saturated in that ring.
-What the swipe fps gains is NOT measured yet. The repeat pair (`base`, then `direct`, back to back) is requested from the
-tester. Until then `STARBITE_PANVK_CPU_DIRECT` stays off by default.
+What the swipe fps gains was measured on phone 2 on 23 November (below): +15 % on home-screen flicks, +37 % in a Settings
+list; the switches are on by default since.
+
+**On phone 2 (23 November), and on by default since.** The repeat that section asked for, on the owner's own root
+(iOS 27.2.1, 24B156; StarbiteMetal 7b0a598c unchanged), one fresh boot each with the same kernel image (L6bt's kernel and
+line plus `sweetspeed` with 16384, `sweetfb_prof=1 sgu_prof=1`) and the same console script (30 s idle on the home screen, 20
+page flicks 1.2 s apart, Settings opened and its list flicked 16 times 1.5 s apart). The only difference: B0 had the 14
+November PanVK (cc241e55, without the two patches), B1 PanVK 22bd0c44 (mesa26-panvk-cpu-minmax + -cpu-direct, as
+`tools/ios27/metal/mk-panvk27.sh` builds it) with `STARBITE_PANVK_CPU_MINMAX=1 STARBITE_PANVK_CPU_DIRECT=1` in mtl2-env.
+Frames a second are the framebuffer's 5 s windows that lie inside each phase (`A5XELTE FB`, pauses between flicks included).
+
+| | B0 (as the owner had it) | B1 (direct) |
+|---|---|---|
+| idle home screen (the Clock icon's 10 Hz), vertex/tiler chain | 10.0 fps, 845 us | 10.0 fps, 490 us |
+| **home-screen flicks** | **25.9 fps** (26.3, 25.7, 25.9) | **29.8 fps** (34.0, 28.9, 28.1, 28.1) |
+| same, vertex/tiler chain average; fragment | 815 to 829 us; 923 to 945 us | 366 to 369 us; 962 to 969 us |
+| same, GPU busy (10 s); the tick asleep for the frame's GPU work; SwapEnd held | 46 to 47 %; 12.7 to 13.8 ms; 6.3 to 6.9 ms | 33 to 38 %; 7.9 to 10.4 ms; 2.3 to 2.9 ms |
+| same, SwapEnd to shown | 20 to 23 ms | 17 to 20 ms |
+| **Settings list flicks** | **16.1 fps** (16.6, 15.7, 16.0) | **22.1 fps** (22.9, 21.4, 22.1) |
+| same, vertex/tiler chain; tick asleep; SwapEnd to shown | 635 to 651 us; 35.6 to 37.2 ms; 43 to 45 ms | 320 us; 21.4 ms; 30 ms |
+
+The home screen and Settings drew correctly (icons, widgets, the glass dock and search field, the blurred bar); no GPU
+fault or `FAILED` line, no backboardd exit, Wi-Fi up, the same crashes as B0 (locationd, chronod). So
+`tools/ios27/fullroot/steps.d/metal-ca/80-metal-ca.sh` now writes both switches into mtl2-env (`METAL_CA_PANVK_DIRECT=0` to
+leave them out). The fragment chains did not move: they are what is left of a busy frame (section 9).
 
 ## 10. Re-pinning the bridge to upstream metal2vulkan (18 November; `M2V_REPIN=1`, opt-in, built)
 
