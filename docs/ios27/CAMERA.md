@@ -528,7 +528,42 @@ hardware ...` (asked on the calling thread, whose voucher the kernel reads), wit
 a nonzero status with `Metal in the background no` names the kernel's answer (the reason says which branch); a nonzero
 status with `yes` means the Metal chain itself fails (then the Metal transfer session); status 0 with the grid unchanged
 means a chain that writes nothing; no `transfer` lines with `render` lines means the stitcher returns before its transfer.
-**Built, not run on a phone.**
+Run on phone 2 on 23 November: the next section.
+
+### What the stitcher trace showed: the M2M scaler's up-scale limit (23 November)
+
+Phone 2 ran the trace on 23 November, as `TEST-ON-PHONE.md` of the desk work says (line `c272m`, `root-cam` with only
+`cam.dylib` changed). Consoles: `scion-phoneB/logs/con-xnu-boot-c272m-1123-*.log` on the build Mac.
+
+- **Measured.** At transfers 1, 30 and 300 the line was the same: `status 0, session there; from surface ... 1504x1128
+  '420f' rect 753,565 0x0 to surface ... 828x1702 '420f' rect 0,178 828x1106`. With it came `proc_can_use_foreground_hw 0
+  reason 13; VideoToolbox: Metal in the background yes` and `IOSurfaceAcceleratorCreate: -536870208, accelerator none`.
+  The stitcher asks VideoToolbox to draw a **0x0 source rectangle** at the picture's centre. VideoToolbox succeeds with
+  nothing to draw, so the destination is unchanged. The kernel's answer is not the cause: 0 with reason 13 is a daemon
+  with no adopted voucher, and VideoToolbox then allows its Metal chain.
+- **Read in 24B156's CMCapture and CMImaging.** In `-[BWPreviewStitcherRenderer renderStitchedPixelBuffer:...]` (render
+  mode 0, the single-camera path) the up-scale from the source rectangle to the output rectangle is capped at
+  `+[FigM2MController maxUpscale]`. When output/input exceeds the cap, the source rectangle is shrunk about its centre to
+  output/cap. `maxUpscale` gives the M2M scaler's capabilities. `+[FigM2MController queryCapabilities]` reads them once
+  from the IOService `AppleM2ScalerCSCDriver` (property `IOSurfaceAcceleratorCapabilitiesDict`: `...MaxHUpscale`,
+  `...MaxVUpscale`, the down-scale limits, minimum sizes). The S9 has no such service, so the cap is 0x0 and the rectangle
+  collapses to nothing.
+- **Ruled out on the phone on the way** (a local diagnostic build, not in this repository): the renderer's camera infos
+  are nil, and that is by design, because the stitching-disabled node makes none. Answering the frame pair's base zoom
+  with 1 changed nothing. The input samples' metadata has no `ValidBufferRect`, so the bound is the whole buffer.
+  `_getInputRect:...` and `_transferPixelBuffer:...` are not called on this path.
+- **Confirmed by an experiment, not a fix:** the diagnostic build answered `maxUpscale` with 16x16 instead of 0x0. The
+  source rectangle became 376,282 752x564, the rear camera's 2x crop. The stitcher's output went from Y 0 (0 of 256
+  above black) to Y 9 (17 of 256). The camera lay face down, at Y 14 at the source. The picture reached the image queue
+  sink (Y 9 at samples 30 and 300). The screen could not show it that night: the room was dark, and the front camera read
+  `gain 64.0x, green 0 above black` at the source.
+
+The fix this needs is a real M2M scaler on the port: an IOSurfaceAccelerator service that does the transforms
+VideoToolbox and CMCapture send it, and publishes its true capabilities. The Exynos 9810's own memory-to-memory scaler is
+one candidate, a GPU-backed one another. Answering the capability query with numbers nothing stands behind would be
+faking hardware, and is not done. Once that service is there, the same phone test, in a lit room, should show the
+source rectangle as above (not 0x0), the stitcher's pixel line lit like the source's, and `IOSurfaceAcceleratorCreate:
+... accelerator made`.
 
 ### SpringBoard's main-display layout (18 November)
 
