@@ -128,6 +128,18 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, battery_from_dsp, CTLFLAG_RD | CTLFLAG_LOCKED
 
 extern void HakiosBatteryReport(const void *state, unsigned size);     /* drivers/power/hakios.battery.cpp */
 
+/*
+ * Whether a charger is attached, as last reported: 1 or 0, -1 before any report. For the power-off (hakios.exynos_poweroff.c),
+ * which runs after the file systems and processes are gone, where its sysctl could not be read (taken as "attached": the
+ * Note9's slide to power off restarted into TWRP instead of powering off).
+ */
+int hakios_battery_charger(void);
+int
+hakios_battery_charger(void)
+{
+	return battery_updates == 0 ? -1 : battery_charger_present;
+}
+
 void
 hakios_battery_report(const struct hakios_battery_state *b)
 {

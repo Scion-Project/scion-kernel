@@ -339,6 +339,8 @@ int hakios_virtio_blk_alias(__unused const char *disk, __unused const char *name
 void hakios_battery_init(void) {}
 int hakios_battery_temperature(void) { return -273; }      /* "not known", as the driver says before its first reading */
 void hakios_battery_report(__unused const struct hakios_battery_state *state) {}
+int hakios_battery_charger(void);
+int hakios_battery_charger(void) { return -1; }      /* not known */
 #endif
 
 #ifndef HAKIOS_CPUFREQ

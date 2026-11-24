@@ -33,6 +33,7 @@
 #include <sys/hakios.log.h>
 #include <sys/hakios.xnu.h>
 extern void hakios_var_save_on_return(void);
+extern int hakios_battery_charger(void);        /* drivers/power/hakios.battery.c: 1, 0, or -1 not known */
 extern bool hakios_s6e3ha8_blank(int (*say)(const char *, ...));   /* drivers/display/panel/hakios.s6e3ha8.c; a stand-in says no */
 
 extern void hakios_thread_say_stack(thread_t thread, int (*say_as)(const char *, ...));  /* osfmk/arm64/machine_routines.c */
@@ -51,14 +52,6 @@ static volatile bool halting;           /* halt_all_cpus() reached: the watch ha
 #define PMU_INFORM2             0x808u          /* xnuloader/loader.c (sec_ext.h): 0x12345678, a restart */
 #define PMU_INFORM3             0x80Cu          /* ... 0x12345674, into recovery */
 
-static bool
-read_int(const char *name, int *value)
-{
-	size_t size = sizeof(*value);
-
-	return kernel_sysctlbyname(name, value, &size, NULL, 0) == 0 && size == sizeof(*value);
-}
-
 /*
  * PS_HOLD low, when the battery driver says no charger is attached (not known counts as attached): returns only if the
  * phone is still running a second later, or was not powered off. `who` begins each line said, in the caller's `say`.
@@ -66,10 +59,10 @@ read_int(const char *name, int *value)
 bool
 hakios_exynos_power_off(const char *who, int (*say_as)(const char *, ...))
 {
-	int charger = 1;
+	int charger = hakios_battery_charger();         /* (the driver's value: no sysctl, which fails this late) */
 
-	if (!read_int("kern.hakios.battery_charger_present", &charger) || charger) {
-		say_as("%s: a charger is attached or not known (%d): the loader's way\n", who, charger);
+	if (charger != 0) {
+		say_as("%s: %s: the loader's way\n", who, charger > 0 ? "a charger is attached" : "no battery report: a charger not known");
 		return false;
 	}
 	vm_offset_t pmu = ml_io_map(PMU_PA + (PMU_PS_HOLD_CONTROL & ~0xfffu), 0x1000);
