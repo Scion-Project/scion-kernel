@@ -51,6 +51,12 @@ what Samsung's 9810 kernel actually stands on; stage two's "armed" condition wil
 offline path exists (it refuses today in any case). The sections below describe the design as first built; the tests
 table is revised for the change.
 
+**24 November 2026: the offline path exists, and the second way to 2314 MHz uses it** ([BIG-CORES.md](BIG-CORES.md)). iOS 27's kernel can take
+M3s 5-7 offline (XNU's processor offline, Samsung's PMU writes, PSCI CPU_OFF, the PMU read off) and start them again; with
+`m3off=2` the rule in `hakios.exynos_cpufreq_ceiling.h` allows 2314 MHz with at most two M3s on, the PMIC's warning read on and
+a fresh temperature under 75 C, without stage one (which Samsung's 9810 kernel does not have either). Run on phone 2: 2314 MHz
+measured with two on, and no faster interface. Off by default.
+
 ## Contents
 
 - (1) The facts

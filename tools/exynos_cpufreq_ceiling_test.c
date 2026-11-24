@@ -11,6 +11,8 @@
  *   - the ceiling: any rate at or under 1794000 left as it is whatever the reason; above it held at 1794000 unless allowed,
  *     and then 2314000 at most (2704000 and 2886000 never);
  *   - every combination of the inputs over a grid: the ceiling is never above 1794000 unless every condition holds.
+ *   - the second way (m3off=2): the PMIC warning, a fresh temperature under 75 C and at most two M3s on, each alone
+ *     holding at 1794000; ocp_guard's level and stage one do not matter there; the same grid.
  */
 #include <stdio.h>
 
@@ -45,6 +47,23 @@ static void one_on(struct ceil_in *in) { in->m3s_off = 3; }
 static void all_bad(struct ceil_in *in) { in->guard = 1; in->alive = false; in->temp_fresh = false; in->m3s_off = 0; }
 static void none(struct ceil_in *in) { (void)in; }
 
+static const struct ceil_in good2 = { .guard = 1, .temp_fresh = true, .big_mc = 60000, .m3s_off = 2, .m3off = 2, .pmic_on = true };
+
+static enum ceil_why
+why2_with(void (*change)(struct ceil_in *))
+{
+	struct ceil_in in = good2;
+
+	change(&in);
+	return ceil_why(&in);
+}
+
+static void no_warn(struct ceil_in *in) { in->pmic_on = false; }
+static void stop_75(struct ceil_in *in) { in->big_mc = 75000; }
+static void under_75(struct ceil_in *in) { in->big_mc = 74999; }
+static void guard_0(struct ceil_in *in) { in->guard = 0; in->alive = false; in->pmic_on = false; }
+static void m3off_1(struct ceil_in *in) { in->m3off = 1; }
+
 int
 main(void)
 {
@@ -67,7 +86,19 @@ main(void)
 	CHECK(ceil_why(&(struct ceil_in){ .guard = 0 }) == CEIL_LEVEL, "nothing known: held");
 	CHECK(ceil_m3s_on(&(struct ceil_in){ .m3s_off = 9 }) == 0, "more off than there are: none on");
 
-	for (enum ceil_why w = CEIL_ALLOWED; w <= CEIL_M3S_ON; w++) {
+	CHECK(why2_with(none) == CEIL_ALLOWED, "m3off=2: all clear");
+	CHECK(why2_with(no_warn) == CEIL_NO_WARN, "m3off=2: no PMIC warning");
+	CHECK(why2_with(stale) == CEIL_NO_TEMP, "m3off=2: no fresh temperature");
+	CHECK(why2_with(not_read) == CEIL_NO_TEMP, "m3off=2: not read");
+	CHECK(why2_with(stop_75) == CEIL_HOT, "m3off=2: 75 C");
+	CHECK(why2_with(under_75) == CEIL_ALLOWED, "m3off=2: 74.999 C");
+	CHECK(why2_with(three_on) == CEIL_M3S_ON, "m3off=2: three M3s on");
+	CHECK(why2_with(four_on) == CEIL_M3S_ON, "m3off=2: four M3s on");
+	CHECK(why2_with(one_on) == CEIL_ALLOWED, "m3off=2: one M3 on");
+	CHECK(why2_with(guard_0) == CEIL_NO_WARN, "m3off=2 without ocp_guard: no warning read");
+	CHECK(why2_with(m3off_1) == CEIL_LEVEL, "m3off=1 is not the second way");
+
+	for (enum ceil_why w = CEIL_ALLOWED; w <= CEIL_NO_WARN; w++) {
 		CHECK(ceil_reason(w)[0] != '\0' && ceil_reason(w)[0] != '?', "reason %d", (int)w);
 		for (unsigned r = 0; r < sizeof(rates) / sizeof(rates[0]); r++) {
 			uint32_t got = ceil_big(rates[r], w);
@@ -87,7 +118,7 @@ main(void)
 			for (int f = 0; f < 2; f++) {
 				for (unsigned t = 0; t < sizeof(temps) / sizeof(temps[0]); t++) {
 					for (uint32_t off = 0; off <= 5; off++) {
-						struct ceil_in in = { guards[g], a != 0, f != 0, temps[t], off };
+						struct ceil_in in = { guards[g], a != 0, f != 0, temps[t], off, 0, false };
 						uint32_t on = off < 4 ? 4 - off : 0;
 						bool all = guards[g] >= 4 && a && f && temps[t] > CEIL_NOT_READ_MC && temps[t] < CEIL_COOL_MC &&
 						    on <= CEIL_DUAL_CORES;
@@ -95,6 +126,27 @@ main(void)
 
 						CHECK(all ? top == CEIL_DUAL_KHZ : top == CEIL_HELD_KHZ, "guard %u alive %d fresh %d %d mC %u on: %u",
 						    guards[g], a, f, temps[t], on, top);
+					}
+				}
+			}
+		}
+	}
+
+	for (int w = 0; w < 2; w++) {
+		for (int f = 0; f < 2; f++) {
+			for (unsigned t = 0; t < sizeof(temps) / sizeof(temps[0]); t++) {
+				for (uint32_t off = 0; off <= 5; off++) {
+					static const int32_t more[] = { 74999, 75000 };
+					for (unsigned x = 0; x < 3; x++) {
+						int32_t mc = x < 2 ? more[x] : temps[t];
+						struct ceil_in in = { .guard = (uint32_t)w, .temp_fresh = f != 0, .big_mc = mc, .m3s_off = off,
+							              .m3off = 2, .pmic_on = w != 0 };
+						uint32_t on = off < 4 ? 4 - off : 0;
+						bool all = w && f && mc > CEIL_NOT_READ_MC && mc < CEIL_M3OFF_STOP_MC && on <= CEIL_DUAL_CORES;
+						uint32_t top = ceil_big(2886000, ceil_why(&in));
+
+						CHECK(all ? top == CEIL_DUAL_KHZ : top == CEIL_HELD_KHZ, "m3off=2 warn %d fresh %d %d mC %u on: %u",
+						    w, f, mc, on, top);
 					}
 				}
 			}

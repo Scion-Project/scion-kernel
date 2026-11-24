@@ -11,6 +11,13 @@
  * option that would take the M3s higher (gov_policy=3's 2314000 with two parked, cpufreq_gov_big_max=) is held at
  * 1794000 by this rule. 16.5's cpufreq_ocp=1 (Anan Jaser's, the PMIC's warning written) does not go through it.
  * NOT run on a phone.
+ *
+ * The second way (iOS 27, m3off=2; docs/ios27/BIG-CORES.md): Samsung's 9810 kernel never runs its OCP driver (OCP.md, 18
+ * November), so what stands between it and 2314000 is the PMIC's CPU over-current warning (OCP_WARN1 bit 7, which S-Boot
+ * leaves on and Samsung's kernel writes on again) and the hotplug governor's count of M3s online. So with m3off=2: the
+ * PMIC's warning read on (ocp_guard=1 or more reads it; never written here), a fresh big-zone temperature under 75 C (this
+ * path's own stop, under Samsung's 83 C cooling point because it raises the power), and at most two M3s on, "on" meaning
+ * not taken offline by CPU_OFF and read off by the PMU. Then 2314000 at most, as Samsung's dual_freq.
  */
 #ifndef HAKIOS_EXYNOS_CPUFREQ_CEILING_H
 #define HAKIOS_EXYNOS_CPUFREQ_CEILING_H
@@ -24,6 +31,7 @@
 #define CEIL_M3S        4u              /* the Exynos 9810's M3s */
 #define CEIL_COOL_MC    83000           /* BIG's control point */
 #define CEIL_NOT_READ_MC (-273000)      /* the TMU driver's "no reading" */
+#define CEIL_M3OFF_STOP_MC 75000        /* m3off=2: its stop, under BIG's control point */
 
 /* what the rule looks at, as the governor knows it now */
 struct ceil_in {
@@ -32,11 +40,13 @@ struct ceil_in {
 	bool temp_fresh;        /* the big zone's temperature read and recent */
 	int32_t big_mc;         /* that temperature, millidegrees (-273000 or under: not read) */
 	uint32_t m3s_off;       /* of the four M3s, those taken offline by CPU_OFF (and read off by the PMU) */
+	uint32_t m3off;         /* m3off= (2: the M3 offline path, the second way) */
+	bool pmic_on;           /* the PMIC's CPU over-current warning read on (OCP_WARN1 bit 7) */
 };
 
 /* why the M3s are held at 1794000 (CEIL_ALLOWED: they are not; 0 is none, for a caller's "not said yet") */
 enum ceil_why {
-	CEIL_ALLOWED = 1, CEIL_LEVEL, CEIL_NOT_ALIVE, CEIL_NO_TEMP, CEIL_HOT, CEIL_M3S_ON,
+	CEIL_ALLOWED = 1, CEIL_LEVEL, CEIL_NOT_ALIVE, CEIL_NO_TEMP, CEIL_HOT, CEIL_M3S_ON, CEIL_NO_WARN,
 };
 
 /* the M3s on: online in Samsung's sense (an M3 parked in WFI or powered down in idle is on) */
@@ -49,6 +59,19 @@ ceil_m3s_on(const struct ceil_in *in)
 static inline enum ceil_why
 ceil_why(const struct ceil_in *in)
 {
+	if (in->m3off >= 2) {
+		/* the second way: Samsung's own conditions, the PMIC warning and the count; a lower temperature stop */
+		if (!in->pmic_on) {
+			return CEIL_NO_WARN;
+		}
+		if (!in->temp_fresh || in->big_mc <= CEIL_NOT_READ_MC) {
+			return CEIL_NO_TEMP;
+		}
+		if (in->big_mc >= CEIL_M3OFF_STOP_MC) {
+			return CEIL_HOT;
+		}
+		return ceil_m3s_on(in) > CEIL_DUAL_CORES ? CEIL_M3S_ON : CEIL_ALLOWED;
+	}
 	if (in->guard < 4) {
 		return CEIL_LEVEL;
 	}
@@ -73,7 +96,8 @@ ceil_reason(enum ceil_why why)
 	case CEIL_NOT_ALIVE: return "stage one not armed or not alive";
 	case CEIL_NO_TEMP:   return "no fresh temperature";
 	case CEIL_HOT:       return "the big zone at its cooling point";
-	case CEIL_M3S_ON:    return "more M3s on than Samsung allows above 1794000 (no M3 can be taken offline in this kernel)";
+	case CEIL_M3S_ON:    return "more M3s on than Samsung allows above 1794000 (two at most)";
+	case CEIL_NO_WARN:   return "the PMIC's CPU over-current warning not read on (needs ocp_guard=1)";
 	}
 	return "?";
 }
