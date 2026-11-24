@@ -52,8 +52,8 @@ WRAPPED = re.compile(r'\b(?:hakios_wifi_option|lx_os_option)\(\s*"([a-z][a-z0-9_
 OPTION_DEF = re.compile(r'^option\(const char \*name\)', re.M)
 OPTION_CALL = re.compile(r'\boption\(\s*"([a-z][a-z0-9_]*)"')
 # ... and user space has its own: boot_arg("var_store") in init.c (a static function that reads sysctl kern.bootargs)
-BOOT_ARG_DEF = re.compile(r'^boot_arg\(const char \*name\)', re.M)
-BOOT_ARG_CALL = re.compile(r'\bboot_arg\(\s*"([a-z][a-z0-9_]*)"')
+BOOT_ARG_DEF = re.compile(r'^boot_arg(?:_zero)?\(const char \*name[,)]', re.M)   # (sbca.c: boot_arg(name, &length), boot_arg_zero(name))
+BOOT_ARG_CALL = re.compile(r'\bboot_arg(?:_zero)?\(\s*"([a-z][a-z0-9_]*)"')
 LOADER = re.compile(r'starts_with\((?:c|cmd|p|a|s), "([a-z][a-z0-9_.]*)=')
 # user space reads sysctl kern.bootargs into a buffer called arguments, args or argument, and looks in it with strstr:
 # strstr(arguments, "gltrace_at="), strstr(args, "touch_lat=1"): the name is what stands before the =

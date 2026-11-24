@@ -31,6 +31,7 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach-o/dyld.h>
+#include <mach-o/loader.h>
 #include <malloc/malloc.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
@@ -358,6 +359,69 @@ my_renderer(void *server)
 	return renderer;
 }
 
+/* ---- the boot line ------------------------------------------------------------------------------ */
+
+/*
+ * The kernel's boot line, whole. On the S9 it is longer than 1 KB (the image's own line, the loader's records and the
+ * built-in line: about 1.2 KB with the stock image), and sysctl does not cut a string that does not fit: it refuses
+ * (ENOMEM). Read into 1 KB, every switch below (sbgl=0, sbprof=0, sbshot=0, sbc3s=0) was silently not seen on the
+ * phones: Mesa's OpenGL ES and its hooks were loaded into backboardd under Metal, and the 1 ms profiler ran for the
+ * whole life of backboardd and of Settings. So the size is asked for first.
+ */
+static const char *boot_line;
+
+static void
+read_boot_line(void *context)
+{
+	size_t size = 0;
+	char *line = NULL;
+	(void)context;
+
+	if (sysctlbyname("kern.bootargs", NULL, &size, NULL, 0) == 0 && size > 0 && (line = calloc(1, size + 1)) != NULL &&
+	    sysctlbyname("kern.bootargs", line, &size, NULL, 0) != 0) {
+		free(line);
+		line = NULL;
+	}
+	boot_line = line != NULL ? line : "";
+}
+
+static const char *
+boot_args(void)
+{
+	static dispatch_once_t once;
+	dispatch_once_f(&once, NULL, read_boot_line);
+	return boot_line;
+}
+
+/* the value of the first word of the boot line that starts with NAME= (up to the next space), or NULL */
+static const char *
+boot_arg(const char *name, size_t *length)
+{
+	const char *line = boot_args();
+	size_t n = strlen(name);
+	for (const char *a = line; (a = strstr(a, name)) != NULL; a += n) {
+		if ((a == line || a[-1] == ' ') && a[n] == '=') {
+			*length = strcspn(a + n + 1, " ");
+			return a + n + 1;
+		}
+	}
+	return NULL;
+}
+
+/* NAME=0 anywhere on the line, as a word */
+static int
+boot_arg_zero(const char *name)
+{
+	const char *line = boot_args();
+	size_t n = strlen(name);
+	for (const char *a = line; (a = strstr(a, name)) != NULL; a += n) {
+		if ((a == line || a[-1] == ' ') && a[n] == '=' && a[n + 1] == '0' && (a[n + 2] == ' ' || a[n + 2] == '\0')) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /* ---- CoreAnimation's shader functions -------------------------------------------------------- */
 
 /*
@@ -399,9 +463,7 @@ static const char c3s_source[] =
 static void
 give_c3s_a_source(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0 && strstr(arguments, "sbc3s=0") != NULL) {
+	if (boot_arg_zero("sbc3s")) {
 		say("sbca: sbc3s=0: function 20 stays refused\n");
 		return;
 	}
@@ -596,12 +658,46 @@ start_watchdog(void)
  * how many samples were spent waiting in the kernel (a Mach trap: SUBMIT, IOSurface, messages).
  * Boot-arg sbprof=0: off.
  */
-#define PROF_SLOTS 2048
+#define PROF_SLOTS 8192
 static struct prof_slot {
-	uintptr_t function;
+	uintptr_t function;             /* while sampling: the pc's 64-byte granule; in a report: its function */
 	uint32_t count;
 } prof[PROF_SLOTS];
 static unsigned prof_samples, prof_reports, prof_in_kernel;
+/* libsystem_kernel's and IOKit's __TEXT, found once: a sample tells a system call from its caller without dladdr */
+static uintptr_t ksys_start, ksys_end, iokit_start, iokit_end;
+
+static void
+text_range(const void *address, uintptr_t *start, uintptr_t *end)
+{
+	Dl_info info;
+	if (address == NULL || dladdr(address, &info) == 0 || info.dli_fbase == NULL) {
+		return;
+	}
+	const struct mach_header_64 *mh = info.dli_fbase;
+	const struct load_command *lc = (const void *)(mh + 1);
+	for (uint32_t i = 0; i < mh->ncmds; i++, lc = (const void *)((const char *)lc + lc->cmdsize)) {
+		const struct segment_command_64 *seg = (const void *)lc;
+		if (lc->cmd == LC_SEGMENT_64 && strcmp(seg->segname, "__TEXT") == 0) {
+			*start = (uintptr_t)mh;
+			*end = (uintptr_t)mh + (uintptr_t)seg->vmsize;
+			return;
+		}
+	}
+}
+
+static int
+in_system_call(uintptr_t pc)
+{
+	return (pc >= ksys_start && pc < ksys_end) || (pc >= iokit_start && pc < iokit_end);
+}
+
+static int
+by_function(const void *a, const void *b)
+{
+	uintptr_t x = ((const struct prof_slot *)a)->function, y = ((const struct prof_slot *)b)->function;
+	return x < y ? -1 : x > y;
+}
 
 static void
 prof_report(void)
@@ -611,6 +707,34 @@ prof_report(void)
 	    "caller), the top places:\n", ++prof_reports, getprogname(), total,
 	    strcmp(getprogname(), "backboardd") == 0 ? "render" : "main", prof_in_kernel);
 	prof_in_kernel = 0;
+	/* the granules counted since the last report, each named by the nearest symbol dladdr knows, merged by it */
+	unsigned used = 0;
+	for (unsigned i = 0; i < PROF_SLOTS; i++) {
+		if (prof[i].count != 0) {
+			Dl_info info;
+			uintptr_t g = prof[i].function;
+			prof[used].function = dladdr((const void *)g, &info) != 0 && info.dli_saddr != NULL ?
+			    (uintptr_t)info.dli_saddr : (g & ~(uintptr_t)0xff);
+			prof[used++].count = prof[i].count;
+		}
+	}
+	for (unsigned i = used; i < PROF_SLOTS; i++) {
+		prof[i].function = 0;
+		prof[i].count = 0;
+	}
+	qsort(prof, used, sizeof(prof[0]), by_function);
+	unsigned merged = 0;
+	for (unsigned i = 0; i < used; i++) {
+		if (merged > 0 && prof[merged - 1].function == prof[i].function) {
+			prof[merged - 1].count += prof[i].count;
+		} else {
+			prof[merged++] = prof[i];
+		}
+	}
+	for (unsigned i = merged; i < used; i++) {
+		prof[i].function = 0;
+		prof[i].count = 0;
+	}
 	for (unsigned k = 0; k < 25; k++) {
 		unsigned best = PROF_SLOTS;
 		for (unsigned i = 0; i < PROF_SLOTS; i++) {
@@ -654,19 +778,16 @@ prof_sample(void *context)
 		return;
 	}
 	uintptr_t pc = (uintptr_t)arm_thread_state64_get_pc(state);
-	Dl_info info;
 	/*
 	 * In a system call (libsystem_kernel: Mach messages, IOKit calls, waits), the time is the
 	 * caller's: counted at the first return address outside libsystem_kernel and IOKit, so that an
-	 * idle CoreAnimation server and a GPU submit that waits in the kernel are told apart.
+	 * idle CoreAnimation server and a GPU submit that waits in the kernel are told apart. (No dladdr
+	 * here: it walks a symbol table, up to a millisecond in UIKit; the report names the places.)
 	 */
-	if (dladdr((const void *)pc, &info) != 0 && info.dli_fname != NULL &&
-	    strstr(info.dli_fname, "libsystem_kernel") != NULL) {
+	if (in_system_call(pc)) {
 		uintptr_t fp = (uintptr_t)arm_thread_state64_get_fp(state), ret = (uintptr_t)arm_thread_state64_get_lr(state);
 		for (unsigned i = 0; i < 12; i++) {
-			Dl_info up;
-			if (dladdr((const void *)ret, &up) == 0 || up.dli_fname == NULL ||
-			    (strstr(up.dli_fname, "libsystem_kernel") == NULL && strstr(up.dli_fname, "/IOKit") == NULL)) {
+			if (!in_system_call(ret)) {
 				pc = ret;
 				break;
 			}
@@ -681,10 +802,8 @@ prof_sample(void *context)
 		}
 		prof_in_kernel++;
 	}
-	/* by function: the nearest symbol dladdr knows (an exported one; else the address in 256-byte steps) */
-	uintptr_t f = dladdr((const void *)pc, &info) != 0 && info.dli_saddr != NULL ? (uintptr_t)info.dli_saddr :
-	    (pc & ~(uintptr_t)0xff);
-	unsigned h = (unsigned)((f >> 2) * 2654435761u) % PROF_SLOTS;
+	uintptr_t f = pc & ~(uintptr_t)0x3f;
+	unsigned h = (unsigned)((f >> 6) * 2654435761u) % PROF_SLOTS;
 	for (unsigned probe = 0; probe < 64; probe++, h = (h + 1) % PROF_SLOTS) {
 		if (prof[h].function == f || prof[h].count == 0) {
 			prof[h].function = f;
@@ -700,11 +819,36 @@ prof_sample(void *context)
 static void
 start_profiler(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0 && strstr(arguments, "sbprof=0") != NULL) {
+	/*
+	 * sbprof=0: off. sbprof=NAME[,NAME...] (a process name each): on in those processes only, whatever else the line
+	 * says (the built-in line carries sbprof=0; a test image adds e.g. sbprof=SpringBoard with s.dylib injected there).
+	 */
+	const char *me = getprogname();
+	int named = 0;
+	for (const char *line = boot_args(), *a = line; (a = strstr(a, "sbprof=")) != NULL; a += 7) {
+		if (a != line && a[-1] != ' ') {
+			continue;
+		}
+		size_t length = strcspn(a + 7, " ");
+		if ((length == 1 && (a[7] == '0' || a[7] == '1')) || length == 0) {
+			continue;
+		}
+		named = 1;
+		for (const char *v = a + 7, *end = a + 7 + length; v < end;) {
+			size_t k = strcspn(v, ", ");
+			if (k == strlen(me) && strncmp(v, me, k) == 0) {
+				say("sbca: sbprof names %s\n", me);
+				goto on;
+			}
+			v += k + 1;
+		}
+	}
+	if (named || boot_arg_zero("sbprof")) {
 		return;
 	}
+on:;
+	text_range((const void *)mach_msg, &ksys_start, &ksys_end);
+	text_range(dlsym(RTLD_DEFAULT, "IOConnectCallMethod"), &iokit_start, &iokit_end);
 	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
 	    dispatch_queue_create("sbca.profiler", DISPATCH_QUEUE_SERIAL));
 	dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 0), NSEC_PER_MSEC, NSEC_PER_MSEC / 10);
@@ -848,9 +992,7 @@ wait_and_schedule(void *context)
 static void
 schedule_shots(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0 && strstr(arguments, "sbshot=0") != NULL) {
+	if (boot_arg_zero("sbshot")) {
 		return;
 	}
 	dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), NULL, wait_and_schedule);
@@ -882,16 +1024,9 @@ no_ethernet_watcher(void)
 static int
 gl_wanted(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
-		for (const char *a = arguments; (a = strstr(a, "sbgl=")) != NULL; a += 5) {
-			if (a == arguments || a[-1] == ' ') {
-				return a[5] != '0';
-			}
-		}
-	}
-	return 1;
+	size_t length = 0;
+	const char *value = boot_arg("sbgl", &length);
+	return value == NULL || length == 0 || value[0] != '0';
 }
 
 __attribute__((constructor))
