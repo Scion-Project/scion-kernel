@@ -560,6 +560,35 @@ With the direct draws on (B1 above), the same script, one fresh boot per line; f
 - Settings: Preferences uses 136 % of the CPU while its list scrolls (10 % in the background) and launchd 18 to 36 % with it;
   the phone reaches 78 C within a minute of it. NOT looked at.
 
+### 9.3 Round two: the idle burn, the slow mode and the 30 fps ceiling (phones 1 and 2, 24 November)
+
+Kernel L6btm c8fb5a0e, the owner's fast root (cloned onto phone 1 too), the same `msr.sh` script, fresh boots, each window
+from +2.5 min. Notes: `agents/smooth-1124/NOTES.md` on the mini.
+
+- **The idle burn of backboardd (23 % with nothing presented) was sbca's 1 ms profiler.** `sbca` (`/usr/lib/s.dylib`) read
+  `kern.bootargs` into 1 KB. The S9's line is longer (`PE_BOOT_ARGS_LENGTH` 2048, about 1.2 KB with the defaults), and the
+  sysctl refuses a short buffer (ENOMEM). So `sbprof=0` and `sbgl=0` were never seen: the profiler stopped backboardd's
+  render thread and Settings' main thread every millisecond, with up to 13 `dladdr` a sample, and Mesa GL was loaded under
+  Metal. Fixed in PR 411. Measured on both phones: backboardd idle 20-28 % -> 5 %. In fast-mode swipes backboardd
+  69-71 % -> 41-48 % at the same 30 fps. With the Settings list moving, Preferences 136-143 % -> 102 % and backboardd 81-86 % -> 48-51 %. Frame rates unchanged.
+- **The slow mode** (13-16 fps, WidgetRenderer_Default 25-29 %, SpringBoard 50-56 %) is the first one to two minutes
+  after the home screen is first shown after a boot. WidgetRenderer_Default is launched then. It was slow in 7 of 8 boots
+  in the first swipes after that launch. In the 5 boots where the swipes were run again 1.5-4 min later, all 5 were fast.
+  WidgetRenderer's main thread is 16-20 % busy committing over the slow swipes and 0-5 % later. Most of its CPU is on other
+  threads. chronod's crash at boot is not the trigger: one boot without it was slow too. What it renders, and why only
+  then, is NOT known.
+- **The 30 fps ceiling is not a rate that iOS is told.** A diagnostic dylib in SpringBoard read these values:
+  `UIScreen.maximumFramesPerSecond` 60; `CADisplay` refreshRate and heartbeatRate 1/60 s, one fixed mode; low power mode
+  off; thermalState 0. A CADisplayLink got 182 callbacks in 3 s. `sweetfb_relbuf=1` changed nothing (30.2 against 30.0
+  fps). SpringBoard's main thread, profiled with sbca's sampler, waits in its run loop for 67 % of the swipe phase,
+  with a flat profile (objc_msgSend, CA layer setters, `collect_animations`, commits). The phase is about 45 % motion,
+  so the main thread is about 70 % busy while the page moves. The reading: a frame of main-thread work of about 20-23 ms
+  on the M3s at 1794 MHz misses every second display-link callback (inferred). The M3s go above 1794 MHz only with cores
+  offlined (the OCP guard's stage two), which this kernel cannot do yet.
+- **Settings after the fix**: Preferences' main thread is 36-58 % busy over the list flicks with a flat profile, and idle
+  (100 % in its run loop) once the list stops. So Settings no longer spins: it works while the list moves.
+  launchd's 18-23 % while the list moves is NOT explained (a lead: lookups of services that are not there, such as CommCenter).
+
 ## 10. Re-pinning the bridge to upstream metal2vulkan (18 November; `M2V_REPIN=1`, opt-in, built)
 
 **How far behind.** The iOS 27 bridge (`tools/ios27/metal2/build-m2v-bridge.sh`) pins metal2vulkan at `720ef1ce`
