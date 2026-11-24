@@ -70,6 +70,7 @@ extern void hakios_exynos_bus_busy(void);                      /* drivers/soc/ex
 extern kern_return_t gic_v3_spi_attach(uint32_t intid, bool edge, void (*handler)(void *context, uint32_t intid), void *context);
 extern void HakiosMaliStart(void);                              /* drivers/gpu/mali/hakios.mali.cpp */
 extern uint32_t gMaliClients, gMaliBuffers, gMaliSubmits, gMaliFailed, gMaliShown;   /* hakios.mali.cpp */
+extern uint32_t gMaliPairs;                                     /* hakios.mali.cpp: job chains submitted two to a request */
 extern struct mali_made { uint64_t address, size; uint32_t asked, flags; } gMaliMade[32];
 
 /*
@@ -1817,6 +1818,7 @@ static struct {
 static uint32_t mali_trace;
 static unsigned mali_queue_head, mali_queue_count;
 static uint64_t mali_queued_seq, mali_done_seq;
+volatile uint64_t *gMaliStatusDone;     /* hakios.mali.cpp's status page (kMaliStatusMemoryType): mali_done_seq, for clients */
 static bool mali_worker_started;
 static LCK_MTX_DECLARE(mali_queue_lock, &mali_lock_group);
 
@@ -2275,6 +2277,9 @@ mali_worker(__unused void *parameter, __unused wait_result_t result)
 		mali_queue_head = (mali_queue_head + 1) % MALI_QUEUE;
 		mali_queue_count--;
 		mali_done_seq = seq;
+		if (gMaliStatusDone != NULL) {
+			*gMaliStatusDone = seq;
+		}
 		sec_jobs++;
 		sec_busy += ended - job_began;
 		sec_queued += job_began - queued;
@@ -2428,10 +2433,10 @@ mali_thread(__unused void *parameter, __unused wait_result_t result)
 	gov_start();
 	for (;;) {
 		delay(60 * 1000 * 1000);
-		printf("mali: step %u of %u; user space says %u%s; %u clients, %u buffers, %u job chains (%u failed), "
-		    "%u pictures shown; %llu MB of the GPU's 4 GB of addresses in use\n", reached, STEPS, user_said,
+		printf("mali: step %u of %u; user space says %u%s; %u clients, %u buffers, %u job chains (%u failed, %u pairs "
+		    "in one request), %u pictures shown; %llu MB of the GPU's 4 GB of addresses in use\n", reached, STEPS, user_said,
 		    user_said == 1 ? " -- a program ran a job on the GPU" : "", gMaliClients, gMaliBuffers, gMaliSubmits,
-		    gMaliFailed, gMaliShown, mali_va.taken * MALI_VA_GRANULE >> 20);
+		    gMaliFailed, gMaliPairs, gMaliShown, mali_va.taken * MALI_VA_GRANULE >> 20);
 		if (mali_dropped != 0 || mali_refused != 0) {
 			printf("mali: %u job chains of clients whose jobs hung not run, %u submissions refused\n", mali_dropped,
 			    mali_refused);

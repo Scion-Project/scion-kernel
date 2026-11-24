@@ -99,7 +99,15 @@ enum {
 	kHakiosMaliWait         = 0x7d,         /* ours: wait for a job by its number (struct mali_wait) */
 	kHakiosMaliSurface      = 0x7e,         /* ours, as HakiosGPU's: an IOSurface's memory as a buffer */
 	kHakiosMaliShow         = 0x7f,         /* ours, as HakiosGPU's: a test's pixels onto the panel */
+	kHakiosMaliSubmit2      = 0x76,         /* ours: two job chains in one request (struct mali_submit2: a pass's vertex/tiler, then its fragment) */
 };
+
+/*
+ * clientMemoryForType's own type, not a buffer's handle: a read-only page whose first word is the number of the last job
+ * the GPU finished (hakios.mali.c keeps it, gMaliStatusDone). hakios-drm reads it to answer "is this buffer idle" and
+ * "is that job done" without a request: on the Note9 those requests were 11% of the window server's drawing thread.
+ */
+#define kMaliStatusMemoryType   0x7fff0001u
 
 struct mali_surface {
 	uint32_t surface;                       /* the IOSurface's ID */
@@ -186,6 +194,11 @@ struct drm_panfrost_submit {
 	uint32_t requirements;
 };
 #define PANFROST_JD_REQ_FS      (1u << 0)
+
+/* kHakiosMaliSubmit2: as two kPanfrostSubmit requests, in order, for one round trip (both jc fields come back) */
+struct mali_submit2 {
+	struct drm_panfrost_submit first, second;
+};
 
 struct drm_panfrost_wait_bo {
 	uint32_t handle, pad;
@@ -327,6 +340,11 @@ HakiosMali::start(IOService * provider)
 	return true;
 }
 
+static IOBufferMemoryDescriptor * gMaliStatus;          /* kMaliStatusMemoryType's page */
+extern "C" uint32_t gMaliPairs;                         /* kHakiosMaliSubmit2 requests (hakios.mali.c says them) */
+uint32_t gMaliPairs;
+extern "C" volatile uint64_t * gMaliStatusDone;          /* hakios.mali.c: written as each job is done */
+
 void
 HakiosMaliStart(void)
 {
@@ -334,6 +352,12 @@ HakiosMaliStart(void)
 	HakiosMali * gpu;
 
 	gMaliLock = IOLockAlloc();
+	gMaliStatus = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task, kIODirectionInOut | kIOMemoryKernelUserShared,
+	    PAGE_SIZE, PAGE_SIZE);
+	if (gMaliStatus != NULL) {
+		bzero(gMaliStatus->getBytesNoCopy(), PAGE_SIZE);
+		gMaliStatusDone = (volatile uint64_t *) gMaliStatus->getBytesNoCopy();
+	}
 	(void)PE_parse_boot_argn("mali_flush", &gMaliFlush, sizeof(gMaliFlush));
 	gpu = OSTypeAlloc(HakiosMali);
 	if (gpu == NULL || provider == NULL || !gpu->init() || !gpu->attach(provider)) {
@@ -887,6 +911,15 @@ HakiosMaliUserClient::clientMemoryForType(UInt32 type, IOOptionBits * options, I
 	struct mali_buffer * b;
 	IOReturn ret = kIOReturnBadArgument;
 
+	if (type == kMaliStatusMemoryType) {
+		if (gMaliStatus == NULL) {
+			return kIOReturnNoMemory;
+		}
+		gMaliStatus->retain();
+		*memory = gMaliStatus;
+		*options = kIOMapReadOnly;
+		return kIOReturnSuccess;
+	}
 	IOLockLock(gMaliLock);
 	b = buffer(type);
 	if (b != NULL) {
@@ -920,6 +953,7 @@ HakiosMaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArgument
 		struct mali_user_memory user;
 		struct mali_sync sync;
 		struct mali_written written;
+		struct mali_submit2 submit2;
 	} r;
 	size_t size = args->structureInputSize;
 	struct mali_buffer * b;
@@ -970,7 +1004,19 @@ HakiosMaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArgument
 		return syncBuffer(&r.sync);
 	}
 	/* a job chain, and a buffer given back: neither holds the lock while it waits (submit, closeBuffer) */
-	if (selector == kPanfrostSubmit || selector == kDrmGemClose) {
+	if (selector == kHakiosMaliSubmit2) {
+		OSIncrementAtomic((SInt32 *) &gMaliPairs);
+		ret = submit(&r.submit2.first);
+		if (ret == kIOReturnSuccess) {
+			ret = submit(&r.submit2.second);
+		}
+		if (ret == kIOReturnSuccess && args->structureOutput != NULL && args->structureOutputSize >= size) {
+			memcpy(args->structureOutput, &r, size);
+			args->structureOutputSize = (uint32_t) size;
+		}
+		return ret;
+	}
+		if (selector == kPanfrostSubmit || selector == kDrmGemClose) {
 		ret = selector == kPanfrostSubmit ? submit(&r.submit) : closeBuffer(r.close.handle);
 		if (ret == kIOReturnSuccess && args->structureOutput != NULL && args->structureOutputSize >= size) {
 			memcpy(args->structureOutput, &r, size);

@@ -136,6 +136,9 @@ drmOpenWithType(const char *name, const char *busid, int type)
 	return dup(connection_fd);
 }
 
+static int flush_pending(void);
+#define HAKIOS_MALI_SUBMIT2     0x76            /* HakiosMali's own: two job chains in one request (struct mali_submit2) */
+
 static int
 call(unsigned number, void *data, size_t size)
 {
@@ -144,6 +147,10 @@ call(unsigned number, void *data, size_t size)
 
 	if (hakios_drm_noop()) {
 		return noop_call(number, data, size);
+	}
+	/* a vertex/tiler chain held back for its fragment chain goes first: nothing may pass it (see flush_pending) */
+	if (number != DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT && number != HAKIOS_MALI_SUBMIT2) {
+		(void)flush_pending();
 	}
 	result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
 
@@ -168,6 +175,10 @@ call(unsigned number, void *data, size_t size)
 }
 
 static int submit(struct drm_panfrost_submit *request);
+static bool pairing(void);
+static int submit_held(struct drm_panfrost_submit *request);
+static int submit_pair(struct drm_panfrost_submit *request);
+static int flush_pending(void);
 static void forget_mapping(uint32_t handle);
 static void forget_surface_handle(uint32_t handle);
 static int wait_buffer(struct drm_panfrost_wait_bo *request);
@@ -191,7 +202,20 @@ drmIoctl(int fd, unsigned long request, void *arg)
 
 	(void)fd;
 	if (opened == PANFROST && number == DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT) {
-		error = submit(arg);
+		struct drm_panfrost_submit *request = arg;
+
+		if (!pairing()) {
+			error = submit(request);
+		} else if (!(request->requirements & PANFROST_JD_REQ_FS) && request->out_sync == 0 && request->in_sync_count == 0) {
+			error = submit_held(request);   /* (a vertex/tiler chain: its fragment chain comes next) */
+		} else if (request->requirements & PANFROST_JD_REQ_FS) {
+			error = submit_pair(request);
+		} else {
+			error = flush_pending();
+			if (error == 0) {
+				error = submit(request);
+			}
+		}
 	} else if (opened == PANFROST && number == DRM_COMMAND_BASE + DRM_PANFROST_WAIT_BO) {
 		error = wait_buffer(arg);
 	} else if (opened == PANFROST && pan_syncobj_ioctl(number, arg, &error)) {
@@ -616,6 +640,34 @@ left_ns(int64_t deadline)
  * ten seconds at most at a time and is asked again until the deadline; a job does not run for that
  * long, since the kernel resets the GPU under one that has not ended within a second.
  */
+/*
+ * The number of the last job the GPU finished, read from HakiosMali's status page (its clientMemoryForType type
+ * kMaliStatusMemoryType, read-only), mapped at the first ask; 0 when there is none (an older kernel), and then every
+ * wait asks the kernel as before.
+ */
+#define HAKIOS_MALI_STATUS_TYPE 0x7fff0001u
+static volatile const uint64_t *status_done;
+static pthread_once_t status_once = PTHREAD_ONCE_INIT;
+
+static void
+status_map(void)
+{
+	mach_vm_address_t address = 0;
+	mach_vm_size_t size = 0;
+
+	if (!hakios_drm_noop() && IOConnectMapMemory64(connection, HAKIOS_MALI_STATUS_TYPE, mach_task_self(), &address, &size,
+	    kIOMapAnywhere | kIOMapReadOnly) == 0 && size >= sizeof(uint64_t)) {
+		status_done = (volatile const uint64_t *)(uintptr_t)address;
+	}
+}
+
+static uint64_t
+gpu_done(void)
+{
+	pthread_once(&status_once, status_map);
+	return status_done != NULL ? *status_done : 0;
+}
+
 static int
 wait_job(uint64_t seq, int64_t deadline)
 {
@@ -625,12 +677,19 @@ wait_job(uint64_t seq, int64_t deadline)
 	} request;                              /* struct mali_wait */
 	bool done;
 	int error;
+	uint64_t gpu;
 
+	(void)flush_pending();
+	gpu = gpu_done();
 	pthread_mutex_lock(&lock);
+	finished = gpu > finished ? gpu : finished;
 	done = seq <= finished;
 	pthread_mutex_unlock(&lock);
 	if (done) {
 		return 0;
+	}
+	if (status_done != NULL && left_ns(deadline) <= 0) {
+		return ETIMEDOUT;               /* (only a look, and the status page says it is not done) */
 	}
 	do {
 		request.seq = seq;
@@ -685,43 +744,45 @@ sampled_handles(void)
 	return handle_bit_taken(HAKIOS_MALI_PARAM_SAMPLED, &taken);
 }
 
-static int
-submit(struct drm_panfrost_submit *request)
+/*
+ * A submission's handles as the kernel takes them (the bits it does not take stripped): a copy, which a held-back
+ * submission needs anyway (panfrost frees its list when the request returns). NULL with *error when there is no memory.
+ */
+static uint32_t *
+submit_handles(const struct drm_panfrost_submit *request, int *error)
 {
-	uint64_t chain = request->jc, handles = request->bo_handles, seq, *fence;
-	uint32_t *given = (uint32_t *)(uintptr_t)request->bo_handles, *plain = NULL;
-	int error;
+	const uint32_t *given = (const uint32_t *)(uintptr_t)request->bo_handles;
+	uint32_t strip = 0, *copy;
 
-	for (uint32_t i = 0; i < request->bo_handle_count; i++) {
-		uint32_t untaken = ((given[i] & HAKIOS_DRM_BO_WRITTEN) && !written_handles() ? HAKIOS_DRM_BO_WRITTEN : 0) |
-		    ((given[i] & HAKIOS_DRM_BO_SAMPLED) && !sampled_handles() ? HAKIOS_DRM_BO_SAMPLED : 0);
-
-		if (untaken != 0) {
-			uint32_t strip = (written_handles() ? 0 : HAKIOS_DRM_BO_WRITTEN) | (sampled_handles() ? 0 : HAKIOS_DRM_BO_SAMPLED);
-
-			plain = malloc(request->bo_handle_count * sizeof(*plain));
-			if (plain == NULL) {
-				return ENOMEM;
-			}
-			for (uint32_t k = 0; k < request->bo_handle_count; k++) {
-				plain[k] = given[k] & ~strip;
-			}
-			request->bo_handles = (uintptr_t)plain;
-			break;
+	*error = 0;
+	if (request->bo_handle_count == 0) {
+		return NULL;
+	}
+	for (uint32_t i = 0; i < request->bo_handle_count && strip == 0; i++) {
+		if (((given[i] & HAKIOS_DRM_BO_WRITTEN) && !written_handles()) || ((given[i] & HAKIOS_DRM_BO_SAMPLED) && !sampled_handles())) {
+			strip = (written_handles() ? 0 : HAKIOS_DRM_BO_WRITTEN) | (sampled_handles() ? 0 : HAKIOS_DRM_BO_SAMPLED);
 		}
 	}
-	error = call(DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT, request, sizeof(*request));
-	request->bo_handles = handles;
-	free(plain);
-	if (error != 0) {
-		return error;
+	if ((copy = malloc(request->bo_handle_count * sizeof(*copy))) == NULL) {
+		*error = ENOMEM;
+		return NULL;
 	}
-	seq = request->jc;
-	request->jc = chain;
+	for (uint32_t i = 0; i < request->bo_handle_count; i++) {
+		copy[i] = given[i] & ~strip;
+	}
+	return copy;
+}
+
+/* What a submission the kernel took gave: its number, the buffers it names, and its sync object's job. */
+static void
+submit_record(uint32_t out_sync, const uint32_t *handles, uint32_t count, uint64_t seq)
+{
+	uint64_t *fence;
+
 	pthread_mutex_lock(&lock);
 	submitted = seq > submitted ? seq : submitted;
-	for (uint32_t i = 0; i < request->bo_handle_count; i++) {
-		struct bo_track *t = bo_track(given[i] & ~(HAKIOS_DRM_BO_WRITTEN | HAKIOS_DRM_BO_SAMPLED), true);
+	for (uint32_t i = 0; i < count; i++) {
+		struct bo_track *t = bo_track(handles[i] & ~(HAKIOS_DRM_BO_WRITTEN | HAKIOS_DRM_BO_SAMPLED), true);
 
 		if (t != NULL) {
 			t->seq = seq;
@@ -729,12 +790,168 @@ submit(struct drm_panfrost_submit *request)
 			tracking_broken = true;     /* (no room to remember: ask the kernel from now on, as before) */
 		}
 	}
-	if (request->out_sync != 0 && (fence = pan_syncobj(request->out_sync)) != NULL) {
+	if (out_sync != 0 && (fence = pan_syncobj(out_sync)) != NULL) {
 		*fence = seq;
 		pthread_cond_broadcast(&pan_given);
 	}
 	pthread_mutex_unlock(&lock);
+}
+
+static int
+submit(struct drm_panfrost_submit *request)
+{
+	struct drm_panfrost_submit asked = *request;
+	uint32_t *handles;
+	int error;
+
+	handles = submit_handles(request, &error);
+	if (error != 0) {
+		return error;
+	}
+	asked.bo_handles = (uintptr_t)handles;
+	error = call(DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT, &asked, sizeof(asked));
+	if (error == 0) {
+		submit_record(request->out_sync, handles, request->bo_handle_count, asked.jc);
+	}
+	free(handles);
+	return error;
+}
+
+/*
+ * A pass's two chains in one request. panfrost submits a batch's vertex/tiler chain and then, at once, its fragment chain
+ * (pan_jm.c jm_submit_batch, under its submit lock), each a round trip to HakiosMali: on the Note9 the submissions were
+ * 31% of the window server's drawing thread (round 14's profile), about 7,800 a second in a blurred screen. A vertex/tiler
+ * chain with no sync objects is held back here, and goes in one request (kHakiosMaliSubmit2) with the fragment chain the
+ * same thread submits next. Anything else first sends it alone: any other request to the kernel (call()), any wait
+ * (wait_buffer, wait_job), another thread's submission, another held-back chain. HAKIOS_PAIR=0 turns it off.
+ */
+struct mali_submit2 {
+	struct drm_panfrost_submit first, second;
+};
+static pthread_mutex_t pending_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+	bool set;
+	pthread_t thread;
+	struct drm_panfrost_submit request;
+	uint32_t *handles;
+} pending;
+static int pair_taken = -1;             /* the kernel takes kHakiosMaliSubmit2: -1 not known yet, 0 no, 1 yes */
+static uint64_t pairs_sent, singles_sent;
+
+static bool
+pairing(void)
+{
+	static int wanted = -1;
+
+	if (wanted < 0) {
+		const char *value = getenv("HAKIOS_PAIR");
+
+		wanted = value == NULL || strcmp(value, "0") != 0;
+	}
+	return wanted && pair_taken != 0;
+}
+
+/* The held-back chain, sent alone if there is one; 0 when there is none or it went. */
+static int
+flush_pending(void)
+{
+	struct drm_panfrost_submit request;
+	uint32_t *handles;
+	int error;
+
+	pthread_mutex_lock(&pending_lock);
+	if (!pending.set) {
+		pthread_mutex_unlock(&pending_lock);
+		return 0;
+	}
+	request = pending.request;
+	handles = pending.handles;
+	pending.set = false;
+	pending.handles = NULL;
+	request.bo_handles = (uintptr_t)handles;
+	error = call(DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT, &request, sizeof(request));
+	if (error == 0) {
+		submit_record(0, handles, request.bo_handle_count, request.jc);
+		singles_sent++;
+	} else {
+		static const char said[] = "hakios-drm: a held-back job chain was refused\n";
+
+		(void)write(2, said, sizeof(said) - 1);
+	}
+	pthread_mutex_unlock(&pending_lock);
+	free(handles);
+	return error;
+}
+
+static int
+submit_held(struct drm_panfrost_submit *request)
+{
+	uint32_t *handles;
+	int error = flush_pending();
+
+	if (error != 0) {
+		return error;
+	}
+	handles = submit_handles(request, &error);
+	if (error != 0) {
+		return error;
+	}
+	pthread_mutex_lock(&pending_lock);
+	pending.set = true;
+	pending.thread = pthread_self();
+	pending.request = *request;
+	pending.handles = handles;
+	pthread_mutex_unlock(&pending_lock);
 	return 0;
+}
+
+static int
+submit_pair(struct drm_panfrost_submit *request)
+{
+	struct mali_submit2 pair;
+	uint32_t *first_handles, *second_handles;
+	int error;
+
+	second_handles = submit_handles(request, &error);
+	if (error != 0) {
+		return error;
+	}
+	pthread_mutex_lock(&pending_lock);
+	if (!pending.set || !pthread_equal(pending.thread, pthread_self())) {
+		pthread_mutex_unlock(&pending_lock);
+		free(second_handles);
+		error = flush_pending();
+		return error != 0 ? error : submit(request);
+	}
+	pair.first = pending.request;
+	first_handles = pending.handles;
+	pending.set = false;
+	pending.handles = NULL;
+	pair.first.bo_handles = (uintptr_t)first_handles;
+	pair.second = *request;
+	pair.second.bo_handles = (uintptr_t)second_handles;
+	error = call(HAKIOS_MALI_SUBMIT2, &pair, sizeof(pair));
+	if (error == ENOSYS) {
+		/* an older kernel: one at a time, and no more holding back */
+		pair_taken = 0;
+		error = call(DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT, &pair.first, sizeof(pair.first));
+		if (error == 0) {
+			submit_record(0, first_handles, pair.first.bo_handle_count, pair.first.jc);
+			error = call(DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT, &pair.second, sizeof(pair.second));
+			if (error == 0) {
+				submit_record(request->out_sync, second_handles, request->bo_handle_count, pair.second.jc);
+			}
+		}
+	} else if (error == 0) {
+		pair_taken = 1;
+		submit_record(0, first_handles, pair.first.bo_handle_count, pair.first.jc);
+		submit_record(request->out_sync, second_handles, request->bo_handle_count, pair.second.jc);
+		pairs_sent++;
+	}
+	pthread_mutex_unlock(&pending_lock);
+	free(first_handles);
+	free(second_handles);
+	return error;
 }
 
 /*
@@ -751,7 +968,12 @@ wait_buffer(struct drm_panfrost_wait_bo *request)
 	bool own = false;
 	int error;
 
+	uint64_t gpu;
+
+	(void)flush_pending();
+	gpu = gpu_done();
 	pthread_mutex_lock(&lock);
+	finished = gpu > finished ? gpu : finished;
 	if (tracking_broken) {
 		/* (asked, as before) */
 	} else if ((t = bo_track(request->handle, false)) != NULL && !t->foreign) {
@@ -764,6 +986,12 @@ wait_buffer(struct drm_panfrost_wait_bo *request)
 		wait_bo_answered++;
 		pthread_mutex_unlock(&lock);
 		return 0;
+	}
+	if (own && status_done != NULL && left_ns(request->timeout_ns) <= 0) {
+		/* only a look (panfrost's BO cache asks so of the oldest buffer of a size): the status page says it is busy */
+		wait_bo_answered++;
+		pthread_mutex_unlock(&lock);
+		return ETIMEDOUT;
 	}
 	wait_bo_asked++;
 	pthread_mutex_unlock(&lock);
