@@ -27,7 +27,7 @@ struct pic {
 static void
 pic_make(struct pic *p, uint32_t fmt, uint32_t w, uint32_t h, uint32_t pad)
 {
-	unsigned bits, full, bpc;
+	unsigned bits = 8, full = 0, bpc;
 	(void)m2m_format_info(fmt, &bits, &full);
 	bpc = bits == 8 ? 1 : 2;
 	memset(p, 0, sizeof(*p));
@@ -53,7 +53,7 @@ pic_free(struct pic *p)
 static unsigned
 bits_of(uint32_t fmt)
 {
-	unsigned b, f;
+	unsigned b = 8, f = 0;
 	(void)m2m_format_info(fmt, &b, &f);
 	return b;
 }
@@ -103,7 +103,7 @@ static double ref_nudge;
 static void
 ref_range(uint32_t fmt, int chroma, double *off, double *span, double *max)
 {
-	unsigned bits, full;
+	unsigned bits = 8, full = 0;
 	(void)m2m_format_info(fmt, &bits, &full);
 	double n = (double)(1u << bits), s = n / 256.0;
 	*max = n - 1;
