@@ -2180,9 +2180,22 @@ hakios_mali_second(uint64_t *busy_ns, uint32_t *jobs, uint64_t *queued_ns, uint3
 	return gov_on ? 2 : 1;
 }
 
+/*
+ * boot-arg mali_worker_cpu=N: the queue's worker kept on logical processor N (-1: anywhere). The Note9's default is 0,
+ * the boot processor, which takes the GPU's interrupt and is one of the A55s: woken at every submission and every job's
+ * end, a worker that ran on whichever core it was woken on took the big core of the thread that had just submitted (the
+ * window server's drawing thread) for each of those, round 17's quarter of that thread inside its submissions.
+ */
+static int mali_worker_cpu = -1;
+
 static void
 mali_worker(__unused void *parameter, __unused wait_result_t result)
 {
+	if (mali_worker_cpu >= 0 && mali_worker_cpu < (int)real_ncpus) {
+		(void)thread_bind(cpu_to_processor(mali_worker_cpu));
+		(void)thread_block(NULL);       /* (the binding takes effect from here) */
+		printf("mali: the queue's worker kept on processor %d\n", mali_worker_cpu);
+	}
 	for (;;) {
 		uint64_t chain, seq;
 		bool fragment;
@@ -2501,6 +2514,7 @@ hakios_mali_init(void)
 			 * of its time inside the call. Most jobs were found done by that look (150 000 of 175 000 in round 13).
 			 */
 			mali_spin_us = 0;
+			mali_worker_cpu = 0;
 		}
 	}
 	(void)PE_parse_boot_argn("mali_irq", &mali_irq, sizeof(mali_irq));
@@ -2509,6 +2523,7 @@ hakios_mali_init(void)
 	(void)PE_parse_boot_argn("mali_spin_us", &mali_spin_us, sizeof(mali_spin_us));
 	mali_spin_us = mali_spin_us > 2000 ? 2000 : mali_spin_us;
 	(void)PE_parse_boot_argn("mali_flushred", &mali_flushred, sizeof(mali_flushred));
+	(void)PE_parse_boot_argn("mali_worker_cpu", &mali_worker_cpu, sizeof(mali_worker_cpu));
 	if (!PE_parse_boot_argn("mali", &last_step, sizeof(last_step)) || last_step == 0) {
 		return;
 	}
