@@ -23,6 +23,11 @@ if [ -z "${NOPATCH:-}" ]; then
 	xcrun -sdk iphoneos metallib $W/src27/turn.air -o $W/src27/turn.metallib || exit 1
 	{ echo "static const unsigned char sweet_turn_metallib[] = {"; xxd -i < $W/src27/turn.metallib; echo "};"; } > $M2/TurnShaders.inc
 fi
+# YCbCrProbe.h includes YCbCrProbe.inc: tools/ios27/metal2/YCbCrProbe.metal (the GPU's read of a two-plane YCbCr texture, the camera
+# preview's display side; used only with SWEET_MTL2_YCCPROBE=1) compiled the same way
+xcrun -sdk iphoneos metal -mios-version-min=16.0 -c $M2/YCbCrProbe.metal -o $W/src27/ycc-probe.air || exit 1
+xcrun -sdk iphoneos metallib $W/src27/ycc-probe.air -o $W/src27/ycc-probe.metallib || exit 1
+{ echo "static const unsigned char sweet_ycc_probe_metallib[] = {"; xxd -i < $W/src27/ycc-probe.metallib; echo "};"; } > $M2/YCbCrProbe.inc
 $CC -x objective-c++ -std=c++17 -fobjc-arc -O2 -g -Wall -Wno-deprecated-declarations -Wno-unused-function -bundle \
 	-o "$B/StarbiteMetal" $M2/HotMetal2.mm $M2/NativeBridgeMetalFrontend.mm -x none "$BRIDGE" \
 	-Wl,-dead_strip -lc++ -framework Foundation -framework Metal -framework IOSurface -framework IOKit \
