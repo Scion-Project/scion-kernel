@@ -99,6 +99,7 @@ enum {
 	kHakiosMaliWait         = 0x7d,         /* ours: wait for a job by its number (struct mali_wait) */
 	kHakiosMaliSurface      = 0x7e,         /* ours, as HakiosGPU's: an IOSurface's memory as a buffer */
 	kHakiosMaliShow         = 0x7f,         /* ours, as HakiosGPU's: a test's pixels onto the panel */
+	kHakiosMaliStats        = 0x75,         /* ours: a client's own timing of its requests, said in the log (struct mali_rtt) */
 	kHakiosMaliSubmit2      = 0x76,         /* ours: two job chains in one request (struct mali_submit2: a pass's vertex/tiler, then its fragment) */
 };
 
@@ -194,6 +195,11 @@ struct drm_panfrost_submit {
 	uint32_t requirements;
 };
 #define PANFROST_JD_REQ_FS      (1u << 0)
+
+/* kHakiosMaliStats: hakios-drm's timing of its submissions' round trips, from its side of the call */
+struct mali_rtt {
+	uint64_t calls, sum_ns, max_ns, under_50us, over_500us;
+};
 
 /* kHakiosMaliSubmit2: as two kPanfrostSubmit requests, in order, for one round trip (both jc fields come back) */
 struct mali_submit2 {
@@ -341,6 +347,8 @@ HakiosMali::start(IOService * provider)
 }
 
 static IOBufferMemoryDescriptor * gMaliStatus;          /* kMaliStatusMemoryType's page */
+extern "C" int proc_selfpid(void);
+extern "C" const char *hakios_mali_worker_where(void);  /* hakios.mali.c: "on processor 0" or "anywhere" (the A/B) */
 extern "C" uint32_t gMaliPairs;                         /* kHakiosMaliSubmit2 requests (hakios.mali.c says them) */
 uint32_t gMaliPairs;
 extern "C" volatile uint64_t * gMaliStatusDone;          /* hakios.mali.c: written as each job is done */
@@ -777,6 +785,7 @@ HakiosMaliUserClient::syncBuffer(const struct mali_sync * request)
  */
 static struct {
 	uint64_t n, handles, copy, look, clean, cleans, clean_bytes, queue, mark, written;
+	uint64_t calls, method, method_max;     /* the requests (one or two submissions each), entry to return */
 } gSubmitTimes;
 
 static inline uint64_t
@@ -793,12 +802,29 @@ submit_times_say(void)
 {
 	uint64_t n = gSubmitTimes.n ? gSubmitTimes.n : 1;
 
+	uint64_t calls = gSubmitTimes.calls ? gSubmitTimes.calls : 1;
+
 	printf("HakiosMali: %llu submissions, %llu handles each: per submission %llu ns reading the list, %llu looking at "
 	    "surfaces, %llu cleaning surfaces' lines (%llu surfaces, %llu MB in all), %llu queueing, %llu marking buffers, %llu "
-	    "for written surfaces\n", gSubmitTimes.n, gSubmitTimes.handles / n, gSubmitTimes.copy / n, gSubmitTimes.look / n,
+	    "for written surfaces; %llu requests, %llu ns each in the kernel's handling (the longest %llu us)\n", gSubmitTimes.n,
+	    gSubmitTimes.handles / n, gSubmitTimes.copy / n, gSubmitTimes.look / n,
 	    gSubmitTimes.clean / n, gSubmitTimes.cleans, gSubmitTimes.clean_bytes >> 20, gSubmitTimes.queue / n,
-	    gSubmitTimes.mark / n, gSubmitTimes.written / n);
+	    gSubmitTimes.mark / n, gSubmitTimes.written / n, gSubmitTimes.calls, gSubmitTimes.method / calls,
+	    gSubmitTimes.method_max / 1000);
 	bzero(&gSubmitTimes, sizeof(gSubmitTimes));
+}
+
+/* a submission request's time in the kernel's handling, from externalMethod's entry to its return */
+static void
+method_timed(uint64_t entered)
+{
+	uint64_t ns = ns_since(entered);
+
+	gSubmitTimes.calls++;
+	gSubmitTimes.method += ns;
+	if (ns > gSubmitTimes.method_max) {
+		gSubmitTimes.method_max = ns;
+	}
 }
 
 IOReturn
@@ -1006,10 +1032,12 @@ HakiosMaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArgument
 		struct mali_sync sync;
 		struct mali_written written;
 		struct mali_submit2 submit2;
+		struct mali_rtt rtt;
 	} r;
 	size_t size = args->structureInputSize;
 	struct mali_buffer * b;
 	IOReturn ret = kIOReturnSuccess;
+	uint64_t entered = mach_absolute_time();
 
 	if (args->structureInput == NULL || size > sizeof(r) || fBuffers == NULL) {
 		return kIOReturnBadArgument;
@@ -1066,13 +1094,25 @@ HakiosMaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArgument
 			memcpy(args->structureOutput, &r, size);
 			args->structureOutputSize = (uint32_t) size;
 		}
+		method_timed(entered);
 		return ret;
+	}
+	if (selector == kHakiosMaliStats) {
+		uint64_t calls = r.rtt.calls ? r.rtt.calls : 1;
+
+		printf("HakiosMali: pid %d's own timing of %llu submission requests: %llu us each on average, the longest %llu us; "
+		    "%llu under 50 us, %llu over 500 us; worker %s\n", proc_selfpid(), r.rtt.calls, r.rtt.sum_ns / calls / 1000,
+		    r.rtt.max_ns / 1000, r.rtt.under_50us, r.rtt.over_500us, hakios_mali_worker_where());
+		return kIOReturnSuccess;
 	}
 		if (selector == kPanfrostSubmit || selector == kDrmGemClose) {
 		ret = selector == kPanfrostSubmit ? submit(&r.submit) : closeBuffer(r.close.handle);
 		if (ret == kIOReturnSuccess && args->structureOutput != NULL && args->structureOutputSize >= size) {
 			memcpy(args->structureOutput, &r, size);
 			args->structureOutputSize = (uint32_t) size;
+		}
+		if (selector == kPanfrostSubmit) {
+			method_timed(entered);
 		}
 		return ret;
 	}

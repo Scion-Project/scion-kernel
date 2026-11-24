@@ -27,6 +27,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <mach/mach_time.h>
 
 #include <IOKit/IOKitLib.h>
 #include <mach/mach.h>
@@ -138,6 +139,42 @@ drmOpenWithType(const char *name, const char *busid, int type)
 
 static int flush_pending(void);
 #define HAKIOS_MALI_SUBMIT2     0x76            /* HakiosMali's own: two job chains in one request (struct mali_submit2) */
+#define HAKIOS_MALI_STATS       0x75            /* HakiosMali's own: this process's timing of its submissions, for the log */
+
+/*
+ * How long a submission's round trip takes from here (round 18): HakiosMali times its own handling of the same requests,
+ * and the difference is the call itself, or the time this thread waited for a processor inside it. Every 2000 requests the
+ * sums go to the kernel, which says them in the log; sent straight, not through call() (which may be under pending_lock).
+ */
+static struct {
+	uint64_t calls, sum_ns, max_ns, under_50us, over_500us;
+} rtt;
+static pthread_mutex_t rtt_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+rtt_note(uint64_t ticks)
+{
+	static mach_timebase_info_data_t base;
+	uint64_t ns;
+
+	if (base.denom == 0) {
+		mach_timebase_info(&base);
+	}
+	ns = ticks * base.numer / base.denom;
+	pthread_mutex_lock(&rtt_lock);
+	rtt.calls++;
+	rtt.sum_ns += ns;
+	rtt.max_ns = ns > rtt.max_ns ? ns : rtt.max_ns;
+	rtt.under_50us += ns < 50000;
+	rtt.over_500us += ns > 500000;
+	if (rtt.calls >= 2000) {
+		size_t returned = sizeof(rtt);
+
+		(void)IOConnectCallStructMethod(connection, HAKIOS_MALI_STATS, &rtt, sizeof(rtt), &rtt, &returned);
+		memset(&rtt, 0, sizeof(rtt));
+	}
+	pthread_mutex_unlock(&rtt_lock);
+}
 
 static int
 call(unsigned number, void *data, size_t size)
@@ -151,8 +188,13 @@ call(unsigned number, void *data, size_t size)
 	/* a vertex/tiler chain held back for its fragment chain goes first: nothing may pass it (see flush_pending) */
 	if (number != DRM_COMMAND_BASE + DRM_PANFROST_SUBMIT && number != HAKIOS_MALI_SUBMIT2) {
 		(void)flush_pending();
+		result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
+	} else {
+		uint64_t began = mach_absolute_time();
+
+		result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
+		rtt_note(mach_absolute_time() - began);
 	}
-	result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
 
 	switch (result) {
 	case 0:

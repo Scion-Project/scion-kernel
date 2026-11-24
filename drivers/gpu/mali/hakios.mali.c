@@ -2187,16 +2187,46 @@ hakios_mali_second(uint64_t *busy_ns, uint32_t *jobs, uint64_t *queued_ns, uint3
  * window server's drawing thread) for each of those, round 17's quarter of that thread inside its submissions.
  */
 static int mali_worker_cpu = -1;
+/*
+ * mali_worker_ab=S (the Note9's default for now, 20): the worker alternates every S seconds between kept on processor 0 and
+ * anywhere, and says so, so that one run measures both (the submissions' round trips and the frames around each line).
+ */
+static uint32_t mali_worker_ab;
+static volatile bool mali_worker_bound;
+
+const char *hakios_mali_worker_where(void);
+const char *
+hakios_mali_worker_where(void)
+{
+	return mali_worker_bound ? "on processor 0" : "anywhere";
+}
+
+static void
+worker_bind(bool bound)
+{
+	(void)thread_bind(bound ? cpu_to_processor(mali_worker_cpu >= 0 ? mali_worker_cpu : 0) : NULL);
+	(void)thread_block(NULL);       /* (the binding takes effect from here) */
+	mali_worker_bound = bound;
+	printf("mali: the queue's worker %s from now on\n", bound ? "kept on processor 0" : "on any processor");
+}
 
 static void
 mali_worker(__unused void *parameter, __unused wait_result_t result)
 {
+	uint64_t ab_next = 0, ab_interval = 0;
+
 	if (mali_worker_cpu >= 0 && mali_worker_cpu < (int)real_ncpus) {
-		(void)thread_bind(cpu_to_processor(mali_worker_cpu));
-		(void)thread_block(NULL);       /* (the binding takes effect from here) */
-		printf("mali: the queue's worker kept on processor %d\n", mali_worker_cpu);
+		worker_bind(true);
+	}
+	if (mali_worker_ab != 0) {
+		clock_interval_to_deadline(mali_worker_ab, NSEC_PER_SEC, &ab_next);
+		nanoseconds_to_absolutetime((uint64_t)mali_worker_ab * NSEC_PER_SEC, &ab_interval);
 	}
 	for (;;) {
+		if (ab_next != 0 && mach_absolute_time() >= ab_next) {
+			worker_bind(!mali_worker_bound);
+			ab_next = mach_absolute_time() + ab_interval;
+		}
 		uint64_t chain, seq;
 		bool fragment;
 
@@ -2515,6 +2545,7 @@ hakios_mali_init(void)
 			 */
 			mali_spin_us = 0;
 			mali_worker_cpu = 0;
+			mali_worker_ab = 20;     /* (the measurement of round 18: see mali_worker_ab) */
 		}
 	}
 	(void)PE_parse_boot_argn("mali_irq", &mali_irq, sizeof(mali_irq));
@@ -2524,6 +2555,7 @@ hakios_mali_init(void)
 	mali_spin_us = mali_spin_us > 2000 ? 2000 : mali_spin_us;
 	(void)PE_parse_boot_argn("mali_flushred", &mali_flushred, sizeof(mali_flushred));
 	(void)PE_parse_boot_argn("mali_worker_cpu", &mali_worker_cpu, sizeof(mali_worker_cpu));
+	(void)PE_parse_boot_argn("mali_worker_ab", &mali_worker_ab, sizeof(mali_worker_ab));
 	if (!PE_parse_boot_argn("mali", &last_step, sizeof(last_step)) || last_step == 0) {
 		return;
 	}
