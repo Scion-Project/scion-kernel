@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 766 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 767 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1696,7 +1696,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (193)
+# User space (194)
 #
 
 # Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
@@ -2200,7 +2200,10 @@ CONFIG_MODEM_AGAIN=y
 # read by sbca.c (user space)
 # CONFIG_SBC3S is not set
 
-# read by sbca.c (user space)
+# load nothing, CoreAnimation keeps its CPU renderer
+# CONFIG_SBGL is not set
+
+# off. sbprof=NAME[,NAME...] (a process name each): on in those processes only, whatever else the line
 # CONFIG_SBPROF is not set
 
 # read by sbca.c (user space)
