@@ -1522,6 +1522,7 @@ enc_frame(struct hakios_mfc_enc_frame *f)
 }
 
 static int mfc_opens;
+static uint32_t mfc_generation;         /* the last HAKIOS_MFC_OPEN's; a decode of another is ESTALE */
 
 static int
 mfc_open(dev_t dev, int flags __unused, int type __unused, proc_t p __unused)
@@ -1537,10 +1538,14 @@ mfc_open(dev_t dev, int flags __unused, int type __unused, proc_t p __unused)
 		} else {
 			enc_opens = 1;
 		}
-	} else if (mfc_opens != 0) {
-		error = EBUSY;                  /* one client at a time; VideoToolbox's next session stays in software */
 	} else {
-		mfc_opens = 1;
+		/*
+		 * Any number of clients: the block belongs to the one whose HAKIOS_MFC_OPEN came last (its generation), and the
+		 * others' decodes get ESTALE until they open again. One client at a time (EBUSY) sent YouTube's next session to
+		 * Apple's software decoder for as long as the previous one, idle, kept its descriptor. The instance is closed at
+		 * the last close (spec_close calls d_close only then).
+		 */
+		mfc_opens++;
 	}
 	lck_mtx_unlock(mfc_lock);
 	return error;
@@ -1657,6 +1662,14 @@ mfc_ioctl(dev_t dev, u_long cmd, caddr_t data, int flag __unused, proc_t p __unu
 		o->flags = I.zc ? HAKIOS_MFC_ZERO_COPY : 0;
 		o->stride = I.stride;
 		o->rows = I.rows;
+		o->generation = ++mfc_generation;
+		if (mfc_generation > 1) {
+			static unsigned told;
+
+			if (told++ < 16) {
+				say("exynos_mfc: open %u (%u descriptors): the block is this client's now\n", mfc_generation, mfc_opens);
+			}
+		}
 		break;
 	}
 	case HAKIOS_MFC_DECODE: {
@@ -1664,6 +1677,10 @@ mfc_ioctl(dev_t dev, u_long cmd, caddr_t data, int flag __unused, proc_t p __unu
 		struct mfc_result r;
 
 		hakios_exynos_bus_busy();       /* bus_max=2: MIF and INT at their top while video is decoded */
+		if (d->generation != mfc_generation) {
+			error = ESTALE;         /* a later open (another session) has the block */
+			break;
+		}
 		if (!I.open || !I.buffers) {
 			error = ENXIO;
 			break;

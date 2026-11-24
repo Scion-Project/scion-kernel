@@ -22,7 +22,7 @@ struct hakios_mfc_open {
 	uint32_t flags;                 /* in: HAKIOS_MFC_ZERO_COPY to ask; out: HAKIOS_MFC_ZERO_COPY if frames are to be the client's surfaces */
 	uint32_t stride;                /* out, zero copy: the bytes a row a surface must have, both planes */
 	uint32_t rows;                  /* out, zero copy: the rows of luma it must have (with the extended pixels); half of them of chroma */
-	uint32_t reserved;
+	uint32_t generation;            /* out: this open's number, for its decodes (a later open of another client takes the block) */
 };
 
 struct hakios_mfc_decode {
@@ -41,6 +41,7 @@ struct hakios_mfc_decode {
 	int32_t slot;                   /* out, zero copy: the slot it went to, -1 none. The client keeps a slot's surface until `used` no longer has its bit */
 	int32_t shown_slot;             /* out, zero copy: the slot of the shown frame, instead of a copy into y and uv */
 	uint32_t used;                  /* out, zero copy: the slots the firmware keeps */
+	uint32_t generation;            /* in: the open's (hakios_mfc_open); ESTALE when a later open has taken the block */
 };
 
 #define HAKIOS_MFC_ZERO_COPY    1u

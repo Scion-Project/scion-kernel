@@ -99,6 +99,7 @@ main(int argc, char **argv)
 		struct hakios_mfc_decode d;
 
 		memset(&d, 0, sizeof(d));
+		d.generation = o.generation;    /* (the open's: a later open elsewhere would take the block) */
 		if (at < (size_t)st.st_size) {
 			end = next_unit(s, (size_t)st.st_size, at);
 			d.stream = (uint64_t)(uintptr_t)(s + at);

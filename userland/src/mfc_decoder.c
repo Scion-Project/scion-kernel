@@ -51,6 +51,7 @@ static const CFStringRef *kVTVideoDecoderList_DecoderID_, *kVTVideoDecoderList_D
 #define ERR_COULD_NOT_FIND      (-12906)        /* kVTCouldNotFindVideoDecoderErr */
 #define ERR_BAD_DATA            (-12909)        /* kVTVideoDecoderBadDataErr */
 #define ERR_MALFUNCTION         (-12911)        /* kVTVideoDecoderMalfunctionErr */
+#define ERR_TAKEN               (-1)            /* (ours, never VideoToolbox's: another session has the block) */
 #define PENDING_MAX             64
 #define RECENT_FRAMES           6
 
@@ -78,6 +79,8 @@ struct mfc_decoder {
 	uint8_t *stream;
 	size_t stream_bytes;
 	CMFormatDescriptionRef format;  /* the one the block was opened for (a sample of another: opened again for it) */
+	uint32_t generation;            /* this session's open of the block (the kernel's); ESTALE: another session has it now */
+	unsigned taken;                 /* times another session took the block from this one */
 	unsigned formats;               /* formats taken in this session after the first */
 };
 
@@ -174,6 +177,7 @@ open_block(struct mfc_decoder *d)
 		return false;
 	}
 	d->zc = (request.flags & HAKIOS_MFC_ZERO_COPY) != 0;
+	d->generation = request.generation;
 	d->zc_stride = request.stride;
 	d->zc_rows = request.rows;
 	if (request.width > d->width || request.height > d->height) {
@@ -329,6 +333,7 @@ decode_unit(struct mfc_decoder *d, const uint8_t *stream, size_t bytes, uint32_t
 		}
 	}
 	memset(&request, 0, sizeof(request));
+	request.generation = d->generation;
 	request.stream = (uint64_t)(uintptr_t)stream;
 	request.bytes = (uint32_t)bytes;
 	request.tag = tag;
@@ -347,6 +352,9 @@ decode_unit(struct mfc_decoder *d, const uint8_t *stream, size_t bytes, uint32_t
 				d->spare = NULL;
 				d->zc = false;
 				return open_block(d) ? decode_unit(d, stream, bytes, tag, finished) : ERR_MALFUNCTION;
+			}
+			if (why == ESTALE) {
+				return ERR_TAKEN;
 			}
 			if (why != EBADMSG) {
 				say("hakios: mfc: a decode fails: %d\n", why);
@@ -380,7 +388,7 @@ decode_unit(struct mfc_decoder *d, const uint8_t *stream, size_t bytes, uint32_t
 	request.room_height = (uint32_t)CVPixelBufferGetHeight(image);
 	if (ioctl(d->fd, HAKIOS_MFC_DECODE, &request) != 0) {
 		/* EBADMSG: this frame's data; the rest (the block has died, the stream outgrew its buffers): the session cannot go on, and VideoToolbox's client makes a new one, in software if need be */
-		status = errno == EBADMSG ? ERR_BAD_DATA : ERR_MALFUNCTION;
+		status = errno == EBADMSG ? ERR_BAD_DATA : errno == ESTALE ? ERR_TAKEN : ERR_MALFUNCTION;
 		if (status == ERR_MALFUNCTION) {
 			say("hakios: mfc: a decode fails: %d\n", errno);
 		}
@@ -481,6 +489,19 @@ decode_frame(void *decoder, void *frame, CMSampleBufferRef sample, uint32_t flag
 	d->pending[tag % PENDING_MAX] = frame;
 	d->pending_set[tag % PENDING_MAX] = true;
 	status = decode_unit(d, d->stream, out, tag, NULL);
+	if (status == ERR_TAKEN) {
+		/*
+		 * Another session opened the block since (VideoToolbox's next one, made while this one stayed): this frame is
+		 * dropped, and so is what follows until a key frame, at which the block is opened for this session again.
+		 */
+		if (d->taken++ < 4) {
+			say("hakios: mfc: another session has the block: this one takes it back at its next key frame\n");
+		}
+		d->drained = true;
+		slots_free(d, 0);
+		emit(d, tag, NULL);
+		return noErr;
+	}
 	if (status == ERR_MALFUNCTION) {
 		uint32_t i = tag % PENDING_MAX;
 
