@@ -51,6 +51,7 @@
 #include <ifaddrs.h>
 #include <mach/mach.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <mach/mach_time.h>
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -381,18 +382,10 @@ reach(const char *name)
 static void
 wifi(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
 	double start = seconds();
-	bool wanted = false, there = false;
+	bool there = false;
 
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0) {
-		return;
-	}
-	for (const char *word = strtok(arguments, " "); word != NULL; word = strtok(NULL, " ")) {
-		wanted |= strcmp(word, "wifi=1") == 0;
-	}
-	if (!wanted) {
+	if (!scion_boot_arg_is("wifi", "1")) {
 		return;
 	}
 	while (!(there = if_nametoindex("en0") != 0) && seconds() - start < 120) {

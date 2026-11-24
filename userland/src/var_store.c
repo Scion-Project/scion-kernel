@@ -69,6 +69,7 @@
  * swap, its logs) or what is grafted from a read-only image at every boot anyway.
  */
 #include "mini.h"
+#include "scion_bootline.h"
 
 #define BLOCK           4096
 #define BUFFER          (4u << 20)              /* the loader's own buffer: one request a write */
@@ -142,30 +143,11 @@ struct entry {
 #define VAR_SAVE_WANTED 2
 #define VAR_SAVE_DONE   3
 
-/* Is NAME=VALUE among the kernel's arguments? (as init.c reads them) */
+/* Is NAME=VALUE among the kernel's arguments? (the whole line, as init.c reads it: scion_bootline.h) */
 static int
 boot_arg_is(const char *name, const char *value)
 {
-	static char args[1024];
-	size_t len = sizeof(args) - 1, n = strlen(name), v = strlen(value);
-
-	if (sysctlbyname("kern.bootargs", args, &len, NULL, 0) != 0) {
-		return 0;
-	}
-	args[len < sizeof(args) ? len : sizeof(args) - 1] = 0;
-	for (char *p = args; *p;) {
-		while (*p == ' ') {
-			p++;
-		}
-		if (strncmp(p, name, n) == 0 && p[n] == '=' && strncmp(p + n + 1, value, v) == 0 &&
-		    (p[n + 1 + v] == 0 || p[n + 1 + v] == ' ')) {
-			return 1;
-		}
-		while (*p && *p != ' ') {
-			p++;
-		}
-	}
-	return 0;
+	return scion_boot_arg_is(name, value);
 }
 
 static long
@@ -310,29 +292,8 @@ catch_term(void)
 static uint64_t
 boot_arg_number(const char *name)
 {
-	static char args[1024];
-	size_t len = sizeof(args) - 1, n = strlen(name);
-
-	if (sysctlbyname("kern.bootargs", args, &len, NULL, 0) != 0) {
-		return 0;
-	}
-	args[len < sizeof(args) ? len : sizeof(args) - 1] = 0;
-	for (char *p = args; *p;) {
-		while (*p == ' ') {
-			p++;
-		}
-		if (strncmp(p, name, n) == 0 && p[n] == '=') {
-			uint64_t v = 0;
-			for (p += n + 1; *p >= '0' && *p <= '9'; p++) {
-				v = v * 10 + (uint64_t)(*p - '0');
-			}
-			return v;
-		}
-		while (*p && *p != ' ') {
-			p++;
-		}
-	}
-	return 0;
+	long long n = scion_boot_arg_number(name, 0);
+	return n > 0 ? (uint64_t)n : 0;
 }
 /* where the store is: the flash partition, or under AVF a virtio disk (pick_device) */
 static const char *device = DEVICE;

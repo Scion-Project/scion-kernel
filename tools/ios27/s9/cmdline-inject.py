@@ -16,7 +16,7 @@ the phone has no interface at all. Hence:
   - refused, with the reason: a line that names sweetinject= or sweetdef= itself, a record line that is not well formed,
     a value longer than the kernel keeps (511 bytes), a line longer than the loader's 607 bytes, and, given the kernel,
     a kernel whose built-in sweetinject= is not the one written here, or a line so long that the kernel would have to
-    leave some of its own built-in arguments out (they are appended only while the 1024-byte line has room).
+    leave some of its own built-in arguments out (they are appended only while its 2048-byte line has room).
 """
 import re
 import sys
@@ -24,7 +24,8 @@ import sys
 BUILTIN = ('/usr/lib/s.dylib,backboardd,Preferences;/usr/lib/m.dylib,PosterBoard,SpringBoard;'
            '/usr/lib/b.dylib,backboardd')
 LOADER_MAX = 607          # the loader's line: 608 bytes with its NUL (make-boot-image.sh)
-KERNEL_LINE = 1024        # BOOT_LINE_LENGTH of the arm64 kernel (pexpert/pexpert/arm64/boot.h)
+KERNEL_LINE = 2048        # the S9 kernel's effective line, PE_BOOT_ARGS_LENGTH (the fork's pexpert/pexpert/pexpert.h,
+                          # starlte_boot_line in osfmk/arm/arm_init.c; it was the loader's 1024 until 18 Nov 2026)
 VALUE_MAX = 511           # sweet_exec_inject[512] in kern_exec.c
 LIB_RE = re.compile(r'/[A-Za-z0-9._/+-]+')
 PROG_RE = re.compile(r'[A-Za-z0-9._+-]+')

@@ -22,9 +22,10 @@ What is looked for:
   the kernel   PE_parse_boot_argn("name" ...) and PE_parse_boot_arg_str("name" ...), in the files the ios-16.5 profile's fork adds
                to Apple's XNU (tools/xnu-tree.py changed) and in the lines it adds to Apple's files, listed as `(patch)`
   the loader   starts_with(c, "name=...") on the payload's command line, in xnuloader/
-  user space   a name given to strstr()/strncmp() on sysctl kern.bootargs, in userland/src/ (seen: sb_delay=, touch_lat=1,
-               ca_vbl=1 ...), compared whole with a word of it (strcmp(word, "wifi=1")), or given to the Metal
-               plug-in's helper hm_boot_arg_set("metal_m2v=1")
+  user space   a name given to the shared reader of sysctl kern.bootargs, userland/src/scion_bootline.h
+               (scion_boot_arg_is("sbgl", "0"), scion_boot_arg("sb_delay", NULL) ...), in userland/src/, hakios-metal/ and
+               tools/ios27/; and the older forms in userland/src/: strstr()/strncmp() on a buffer of the line, a word of it
+               compared whole (strcmp(word, "wifi=1")), the Metal plug-in's helper hm_boot_arg_set("metal_m2v=1")
 """
 import argparse
 import collections
@@ -52,8 +53,16 @@ WRAPPED = re.compile(r'\b(?:hakios_wifi_option|lx_os_option)\(\s*"([a-z][a-z0-9_
 OPTION_DEF = re.compile(r'^option\(const char \*name\)', re.M)
 OPTION_CALL = re.compile(r'\boption\(\s*"([a-z][a-z0-9_]*)"')
 # ... and user space has its own: boot_arg("var_store") in init.c (a static function that reads sysctl kern.bootargs)
-BOOT_ARG_DEF = re.compile(r'^boot_arg(?:_zero)?\(const char \*name[,)]', re.M)   # (sbca.c: boot_arg(name, &length), boot_arg_zero(name))
-BOOT_ARG_CALL = re.compile(r'\bboot_arg(?:_zero)?\(\s*"([a-z][a-z0-9_]*)"')
+BOOT_ARG_DEF = re.compile(r'^boot_arg(?:_zero|_is|_number)?\(const char \*name[,)]', re.M)   # (var_store.c: boot_arg_is(name, value), boot_arg_number(name))
+BOOT_ARG_CALL = re.compile(r'\bboot_arg(?:_zero|_is|_number)?\(\s*"([a-z][a-z0-9_]*)"')
+# ... and since 24 Nov 2026 all of user space reads the line through one shared header, userland/src/scion_bootline.h:
+# scion_boot_arg("sbprof", &length), scion_boot_arg_is("sbgl", "0"), scion_boot_arg_set("metal_noubwc"),
+# scion_boot_arg_number("poster_retry", 1), scion_boot_arg_copy("tu_debug", ...), and their _in forms on a line given
+# (scion_boot_arg_in(arguments, "glno", NULL)): the name is the first literal. In userland/src/, hakios-metal/ and the
+# programs and libraries of tools/ios27/ (cam.dylib and the others built for the iOS 27 root).
+SCION_CALL = re.compile(r'\bscion_boot_arg(?:_set|_is|_number|_copy)?(?:_in\(\s*[^,()"]+(?:\([^()]*\))?[^,()"]*,|\()\s*"(-?[a-z][a-z0-9_.]*)"')
+USER_TREES = ("userland/src/", "hakios-metal/", "tools/ios27/")
+SCION_HEADER = "scion_bootline.h"
 LOADER = re.compile(r'starts_with\((?:c|cmd|p|a|s), "([a-z][a-z0-9_.]*)=')
 # user space reads sysctl kern.bootargs into a buffer called arguments, args or argument, and looks in it with strstr:
 # strstr(arguments, "gltrace_at="), strstr(args, "touch_lat=1"): the name is what stands before the =
@@ -208,6 +217,9 @@ def scan(root, keep=None, fork=None):
         if f.startswith("xnuloader/") and f.endswith(".c"):
             for m in LOADER.finditer(text):
                 found[m.group(1)]["loader"].add(base)
+        if f.startswith(USER_TREES) and base != SCION_HEADER:
+            for m in SCION_CALL.finditer(text):
+                found[m.group(1)]["user"].add(base)
         if f.startswith("userland/src/"):
             for m in USER.finditer(text):
                 found[m.group(1)]["user"].add(base)

@@ -15,6 +15,7 @@
  * commands.
  */
 #include "mini.h"
+#include "scion_bootline.h"
 
 #define PATTERN_SIZE    300000
 #define RB_HALT         0x08
@@ -59,35 +60,13 @@ join(const char *a, const char *b, const char *c)
 	return buf;
 }
 
-/* The value of boot-arg NAME on the kernel's command line, or NULL. */
+/* The value of boot-arg NAME on the kernel's command line (read whole: scion_bootline.h), or NULL. */
 static const char *
 boot_arg(const char *name)
 {
-	static char args[1024], value[128];
-	size_t len = sizeof(args) - 1, n = strlen(name);
+	static char value[128];
 
-	if (sysctlbyname("kern.bootargs", args, &len, NULL, 0) != 0) {
-		return NULL;
-	}
-	args[len < sizeof(args) ? len : sizeof(args) - 1] = 0;
-	for (char *p = args; *p;) {
-		while (*p == ' ') {
-			p++;
-		}
-		if (strncmp(p, name, n) == 0 && p[n] == '=') {
-			size_t i = 0;
-
-			for (p += n + 1; *p && *p != ' ' && i < sizeof(value) - 1; p++) {
-				value[i++] = *p;
-			}
-			value[i] = 0;
-			return value;
-		}
-		while (*p && *p != ' ') {
-			p++;
-		}
-	}
-	return NULL;
+	return scion_boot_arg_copy(name, value, sizeof(value)) ? value : NULL;
 }
 
 /* A directory of this image (or anything else) shown in place of one of the volume's: bindfs. */

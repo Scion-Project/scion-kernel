@@ -74,6 +74,8 @@ jobs:
         run: |
           python3 tools/boot-args-test.py
           python3 tools/boot-args.py --check
+      - name: User space reads the kernel's boot line whole (the S9's is longer than 1 KB) and each argument exactly (sanitizers)
+        run: sh tools/bootline-test.sh
       - name: The drivers are kept by subsystem, every one is in drivers/map, and drivers/*/conf builds each exactly once
         run: python3 tools/drivers-check.py
       - name: The architecture's rules - no new file over 800 lines in drivers/ or socs/, allowances only shrink, codecs include no kernel header and have a host test

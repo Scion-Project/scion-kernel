@@ -21,6 +21,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -35,7 +36,7 @@ static FILE *out;
 static void
 put(const char *name, const char *value)
 {
-	char line[640];
+	char line[SCION_BOOT_LINE_MAX + 128];     /* the boot line whole, too */
 
 	snprintf(line, sizeof(line), "%s: %s\n", name, value);
 	fputs(line, out);
@@ -151,7 +152,7 @@ main(void)
 	}
 	printf("selftest: begins\n");
 	text("kern.version");
-	text("kern.bootargs");
+	put("kern.bootargs", scion_boot_line());       /* whole: about 1.1 KB on the S9, more than text() holds */
 	count("hw.ncpu");
 	count("hw.activecpu");
 	count("kern.hakios.fb_surface");

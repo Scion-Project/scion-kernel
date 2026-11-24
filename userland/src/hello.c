@@ -106,21 +106,34 @@ show_int(int fd, const char *name)
 	}
 }
 
-/* hello_wait=N in the kernel's command line (kern.bootargs): N, or 0 */
+/*
+ * hello_wait=N in the kernel's command line (kern.bootargs): N, or 0. The line is read whole, into the kernel's longest
+ * (PE_BOOT_ARGS_LENGTH, 2048 on the S9): sysctl gives nothing at all to a buffer too small for it (ENOMEM), and the
+ * S9's line is about 1.1 KB. A word named exactly hello_wait (no program here has the C library, nor
+ * userland/src/scion_bootline.h's allocator).
+ */
 static long
 wait_seconds(void)
 {
-	char args[700];
-	u64 size = sizeof(args);
+	static char args[2048 + 1];
+	static const char name[] = "hello_wait=";
+	u64 size = sizeof(args) - 1;
 	long n = 0;
 
 	if (syscall6(SYS_sysctlbyname, (long)"kern.bootargs", 13, (long)args, (long)&size, 0, 0) != 0) {
 		return 0;
 	}
+	args[size < sizeof(args) ? size : sizeof(args) - 1] = 0;
 	for (char *c = args; *c; c++) {
-		if (c[0] == 'h' && c[1] == 'e' && c[2] == 'l' && c[3] == 'l' && c[4] == 'o' && c[5] == '_' && c[6] == 'w' &&
-		    c[7] == 'a' && c[8] == 'i' && c[9] == 't' && c[10] == '=') {
-			for (c += 11; *c >= '0' && *c <= '9'; c++) {
+		unsigned i = 0;
+		if (c != args && c[-1] != ' ' && c[-1] != '\t') {
+			continue;
+		}
+		while (name[i] != 0 && c[i] == name[i]) {
+			i++;
+		}
+		if (name[i] == 0) {
+			for (c += i; *c >= '0' && *c <= '9'; c++) {
 				n = n * 10 + (*c - '0');
 			}
 			return n;

@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 
 #define kHKChangeSecret 0x100
 #define kHKCopyBlob     0x101
@@ -335,15 +336,7 @@ status(uint64_t out[5])
 static bool
 debugging(void)
 {
-	static int known = -1;
-	char args[1024];
-	size_t size = sizeof(args) - 1;
-
-	if (known < 0) {
-		memset(args, 0, sizeof(args));
-		known = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "passcode_debug=1") != NULL;
-	}
-	return known == 1;
+	return scion_boot_arg_is("passcode_debug", "1");
 }
 
 /* The key store's messages, as keybagd's notifications. */

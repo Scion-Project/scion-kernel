@@ -11,6 +11,7 @@
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "../../../userland/src/scion_bootline.h"
 #include <string.h>
 #include <errno.h>
 #include <setjmp.h>
@@ -66,8 +67,8 @@ static void header(const char *mode) {
 	struct timeval tv; gettimeofday(&tv, 0); char tb[64]; struct tm tm; time_t t = tv.tv_sec; gmtime_r(&t, &tm);
 	strftime(tb, sizeof tb, "%Y-%m-%dT%H:%M:%SZ", &tm);
 	struct utsname u; uname(&u);
-	char kv[512] = "?", ba[1024] = "?", bt[64] = "?"; size_t l = sizeof kv; sysctlbyname("kern.version", kv, &l, 0, 0);
-	l = sizeof ba; if (sysctlbyname("kern.bootargs", ba, &l, 0, 0)) snprintf(ba, sizeof ba, "(err %d %s)", ERR(errno));
+	char kv[512] = "?", bt[64] = "?"; size_t l = sizeof kv; sysctlbyname("kern.version", kv, &l, 0, 0);
+	const char *ba = scion_boot_line(); // the whole line (the S9's is ~1.1 KB: a 1 KB buffer got ENOMEM)
 	struct timeval bts; l = sizeof bts; if (!sysctlbyname("kern.boottime", &bts, &l, 0, 0)) snprintf(bt, sizeof bt, "%ld", (long)bts.tv_sec);
 	L("");
 	L("==================== dptest start %s (unix %ld) mode=%s uid=%d euid=%d pid=%d ====================", tb, (long)tv.tv_sec, mode, getuid(), geteuid(), getpid());

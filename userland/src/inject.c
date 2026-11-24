@@ -44,6 +44,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <signal.h>
 #include <sys/ucontext.h>
 #include <unistd.h>
@@ -375,10 +376,10 @@ static void
 functions_said_yes(const char *arguments)
 {
 	static const char names[] = HAKIOS_CA_FUNCTIONS;
-	const char *argument = strstr(arguments, "glno=");
+	const char *argument = scion_boot_arg_in(arguments, "glno", NULL);
 
 	/* glno=N[,N...]: and the other way about, for seeing what a function of ours stands in for */
-	for (argument = argument != NULL ? argument + 5 : NULL; argument != NULL && *argument >= '0' && *argument <= '9';) {
+	for (; argument != NULL && *argument >= '0' && *argument <= '9';) {
 		unsigned function = (unsigned)strtoul(argument, (char **)&argument, 10);
 
 		if (function < 90) {
@@ -388,8 +389,8 @@ functions_said_yes(const char *arguments)
 		}
 		argument = *argument == ',' ? argument + 1 : NULL;
 	}
-	argument = strstr(arguments, "glyes=");
-	for (argument = argument != NULL ? argument + 6 : NULL; argument != NULL && *argument >= '0' && *argument <= '9';) {
+	argument = scion_boot_arg_in(arguments, "glyes", NULL);
+	for (; argument != NULL && *argument >= '0' && *argument <= '9';) {
 		unsigned function = (unsigned)strtoul(argument, (char **)&argument, 10);
 
 		if (function < 90) {
@@ -627,22 +628,12 @@ my_detect_displays(id server, SEL selector)
 static void
 window_server_chooses_its_renderer(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	const char *camtl = NULL;
+	/* the word camtl= (the whole line: scion_bootline.h) */
+	const char *camtl = scion_boot_arg("camtl", NULL);
 	Class cls;
 	Method method;
 	IMP original;
 
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
-		/* the word camtl=, not the end of another argument's name */
-		const char *at = strstr(arguments, "camtl=");
-
-		while (at != NULL && at != arguments && at[-1] != ' ') {
-			at = strstr(at + 6, "camtl=");
-		}
-		camtl = at != NULL ? at + 6 : NULL;
-	}
 	if (camtl != NULL && atoi(camtl) != 0) {
 		say("hakios: camtl=1: CoreAnimation may have the Metal device (it needs "
 		    "QuartzCore.framework/default.metallib in the image)\n");
@@ -688,14 +679,8 @@ window_server_fixes(void)
 		    VSLOT(VT_GLES_CONTEXT, 0x060), 0x1883fc808UL, my_compile_shader);
 		say("hakios: the shader compiler of CoreAnimation is %s\n", orig_compile_shader ? "watched" : "NOT watched");
 		watch_for_faults();
-		{
-			char arguments[1024] = "";
-			size_t size = sizeof(arguments) - 1;
-
-			if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0 &&
-			    strstr(arguments, "glsb3=1") != NULL) {
-				give_the_renderer_a_shader(40, shadow_blur_source);
-			}
+		if (scion_boot_arg_is("glsb3", "1")) {
+			give_the_renderer_a_shader(40, shadow_blur_source);
 		}
 	}
 	say("hakios: window server hooks %s\n", orig_is_ready && orig_ignore_update_p && orig_begin_update &&
@@ -1725,16 +1710,9 @@ input_thread(__unused void *arg)
 	int device;
 
 	pthread_setname_np("redwood input");
-	{
-		char arguments[1024] = "";
-		size_t size = sizeof(arguments) - 1;
-
-		if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
-			touch_latency = strstr(arguments, "touch_lat=1") != NULL;
-			touch_fault = strstr(arguments, "touch_fault=1") != NULL;
-		}
-		mach_timebase_info(&timebase);
-	}
+	touch_latency = scion_boot_arg_is("touch_lat", "1");
+	touch_fault = scion_boot_arg_is("touch_fault", "1");
+	mach_timebase_info(&timebase);
 	device = open(HAKIOS_TOUCH_DEVICE, O_RDONLY);
 	if (device < 0) {
 		say("hakios: input: %s: %s\n", HAKIOS_TOUCH_DEVICE, strerror(errno));
@@ -1847,9 +1825,7 @@ container_manager_fixes(void)
 static void
 opengl_es(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	const char *argument;
+	const char *arguments = scion_boot_line(), *argument;
 	io_service_t gpu;
 	void *library;
 	int wanted = -1, told = 0;
@@ -1857,15 +1833,11 @@ opengl_es(void)
 	if (access(HAKIOS_GL, R_OK) != 0) {
 		return;                                 /* (an image built without it) */
 	}
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
-		functions_said_yes(arguments);
-		compile_shaders_said = strstr(arguments, "glcompile=1") != NULL;
-		for (argument = arguments; (argument = strstr(argument, "gl=")) != NULL; argument += 3) {
-			if (argument == arguments || argument[-1] == ' ') {
-				wanted = argument[3] != '0';
-				told = 1;
-			}
-		}
+	functions_said_yes(arguments);
+	compile_shaders_said = scion_boot_arg_is_in(arguments, "glcompile", "1");
+	if ((argument = scion_boot_arg_in(arguments, "gl", NULL)) != NULL) {
+		wanted = argument[0] != '0';
+		told = 1;
 	}
 	if (wanted < 0) {
 		gpu = IOServiceGetMatchingService(0, IOServiceMatching("HakiosGPU"));
@@ -1949,17 +1921,15 @@ static void
 watch_metallib_lookups(const char *arguments)
 {
 	static char path[256];
-	const char *at = strstr(arguments, "ca_metallib=");
+	size_t length = 0;
+	const char *at = scion_boot_arg_in(arguments, "ca_metallib", &length);
 	Class bundle = objc_getClass("NSBundle");
 	Method two, three;
 
-	if (at != NULL) {
-		size_t length = strcspn(at + 12, " ");
-
-		if (length < sizeof(path)) {
-			memcpy(path, at + 12, length);
-			ca_metallib = path;
-		}
+	if (at != NULL && length < sizeof(path)) {
+		memcpy(path, at, length);
+		path[length] = 0;
+		ca_metallib = path;
 	}
 	if (bundle == NULL) {
 		return;
@@ -1987,8 +1957,7 @@ hakios_init(void)
 	}
 	slide = (uintptr_t)cache - CACHE_BASE;
 	if (strcmp(name, "backboardd") == 0) {
-		char arguments[1024] = "";
-		size_t size = sizeof(arguments) - 1;
+		const char *arguments = scion_boot_line();
 
 		/*
 		 * Boot-arg ca_vbl=1: CoreAnimation's frame clock from the display driver's refresh
@@ -1997,7 +1966,7 @@ hakios_init(void)
 		 * (CADeviceUseVBL()); on the iPhone X it runs a timer of its own instead (CADisplayTimer),
 		 * whose phase it would set from the frame timings of a display driver this one is not.
 		 */
-		if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0 && strstr(arguments, "ca_vbl=1") != NULL) {
+		if (scion_boot_arg_is_in(arguments, "ca_vbl", "1")) {
 			setenv("CA_FORCE_TIMER", "1", 1);
 			say("hakios: ca_vbl=1: CoreAnimation is to take the display driver's refresh notifications\n");
 		}
@@ -2005,15 +1974,16 @@ hakios_init(void)
 		 * Boot-arg caenv=NAME=VALUE (as many as wanted): into the window server's environment, for
 		 * CoreAnimation's own switches (CA_LOG_TRIPLE_BUFFERING=1, CA_FORCE_DOUBLE_BUFFERING=1 ...).
 		 */
-		for (const char *argument = arguments; (argument = strstr(argument, "caenv=")) != NULL; argument += 6) {
+		size_t length = 0;
+		for (const char *argument = scion_boot_arg_in(arguments, "caenv", &length); argument != NULL;
+		    argument = scion_boot_arg_in(argument + length, "caenv", &length)) {
 			char setting[128];
-			size_t length = strcspn(argument + 6, " ");
 			char *equals;
 
-			if ((argument != arguments && argument[-1] != ' ') || length == 0 || length >= sizeof(setting)) {
+			if (length == 0 || length >= sizeof(setting)) {
 				continue;
 			}
-			memcpy(setting, argument + 6, length);
+			memcpy(setting, argument, length);
 			setting[length] = 0;
 			if ((equals = strchr(setting, '=')) != NULL) {
 				*equals = 0;
@@ -2028,7 +1998,7 @@ hakios_init(void)
 				say("hakios: caenv: %s=%s for the window server\n", setting, equals + 1);
 			}
 		}
-		if (strstr(arguments, "metal_watch=1") != NULL || strstr(arguments, "ca_metallib=") != NULL) {
+		if (scion_boot_arg_is_in(arguments, "metal_watch", "1") || scion_boot_arg_set_in(arguments, "ca_metallib")) {
 			watch_metallib_lookups(arguments);
 		}
 		opengl_es();

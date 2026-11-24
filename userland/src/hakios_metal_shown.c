@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <unistd.h>
 #include "hakios_metal_shown.h"
 
@@ -116,12 +117,9 @@ hakios_metal_is_window_server(void)
 static int
 camtl(const char *args)
 {
-	const char *at = strstr(args, "camtl=");
+	const char *at = scion_boot_arg_in(args, "camtl", NULL);
 
-	while (at != NULL && at != args && at[-1] != ' ') {
-		at = strstr(at + 6, "camtl=");
-	}
-	return at == NULL ? -1 : atoi(at + 6) != 0;
+	return at == NULL ? -1 : atoi(at) != 0;
 }
 
 #define CLIENTS_KEPT   "/private/var/db/HakiosMetal.clients"
@@ -174,20 +172,12 @@ isApplication(void)
 int
 hakios_metal_shown(void (*say)(const char *line))
 {
-	char args[1024] = "", line[256];
-	size_t size = sizeof(args) - 1;
+	/* the whole line (scion_bootline.h); the word metal=, not the end of another argument's name (ca_metal=, say) */
+	const char *args = scion_boot_line(), *at = scion_boot_arg_in(args, "metal", NULL);
+	char line[256];
 	const char *name = getprogname();
-	int level = 1;
+	int level = at != NULL ? atoi(at) : 1;
 
-	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0) {
-		/* the word metal=, not the end of another argument's name (ca_metal=, say) */
-		for (const char *at = args; (at = strstr(at, "metal=")) != NULL; at += 6) {
-			if (at == args || at[-1] == ' ') {
-				level = atoi(at + 6);
-				break;
-			}
-		}
-	}
 	if (name == NULL) {
 		return 0;
 	}

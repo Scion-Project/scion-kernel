@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 
 void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1, 2)));    /* camera_say.c */
 #define say hakios_camera_say
@@ -50,19 +51,7 @@ w_no(id self, SEL sel)
 static bool
 fusion_kept(void)
 {
-	char args[1024] = "", *w, *last = NULL;
-	size_t n = sizeof(args) - 1;
-
-	if (sysctlbyname("kern.bootargs", args, &n, NULL, 0) != 0) {
-		return false;
-	}
-	args[n < sizeof(args) ? n : sizeof(args) - 1] = '\0';
-	for (w = strtok_r(args, " ", &last); w != NULL; w = strtok_r(NULL, " ", &last)) {
-		if (strncmp(w, "cam_fusion=", 11) == 0 && atoi(w + 11) > 0) {
-			return true;
-		}
-	}
-	return false;
+	return scion_boot_arg_number("cam_fusion", 0) > 0;
 }
 
 void

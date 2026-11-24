@@ -49,6 +49,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 
 void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1, 2)));    /* camera_say.c */
 void hakios_camera_trace_callers(const char *what, const char *camera);                  /* camera_say.c */
@@ -59,25 +60,6 @@ void hakios_camera_trace_callers(const char *what, const char *camera);         
 #define ME              "cameracaptured"
 
 /* ---- cam_metal=1: the plug-in's fopen() of the client list ---- */
-
-static bool
-boot_arg(const char *word)
-{
-	char args[1024] = "";
-	size_t n = sizeof(args) - 1;
-	size_t len = strlen(word);
-
-	if (sysctlbyname("kern.bootargs", args, &n, NULL, 0) != 0) {
-		return false;
-	}
-	args[sizeof(args) - 1] = 0;
-	for (char *w = args; (w = strstr(w, word)) != NULL; w += len) {
-		if ((w == args || w[-1] == ' ') && (w[len] == 0 || w[len] == ' ')) {
-			return true;
-		}
-	}
-	return false;
-}
 
 static FILE *
 w_fopen(const char *path, const char *mode)
@@ -232,7 +214,7 @@ metal_image_added(const struct mach_header *header, intptr_t slide)
 void
 scioncam_metal_client(void)
 {
-	if (!boot_arg("cam_metal=1")) {
+	if (!scion_boot_arg_is("cam_metal", "1")) {
 		return;
 	}
 	say("metal: cam_metal=1: cameracaptured will be a client of the Metal plug-in (its preview pipeline needs a device)");

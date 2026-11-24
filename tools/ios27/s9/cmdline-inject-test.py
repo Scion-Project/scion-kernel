@@ -82,9 +82,9 @@ refused(lambda: ci.compose(LINE, '/usr/lib/o.dylib backboardd\n', b'no line here
         'a kernel without the S9 line')
 refused(lambda: ci.compose(LINE, '/usr/lib/o.dylib backboardd\n', kernel(DEFAULTS.replace('/usr/lib/b.dylib,backboardd', '/usr/lib/b.dylib,backboardd,X'))),
         'not the one', 'a kernel whose built-in sweetinject= differs')
-long_defaults = DEFAULTS + ' ' + ' '.join(f'arg{i}=1' for i in range(120))
+long_defaults = DEFAULTS + ' ' + ' '.join(f'arg{i}=1' for i in range(240))
 refused(lambda: ci.compose(LINE, '/usr/lib/o.dylib backboardd\n', kernel(long_defaults)), 'would leave out',
-        'a line that would push the kernel\'s own arguments off its 1024 bytes')
+        'a line that would push the kernel\'s own arguments off its 2048 bytes')
 # 7. the command as make-boot-image.sh runs it
 with tempfile.TemporaryDirectory() as t:
     rec = os.path.join(t, 'root-full.img.inject')
