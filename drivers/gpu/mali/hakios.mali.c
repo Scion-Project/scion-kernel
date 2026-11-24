@@ -26,6 +26,12 @@
  *   mali_gov=1          the clock follows the load (see gov_window()). Needs mali_pll and mali_acpm.
  *   mali_gov_frame=MHZ  clock floor while frames are shown (default 572; 0: none).
  *   mali_nap_us=US      poll interval for a job still running after its first 200 us, clamped to 10..1000 (default 50).
+ *   mali_irq=1          a job's end is waited for by the GPU's job interrupt (SPI 282, INTID 314) instead of naps of
+ *                       mali_nap_us; mali_irq_us=US (default 1000) is the longest sleep before a look anyway, and
+ *                       mali_spin_us=US (default 200) how long the status is looked at before the first sleep. Default 0.
+ *   mali_flushred=1     the GPU's flush reduction (Linux panfrost's JS_CONFIG_ENABLE_FLUSH_REDUCTION): a chain carries the
+ *                       GPU's flush count from when it was queued, and the cache flush at its start is left out when one
+ *                       happened since (the end flush of the chain before, nearly always). Default 0.
  *
  * The user client is opened by backboardd, which does not run as root. Nothing here or in hakios.mali.cpp needs root.
  *
@@ -61,6 +67,7 @@ extern boolean_t pmap_valid_address(uint64_t addr);             /* memory the ke
 extern int hakios_mfc_carved(uint64_t phys);                    /* the video decoder's (hakios.exynos_mfc.c, mfc_zc; stubs.c) */
 extern int hakios_scanout_carved(uint64_t phys);                /* the DPU's pool (hakios.exynos_dpu.c; stubs.c) */
 extern void hakios_exynos_bus_busy(void);                      /* drivers/soc/exynos/hakios.exynos_acpm.c */
+extern kern_return_t gic_v3_spi_attach(uint32_t intid, bool edge, void (*handler)(void *context, uint32_t intid), void *context);
 extern void HakiosMaliStart(void);                              /* drivers/gpu/mali/hakios.mali.cpp */
 extern uint32_t gMaliClients, gMaliBuffers, gMaliSubmits, gMaliFailed, gMaliShown;   /* hakios.mali.cpp */
 extern struct mali_made { uint64_t address, size; uint32_t asked, flags; } gMaliMade[32];
@@ -391,6 +398,10 @@ pause_us(uint32_t us)
 #define JS_CONFIG_NEXT      0x58
 #define JS_COMMAND_NEXT     0x60
 #define JS_CONFIG           ((3u << 8) | (3u << 12) | (8u << 16))  /* AS 0, caches flushed both ends */
+#define JS_CONFIG_FLUSH_REDUCTION (1u << 14) /* panfrost_regs.h: JS_CONFIG_ENABLE_FLUSH_REDUCTION */
+#define JS_FLUSH_ID_NEXT    0x70        /* panfrost_regs.h */
+#define GPU_LATEST_FLUSH_ID 0x38        /* panfrost_regs.h: the GPU's count of cache flushes */
+#define MALI_JOB_INTID      314         /* SPI 282 (Samsung's mali@17500000: interrupts <0 282 0 ...>, "JOB") */
 
 #define AS0                 0x2400
 #define AS_TRANSTAB_LO      0x00
@@ -1359,18 +1370,73 @@ job_bits(uint32_t value, uint32_t mask, uint32_t want)
 	return want == 0 ? (value & mask) != 0 : (value & mask) == want;
 }
 
+/*
+ * boot-arg mali_irq=1: the job interrupt. The line is level: it stays up while (JOB_INT_RAWSTAT & JOB_INT_MASK) is not 0,
+ * so the handler only takes the mask away (the line goes down) and wakes the waiter, which reads the raw status itself
+ * as before. The mask is set only while a waiter sleeps, to the bits it waits for. A lost interrupt costs one sleep of
+ * mali_irq_us; one sleep timed out with the job then found done is counted, and after MALI_IRQ_GIVE_UP of them in a row
+ * the naps come back for the rest of the boot (a line says so).
+ */
+#define MALI_IRQ_GIVE_UP 64
+static uint32_t mali_irq, mali_irq_us = 1000, mali_spin_us = 200;
+static bool mali_irq_on;
+static int mali_irq_event;
+static uint64_t mali_irq_woken, mali_irq_timed_out, mali_irq_count, mali_irq_looked;
+static uint32_t mali_irq_misses;
+
+static void
+mali_job_interrupt(__unused void *context, __unused uint32_t intid)
+{
+	wr(mali, JOB_INT_MASK, 0);
+	mali_irq_count++;
+	thread_wakeup((event_t)&mali_irq_event);
+}
+
 static bool
 wait_job(uint32_t at, uint32_t mask, uint32_t want, uint32_t ms)
 {
-	uint64_t deadline;
+	uint64_t deadline, spin_until;
 
-	for (int i = 0; i < 20; i++) {
+	clock_interval_to_deadline(mali_irq_on ? mali_spin_us : 200, NSEC_PER_USEC, &spin_until);
+	do {
 		if (job_bits(rd(mali, at), mask, want)) {
+			if (mali_irq_on) {
+				mali_irq_looked++;
+			}
 			return true;
 		}
 		delay(10);
-	}
+	} while (mach_absolute_time() < spin_until);
 	clock_interval_to_deadline(ms, NSEC_PER_MSEC, &deadline);
+	while (mali_irq_on && at == JOB_INT_RAWSTAT && mach_absolute_time() < deadline) {
+		wait_result_t r;
+
+		/* (asserted before the look: an interrupt between the two wakes this wait instead of being lost) */
+		assert_wait_timeout((event_t)&mali_irq_event, THREAD_UNINT, mali_irq_us, NSEC_PER_USEC);
+		wr(mali, JOB_INT_MASK, mask);
+		if (job_bits(rd(mali, at), mask, want)) {
+			clear_wait(current_thread(), THREAD_AWAKENED);
+			wr(mali, JOB_INT_MASK, 0);
+			mali_irq_looked++;
+			return true;
+		}
+		r = thread_block(THREAD_CONTINUE_NULL);
+		wr(mali, JOB_INT_MASK, 0);
+		if (job_bits(rd(mali, at), mask, want)) {
+			if (r == THREAD_TIMED_OUT) {
+				mali_irq_timed_out++;
+				if (++mali_irq_misses >= MALI_IRQ_GIVE_UP) {
+					mali_irq_on = false;
+					printf("mali: %u jobs in a row found done only after a timed-out sleep: the job interrupt is not "
+					    "coming; naps from now on\n", mali_irq_misses);
+				}
+			} else {
+				mali_irq_woken++;
+				mali_irq_misses = 0;
+			}
+			return true;
+		}
+	}
 	while (mach_absolute_time() < deadline) {
 		if (job_bits(rd(mali, at), mask, want)) {
 			return true;
@@ -1662,11 +1728,18 @@ walk_tables(uint64_t gpu, uint64_t walk[3])
  * finished nor failed within a second. After a failure the GPU is reset, so the next job finds it working.
  */
 #define MALI_HUNG       0xffu
+static uint32_t mali_flushred;          /* boot-arg mali_flushred=1 */
+static uint32_t mali_next_flush_id;     /* the chain about to run's: its queue entry's (mali_worker) */
+static bool mali_next_flush_known;
+
 uint32_t
 hakios_mali_submit(uint64_t chain, bool fragment)
 {
 	uint32_t slot = fragment ? 0 : 1, js = fragment ? JS0 : JS1, raw, status = 0;
 	bool finished;
+	bool reduce = mali_flushred && mali_next_flush_known;
+
+	mali_next_flush_known = false;
 
 	lck_mtx_lock(&mali_job_lock);
 	lck_mtx_lock(&mali_lock);
@@ -1675,7 +1748,10 @@ hakios_mali_submit(uint64_t chain, bool fragment)
 	wr(mali, js + JS_HEAD_NEXT_HI, (uint32_t)(chain >> 32));
 	wr(mali, js + JS_AFFINITY_NEXT_LO, shader_mask);
 	wr(mali, js + JS_AFFINITY_NEXT_HI, 0);
-	wr(mali, js + JS_CONFIG_NEXT, JS_CONFIG);
+	if (reduce) {
+		wr(mali, js + JS_FLUSH_ID_NEXT, mali_next_flush_id);
+	}
+	wr(mali, js + JS_CONFIG_NEXT, JS_CONFIG | (reduce ? JS_CONFIG_FLUSH_REDUCTION : 0));
 	wr(mali, js + JS_COMMAND_NEXT, 1);
 	lck_mtx_unlock(&mali_lock);
 	/*
@@ -1728,6 +1804,7 @@ hakios_mali_submit(uint64_t chain, bool fragment)
 static struct {
 	uint64_t chain, seq, queued;
 	uint32_t owner;                 /* the client's number (hakios_mali_enqueue_for), 0: none */
+	uint32_t flush_id;              /* mali_flushred: the GPU's flush count when it was queued (after its cleans) */
 	bool fragment;
 } mali_queue[MALI_QUEUE];
 
@@ -2126,6 +2203,8 @@ mali_worker(__unused void *parameter, __unused wait_result_t result)
 		bool dropped = owner_drops(owner, seq);
 
 		fragment = mali_queue[mali_queue_head].fragment;
+		mali_next_flush_id = mali_queue[mali_queue_head].flush_id;
+		mali_next_flush_known = true;
 		if (dropped) {
 			mali_dropped++;
 		}
@@ -2173,6 +2252,12 @@ mali_worker(__unused void *parameter, __unused wait_result_t result)
 					    jobs[1], busy[1] / 1000000, jobs[1] ? busy[1] / 1000 / jobs[1] : 0, pll_mhz(),
 					    gov_switches, gov_ups, gov_capped, mc == GOV_NOT_READ_MC ? 0 : mc / 1000,
 					    mc == GOV_NOT_READ_MC ? 0 : mc % 1000 / 100);
+					if (mali_irq || mali_flushred) {
+						printf("mali: job interrupt %s: %llu jobs found done by a look, %llu woken by it, %llu "
+						    "after a timed-out sleep, %llu interrupts; flush reduction %s\n", mali_irq_on ? "on" :
+						    mali_irq ? "given up" : "off", mali_irq_looked, mali_irq_woken, mali_irq_timed_out,
+						    mali_irq_count, mali_flushred ? "on" : "off");
+					}
 					busy[0] = busy[1] = jobs[0] = jobs[1] = 0;
 					since = now;
 				}
@@ -2223,6 +2308,7 @@ hakios_mali_enqueue_for(uint64_t chain, bool fragment, uint32_t owner)
 	unsigned at = (mali_queue_head + mali_queue_count) % MALI_QUEUE;
 
 	mali_queue[at].chain = chain;
+	mali_queue[at].flush_id = mali_flushred ? rd(mali, GPU_LATEST_FLUSH_ID) : 0;
 	mali_queue[at].fragment = fragment;
 	mali_queue[at].owner = owner;
 	mali_queue[at].seq = seq;
@@ -2322,6 +2408,18 @@ mali_thread(__unused void *parameter, __unused wait_result_t result)
 		return;
 	}
 	say("mali: came up to step %u of %u: the GPU is there for programs (HakiosMali)\n", reached, STEPS);
+	if (mali_irq) {
+		kern_return_t attached;
+
+		wr(mali, JOB_INT_MASK, 0);
+		attached = gic_v3_spi_attach(MALI_JOB_INTID, false, mali_job_interrupt, NULL);
+		mali_irq_on = attached == KERN_SUCCESS;
+		say("mali: the job interrupt (INTID %u): %s (%d); look %u us before sleeping, sleeps of %u us at most\n",
+		    MALI_JOB_INTID, mali_irq_on ? "attached" : "NOT attached: naps as before", attached, mali_spin_us, mali_irq_us);
+	}
+	if (mali_flushred) {
+		say("mali: flush reduction on (the GPU's flush count now %#x)\n", rd(mali, GPU_LATEST_FLUSH_ID));
+	}
 	gov_start();
 	for (;;) {
 		delay(60 * 1000 * 1000);
@@ -2378,6 +2476,12 @@ hakios_mali_init(void)
 	(void)PE_parse_boot_argn("mali_dvs_floor", &mali_dvs_floor, sizeof(mali_dvs_floor));
 	(void)PE_parse_boot_argn("mali_nap_us", &mali_nap_us, sizeof(mali_nap_us));
 	mali_nap_us = mali_nap_us < 10 ? 10 : mali_nap_us > 1000 ? 1000 : mali_nap_us;
+	(void)PE_parse_boot_argn("mali_irq", &mali_irq, sizeof(mali_irq));
+	(void)PE_parse_boot_argn("mali_irq_us", &mali_irq_us, sizeof(mali_irq_us));
+	mali_irq_us = mali_irq_us < 50 ? 50 : mali_irq_us > 20000 ? 20000 : mali_irq_us;
+	(void)PE_parse_boot_argn("mali_spin_us", &mali_spin_us, sizeof(mali_spin_us));
+	mali_spin_us = mali_spin_us > 2000 ? 2000 : mali_spin_us;
+	(void)PE_parse_boot_argn("mali_flushred", &mali_flushred, sizeof(mali_flushred));
 	if (!PE_parse_boot_argn("mali", &last_step, sizeof(last_step)) || last_step == 0) {
 		return;
 	}
