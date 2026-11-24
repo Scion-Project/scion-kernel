@@ -1444,6 +1444,30 @@ static struct {
 	unsigned count;
 } prof_table[PROF_SLOTS];
 
+/* The words of file PATH added to ARGUMENTS (a space between; new lines as spaces), as far as they fit. */
+static void
+gl_args_file(const char *path, char *arguments, size_t room)
+{
+	int fd = open(path, O_RDONLY);
+	size_t used = strlen(arguments);
+	ssize_t got;
+
+	if (fd < 0) {
+		return;
+	}
+	if (used + 2 < room) {
+		arguments[used++] = ' ';
+		got = read(fd, arguments + used, room - used - 1);
+		arguments[used + (got > 0 ? (size_t)got : 0)] = '\0';
+		for (char *c = arguments + used; *c != '\0'; c++) {
+			if (*c == '\n' || *c == '\r' || *c == '\t') {
+				*c = ' ';
+			}
+		}
+	}
+	close(fd);
+}
+
 static int
 prof_by_count(const void *a, const void *b)
 {
@@ -4788,8 +4812,17 @@ install(void)
 	size_t size = sizeof(arguments) - 1;
 	const char *argument;
 
-	/* the kernel's boot-args are where a run is told things */
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
+	/*
+	 * The kernel's boot-args are where a run is told things. The Note9's line is full (607 characters, the loader's own
+	 * first), so two files add to them: one in the image (userland/build.sh GL_ARGS=, /redwood/lib/hakios-gl.args) and one
+	 * kept on the phone (/private/var/db/hakios-gl.args, written by hand).
+	 */
+	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0) {
+		arguments[0] = '\0';
+	}
+	gl_args_file("/redwood/lib/hakios-gl.args", arguments, sizeof(arguments));
+	gl_args_file("/private/var/db/hakios-gl.args", arguments, sizeof(arguments));
+	if (arguments[0] != '\0') {
 		if ((argument = strstr(arguments, "gltrace=")) != NULL) {
 			trace_last = trace_first = (unsigned)strtoul(argument + 8, (char **)&argument, 10);
 			if (*argument == '-') {

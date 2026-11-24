@@ -883,6 +883,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		if [ -f obj/u2f_test ]; then cp obj/u2f_test root/bin/; fi   # an "if": see the inject.conf loop below
 		[ -f obj/air_run ] && cp obj/air_run root/bin/
 		[ "$GL" = test ] || cp obj/libhakios.gl.dylib root/lib/
+		# GL_ARGS="glprof=1000 ...": eagl's switches for a phone whose boot line is full (src/eagl.c gl_args_file)
+		[ -z "$GL_ARGS" ] || echo "$GL_ARGS" > root/lib/hakios-gl.args
 	fi
 	# a program is not started with a library that is not there: it would not start at all
 	echo "$INJECT" | while read -r library names; do

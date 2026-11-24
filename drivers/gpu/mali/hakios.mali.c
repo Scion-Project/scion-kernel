@@ -1728,7 +1728,7 @@ walk_tables(uint64_t gpu, uint64_t walk[3])
  * finished nor failed within a second. After a failure the GPU is reset, so the next job finds it working.
  */
 #define MALI_HUNG       0xffu
-static uint32_t mali_flushred;          /* boot-arg mali_flushred=1 */
+static uint32_t mali_flushred;          /* boot-arg mali_flushred=1 (the Note9's default) */
 static uint32_t mali_next_flush_id;     /* the chain about to run's: its queue entry's (mali_worker) */
 static bool mali_next_flush_known;
 
@@ -2476,6 +2476,16 @@ hakios_mali_init(void)
 	(void)PE_parse_boot_argn("mali_dvs_floor", &mali_dvs_floor, sizeof(mali_dvs_floor));
 	(void)PE_parse_boot_argn("mali_nap_us", &mali_nap_us, sizeof(mali_nap_us));
 	mali_nap_us = mali_nap_us < 10 ? 10 : mali_nap_us > 1000 ? 1000 : mali_nap_us;
+	{
+		/* the Note9: on by default (its boot line has no room for them; mali_irq=0 / mali_flushred=0 turn them off) */
+		char platform[24] = "";
+
+		(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+		if (strcmp(platform, "crownlte") == 0) {
+			mali_irq = 1;
+			mali_flushred = 1;
+		}
+	}
 	(void)PE_parse_boot_argn("mali_irq", &mali_irq, sizeof(mali_irq));
 	(void)PE_parse_boot_argn("mali_irq_us", &mali_irq_us, sizeof(mali_irq_us));
 	mali_irq_us = mali_irq_us < 50 ? 50 : mali_irq_us > 20000 ? 20000 : mali_irq_us;
