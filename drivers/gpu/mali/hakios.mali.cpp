@@ -410,6 +410,9 @@ public:
 	virtual IOReturn clientClose(void) APPLE_KEXT_OVERRIDE;
 	virtual void free(void) APPLE_KEXT_OVERRIDE;
 	virtual IOReturn clientMemoryForType(UInt32 type, IOOptionBits * options, IOMemoryDescriptor ** memory) APPLE_KEXT_OVERRIDE;
+	virtual IOExternalTrap * getTargetAndTrapForIndex(IOService ** targetP, UInt32 index) APPLE_KEXT_OVERRIDE;
+	IOReturn trapSubmit(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6);
+	IOReturn trapHello(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6);
 	virtual IOReturn externalMethod(uint32_t selector, IOExternalMethodArguments * args,
 	    IOExternalMethodDispatch * dispatch, OSObject * target, void * reference) APPLE_KEXT_OVERRIDE;
 };
@@ -1009,6 +1012,72 @@ HakiosMaliUserClient::clientMemoryForType(UInt32 type, IOOptionBits * options, I
 	}
 	IOLockUnlock(gMaliLock);
 	return ret;
+}
+
+/*
+ * The submissions through IOConnectTrap6 (iokit_user_client_trap): a system call with the request's address, not a Mach
+ * message carrying it. Round 18 timed a submission at 35 to 40 us from hakios-drm's side and 12 to 14 us of it here: the
+ * rest was the message, about 5,700 a second in a blurred screen, a fifth of a core. Trap 0: the submission (p1 the address
+ * of one struct drm_panfrost_submit, or of two in a row; p2 how many), both read in and their numbers written back. Trap 1:
+ * 'MALI' written at p1, which is how hakios-drm knows the traps are here (iokit_user_client_trap answers success for a
+ * trap a client does not have).
+ */
+#define kMaliTrapHello          0x4d414c49u     /* 'MALI' */
+static IOExternalTrap gMaliTraps[2] = {
+	{ NULL, (IOTrap) &HakiosMaliUserClient::trapSubmit },
+	{ NULL, (IOTrap) &HakiosMaliUserClient::trapHello },
+};
+
+IOExternalTrap *
+HakiosMaliUserClient::getTargetAndTrapForIndex(IOService ** targetP, UInt32 index)
+{
+	if (index >= sizeof(gMaliTraps) / sizeof(gMaliTraps[0])) {
+		return NULL;
+	}
+	*targetP = this;
+	return &gMaliTraps[index];
+}
+
+IOReturn
+HakiosMaliUserClient::trapSubmit(void * p1, void * p2, void * p3 __unused, void * p4 __unused, void * p5 __unused,
+    void * p6 __unused)
+{
+	struct drm_panfrost_submit requests[2];
+	uintptr_t count = (uintptr_t) p2;
+	user_addr_t at = (user_addr_t) (uintptr_t) p1;
+	uint64_t entered = mach_absolute_time();
+	IOReturn ret;
+
+	if (fBuffers == NULL || (count != 1 && count != 2)) {
+		return kIOReturnBadArgument;
+	}
+	if (!hakios_mali_ready()) {
+		return kIOReturnNotReady;
+	}
+	if (copyin(at, requests, count * sizeof(requests[0])) != 0) {
+		return kIOReturnBadArgument;
+	}
+	if (count == 2) {
+		OSIncrementAtomic((SInt32 *) &gMaliPairs);
+	}
+	ret = submit(&requests[0]);
+	if (ret == kIOReturnSuccess && count == 2) {
+		ret = submit(&requests[1]);
+	}
+	if (ret == kIOReturnSuccess && copyout(requests, at, count * sizeof(requests[0])) != 0) {
+		ret = kIOReturnBadArgument;
+	}
+	method_timed(entered);
+	return ret;
+}
+
+IOReturn
+HakiosMaliUserClient::trapHello(void * p1, void * p2 __unused, void * p3 __unused, void * p4 __unused, void * p5 __unused,
+    void * p6 __unused)
+{
+	uint32_t hello = kMaliTrapHello;
+
+	return copyout(&hello, (user_addr_t) (uintptr_t) p1, sizeof(hello)) == 0 ? kIOReturnSuccess : kIOReturnBadArgument;
 }
 
 IOReturn

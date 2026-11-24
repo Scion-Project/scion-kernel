@@ -2544,8 +2544,10 @@ hakios_mali_init(void)
 			 * of its time inside the call. Most jobs were found done by that look (150 000 of 175 000 in round 13).
 			 */
 			mali_spin_us = 0;
-			mali_worker_cpu = 0;
-			mali_worker_ab = 20;     /* (the measurement of round 18: see mali_worker_ab) */
+			/*
+			 * (the worker anywhere: round 18 measured no difference in a submission's round trip on processor 0 or
+			 * anywhere, and spikes of 9 to 19 ms on processor 0, which takes every device's interrupt)
+			 */
 		}
 	}
 	(void)PE_parse_boot_argn("mali_irq", &mali_irq, sizeof(mali_irq));

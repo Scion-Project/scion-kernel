@@ -146,6 +146,30 @@ static int flush_pending(void);
  * and the difference is the call itself, or the time this thread waited for a processor inside it. Every 2000 requests the
  * sums go to the kernel, which says them in the log; sent straight, not through call() (which may be under pending_lock).
  */
+/*
+ * Submissions through HakiosMali's trap 0 (IOConnectTrap6: a system call, not a Mach message carrying the request) when its
+ * trap 1 answers 'MALI' at the address given (the kernel answers success for a trap it does not have, so the word is what
+ * says). Round 18: 35 to 40 us a submission from here, 12 to 14 of them the kernel's. HAKIOS_TRAP=0 turns it off.
+ */
+/* IOKit's own IOConnectTrap6, which iOS's headers mark unavailable; the library has it (IOKit.tbd: _IOConnectTrap6) */
+extern kern_return_t hakios_connect_trap6(io_connect_t connect, uint32_t index, uintptr_t p1, uintptr_t p2, uintptr_t p3,
+    uintptr_t p4, uintptr_t p5, uintptr_t p6) __asm("_IOConnectTrap6");
+
+static bool
+submit_trap(void)
+{
+	static int state = -1;
+
+	if (state < 0) {
+		const char *value = getenv("HAKIOS_TRAP");
+		uint32_t hello = 0;
+
+		state = (value == NULL || strcmp(value, "0") != 0) &&
+		    hakios_connect_trap6(connection, 1, (uintptr_t)&hello, 0, 0, 0, 0, 0) == KERN_SUCCESS && hello == 0x4d414c49u;
+	}
+	return state == 1;
+}
+
 static struct {
 	uint64_t calls, sum_ns, max_ns, under_50us, over_500us;
 } rtt;
@@ -192,7 +216,12 @@ call(unsigned number, void *data, size_t size)
 	} else {
 		uint64_t began = mach_absolute_time();
 
-		result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
+		if (submit_trap()) {
+			/* one struct drm_panfrost_submit, or two in a row (struct mali_submit2), read and written back by the kernel */
+			result = hakios_connect_trap6(connection, 0, (uintptr_t)data, number == HAKIOS_MALI_SUBMIT2 ? 2 : 1, 0, 0, 0, 0);
+		} else {
+			result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
+		}
 		rtt_note(mach_absolute_time() - began);
 	}
 
