@@ -2538,6 +2538,14 @@ hakios_mali_init(void)
 			mali_irq = 1;
 			mali_flushred = 1;
 			/*
+			 * BUCK6 follows the GPU's level (the APM's voltage for it + mali_dvs_margin, at least mali_dvs_floor) instead of
+			 * 950 mV throughout: a GPU's energy for the same work goes with the square of its voltage, so a lower clock at
+			 * 950 mV saved nearly nothing. mali_dvs=0 keeps 950 mV.
+			 */
+			if (!PE_parse_boot_argn("mali_dvs", &mali_dvs, sizeof(mali_dvs))) {
+				mali_dvs = 1;
+			}
+			/*
 			 * No look before sleeping for the interrupt: the worker's 200 us look at the status took the core from the
 			 * thread that submitted (the window server's drawing thread, woken by nobody, waiting to run inside its
 			 * submission): round 16 timed the submission's own work at 4 to 10 us, and the drawing thread spent a third

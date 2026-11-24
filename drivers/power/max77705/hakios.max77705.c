@@ -338,6 +338,51 @@ battery_read(struct hakios_battery_state *b)
 	return true;
 }
 
+/*
+ * The battery's current, a line a minute and a sum since the start by whether the screen was on, for comparing what a change
+ * costs (round 21 on the Note9: battery optimisation needs numbers; the 5-minute line gave one or two a test). A reading
+ * every POLL_MS; positive current is charging, so what is drawn is the negative. Nothing is said while a charger is attached.
+ */
+extern bool hakios_panel_asleep(void);          /* drivers/display/panel/hakios.s6e3ha8.c (stubs.c: never) */
+static struct {
+	int64_t minute_ua;
+	unsigned minute_reads, minute_on;
+	int64_t on_ua, off_ua;
+	uint64_t on_reads, off_reads;
+} power;
+
+static void
+power_note(const struct hakios_battery_state *b)
+{
+	bool on = !hakios_panel_asleep();
+
+	if (b->external) {
+		power.minute_reads = power.minute_on = 0;
+		power.minute_ua = 0;
+		return;
+	}
+	power.minute_ua += b->current_ua;
+	power.minute_reads++;
+	power.minute_on += on;
+	if (on) {
+		power.on_ua += b->current_ua;
+		power.on_reads++;
+	} else {
+		power.off_ua += b->current_ua;
+		power.off_reads++;
+	}
+	if (power.minute_reads * (POLL_MS / 1000) >= 60) {
+		say("max77705: a minute: %lld mA drawn on average (the screen on in %u of %u readings), %d.%02d%%, %d mV; since the "
+		    "start: screen on %llu s at %lld mA, off %llu s at %lld mA\n", -power.minute_ua / power.minute_reads / 1000,
+		    power.minute_on, power.minute_reads, b->percent_hundredths / 100, b->percent_hundredths % 100,
+		    b->voltage_uv / 1000, power.on_reads * (POLL_MS / 1000),
+		    power.on_reads ? -power.on_ua / (int64_t)power.on_reads / 1000 : 0, power.off_reads * (POLL_MS / 1000),
+		    power.off_reads ? -power.off_ua / (int64_t)power.off_reads / 1000 : 0);
+		power.minute_ua = 0;
+		power.minute_reads = power.minute_on = 0;
+	}
+}
+
 static void
 say_state(const char *when, const struct hakios_battery_state *b)
 {
@@ -1138,6 +1183,7 @@ battery_thread(void *arg, __unused wait_result_t result)
 			failed = 0;
 			hakios_battery_report(&b);
 			charger_tune(&b);
+			power_note(&b);
 			if (tick % 60 == 0) {
 				say_state("every 5 minutes", &b);
 				if (chg_diag) {

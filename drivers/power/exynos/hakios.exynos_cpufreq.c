@@ -2063,6 +2063,15 @@ hakios_exynos_cpufreq_gov_start(void)
 	 * tree); cpufreq_gov_lit_max=2002000 takes it. The level must be in the APM's table, as every rate here is.
 	 */
 	clusters[0].dt_max = 2002000;
+	{
+		/* the Note9: the A55s to Samsung's own policy top, 1950000, unless cpufreq_gov_lit_max= says (widgets: all eight cores busy) */
+		char platform[24] = "";
+
+		(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+		if (lit_max == 0 && strcmp(platform, "crownlte") == 0) {
+			lit_max = 1950000;
+		}
+	}
 	cluster_setup(&clusters[0], lit_max, lit_min, 1794000, 1053000);
 	/* (with OCP: up to the busy-count limits above, or cpufreq_gov_big_oc's) */
 	cluster_setup(&clusters[1], big_max, big_min,
