@@ -1433,11 +1433,14 @@ show_texture(struct eagl *e, struct image *image)
 #define PROF_SLOTS      8192
 #define PROF_DUMP       4000
 #define PROF_SHOWN      200
-#define PROF_DEPTH      4                       /* the program counter, the link register, seven callers from the frame chain */
+#define PROF_DEPTH      8                       /* the program counter, the link register, six callers from the frame chain */
 static unsigned prof_us;                        /* 0: no profile */
+static unsigned prof_waits;                     /* boot-arg glprof_wait=1: also where the thread waits inside a frame */
+static volatile int prof_in_frame;              /* between a frame's first drawing and its end (frame_begin, frame_end) */
 static thread_t prof_thread;                    /* the drawing thread, the first that begins a frame */
 static struct {
 	uint64_t stack[PROF_DEPTH];
+	unsigned waiting;                       /* 0: on a processor; 1: waiting (not running) inside a frame */
 	unsigned count;
 } prof_table[PROF_SLOTS];
 
@@ -1452,7 +1455,7 @@ prof_by_count(const void *a, const void *b)
 static void *
 prof_main(__unused void *argument)
 {
-	unsigned taken = 0, looks = 0;
+	unsigned taken = 0, looks = 0, waited = 0;
 
 	for (;;) {
 		thread_basic_info_data_t basic;
@@ -1462,8 +1465,21 @@ prof_main(__unused void *argument)
 
 		usleep(prof_us);
 		looks++;
-		if (thread_info(prof_thread, THREAD_BASIC_INFO, (thread_info_t)&basic, &count) != KERN_SUCCESS ||
-		    basic.run_state != TH_STATE_RUNNING) {
+		/*
+		 * On a processor; or, with glprof_wait=1, waiting inside a frame: the frame's time that is not the processor's (a
+		 * GPU buffer waited for, a lock, a kernel request), which the processor's samples cannot show. The stack of a
+		 * waiting thread is where it entered the kernel, and its callers say what it waits for.
+		 */
+		unsigned waiting;
+
+		if (thread_info(prof_thread, THREAD_BASIC_INFO, (thread_info_t)&basic, &count) != KERN_SUCCESS) {
+			continue;
+		}
+		if (basic.run_state == TH_STATE_RUNNING) {
+			waiting = 0;
+		} else if (prof_waits && prof_in_frame && basic.run_state == TH_STATE_WAITING) {
+			waiting = 1;
+		} else {
 			continue;
 		}
 		if (thread_suspend(prof_thread) != KERN_SUCCESS) {
@@ -1491,25 +1507,31 @@ prof_main(__unused void *argument)
 			}
 			fp = record[0];
 		}
+		hash = waiting;
 		for (unsigned depth = 0; depth < PROF_DEPTH; depth++) {
 			hash = (hash ^ stack[depth]) * 0x9e3779b97f4a7c15ull;
 		}
 		for (unsigned i = (unsigned)(hash >> 32) % PROF_SLOTS, probes = 0; probes < PROF_SLOTS; i = (i + 1) % PROF_SLOTS, probes++) {
-			if (prof_table[i].count == 0 || memcmp(prof_table[i].stack, stack, sizeof(stack)) == 0) {
+			if (prof_table[i].count == 0 ||
+			    (prof_table[i].waiting == waiting && memcmp(prof_table[i].stack, stack, sizeof(stack)) == 0)) {
 				memcpy(prof_table[i].stack, stack, sizeof(stack));
+				prof_table[i].waiting = waiting;
 				prof_table[i].count++;
 				break;
 			}
 		}
+		waited += waiting;
 		if (++taken < PROF_DUMP) {
 			continue;
 		}
 		/* the most frequent first, each as its image and the offset in it (dladdr: not while the thread was held) */
 		qsort(prof_table, PROF_SLOTS, sizeof(prof_table[0]), prof_by_count);
-		say("hakios-prof: %u samples of the drawing thread on a processor, in %u looks:\n", taken, looks);
+		say("hakios-prof: %u samples of the drawing thread, %u on a processor and %u waiting inside a frame (W), in %u "
+		    "looks:\n", taken, taken - waited, waited, looks);
 		for (unsigned i = 0; i < PROF_SHOWN && prof_table[i].count != 0; i++) {
 			char line[1024];
-			int at = snprintf(line, sizeof(line), "hakios-prof: %.1f%%", 100.0 * prof_table[i].count / taken);
+			int at = snprintf(line, sizeof(line), "hakios-prof: %s%.1f%%", prof_table[i].waiting ? "W " : "",
+			    100.0 * prof_table[i].count / taken);
 
 			for (unsigned depth = 0; depth < PROF_DEPTH && prof_table[i].stack[depth] != 0 && at < (int)sizeof(line); depth++) {
 				Dl_info where = { 0 };
@@ -1526,7 +1548,7 @@ prof_main(__unused void *argument)
 			say("%s\n", line);
 		}
 		memset(prof_table, 0, sizeof(prof_table));
-		taken = looks = 0;
+		taken = looks = waited = 0;
 	}
 	return NULL;
 }
@@ -1542,6 +1564,7 @@ frame_begin(struct eagl *e)
 		return;
 	}
 	e->in_frame = true;
+	prof_in_frame = 1;
 	e->began = now_us();
 	if (prof_us != 0 && prof_thread == MACH_PORT_NULL) {
 		pthread_t sampler;
@@ -1655,6 +1678,7 @@ frame_end(struct eagl *e, bool finished)
 	}
 	after = now_us();
 	e->in_frame = false;
+	prof_in_frame = 0;
 	e->frames++;
 	if (latency_lines) {
 		uint64_t tpidr;
@@ -4817,6 +4841,7 @@ install(void)
 		if ((argument = strstr(arguments, "glprof=")) != NULL) {
 			prof_us = (unsigned)strtoul(argument + 7, NULL, 10);    /* (frame_begin() starts the profile: prof_main()) */
 		}
+		prof_waits = strstr(arguments, "glprof_wait=1") != NULL;
 		if ((argument = strstr(arguments, "glslow=")) != NULL) {
 			slow_calls_us = strtoull(argument + 7, NULL, 10);
 		}
