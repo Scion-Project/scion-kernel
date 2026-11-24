@@ -42,6 +42,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -362,65 +363,12 @@ my_renderer(void *server)
 /* ---- the boot line ------------------------------------------------------------------------------ */
 
 /*
- * The kernel's boot line, whole. On the S9 it is longer than 1 KB (the image's own line, the loader's records and the
- * built-in line: about 1.2 KB with the stock image), and sysctl does not cut a string that does not fit: it refuses
- * (ENOMEM). Read into 1 KB, every switch below (sbgl=0, sbprof=0, sbshot=0, sbc3s=0) was silently not seen on the
- * phones: Mesa's OpenGL ES and its hooks were loaded into backboardd under Metal, and the 1 ms profiler ran for the
- * whole life of backboardd and of Settings. So the size is asked for first.
+ * The kernel's boot line is read whole, by scion_bootline.h: on the S9 it is longer than 1 KB (the image's own line,
+ * the loader's records and the built-in line, about 1.1 KB), and sysctl does not cut a string that does not fit: it
+ * refuses (ENOMEM). Read into 1 KB, every switch below (sbgl=0, sbprof=0, sbshot=0, sbc3s=0) was silently not seen on
+ * the phones until PR 411: Mesa's OpenGL ES and its hooks were loaded into backboardd under Metal, and the 1 ms
+ * profiler ran for the whole life of backboardd and of Settings.
  */
-static const char *boot_line;
-
-static void
-read_boot_line(void *context)
-{
-	size_t size = 0;
-	char *line = NULL;
-	(void)context;
-
-	if (sysctlbyname("kern.bootargs", NULL, &size, NULL, 0) == 0 && size > 0 && (line = calloc(1, size + 1)) != NULL &&
-	    sysctlbyname("kern.bootargs", line, &size, NULL, 0) != 0) {
-		free(line);
-		line = NULL;
-	}
-	boot_line = line != NULL ? line : "";
-}
-
-static const char *
-boot_args(void)
-{
-	static dispatch_once_t once;
-	dispatch_once_f(&once, NULL, read_boot_line);
-	return boot_line;
-}
-
-/* the value of the first word of the boot line that starts with NAME= (up to the next space), or NULL */
-static const char *
-boot_arg(const char *name, size_t *length)
-{
-	const char *line = boot_args();
-	size_t n = strlen(name);
-	for (const char *a = line; (a = strstr(a, name)) != NULL; a += n) {
-		if ((a == line || a[-1] == ' ') && a[n] == '=') {
-			*length = strcspn(a + n + 1, " ");
-			return a + n + 1;
-		}
-	}
-	return NULL;
-}
-
-/* NAME=0 anywhere on the line, as a word */
-static int
-boot_arg_zero(const char *name)
-{
-	const char *line = boot_args();
-	size_t n = strlen(name);
-	for (const char *a = line; (a = strstr(a, name)) != NULL; a += n) {
-		if ((a == line || a[-1] == ' ') && a[n] == '=' && a[n + 1] == '0' && (a[n + 2] == ' ' || a[n + 2] == '\0')) {
-			return 1;
-		}
-	}
-	return 0;
-}
 
 /* ---- CoreAnimation's shader functions -------------------------------------------------------- */
 
@@ -463,7 +411,7 @@ static const char c3s_source[] =
 static void
 give_c3s_a_source(void)
 {
-	if (boot_arg_zero("sbc3s")) {
+	if (scion_boot_arg_is("sbc3s", "0")) {
 		say("sbca: sbc3s=0: function 20 stays refused\n");
 		return;
 	}
@@ -824,29 +772,26 @@ start_profiler(void)
 	 * says (the built-in line carries sbprof=0; a test image adds e.g. sbprof=SpringBoard with s.dylib injected there).
 	 */
 	const char *me = getprogname();
-	int named = 0;
-	for (const char *line = boot_args(), *a = line; (a = strstr(a, "sbprof=")) != NULL; a += 7) {
-		if (a != line && a[-1] != ' ') {
-			continue;
-		}
-		size_t length = strcspn(a + 7, " ");
-		if ((length == 1 && (a[7] == '0' || a[7] == '1')) || length == 0) {
-			continue;
-		}
-		named = 1;
-		for (const char *v = a + 7, *end = a + 7 + length; v < end;) {
-			size_t k = strcspn(v, ", ");
-			if (k == strlen(me) && strncmp(v, me, k) == 0) {
-				say("sbca: sbprof names %s\n", me);
-				goto on;
-			}
-			v += k + 1;
-		}
-	}
-	if (named || boot_arg_zero("sbprof")) {
+	size_t length = 0;
+	const char *value = scion_boot_arg("sbprof", &length);
+	if (value != NULL && length == 1 && value[0] == '0') {
 		return;
 	}
-on:;
+	if (value != NULL && length > 0 && !(length == 1 && value[0] == '1')) {
+		int mine = 0;
+		for (const char *v = value, *end = value + length; v < end && !mine; v++) {
+			size_t k = strcspn(v, ", \t");
+			if (k > (size_t)(end - v)) {
+				k = (size_t)(end - v);
+			}
+			mine = k == strlen(me) && strncmp(v, me, k) == 0;
+			v += k;
+		}
+		if (!mine) {
+			return;
+		}
+		say("sbca: sbprof names %s\n", me);
+	}
 	text_range((const void *)mach_msg, &ksys_start, &ksys_end);
 	text_range(dlsym(RTLD_DEFAULT, "IOConnectCallMethod"), &iokit_start, &iokit_end);
 	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
@@ -992,7 +937,7 @@ wait_and_schedule(void *context)
 static void
 schedule_shots(void)
 {
-	if (boot_arg_zero("sbshot")) {
+	if (scion_boot_arg_is("sbshot", "0")) {
 		return;
 	}
 	dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), NULL, wait_and_schedule);
@@ -1024,9 +969,7 @@ no_ethernet_watcher(void)
 static int
 gl_wanted(void)
 {
-	size_t length = 0;
-	const char *value = boot_arg("sbgl", &length);
-	return value == NULL || length == 0 || value[0] != '0';
+	return !scion_boot_arg_is("sbgl", "0");
 }
 
 __attribute__((constructor))

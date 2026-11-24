@@ -44,6 +44,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include "camera_trace.h"
 
 void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1, 2)));    /* camera_say.c */
@@ -227,24 +228,6 @@ colour_info(void)
 	return d;
 }
 
-static bool
-boot_arg(const char *name)
-{
-	char args[1024] = "";
-	size_t n = sizeof(args) - 1, len = strlen(name);
-
-	if (sysctlbyname("kern.bootargs", args, &n, NULL, 0) != 0) {
-		return false;
-	}
-	args[n < sizeof(args) ? n : sizeof(args) - 1] = '\0';
-	for (char *last = NULL, *w = strtok_r(args, " ", &last); w != NULL; w = strtok_r(NULL, " ", &last)) {
-		if (strncmp(w, name, len) == 0 && w[len] == '=' && atoi(w + len + 1) > 0) {
-			return true;
-		}
-	}
-	return false;
-}
-
 void
 scioncam_colour_info(void)
 {
@@ -289,7 +272,7 @@ scioncam_colour_info(void)
 			method_setImplementation(a, (IMP)w_attachments);
 			o_allocate = method_getImplementation(m);
 			method_setImplementation(m, (IMP)w_allocate);
-			any_colour = boot_arg("cam_colour_any");
+			any_colour = scion_boot_arg_number("cam_colour_any", 0) > 0;
 			hakios_camera_colour_info = colour_info;
 			say("colour: the stream's colour info will be %s, and the pictures carry sRGB/601's attachments from the first "
 			    "session on", any_colour ? "the diagnostic's (cam_colour_any=1)" : "sRGB/601 for every output");

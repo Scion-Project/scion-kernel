@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <unistd.h>
 
 /* libproc's, which the iPhoneOS SDK does not declare (as in cputop.c) */
@@ -123,16 +124,12 @@ stop(int pid, const char *name)
 int
 main(int argc, char **argv)
 {
-	char args[1024] = "", list[512];
-	size_t size = sizeof(args) - 1;
+	char list[512];
 	int limit = argc > 1 ? atoi(argv[1]) : 900, mode = 1, board, count, tries = 0, chronod_done = 0;
 	int not_before = -1, quiet_by = -1;      /* when PosterBoard is first judged; when the load stops mattering */
-	const char *at;
 
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "poster_retry=")) != NULL) {
-		mode = atoi(at + strlen("poster_retry="));
-	}
+	mode = (int)scion_boot_arg_number("poster_retry", mode);
 	if (mode == 0) {
 		printf("poster_retry: off (poster_retry=0)\n");
 		return 0;

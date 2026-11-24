@@ -87,6 +87,7 @@
 
 #import <Foundation/Foundation.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <sys/stat.h>
 #include <fcntl.h>
 #import <Metal/Metal.h>
@@ -1361,10 +1362,7 @@ hm_strict(void)
 		return strcmp(env, "1") == 0;
 	}
 	if (strict < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-
-		strict = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_strict") != NULL;
+		strict = scion_boot_arg_set("metal_strict");
 	}
 	return strict != 0;
 }
@@ -1732,15 +1730,16 @@ hm_m2v_variant(const char *name, const char *label, const char *pipeline, int ve
 static void
 hm_dump_function(const char *label, id function, const char *key, const hakios_metal_constant *constants, unsigned count)
 {
-	char args[1024] = {0};
-	size_t size = sizeof(args) - 1;
-	const char *at;
+	/* key: "metal_dump=WHAT"; the line's metal_dump= is WHAT, or WHAT:NAME[,NAME...] */
+	const char *equals = strchr(key, '=');
+	size_t length = 0, what = equals != NULL ? strlen(equals + 1) : 0;
+	const char *at = scion_boot_arg("metal_dump", &length);
 
-	if (function == nil || sysctlbyname("kern.bootargs", args, &size, NULL, 0) != 0 || (at = strstr(args, key)) == NULL ||
-	    ![function respondsToSelector:sel_getUid("bitcodeData")]) {
+	if (function == nil || equals == NULL || at == NULL || length < what || strncmp(at, equals + 1, what) != 0 ||
+	    (length > what && at[what] != ':') || ![function respondsToSelector:sel_getUid("bitcodeData")]) {
 		return;
 	}
-	at += strlen(key);
+	at += what;
 	if (*at == ':') {
 		const char *name = [[function name] UTF8String];
 		bool listed = false;
@@ -2079,13 +2078,11 @@ ca_prof_start(void)
 	static dispatch_once_t once;
 
 	dispatch_once(&once, ^{
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
 		const char *at;
 		pthread_t sampler;
 
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) != 0 || (at = strstr(args, "ca_prof=")) == NULL) return;
-		ca_prof_us = (unsigned)atoi(at + 8);
+		if ((at = scion_boot_arg("ca_prof", NULL)) == NULL) return;
+		ca_prof_us = (unsigned)atoi(at);
 		if (ca_prof_us == 0) return;
 		pthread_create(&sampler, NULL, ca_prof_main, NULL);
 		hm_print("ca-prof: every thread looked at every %u us\n", ca_prof_us);
@@ -2112,10 +2109,19 @@ hm_m2v_missing(const char *class, const char *selector)
 static bool
 hm_boot_arg_set(const char *what)
 {
-	char args[1024] = "";
-	size_t size = sizeof(args) - 1;
+	/* "NAME=VALUE": that word, VALUE whole; "NAME": a word of that name (scion_bootline.h, the whole line) */
+	const char *equals = strchr(what, '=');
+	char name[64];
 
-	return sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, what) != NULL;
+	if (equals == NULL) {
+		return scion_boot_arg_set(what);
+	}
+	if ((size_t)(equals - what) >= sizeof(name)) {
+		return false;
+	}
+	memcpy(name, what, (size_t)(equals - what));
+	name[equals - what] = '\0';
+	return scion_boot_arg_is(name, equals + 1);
 }
 
 - (instancetype)initWithAcceleratorPort:(io_service_t)port
@@ -2125,12 +2131,10 @@ hm_boot_arg_set(const char *what)
 	 * beside them and aborts, while without a device it takes the road it takes today. Boot-arg metal_all=1: all. */
 	{
 		static int all = -1;
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
 		const char *name = getprogname();
 
 		if (all < 0) {
-			all = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_all=1") != NULL;
+			all = scion_boot_arg_is("metal_all", "1");
 		}
 		if (!all && (name == NULL || strcmp(name, "backboardd") != 0)) {
 			HM_ONCE("%s is not shown the device: the window server alone is (metal_all=1: every process)\n", name ? name : "?");
@@ -2142,13 +2146,9 @@ hm_boot_arg_set(const char *what)
 	if (native_bridge_metal_open != NULL && hm_boot_arg_set("metal_m2v=1")) {
 		/* boot-arg tu_debug=FLAGS[,FLAGS]: Turnip's TU_DEBUG in the window server (sysmem, gmem, forcebin, ...) */
 		{
-			char args[1024] = "", value[64] = "";
-			size_t size = sizeof(args) - 1;
-			const char *at;
+			char value[64] = "";
 
-			if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "tu_debug=")) != NULL) {
-				strlcpy(value, at + 9, sizeof(value));
-				value[strcspn(value, " ")] = 0;
+			if (scion_boot_arg_copy("tu_debug", value, sizeof(value))) {
 				setenv("TU_DEBUG", value, 1);
 				hm_print("metal2vulkan: TU_DEBUG=%s\n", value);
 			}
@@ -3277,11 +3277,9 @@ hm_describe_function(id f)
 			/* boot-arg metal_dump=FNV (a diagnostic): that module's bytes into the log in hex, for the host's own
 			 * front end and compiler to take apart. What it prints is the system's code: it stays in the log. */
 			{
-				char args[1024] = {0}, *at;
-				size_t size = sizeof(args) - 1;
+				const char *at = scion_boot_arg("metal_dump", NULL);
 
-				if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "metal_dump=")) != NULL &&
-				    (uint32_t)strtoul(at + 11, NULL, 16) == h) {
+				if (at != NULL && (uint32_t)strtoul(at, NULL, 16) == h) {
 					for (NSUInteger o = 0; o < [air length]; o += 64) {
 						char line[160];
 						size_t n = 0;
@@ -3491,10 +3489,7 @@ hm_compress_ok(void)
 	static int off = -1;
 
 	if (off < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-
-		off = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_noubwc") != NULL;
+		off = scion_boot_arg_set("metal_noubwc");
 	}
 	return !off;
 }
@@ -4965,10 +4960,7 @@ HM_REFUSES_OUT_LOUD
 		/* boot-arg metal_defer=1: this queue's command buffers recorded by a thread of hakios-metal's own (deferred
 		 * recording), so that the window server's render thread does not wait for each draw's encoding (some 40 us a
 		 * draw on the phone, 2 November) */
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_defer=1") != NULL) {
+		if (scion_boot_arg_is("metal_defer", "1")) {
 			hakios_metal_queue_set_deferred(_queue, 1);
 			HM_ONCE("command buffers recorded deferred, by a thread of hakios-metal's (metal_defer=1)\n");
 		}
@@ -5656,10 +5648,7 @@ hm_gmem_on(void)
 	static int on = -1;
 
 	if (on < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-
-		on = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_gmem=1") != NULL;
+		on = scion_boot_arg_is("metal_gmem", "1");
 	}
 	return on != 0;
 }
@@ -5671,10 +5660,7 @@ hm_fps_draws(void)
 	static int on = -1;
 
 	if (on < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-
-		on = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_fps=draws") != NULL;
+		on = scion_boot_arg_is("metal_fps", "draws");
 	}
 	return on != 0;
 }
@@ -5689,14 +5675,9 @@ hm_gmem_off(void)
 	static int bits = -1;
 
 	if (bits < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-		const char *at;
+		const char *at = scion_boot_arg("metal_gmem_off", NULL);
 
-		bits = 0;
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "metal_gmem_off=")) != NULL) {
-			bits = atoi(at + strlen("metal_gmem_off="));
-		}
+		bits = at != NULL ? atoi(at) : 0;
 	}
 	return (unsigned)bits;
 }
@@ -5711,14 +5692,9 @@ hm_gmem_draws(void)
 	static int draws = -1;
 
 	if (draws < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-		const char *at;
+		const char *at = scion_boot_arg("metal_gmem_draws", NULL);
 
-		draws = 56;
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "metal_gmem_draws=")) != NULL) {
-			draws = atoi(at + strlen("metal_gmem_draws="));
-		}
+		draws = at != NULL ? atoi(at) : 56;
 	}
 	return (unsigned)draws;
 }
@@ -5729,10 +5705,7 @@ hm_fps_on(void)
 	static int on = -1;
 
 	if (on < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-
-		on = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_fps") != NULL;
+		on = scion_boot_arg_set("metal_fps");
 	}
 	return on != 0;
 }
@@ -5781,9 +5754,7 @@ hm_fps_note(BOOL present, double gpu, double latency, hakios_metal_cb *cb)
 				static int passesOn = -1;
 				static unsigned seen;
 				if (passesOn < 0) {
-					char args[1024] = "";
-					size_t size = sizeof(args) - 1;
-					passesOn = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_fps=passes") != NULL;
+					passesOn = scion_boot_arg_is("metal_fps", "passes");
 				}
 				int n = passesOn ? hakios_metal_cb_pass_time(cb, 0, NULL, NULL, NULL, NULL, NULL) : 0;
 				double total = 0, us;
@@ -5823,9 +5794,7 @@ hm_fps_note(BOOL present, double gpu, double latency, hakios_metal_cb *cb)
 				static int mainOn = -1;
 				static unsigned mainShown;
 				if (mainOn < 0) {
-					char args[1024] = "";
-					size_t size = sizeof(args) - 1;
-					mainOn = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_fps=mainpass") != NULL;
+					mainOn = scion_boot_arg_is("metal_fps", "mainpass");
 				}
 				const BOOL main = mainOn && slowUs > 4000 && slowDraws >= 40 && mainShown < 6;
 				mainShown += main ? 1 : 0;
@@ -6060,10 +6029,7 @@ hm_sampling(void)
 	static int on = -1;
 
 	if (on < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-
-		on = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_fps=sample") != NULL;
+		on = scion_boot_arg_is("metal_fps", "sample");
 	}
 	return on != 0;
 }
@@ -6231,10 +6197,7 @@ hm_timeline_on(void)
 	static int on = -1;
 
 	if (on < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-
-		on = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_fps=timeline") != NULL;
+		on = scion_boot_arg_is("metal_fps", "timeline");
 	}
 	return on != 0;
 }
@@ -6263,10 +6226,7 @@ hm_completed(hakios_metal_cb *cb, void *context)
 		static int lines = -1;
 
 		if (lines < 0) {
-			char args[1024] = "";
-			size_t size = sizeof(args) - 1;
-
-			lines = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "touch_lat=1") != NULL;
+			lines = scion_boot_arg_is("touch_lat", "1");
 		}
 		if (lines) {
 			fprintf(stderr, "tl: M made %.0f committed %.0f done %.0f gpu %.0f\n", [self hakiosCreatedAt] * 1e6,
@@ -7339,9 +7299,7 @@ hm_rows_texture(HakiosMetalBlitCommandEncoder *self, hakios_metal_cb *cb, hakios
 	static int traced = -1;
 
 	if (traced < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-		traced = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_trace_release") != NULL;
+		traced = scion_boot_arg_set("metal_trace_release");
 	}
 	if (traced && [self retainCount] == 1) {
 		char what[128];
@@ -7395,10 +7353,7 @@ hm_spec_off(void)
 	static int off = -1;
 
 	if (off < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-
-		off = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_nospec") != NULL;
+		off = scion_boot_arg_set("metal_nospec");
 	}
 	return off != 0;
 }
@@ -8109,10 +8064,7 @@ hm_tracing(void)
 	static int on = -1;
 
 	if (on < 0) {
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-
-		on = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_trace=1") != NULL;
+		on = scion_boot_arg_is("metal_trace", "1");
 	}
 	return on == 1;
 }
@@ -8126,14 +8078,11 @@ hm_skip_word(void)
 	static int read;
 
 	if (!read) {
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-		const char *at;
+		const char *at = scion_boot_arg("metal_skip", NULL);
 
 		read = 1;
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "metal_skip=")) != NULL) {
-			at += strlen("metal_skip=");
-			for (size_t i = 0; i + 1 < sizeof(word) && at[i] != '\0' && at[i] != ' '; i++) {
+		if (at != NULL) {
+			for (size_t i = 0; i + 1 < sizeof(word) && at[i] != '\0' && at[i] != ' ' && at[i] != '\t'; i++) {
 				word[i] = at[i] == '_' ? ' ' : at[i];
 			}
 		}
@@ -8152,14 +8101,13 @@ hm_dump_config(const char *program, hakios_metal_buffer *const *buffers, const u
 	static NSMutableSet *seen;
 
 	if (state < 0) {
-		char args[1024] = {0};
-		size_t size = sizeof(args) - 1;
-		const char *at;
+		size_t length = 0;
+		const char *at = scion_boot_arg("metal_dump", &length);
 
 		state = 0;
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "metal_dump=cfg:")) != NULL) {
-			at += strlen("metal_dump=cfg:");
-			for (size_t i = 0; i + 1 < sizeof(name) && at[i] != '\0' && at[i] != ' '; i++) name[i] = at[i];
+		if (at != NULL && length > 4 && strncmp(at, "cfg:", 4) == 0) {
+			at += 4;
+			for (size_t i = 0; i + 1 < sizeof(name) && i < length - 4; i++) name[i] = at[i];
 			state = name[0] != '\0';
 			seen = [[NSMutableSet alloc] init];
 		}
@@ -8198,10 +8146,7 @@ hm_luma_boost_left_out(const char *program)
 		return NO;
 	}
 	if (keep < 0) {
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-
-		keep = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_luma_boost=1") != NULL;
+		keep = scion_boot_arg_is("metal_luma_boost", "1");
 		HM_ONCE("luma_boost: %s (metal_luma_boost=1 draws it)\n", keep ? "drawn" : "left out, the picture as it is");
 	}
 	return !keep;

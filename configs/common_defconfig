@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 767 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 782 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -1696,7 +1696,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (194)
+# User space (209)
 #
 
 # Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
@@ -1716,6 +1716,9 @@ CONFIG_MODEM_AGAIN=y
 
 # arguments only the kernel reads built into the kernel (HAKIOS_BUILTIN_ARGS); given on the line, an argument goes ...
 # CONFIG_BUILTIN_ARGS is not set
+
+# read by inject_sb.c (user space)
+# CONFIG_ANIM_MAX is not set
 
 # read by hakios.exec.c (kernel)
 # CONFIG_APPLOG is not set
@@ -1846,6 +1849,18 @@ CONFIG_MODEM_AGAIN=y
 # read by hakios.ak737x.c (kernel)
 # CONFIG_CAM_AF_Y is not set
 
+# read by camera_colour.c (user space)
+# CONFIG_CAM_COLOUR_ANY is not set
+
+# read by inject_media.c (user space)
+# CONFIG_CAM_FRONT_AF is not set
+
+# read by camera_stills.c (user space)
+# CONFIG_CAM_FUSION is not set
+
+# read by camera_metal.c (user space)
+# CONFIG_CAM_METAL is not set
+
 # the camera of this run (cam_s9=N's steps, camshot, the stream) is the rear one
 # CONFIG_CAM_REAR is not set
 
@@ -1890,6 +1905,12 @@ CONFIG_MODEM_AGAIN=y
 
 # the tele frames turned half round for user space (default 0, as Apollo streams it: no flip)
 # CONFIG_CAM_S9_TELE_TURN is not set
+
+# read by camera_refuse.c (user space)
+# CONFIG_CAM_STILL10 is not set
+
+# read by camera_trace.c (user space)
+# CONFIG_CAM_TRACE is not set
 
 # read by hakios_metal_shown.c, inject.c (user space)
 # CONFIG_CAMTL is not set
@@ -1992,6 +2013,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by 1002-avf-security-level.patch (kernel)
 # CONFIG_CS_RELAX_PLATFORM_TASK_PORTS is not set
+
+# read by inject_sb.c (user space)
+# CONFIG_DL_MAX is not set
 
 # read by hakios.exynos_dpu.c (kernel)
 # CONFIG_FB_PSR is not set
@@ -2113,6 +2137,9 @@ CONFIG_MODEM_AGAIN=y
 # read by 1101-virtio-disk-as-md0.patch (kernel)
 # CONFIG_MD0 is not set
 
+# read by inject_media.c (user space)
+# CONFIG_MEDIAMTL is not set
+
 # read by HakiosMetalCA.m (user space)
 # CONFIG_METAL_ALL is not set
 
@@ -2140,6 +2167,12 @@ CONFIG_MODEM_AGAIN=y
 # read by HakiosMetalCA.m (user space)
 # CONFIG_METAL_M2V is not set
 
+# every draw with the pipeline's own program, no uber shader specialised
+# CONFIG_METAL_NOSPEC is not set
+
+# read by HakiosMetalCA.m (user space)
+# CONFIG_METAL_NOUBWC is not set
+
 # read by hakiosmetal_air.m (user space)
 # CONFIG_METAL_PROFILE is not set
 
@@ -2147,7 +2180,13 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_METAL_SKIP is not set
 
 # read by HakiosMetalCA.m (user space)
+# CONFIG_METAL_STRICT is not set
+
+# read by HakiosMetalCA.m (user space)
 # CONFIG_METAL_TRACE is not set
+
+# read by HakiosMetalCA.m (user space)
+# CONFIG_METAL_TRACE_RELEASE is not set
 
 # read by inject.c (user space)
 # CONFIG_METAL_WATCH is not set
@@ -2221,6 +2260,9 @@ CONFIG_MODEM_AGAIN=y
 # read by hakios.scsnd.c (kernel)
 # CONFIG_SCSND_SIZE is not set
 
+# read by inject_sb.c (user space)
+# CONFIG_SIRI_ORB is not set
+
 # read by scion_splash.c (kernel)
 # CONFIG_SPLASH_LINES is not set
 
@@ -2253,6 +2295,9 @@ CONFIG_MODEM_AGAIN=y
 
 # the data volume starts from the seed in this image, share/var.seed, not from the empty template
 # CONFIG_VAR_SEED is not set
+
+# read by var_store.c (user space)
+# CONFIG_VAR_STORE_EVERY is not set
 
 # read by hakios.vgpu.c (kernel)
 # CONFIG_VGPU_HEIGHT is not set

@@ -67,6 +67,12 @@ FILES = {
     "userland/src/eagl.c": 'void k(char *arguments) { strstr(arguments, "u_strstr=1"); strstr(arguments, "ku_both="); }\n',
     "userland/src/init.c": 'static const char *\nboot_arg(const char *name)\n{ return 0; }\nvoid m(void) { boot_arg("u_helper"); }\n',
     "userland/src/HakiosMetalCA.m": 'void hm(void) { if (hm_boot_arg_set("u_hm_helper=1")) {} }\n',
+    # user space through the shared reader (userland/src/scion_bootline.h), in userland/src/, hakios-metal/ and tools/ios27/
+    "userland/src/sbca.c": 'void sa(void) { scion_boot_arg_is("u_scion_is", "0"); scion_boot_arg("u_scion", &n); }\n',
+    "tools/ios27/camera/camera_x.c": 'void sb(const char *l) { scion_boot_arg_number("u_scion_number", 0); scion_boot_arg_in(v + n, "u_scion_in", &n); }\n',
+    "hakios-metal/plugin/HakiosMetal.m": 'void sc(void) { scion_boot_arg_set("u_scion_set"); scion_boot_arg_is_in(scion_boot_line(), "u_scion_line", "1"); }\n',
+    "userland/src/scion_bootline.h": '/* scion_boot_arg("not_u_header", NULL) */\n',          # the header itself: its examples are no reader
+    "tools/bootline_test.c": 'void st(void) { scion_boot_arg_is_in(line, "not_u_test", "1"); }\n',     # a host test: not a program of the phone
     # the kernel also reads ku_both
     "drivers/net/hakios.net.c": 'void n(void) { PE_parse_boot_argn("ku_both", &v, 4); }\n',
     # kernel: a file the fork adds to Apple's XNU
@@ -83,9 +89,12 @@ try:
     got = found(d)
     for name, layers in (("k_direct", "k"), ("k_string", "k"), ("k_tunable", "k"), ("k_writeable", "k"), ("k_wrapped", "k"),
                          ("k_fork", "k"), ("k_wifi_helper", "k"), ("k_wifi_lx", "k"), ("l_arg", "l"), ("u_strstr", "u"), ("u_helper", "u"), ("u_hm_helper", "u"),
+                         ("u_scion_is", "u"), ("u_scion", "u"), ("u_scion_number", "u"), ("u_scion_in", "u"), ("u_scion_set", "u"),
+                         ("u_scion_line", "u"),
                          ("ku_both", "klu")):
         check("found: %-14s layers %s" % (name, layers), got.get(name) == layers, "got %r" % got.get(name))
-    for name in ("not_k_no_definition", "adreno_zap", "metadata", "not_u_other", "not_k_dt", "name", "arguments"):
+    for name in ("not_k_no_definition", "adreno_zap", "metadata", "not_u_other", "not_k_dt", "name", "arguments", "not_u_header",
+                 "not_u_test"):
         check("NOT found: %s" % name, name not in got, "it is in the catalogue as %r" % got.get(name))
     check("drivers/ is scanned as well as the fork's files", "k_tunable" in got and "k_fork" in got)
     check("the groups: the GPU file's argument is under GPU and display", "## GPU and display" in run(d, "--markdown").stdout)

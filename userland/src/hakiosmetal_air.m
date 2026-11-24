@@ -102,6 +102,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <unistd.h>
 
 /* The contract with Mesa's side, copied here rather than included: this file is built by
@@ -1248,15 +1249,9 @@ struct gem_close { uint32_t handle, pad; };
 	static NSUInteger profile = (NSUInteger)-1;
 
 	if (profile == (NSUInteger)-1) {
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-		const char *at;
+		const char *at = scion_boot_arg("metal_profile", NULL);
 
-		profile = 0;
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 &&
-		    (at = strstr(args, "metal_profile=")) != NULL && (at == args || at[-1] == ' ')) {
-			profile = (NSUInteger)strtoul(at + strlen("metal_profile="), NULL, 10);
-		}
+		profile = at != NULL ? (NSUInteger)strtoul(at, NULL, 10) : 0;
 		rw_print("feature profile %lu, which is what Metal reads this device's "
 		         "whole capability surface out of (metal_profile= to change it; 0 claims Apple1 "
 		         "alone, 1 adds Apple2, which is the lowest rung MPS asks about)\n",

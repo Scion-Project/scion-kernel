@@ -41,6 +41,7 @@ ADSP_RETURN	arg	adsp_return	Audio and battery	k	hakios.adsp.c
 ADSP_STEP	arg	adsp_step	Audio and battery	k	hakios.adsp.c	
 ADSP_WAIT	arg	adsp_wait	Audio and battery	k	hakios.adsp.c	
 ADT_LAYER	arg	adt_layer	Loader	l	loader.c	
+ANIM_MAX	arg	anim_max	User space	u	inject_sb.c	
 APFS_CHEAP	arg	apfs_cheap	Storage and APFS	k	apfs_vfsops.c	
 APFS_CHECK	arg	apfs_check	Storage and APFS	k	hakios.apfs_check.c	walk the whole volume and print only the totals
 APFS_CHUNK	arg	apfs_chunk	Storage and APFS	k	hakios.apfs_check.c	
@@ -126,11 +127,15 @@ CAM_AF_WIN	arg	cam_af_win	User space	k	hakios.ak737x.c	the window's side in pixe
 CAM_AF_X	arg	cam_af_x	User space	k	hakios.ak737x.c	
 CAM_AF_Y	arg	cam_af_y	User space	k	hakios.ak737x.c	
 CAM_AFTER	arg	cam_after	Cameras	k	hakios.camera.c	
+CAM_COLOUR_ANY	arg	cam_colour_any	User space	u	camera_colour.c	
 CAM_FAKE	arg	cam_fake	Cameras	k	hakios.camera.c	
 CAM_FAKE_FPS	arg	cam_fake_fps	Cameras	k	hakios.camera.c	
 CAM_FRAMES	arg	cam_frames	Cameras	k	hakios.camera.c	
+CAM_FRONT_AF	arg	cam_front_af	User space	u	inject_media.c	
+CAM_FUSION	arg	cam_fusion	User space	u	camera_stills.c	
 CAM_GAIN	arg	cam_gain	Cameras	k	hakios.camera.c	
 CAM_KEEP_MB	arg	cam_keep_mb	Cameras	k	hakios.camera.c	
+CAM_METAL	arg	cam_metal	User space	u	camera_metal.c	
 CAM_MODE	arg	cam_mode	Cameras	k	hakios.camera.c	
 CAM_PATTERN	arg	cam_pattern	Cameras	k	hakios.camera.c	
 CAM_REAR	arg	cam_rear	User space	k	hakios.exynos_camera_rear.c	the camera of this run (cam_s9=N's steps, camshot, the stream) is the rear one
@@ -173,7 +178,9 @@ CAM_S9_TELE_TURN	arg	cam_s9_tele_turn	User space	k	hakios.exynos_camera_star2.c	
 CAM_SENSOR	arg	cam_sensor	Cameras	k	hakios.camera.c	
 CAM_SETTLE	arg	cam_settle	Cameras	k	hakios.camera.c	
 CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c	
+CAM_STILL10	arg	cam_still10	User space	u	camera_refuse.c	
 CAM_SWITCH	arg	cam_switch	Cameras	k	hakios.exynos_camera.c	with 7: both cameras in one run, one streaming at a time, switched by the reader's SENSOR command
+CAM_TRACE	arg	cam_trace	User space	u	camera_trace.c	
 CAM_VBLANK	arg	cam_vblank	Cameras	k	hakios.camera.c	
 CAMTL	arg	camtl	User space	u	hakios_metal_shown.c,inject.c	
 CC_FADE	arg	cc_fade	User space	u	inject_sb.c	
@@ -223,6 +230,7 @@ DDR_REST	arg	ddr_rest	CPU, memory and boot	k	hakios.cpufreq.c
 DDR_VOTE	arg	ddr_vote	CPU, memory and boot	k	hakios.cpufreq.c	
 DEVSH	arg	devsh	USB	k	hakios.dwc3.c	
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
+DL_MAX	arg	dl_max	User space	u	inject_sb.c	
 EARLY_LOG	arg	early_log	CPU, memory and boot	k	loader_return.c	right after ml_parse_cpu_topology(), what the kernel will match each processor's MPIDR against
 ESSLOG	arg	esslog	CPU, memory and boot	k	loader_return.c	
 EXTRA_RAM	arg	extra_ram	Loader	kl	hakios_extra_ram.h,loader.c	
@@ -366,8 +374,9 @@ MAX98512	arg	max98512	Audio and battery	k	hakios.max98512.c	a look: the bus brou
 MAX98512_GAIN	arg	max98512_gain	Audio and battery	k	hakios.max98512.c	the bottom speaker's gain at start, 1 to 5 (+3 to +15 dB; 1); the top one's is always 1
 MC_CE	arg	mc_ce	User space	k	mc_ce.c	
 MD0	arg	md0	User space	k	1101-virtio-disk-as-md0.patch	
+MEDIAMTL	arg	mediamtl	User space	u	inject_media.c	
 MEMBENCH	arg	membench	CPU, memory and boot	k	hakios.cpufreq.c	
-METAL	arg	metal	GPU and display	ku	MiniIOMobileFramebuffer.cpp,inject_sb.c	say where Metal's device is (docs/metal-plan.md, step 1)
+METAL	arg	metal	GPU and display	ku	HakiosMetal.m,MiniIOMobileFramebuffer.cpp,hakios_metal_shown.c,inject_sb.c	say where Metal's device is (docs/metal-plan.md, step 1)
 METAL_ALL	arg	metal_all	User space	u	HakiosMetalCA.m	
 METAL_DEFER	arg	metal_defer	User space	u	HakiosMetalCA.m	this queue's command buffers recorded by a thread of hakios-metal's own (deferred recording), so that the window server's render thread does not wait
 METAL_DUMP	arg	metal_dump	User space	u	HakiosMetalCA.m	
@@ -377,11 +386,15 @@ METAL_GMEM_DRAWS	arg	metal_gmem_draws	User space	u	HakiosMetalCA.m	GMEM for a pa
 METAL_GMEM_OFF	arg	metal_gmem_off	User space	u	HakiosMetalCA.m	
 METAL_LUMA_BOOST	arg	metal_luma_boost	User space	u	HakiosMetalCA.m	
 METAL_M2V	arg	metal_m2v	User space	u	HakiosMetalCA.m	
+METAL_NOSPEC	arg	metal_nospec	User space	u	HakiosMetalCA.m	every draw with the pipeline's own program, no uber shader specialised
+METAL_NOUBWC	arg	metal_noubwc	User space	u	HakiosMetalCA.m	
 METAL_PROFILE	arg	metal_profile	User space	u	hakiosmetal_air.m	
 METAL_SKIP	arg	metal_skip	User space	u	HakiosMetalCA.m	
+METAL_STRICT	arg	metal_strict	User space	u	HakiosMetalCA.m	
 METAL_TRACE	arg	metal_trace	User space	u	HakiosMetalCA.m	
+METAL_TRACE_RELEASE	arg	metal_trace_release	User space	u	HakiosMetalCA.m	
 METAL_WATCH	arg	metal_watch	User space	u	inject.c	
-MFC	arg	mfc	Loader	kl	hakios.exynos_mfc.c,loader.c	look: the domain's and the clocks' state, read only
+MFC	arg	mfc	Loader	klu	hakios.exynos_mfc.c,inject_media.c,loader.c	look: the domain's and the clocks' state, read only
 MFC_FW_PART	arg	mfc_fw_part	User space	k	hakios.exynos_mfc.c	the partition holding mfc_fw.bin (default VENDOR)
 MFC_INT_KHZ	arg	mfc_int_khz	User space	k	hakios.exynos_mfc.c	
 MFC_IRQ	arg	mfc_irq	User space	k	hakios.exynos_mfc.c	with 4 or more: wait for the block's interrupt instead of polling
@@ -507,6 +520,7 @@ SHUB_REQ_RPC	arg	shub_req_rpc	Sensors	k	hakios.ssp.c	RPC that carries SSP to the
 SHUB_SAY	arg	shub_say	Sensors	k	hakios.ssp.c	with step 6: every n seconds two lines, the accelerometer's and the gyroscope's: the mean over
 SHUB_SELFREAD	arg	shub_selfread	Sensors	k	hakios.ssp.c	with step 6: thirty seconds after the boot, /dev/hakios-sensors opened and read for n seconds
 SHUB_SENSORS	arg	shub_sensors	Sensors	k	hakios.ssp.c	
+SIRI_ORB	arg	siri_orb	User space	u	inject_sb.c	
 SLEEP_CORES	arg	sleep_cores	CPU, memory and boot	k	GenericARMPE.cpp	sleep_cores_after= seconds (default 10) after the screen went off, the cores of the performance
 SLEEP_CORES_AFTER	arg	sleep_cores_after	CPU, memory and boot	k	GenericARMPE.cpp	
 SMALL_CORES	arg	small_cores	CPU, memory and boot	k	(patch)	
@@ -607,6 +621,7 @@ USTACKS_TNAME	arg	ustacks_tname	Debugging	k	user_exception_trace.c
 VAR_HFS	arg	var_hfs	User space	u	init.c	
 VAR_SAVE_MS	arg	var_save_ms	Storage and APFS	k	hakios.ufs.c	
 VAR_SEED	arg	var_seed	User space	u	init.c	the data volume starts from the seed in this image, share/var.seed, not from the empty template
+VAR_STORE_EVERY	arg	var_store_every	User space	u	var_store.c	
 VBLUR	arg	vblur	GPU and display	u	eagl.c	
 VGPU_HEIGHT	arg	vgpu_height	User space	k	hakios.vgpu.c	
 VGPU_WIDTH	arg	vgpu_width	User space	k	hakios.vgpu.c	

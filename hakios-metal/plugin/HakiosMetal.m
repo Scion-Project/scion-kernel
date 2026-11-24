@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "../../userland/src/scion_bootline.h"
 #include <unistd.h>
 
 static Class gBase;                     /* Metal's private _MTLDevice */
@@ -1552,18 +1553,10 @@ listedBesideTheBundle(const char *name)
 static BOOL
 shownToThisProcess(void)
 {
-	char args[1024] = "";
-	size_t size = sizeof(args) - 1;
+	/* the word metal= of the whole line (scion_bootline.h; not ca_metal= nor a 1 KB read that the S9's line refuses) */
+	const char * at = scion_boot_arg("metal", NULL);
 	const char * name = getprogname();
-	int level = 1;
-
-	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0) {
-		const char * at = strstr(args, "metal=");
-
-		if (at != NULL) {
-			level = atoi(at + 6);
-		}
-	}
+	int level = at != NULL ? atoi(at) : 1;
 	if (name == NULL) {
 		return NO;
 	}

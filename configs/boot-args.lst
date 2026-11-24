@@ -42,6 +42,7 @@ adsp_return	k
 adsp_step	k
 adsp_wait	k
 adt_layer	l
+anim_max	u
 apfs_cheap	k
 apfs_check	k
 apfs_chunk	k
@@ -132,11 +133,15 @@ cam_af_win	k
 cam_af_x	k
 cam_af_y	k
 cam_after	k
+cam_colour_any	u
 cam_fake	k
 cam_fake_fps	k
 cam_frames	k
+cam_front_af	u
+cam_fusion	u
 cam_gain	k
 cam_keep_mb	k
+cam_metal	u
 cam_mode	k
 cam_pattern	k
 cam_rear	k
@@ -183,7 +188,9 @@ cam_s9_tele_turn	k
 cam_sensor	k
 cam_settle	k
 cam_shutter	k
+cam_still10	u
 cam_switch	k
+cam_trace	u
 cam_vblank	k
 camtl	u
 cc_fade	u
@@ -235,6 +242,7 @@ ddr_rest	k
 ddr_vote	k
 devsh	k
 display_probe	k
+dl_max	u
 early_log	k
 epoch	k
 esslog	k
@@ -384,6 +392,7 @@ max98512	k
 max98512_gain	k
 mc_ce	k
 md0	k
+mediamtl	u
 membench	k
 metal	ku
 metal_all	u
@@ -395,11 +404,15 @@ metal_gmem_draws	u
 metal_gmem_off	u
 metal_luma_boost	u
 metal_m2v	u
+metal_nospec	u
+metal_noubwc	u
 metal_profile	u
 metal_skip	u
+metal_strict	u
 metal_trace	u
+metal_trace_release	u
 metal_watch	u
-mfc	kl
+mfc	klu
 mfc_fw_part	k
 mfc_int_khz	k
 mfc_irq	k
@@ -533,6 +546,7 @@ shub_req_rpc	k
 shub_say	k
 shub_selfread	k
 shub_sensors	k
+siri_orb	u
 sleep_cores	k
 sleep_cores_after	k
 small_cores	k
@@ -644,6 +658,7 @@ var_hfs	u
 var_save_ms	k
 var_seed	u
 var_store	u
+var_store_every	u
 vblur	u
 vgpu_height	k
 vgpu_width	k

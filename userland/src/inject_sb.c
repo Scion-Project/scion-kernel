@@ -64,6 +64,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <unistd.h>
 
 /* where what is said goes: the standard error, which is the console's for SpringBoard (an application's is nowhere) */
@@ -214,12 +215,7 @@ stall_watch(void *argument)
 static void
 watch_main_loop(void)
 {
-	char args[1024] = "";
-	size_t size = sizeof(args) - 1;
-	const char *arg;
-
-	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) != 0 || (arg = strstr(args, "touch_lat=1")) == NULL ||
-	    (arg != args && arg[-1] != ' ')) {
+	if (!scion_boot_arg_is("touch_lat", "1")) {
 		return;
 	}
 	mach_timebase_info(&timebase);
@@ -300,12 +296,7 @@ static IMP replace_method(const char *class_name, const char *selector, uintptr_
 static void
 sb_fps_hooks(void)
 {
-	char args[1024] = "";
-	size_t size = sizeof(args) - 1;
-	const char *arg;
-
-	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (arg = strstr(args, "sb_fps=0")) != NULL &&
-	    (arg == args || arg[-1] == ' ')) {
+	if (scion_boot_arg_is("sb_fps", "0")) {
 		say("hakios: SpringBoard's own frame rate caps left as they are (sb_fps=0)\n");
 		return;
 	}
@@ -832,34 +823,23 @@ battery_post_notifications(void)
 static bool
 gpu_draws(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
 	const char *argument;
 	io_service_t gpu;
 
 	/* ... or through Metal (boot-arg metal=1 with the GPU kept: HakiosMetal.bundle, an image built with METAL_PLUGIN) */
 	if (access("/redwood/lib/HakiosMetal.bundle/HakiosMetal", R_OK) == 0 &&
-	    sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
-		for (argument = arguments; (argument = strstr(argument, "metal=")) != NULL; argument += 6) {
-			if ((argument == arguments || argument[-1] == ' ') && argument[6] != '0') {
-				gpu = IOServiceGetMatchingService(0, IOServiceMatching("HakiosGPU"));
-				if (gpu != 0) {
-					IOObjectRelease(gpu);
-					return true;
-				}
-			}
+	    (argument = scion_boot_arg("metal", NULL)) != NULL && argument[0] != '0') {
+		gpu = IOServiceGetMatchingService(0, IOServiceMatching("HakiosGPU"));
+		if (gpu != 0) {
+			IOObjectRelease(gpu);
+			return true;
 		}
 	}
-	size = sizeof(arguments) - 1;
 	if (access(HAKIOS_GL, R_OK) != 0) {
 		return false;
 	}
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
-		for (argument = arguments; (argument = strstr(argument, "gl=")) != NULL; argument += 3) {
-			if (argument == arguments || argument[-1] == ' ') {
-				return argument[3] != '0';
-			}
-		}
+	if ((argument = scion_boot_arg("gl", NULL)) != NULL) {
+		return argument[0] != '0';
 	}
 	gpu = IOServiceGetMatchingService(0, IOServiceMatching("HakiosGPU"));
 	if (gpu == 0) {
@@ -904,16 +884,14 @@ plain_vibrancy(void)
 static void
 ui_lite(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	const char *argument;
+	size_t length = 0;
+	const char *argument = scion_boot_arg("ui_lite", &length);
 	CFBooleanRef on;
 
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0 ||
-	    (argument = strstr(arguments, "ui_lite=")) == NULL || (argument != arguments && argument[-1] != ' ')) {
+	if (argument == NULL || length == 0) {
 		return;
 	}
-	on = argument[8] == '0' ? kCFBooleanFalse : kCFBooleanTrue;
+	on = argument[0] == '0' ? kCFBooleanFalse : kCFBooleanTrue;
 	CFPreferencesSetValue(CFSTR("EnhancedBackgroundContrastEnabled"), on, CFSTR("com.apple.Accessibility"),
 	    kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
 	CFPreferencesSetValue(CFSTR("ReduceMotionEnabled"), on, CFSTR("com.apple.Accessibility"),
@@ -921,7 +899,7 @@ ui_lite(void)
 	CFPreferencesSynchronize(CFSTR("com.apple.Accessibility"), kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
 	notify_post("com.apple.accessibility.cache.enhance.background.contrast");
 	notify_post("com.apple.accessibility.cache.reduce.motion");
-	say("hakios: SpringBoard: ui_lite=%c: Reduce Transparency and Reduce Motion %s\n", argument[8], on == kCFBooleanTrue ? "on" : "off");
+	say("hakios: SpringBoard: ui_lite=%c: Reduce Transparency and Reduce Motion %s\n", argument[0], on == kCFBooleanTrue ? "on" : "off");
 }
 
 /* ---- the side button's long press ---------------------------------------------------------------- */
@@ -1411,16 +1389,12 @@ wallpaper_freeze_say(unsigned times)
 static void
 wallpaper_freeze(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	const char *argument;
+	int freeze = (int)scion_boot_arg_number("wallpaper_freeze", 0);
 
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0 ||
-	    (argument = strstr(arguments, "wallpaper_freeze=")) == NULL || (argument != arguments && argument[-1] != ' ') ||
-	    (argument[17] != '1' && argument[17] != '2')) {
+	if (freeze != 1 && freeze != 2) {
 		return;
 	}
-	wallpaper_hide_only = argument[17] == '2';
+	wallpaper_hide_only = freeze == 2;
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
 		wallpaper_freeze_pass(0);
 	});
@@ -1460,14 +1434,7 @@ status_bar_fallback_is_split(void)
 {
 	Class fallback = objc_getClass("_UIStatusBarVisualProvider_Fallback");
 	/* (no UIScreen here: this runs in the library's constructor, before UIKit is up -- +[UIScreen mainScreen] asserted) */
-	char args[1024] = "";
-	size_t size = sizeof(args) - 1;
-	const char *at;
-	unsigned width = 1125;
-
-	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "fbwidth=")) != NULL) {
-		width = (unsigned)atoi(at + 8);
-	}
+	unsigned width = (unsigned)scion_boot_arg_number("fbwidth", 1125);
 	status_bar_split = objc_getClass(width == 1080 ? "_UIStatusBarVisualProvider_Split1080" : "_UIStatusBarVisualProvider_Split1125");
 	if (fallback == NULL || status_bar_split == NULL) {
 		say("hakios: SpringBoard: no status bar fallback or split provider class (%p %p)\n", (void *)fallback, (void *)status_bar_split);
@@ -1514,12 +1481,7 @@ status_bar_fallback_is_split(void)
 static void
 wallpaper_cache(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	const char *argument;
-
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0 ||
-	    (argument = strstr(arguments, "wallpaper_cache=1")) == NULL || (argument != arguments && argument[-1] != ' ')) {
+	if (!scion_boot_arg_is("wallpaper_cache", "1")) {
 		return;
 	}
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -1558,12 +1520,7 @@ switcher_wallpaper_overlay(id self, SEL selector)
 	static unsigned told;
 
 	if (wanted < 0) {
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-		const char *at;
-
-		wanted = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 &&
-		    (at = strstr(args, "switcher_wallpaper=1")) != NULL && (at == args || at[-1] == ' ');
+		wanted = scion_boot_arg_is("switcher_wallpaper", "1");
 	}
 	if (told++ == 0) {
 		say("hakios: the switcher's wash of wallpaper is %s\n", wanted ?
@@ -1595,17 +1552,6 @@ switcher_wallpaper_overlay(id self, SEL selector)
  */
 static void (*original_prewarm_orb_view_shaders)(id self, SEL selector);
 
-static bool
-boot_arg_is_set(const char *word)
-{
-	char args[1024] = "";
-	size_t size = sizeof(args) - 1;
-	const char *at;
-
-	return sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 &&
-	    (at = strstr(args, word)) != NULL && (at == args || at[-1] == ' ');
-}
-
 static void
 prewarm_orb_view_shaders(id self, SEL selector)
 {
@@ -1614,7 +1560,7 @@ prewarm_orb_view_shaders(id self, SEL selector)
 	id device = create ? create() : nil;
 
 	if (skip < 0) {
-		skip = boot_arg_is_set("siri_orb=0");
+		skip = scion_boot_arg_is("siri_orb", "0");
 	}
 	if (create == NULL) {
 		say("hakios: Siri's orb: MTLCreateSystemDefaultDevice is not even a symbol here\n");
@@ -2085,11 +2031,11 @@ add_animation_cc(id self, SEL selector, id animation, id key)
 static void
 control_center_fades(const char *arguments)
 {
-	const char *setting = strstr(arguments, "cc_fade=");
+	const char *setting = scion_boot_arg_in(arguments, "cc_fade", NULL);
 	Method add = class_getInstanceMethod(objc_getClass("CALayer"), sel_registerName("addAnimation:forKey:"));
 
 	if (setting != NULL) {
-		cc_fade_s = atof(setting + 8) / 1000.0;
+		cc_fade_s = atof(setting) / 1000.0;
 	}
 	if (cc_fade_s <= 0 || add == NULL) {
 		return;
@@ -2186,14 +2132,6 @@ set_range(id self, SEL selector, frame_rate_range range)
 	original_set_range(self, selector, range);
 }
 
-static bool
-boot_arg(const char *arguments, const char *name)
-{
-	const char *at = strstr(arguments, name);
-
-	return at != NULL && (at == arguments || at[-1] == ' ');
-}
-
 /*
  * The animations SpringBoard hands the window server (an application opening from its icon and closing to it, the
  * home screen coming back, folders): the window server moves them at the rate each asks for (CAAnimation's
@@ -2234,7 +2172,7 @@ animation_rates(const char *arguments)
 {
 	Method add = class_getInstanceMethod(objc_getClass("CALayer"), sel_registerName("addAnimation:forKey:"));
 
-	if (!boot_arg(arguments, "anim_max=1") || add == NULL) {
+	if (!scion_boot_arg_is_in(arguments, "anim_max", "1") || add == NULL) {
 		return;
 	}
 	original_add_animation = (void (*)(id, SEL, id, id))method_setImplementation(add, (IMP)add_animation_full_rate);
@@ -2244,16 +2182,15 @@ animation_rates(const char *arguments)
 static void
 display_link_rates(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
+	const char *arguments = scion_boot_line();
 	Class link = objc_getClass("CADisplayLink");
 	Method made, fps, range;
 
-	if (link == NULL || sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0) {
+	if (link == NULL) {
 		return;
 	}
-	dl_say = boot_arg(arguments, "touch_lat=1");
-	dl_max = boot_arg(arguments, "dl_max=1");
+	dl_say = scion_boot_arg_is_in(arguments, "touch_lat", "1");
+	dl_max = scion_boot_arg_is_in(arguments, "dl_max", "1");
 	animation_rates(arguments);
 	if (!dl_say && !dl_max) {
 		return;
@@ -2280,24 +2217,19 @@ display_link_rates(void)
 static void
 accessibility_settings(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
 	static const struct {
 		const char *arg, *setter, *what;
 	} settings[] = {
-		{ "ax_rt=", "_AXSSetEnhanceBackgroundContrastEnabled", "Reduce Transparency" },
-		{ "ax_rm=", "_AXSSetReduceMotionEnabled", "Reduce Motion" },
+		{ "ax_rt", "_AXSSetEnhanceBackgroundContrastEnabled", "Reduce Transparency" },
+		{ "ax_rm", "_AXSSetReduceMotionEnabled", "Reduce Motion" },
 	};
 	void *library;
 
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0) {
-		return;
-	}
 	for (size_t i = 0; i < sizeof(settings) / sizeof(settings[0]); i++) {
-		const char *at = strstr(arguments, settings[i].arg);
+		long long value = scion_boot_arg_number(settings[i].arg, -1);
 		void (*set)(Boolean);
 
-		if (at == NULL || (at != arguments && at[-1] != ' ')) {
+		if (value < 0) {
 			continue;
 		}
 		if ((library = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW)) == NULL ||
@@ -2305,9 +2237,8 @@ accessibility_settings(void)
 			say("hakios: %s: no %s in libAccessibility\n", settings[i].what, settings[i].setter);
 			continue;
 		}
-		set(atoi(at + strlen(settings[i].arg)) != 0);
-		say("hakios: %s %s (%s%d)\n", settings[i].what, atoi(at + strlen(settings[i].arg)) ? "on" : "off", settings[i].arg,
-		    atoi(at + strlen(settings[i].arg)));
+		set(value != 0);
+		say("hakios: %s %s (%s=%lld)\n", settings[i].what, value ? "on" : "off", settings[i].arg, value);
 	}
 }
 
@@ -2340,21 +2271,17 @@ load_tweaks(void)
 static void
 caenv(void)
 {
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
+	size_t length = 0;
 
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0) {
-		return;
-	}
-	for (const char *argument = arguments; (argument = strstr(argument, "caenv=")) != NULL; argument += 6) {
+	for (const char *argument = scion_boot_arg("caenv", &length); argument != NULL;
+	    argument = scion_boot_arg_in(argument + length, "caenv", &length)) {
 		char setting[128];
-		size_t length = strcspn(argument + 6, " ");
 		char *equals;
 
-		if ((argument != arguments && argument[-1] != ' ') || length == 0 || length >= sizeof(setting)) {
+		if (length == 0 || length >= sizeof(setting)) {
 			continue;
 		}
-		memcpy(setting, argument + 6, length);
+		memcpy(setting, argument, length);
 		setting[length] = 0;
 		if ((equals = strchr(setting, '=')) != NULL) {
 			*equals = 0;
@@ -3288,16 +3215,13 @@ brightness_image_added(const struct mach_header *header, intptr_t image_slide)
 static void
 brightness_bridge(const char *arguments)
 {
-	const char *arg = strstr(arguments, "brightness_bridge=");
+	const char *arg = scion_boot_arg_in(arguments, "brightness_bridge", NULL);
 	int mode;
 	void *library;
 	dispatch_source_t timer;
 	IMP original;
 
-	while (arg != NULL && arg != arguments && arg[-1] != ' ') {
-		arg = strstr(arg + 1, "brightness_bridge=");
-	}
-	if (arg == NULL || (mode = atoi(arg + 18)) <= 0) {
+	if (arg == NULL || (mode = atoi(arg)) <= 0) {
 		return;
 	}
 	library = dlopen("/System/Library/PrivateFrameworks/BackBoardServices.framework/BackBoardServices", RTLD_LAZY);
@@ -3917,13 +3841,10 @@ hakios_springboard_init(void)
 	    original_battery_view_set_charge_percent ? "ok" : "NO",
 	    original_ring_charging_level ? "ok" : "NO");
 	{
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-		const char *delay;
+		const char *delay = scion_boot_arg("sb_delay", NULL);
 
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (delay = strstr(args, "sb_delay=")) != NULL &&
-		    (delay == args || delay[-1] == ' ')) {
-			usleep((useconds_t)(atof(delay + 9) * 1e6));
+		if (delay != NULL) {
+			usleep((useconds_t)(atof(delay) * 1e6));
 		}
 	}
 	/*
@@ -3941,14 +3862,7 @@ hakios_springboard_init(void)
 			((void (*)(id, SEL, BOOL))objc_msgSend)(device, monitoring, YES);
 		}
 		watch_main_loop();
-		{
-			char arguments[1024] = "";
-			size_t size = sizeof(arguments) - 1;
-
-			if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
-				control_center_fades(arguments);
-			}
-		}
+		control_center_fades(scion_boot_line());
 		say("hakios: battery: SOC=%d%% battery=%d charger=%d charging=%d\n",
 		    sysctl_int("kern.hakios.battery_soc"), sysctl_int("kern.hakios.battery_present"),
 		    sysctl_int("kern.hakios.battery_charger_present"), sysctl_int("kern.hakios.battery_charging"));
@@ -3963,14 +3877,7 @@ hakios_springboard_init(void)
 	notify_register_dispatch("com.hakios.switcher", &token, dispatch_get_main_queue(), ^(__unused int t) {
 		switcher();
 	});
-	{
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0) {
-			brightness_bridge(args);
-		}
-	}
+	brightness_bridge(scion_boot_line());
 	/*
 	 * Belt-and-suspenders unlock. The user can always swipe up to open the home screen -- that
 	 * works fine when the touch driver is doing its job. But if touch is still probing, has
@@ -3982,16 +3889,9 @@ hakios_springboard_init(void)
 	 * With autounlock=0 among the kernel's arguments the lock screen stays until it is swiped away
 	 * (to show the phone starting the way an iPhone does).
 	 */
-	{
-		char args[1024] = "";
-		size_t size = sizeof(args) - 1;
-		const char *arg;
-
-		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (arg = strstr(args, "autounlock=0")) != NULL &&
-		    (arg == args || arg[-1] == ' ')) {
-			say("hakios: the lock screen stays until it is swiped away (autounlock=0)\n");
-			return;
-		}
+	if (scion_boot_arg_is("autounlock", "0")) {
+		say("hakios: the lock screen stays until it is swiped away (autounlock=0)\n");
+		return;
 	}
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
 		unlock();

@@ -50,6 +50,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <execinfo.h>
 #include <signal.h>
 #include <sys/ucontext.h>
@@ -722,16 +723,6 @@ extern id objc_retain(id object);
 
 static bool metal_left_alone;                   /* boot-arg mediamtl=1 */
 
-static bool
-boot_arg(const char *what)
-{
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-
-	return sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0 &&
-	    strstr(arguments, what) != NULL;
-}
-
 static void
 keep_metal_from_the_capture_stack(void)
 {
@@ -893,7 +884,7 @@ capture_plist_patched(CFDictionaryRef plist, const char *path)
 	int one = 1, n = 0;
 
 	if (plist == NULL || CFGetTypeID(plist) != CFDictionaryGetTypeID() || strstr(path, "/D22/") == NULL ||
-	    boot_arg("cam_front_af=0")) {
+	    scion_boot_arg_is("cam_front_af", "0")) {
 		return NULL;
 	}
 	copy = (CFMutableDictionaryRef)CFPropertyListCreateDeepCopy(NULL, plist, kCFPropertyListMutableContainersAndLeaves);
@@ -1065,7 +1056,7 @@ hakios_media_init(void)
 	}
 	slide = (uintptr_t)_dyld_get_shared_cache_range(&length) - CACHE_BASE;
 	crash_watch();
-	metal_left_alone = boot_arg("mediamtl=1");
+	metal_left_alone = scion_boot_arg_is("mediamtl", "1");
 	if (metal_left_alone) {
 		say("hakios: mediaserverd: mediamtl=1: the capture stack may have the Metal device (it "
 		    "needs AppleCVAPhoto's cvadepth-iOS.metallib in the image)\n");
@@ -1084,7 +1075,7 @@ hakios_media_init(void)
 		register_hevc_encoder();
 		front_camera_focus_hooks();
 	}
-	if (boot_arg("mfc=")) {
+	if (scion_boot_arg_set("mfc")) {
 		pthread_t waiter;
 
 		pthread_create(&waiter, NULL, wait_for_mfc, NULL);

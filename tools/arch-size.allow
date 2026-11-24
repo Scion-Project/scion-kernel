@@ -85,7 +85,7 @@ tools/metal/owesclass.py                                  1002
 tools/modem/shannon_test.c                                 982
 tools/qmi-test/test_qmi.c                                 1562
 userland/src/HakiosMetal.m                                1534
-userland/src/HakiosMetalCA.m                              8747
+userland/src/HakiosMetalCA.m                              8692
 userland/src/audio_plugin.c                               1100
 userland/src/camera_device.c                              2044
 userland/src/camera_isp.c                                 1230
@@ -94,16 +94,16 @@ userland/src/gfx/gfx_gl.c                                 1083
 userland/src/gnssd.m                                      1936
 userland/src/gnsstool.c                                   1104
 userland/src/gps_app.m                                    1073
-userland/src/hakiosmetal_air.m                            6342
-userland/src/init.c                                       1840
-userland/src/inject.c                                     2048
-userland/src/inject_media.c                                1093
-userland/src/inject_sb.c                                  3999
+userland/src/hakiosmetal_air.m                            6337
+userland/src/init.c                                       1819
+userland/src/inject.c                                     2018
+userland/src/inject_media.c                                1084
+userland/src/inject_sb.c                                  3899
 userland/src/metal_drv_test.m                             7737
 userland/src/metal_stubdev.m                               877
 userland/src/metalvk/NativeBridgeMetalFrontend.mm         2664
 userland/src/metalvk/metal_tri.m                          1361
-userland/src/sbca.c                                       1155   # PR 411 (whole boot line, profiler without dladdr); split next
+userland/src/sbca.c                                       1098   # PR 411 grew it; its boot-line reader went to scion_bootline.h (24 Nov); split next
 userland/src/triangle_app.m                               1273
-userland/src/var_store.c                                  1697
+userland/src/var_store.c                                  1658
 userland/src/vk_test.c                                     956

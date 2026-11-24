@@ -71,6 +71,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "../../../../userland/src/scion_bootline.h"
 #include <unistd.h>
 
 #include "hakios.gl.h"
@@ -4199,43 +4200,41 @@ install(void)
 	};
 	Class class = objc_getClass("EAGLContext");
 	unsigned replaced = 0;
-	char arguments[1024] = "";
-	size_t size = sizeof(arguments) - 1;
-	const char *argument;
+	const char *arguments = scion_boot_line(), *argument;      /* the whole line: scion_bootline.h */
 
 	/* the kernel's boot-args are where a run is told things */
-	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) == 0) {
-		if ((argument = strstr(arguments, "gltrace=")) != NULL) {
-			trace_last = trace_first = (unsigned)strtoul(argument + 8, (char **)&argument, 10);
+	{
+		if ((argument = scion_boot_arg_in(arguments, "gltrace", NULL)) != NULL) {
+			trace_last = trace_first = (unsigned)strtoul(argument, (char **)&argument, 10);
 			if (*argument == '-') {
 				trace_last = (unsigned)strtoul(argument + 1, NULL, 10);
 			}
 		}
-		if ((argument = strstr(arguments, "gltrace_at=")) != NULL) {
-			trace_at = now_us() + strtoull(argument + 11, NULL, 10) * 1000000;
+		if ((argument = scion_boot_arg_in(arguments, "gltrace_at", NULL)) != NULL) {
+			trace_at = now_us() + strtoull(argument, NULL, 10) * 1000000;
 		}
-		if ((argument = strstr(arguments, "gltrace_draws=")) != NULL) {
-			trace_draws = (unsigned)strtoul(argument + 14, NULL, 10);
+		if ((argument = scion_boot_arg_in(arguments, "gltrace_draws", NULL)) != NULL) {
+			trace_draws = (unsigned)strtoul(argument, NULL, 10);
 		}
-		if ((argument = strstr(arguments, "gltrace_function=")) != NULL) {
-			trace_function = (int)strtoul(argument + 17, (char **)&argument, 10);
+		if ((argument = scion_boot_arg_in(arguments, "gltrace_function", NULL)) != NULL) {
+			trace_function = (int)strtoul(argument, (char **)&argument, 10);
 			trace_function_after = *argument == ',' ? (int)strtoul(argument + 1, NULL, 10) : 1;
 		}
-		if ((argument = strstr(arguments, "gltrace_frames=")) != NULL) {
-			trace_frames = (unsigned)strtoul(argument + 15, NULL, 10);
+		if ((argument = scion_boot_arg_in(arguments, "gltrace_frames", NULL)) != NULL) {
+			trace_frames = (unsigned)strtoul(argument, NULL, 10);
 		}
-		trace_lit = strstr(arguments, "gltrace_lit=1") != NULL;
-		trace_look = strstr(arguments, "gltrace_look=1") != NULL;
-		trace_shaders = strstr(arguments, "gltrace_shaders=1") != NULL;
-		function_numbers = strstr(arguments, "glnumbers=1") != NULL;
-		trace_uniforms_on = strstr(arguments, "gltrace_uniforms=1") != NULL;
-		if ((argument = strstr(arguments, "gltrace_corners=")) != NULL) {
-			trace_corners = (GLsizei)strtol(argument + 16, NULL, 10);
+		trace_lit = scion_boot_arg_is_in(arguments, "gltrace_lit", "1");
+		trace_look = scion_boot_arg_is_in(arguments, "gltrace_look", "1");
+		trace_shaders = scion_boot_arg_is_in(arguments, "gltrace_shaders", "1");
+		function_numbers = scion_boot_arg_is_in(arguments, "glnumbers", "1");
+		trace_uniforms_on = scion_boot_arg_is_in(arguments, "gltrace_uniforms", "1");
+		if ((argument = scion_boot_arg_in(arguments, "gltrace_corners", NULL)) != NULL) {
+			trace_corners = (GLsizei)strtol(argument, NULL, 10);
 		}
-		fetch_offered = strstr(arguments, "glfetch=0") == NULL;
-		group_vibrant_on = strstr(arguments, "glgroup=0") == NULL;
-		if ((argument = strstr(arguments, "gltrace_place=")) != NULL) {
-			char *end = (char *)argument + 14;
+		fetch_offered = !scion_boot_arg_is_in(arguments, "glfetch", "0");
+		group_vibrant_on = !scion_boot_arg_is_in(arguments, "glgroup", "0");
+		if ((argument = scion_boot_arg_in(arguments, "gltrace_place", NULL)) != NULL) {
+			char *end = (char *)argument;
 
 			for (unsigned i = 0; i < 4; i++) {
 				trace_place[i] = strtof(end, &end);
@@ -4243,20 +4242,20 @@ install(void)
 			}
 			trace_placed = 1;
 		}
-		all_shaders = strstr(arguments, "glshaders=1") != NULL;
-		census_on = strstr(arguments, "glcensus=1") != NULL;
-		frame_lines = strstr(arguments, "glframes=1") != NULL;
-		latency_lines = strstr(arguments, "touch_lat=1") != NULL;
-		if ((argument = strstr(arguments, "glslow=")) != NULL) {
-			slow_calls_us = strtoull(argument + 7, NULL, 10);
+		all_shaders = scion_boot_arg_is_in(arguments, "glshaders", "1");
+		census_on = scion_boot_arg_is_in(arguments, "glcensus", "1");
+		frame_lines = scion_boot_arg_is_in(arguments, "glframes", "1");
+		latency_lines = scion_boot_arg_is_in(arguments, "touch_lat", "1");
+		if ((argument = scion_boot_arg_in(arguments, "glslow", NULL)) != NULL) {
+			slow_calls_us = strtoull(argument, NULL, 10);
 		}
-		full_precision = strstr(arguments, "glprecision=0") == NULL;
-		vblur_on = strstr(arguments, "vblur=0") != NULL ? 0 : strstr(arguments, "vblur=2") != NULL ? 2 : 1;
-		if ((argument = strstr(arguments, "glplain=")) != NULL) {
-			plain_draws = (int)strtoul(argument + 8, NULL, 10);
+		full_precision = !scion_boot_arg_is_in(arguments, "glprecision", "0");
+		vblur_on = scion_boot_arg_is_in(arguments, "vblur", "0") ? 0 : scion_boot_arg_is_in(arguments, "vblur", "2") ? 2 : 1;
+		if ((argument = scion_boot_arg_in(arguments, "glplain", NULL)) != NULL) {
+			plain_draws = (int)strtoul(argument, NULL, 10);
 		}
-		if ((argument = strstr(arguments, "glskip=")) != NULL) {
-			const char *at = argument + 7;
+		if ((argument = scion_boot_arg_in(arguments, "glskip", NULL)) != NULL) {
+			const char *at = argument;
 
 			while (skipping < sizeof(skipped) / sizeof(skipped[0])) {
 				skipped[skipping++] = (GLuint)strtoul(at, NULL, 10);
@@ -4266,39 +4265,40 @@ install(void)
 				at++;
 			}
 		}
-		if ((argument = strstr(arguments, "glshow=")) != NULL) {
-			if (strchr(argument + 7, 'x') != NULL && strchr(argument + 7, 'x') < argument + 7 + strcspn(argument + 7, " ")) {
-				shown_wanted[0] = (GLint)strtol(argument + 7, NULL, 10);
-				shown_wanted[1] = (GLint)strtol(strchr(argument + 7, 'x') + 1, NULL, 10);
+		if ((argument = scion_boot_arg_in(arguments, "glshow", NULL)) != NULL) {
+			if (strchr(argument, 'x') != NULL && strchr(argument, 'x') < argument + strcspn(argument, " ")) {
+				shown_wanted[0] = (GLint)strtol(argument, NULL, 10);
+				shown_wanted[1] = (GLint)strtol(strchr(argument, 'x') + 1, NULL, 10);
 				shown_texture = 1;              /* (that there is one to show at all) */
 			} else {
-				shown_texture = (GLuint)strtoul(argument + 7, NULL, 10);
+				shown_texture = (GLuint)strtoul(argument, NULL, 10);
 			}
-			if ((argument = strstr(arguments, "glshow_part=")) != NULL) {
-				shown_part[0] = (GLint)strtol(argument + 12, NULL, 10);
-				shown_part[1] = strchr(argument + 12, ',') != NULL ?
-				    (GLint)strtol(strchr(argument + 12, ',') + 1, NULL, 10) : shown_part[0];
+			if ((argument = scion_boot_arg_in(arguments, "glshow_part", NULL)) != NULL) {
+				shown_part[0] = (GLint)strtol(argument, NULL, 10);
+				shown_part[1] = strchr(argument, ',') != NULL ?
+				    (GLint)strtol(strchr(argument, ',') + 1, NULL, 10) : shown_part[0];
 			}
-			if ((argument = strstr(arguments, "glshow_zoom=")) != NULL) {
-				shown_zoom = (GLint)strtol(argument + 12, NULL, 10);
+			if ((argument = scion_boot_arg_in(arguments, "glshow_zoom", NULL)) != NULL) {
+				shown_zoom = (GLint)strtol(argument, NULL, 10);
 				shown_zoom = shown_zoom < 1 ? 1 : shown_zoom;
 			}
 		}
-		share_surfaces = strstr(arguments, "glcopy=1") == NULL;
-		blit_targets = strstr(arguments, "glblit=0") == NULL;
-		sync_frames = strstr(arguments, "glsync=0") == NULL;
-		if (strstr(arguments, "glwait=0") != NULL || (strstr(arguments, "glwait=1") == NULL && display_waits())) {
+		share_surfaces = !scion_boot_arg_is_in(arguments, "glcopy", "1");
+		blit_targets = !scion_boot_arg_is_in(arguments, "glblit", "0");
+		sync_frames = !scion_boot_arg_is_in(arguments, "glsync", "0");
+		if (scion_boot_arg_is_in(arguments, "glwait", "0") || (!scion_boot_arg_is_in(arguments, "glwait", "1") && display_waits())) {
 			wait_for_frames = 0;
 		}
 		say("hakios-gl: a frame is waited for %s\n", wait_for_frames ? "here, before it is handed to the display" :
 		    "by the display's driver, not here");
-		for (argument = arguments; (argument = strstr(argument, "glenv=")) != NULL; argument += 6) {
+		size_t length = 0;
+		for (argument = scion_boot_arg_in(arguments, "glenv", &length); argument != NULL;
+		    argument = scion_boot_arg_in(argument + length, "glenv", &length)) {
 			char setting[128];
-			size_t length = strcspn(argument + 6, " ");
 			char *value;
 
 			if (length < sizeof(setting)) {
-				memcpy(setting, argument + 6, length);
+				memcpy(setting, argument, length);
 				setting[length] = 0;
 				if ((value = strchr(setting, '=')) != NULL) {
 					*value = 0;

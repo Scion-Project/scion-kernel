@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include "scion_bootline.h"
 #include <unistd.h>
 #include "camera_trace.h"
 
@@ -39,21 +40,12 @@ void hakios_camera_say(const char *format, ...) __attribute__((format(printf, 1,
 int
 scioncam_trace_level(void)
 {
-	char args[1024] = "", file[8] = "";
-	size_t n = sizeof(args) - 1;
+	char file[8] = "";
+	const char *value = scion_boot_arg("cam_trace", NULL);     /* the whole line: scion_bootline.h */
 	int fd;
 
-	if (sysctlbyname("kern.bootargs", args, &n, NULL, 0) == 0) {
-		args[n < sizeof(args) ? n : sizeof(args) - 1] = '\0';
-		for (char *w = strtok(args, " "); w != NULL; w = strtok(NULL, " ")) {
-			if (strncmp(w, "cam_trace=", 10) == 0) {
-				int level = atoi(w + 10);
-
-				if (level > 0) {
-					return level;
-				}
-			}
-		}
+	if (value != NULL && atoi(value) > 0) {
+		return atoi(value);
 	}
 	if ((fd = open(SCIONCAM_TRACE_FILE, O_RDONLY)) >= 0) {
 		ssize_t got = read(fd, file, sizeof(file) - 1);
