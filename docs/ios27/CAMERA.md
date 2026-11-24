@@ -607,7 +607,9 @@ with the diagnostics below (`YCbCrProbe.h`, `DrawNote.h`, all off unless set in 
 - **Inferred, not verified: where it is lost.** In the `S1` path the picture only reaches the screen through color 1, a
   memoryless attachment read back by a later draw of the same pass (framebuffer fetch). That is the next place to measure:
   what metal2vulkan does with that attachment and that fetch on PanVK (its rasterization-order and interlock features), and
-  whether the pass is split into instances there (the bridge's `new_instance_<reason>` counts, `touch /var/local/mtl2-telemetry`).
+  whether the pass is split into instances there. With the bridge's telemetry on (`touch /var/local/mtl2-telemetry`) through a
+  camera session: no `new_instance_<reason>` count (the pass is not split), no degradation notice and no refusal from backboardd.
+  So the next measurement is inside PanVK: how it keeps the memoryless color and serves its fetch.
 - **Also measured:** with the camera open, backboardd runs at 495 to 498 of its 514 MiB GPU cap. The kernel refused it a
   24 MiB buffer after the photo (D5), and 13 times with the BGRA8 copies on (D7), where `mtl2.log` also has `OutOfMemory(Device)`
   refusals of textures and of two command buffers. Each converted 828 x 1702 texture keeps an `RGBA16Float` image of about
