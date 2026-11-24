@@ -181,6 +181,8 @@ int pan_drmSyncobjExportSyncFile(int fd, uint32_t handle, int *sync_file_fd);
 int pan_drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd);
 int pan_drmSyncobjSignal(int fd, const uint32_t *handles, uint32_t count);
 
+static void bo_forget(uint32_t handle);
+
 int
 drmIoctl(int fd, unsigned long request, void *arg)
 {
@@ -194,10 +196,21 @@ drmIoctl(int fd, unsigned long request, void *arg)
 		error = wait_buffer(arg);
 	} else if (opened == PANFROST && pan_syncobj_ioctl(number, arg, &error)) {
 		/* (done there) */
+	} else if (opened == PANFROST && number == DRM_COMMAND_BASE + DRM_PANFROST_MADVISE) {
+		/*
+		 * HakiosMali purges nothing: its answer is always "retained" (hakios.mali.cpp kPanfrostMadvise), and asking cost
+		 * 14% of the window server's drawing thread on the Note9 (round 13's profile: panfrost's BO cache marks every
+		 * buffer it takes in and gives out), each a round trip under HakiosMali's lock. Answered here.
+		 */
+		((struct drm_panfrost_madvise *)arg)->retained = 1;
+		error = 0;
 	} else {
 		if (number == (DRM_IOCTL_GEM_CLOSE & 0xff)) {
-			forget_mapping(((struct drm_gem_close *)arg)->handle);
-			forget_surface_handle(((struct drm_gem_close *)arg)->handle);
+			uint32_t closed = ((struct drm_gem_close *)arg)->handle;
+
+			forget_mapping(closed);
+			forget_surface_handle(closed);
+			bo_forget(closed);
 		}
 		error = call(number, arg, IOCPARM_LEN(request));
 	}
@@ -446,6 +459,8 @@ forget_surface_handle(uint32_t handle)
 	pthread_mutex_unlock(&surface_handles_lock);
 }
 
+static void bo_mark_foreign(uint32_t handle);
+
 int
 drmPrimeFDToHandle(int fd, int surface, uint32_t *handle)
 {
@@ -461,6 +476,7 @@ drmPrimeFDToHandle(int fd, int surface, uint32_t *handle)
 	if (surface != 0) {
 		note_surface_handle((uint32_t)surface, request.handle);
 	}
+	bo_mark_foreign(request.handle);
 	return 0;
 }
 
@@ -512,6 +528,73 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t submitted;              /* the last job number the kernel gave (to this process) */
 static pthread_cond_t pan_given = PTHREAD_COND_INITIALIZER;     /* a sync object was given a job or signalled */
 static uint64_t finished;               /* a job known to be done, and with it every one before it */
+
+/*
+ * The last job of this process that named each buffer (by its handle), and whether the buffer is an IOSurface's
+ * (drmPrimeFDToHandle: another process's jobs may write it too). panfrost asks the kernel whether a buffer is idle
+ * at every reuse from its cache (WAIT_BO with no time to wait): 10% of the window server's drawing thread on the
+ * Note9 (round 13's profile), each a round trip to HakiosMali under its lock. A buffer of this process's own whose
+ * last job is at or below `finished` is idle without asking. Under `lock`.
+ */
+static struct bo_track { uint64_t seq; bool foreign; } *bo_tracks;
+static uint32_t bo_track_count;
+static uint64_t wait_bo_answered, wait_bo_asked;
+static bool tracking_broken;            /* no room once to remember a buffer: every wait asks the kernel from then on */
+
+static struct bo_track *
+bo_track(uint32_t handle, bool grow)
+{
+	if (handle == 0) {
+		return NULL;
+	}
+	if (handle > bo_track_count) {
+		uint32_t count = bo_track_count ? bo_track_count : 256;
+		struct bo_track *grown;
+
+		if (!grow) {
+			return NULL;
+		}
+		while (count < handle) {
+			count *= 2;
+		}
+		if ((grown = realloc(bo_tracks, count * sizeof(*grown))) == NULL) {
+			return NULL;
+		}
+		memset(grown + bo_track_count, 0, (count - bo_track_count) * sizeof(*grown));
+		bo_tracks = grown;
+		bo_track_count = count;
+	}
+	return &bo_tracks[handle - 1];
+}
+
+/* A buffer given back (GEM_CLOSE): its handle may come back for another buffer, which no job has named. */
+static void
+bo_forget(uint32_t handle)
+{
+	struct bo_track *t;
+
+	pthread_mutex_lock(&lock);
+	if ((t = bo_track(handle, false)) != NULL) {
+		t->seq = 0;
+		t->foreign = false;
+	}
+	pthread_mutex_unlock(&lock);
+}
+
+/* A buffer of an IOSurface (drmPrimeFDToHandle): another process's jobs may write it, so its waits always ask. */
+static void
+bo_mark_foreign(uint32_t handle)
+{
+	struct bo_track *t;
+
+	pthread_mutex_lock(&lock);
+	if ((t = bo_track(handle, true)) != NULL) {
+		t->foreign = true;
+	} else {
+		tracking_broken = true;
+	}
+	pthread_mutex_unlock(&lock);
+}
 
 /*
  * Mesa's deadlines are moments of its clock (os_time_get_nano(): CLOCK_MONOTONIC on this system),
@@ -637,6 +720,15 @@ submit(struct drm_panfrost_submit *request)
 	request->jc = chain;
 	pthread_mutex_lock(&lock);
 	submitted = seq > submitted ? seq : submitted;
+	for (uint32_t i = 0; i < request->bo_handle_count; i++) {
+		struct bo_track *t = bo_track(given[i] & ~(HAKIOS_DRM_BO_WRITTEN | HAKIOS_DRM_BO_SAMPLED), true);
+
+		if (t != NULL) {
+			t->seq = seq;
+		} else {
+			tracking_broken = true;     /* (no room to remember: ask the kernel from now on, as before) */
+		}
+	}
 	if (request->out_sync != 0 && (fence = pan_syncobj(request->out_sync)) != NULL) {
 		*fence = seq;
 		pthread_cond_broadcast(&pan_given);
@@ -654,12 +746,36 @@ static int
 wait_buffer(struct drm_panfrost_wait_bo *request)
 {
 	struct drm_panfrost_wait_bo asked = *request;
+	struct bo_track *t;
+	uint64_t seq = 0;
+	bool own = false;
 	int error;
 
+	pthread_mutex_lock(&lock);
+	if (tracking_broken) {
+		/* (asked, as before) */
+	} else if ((t = bo_track(request->handle, false)) != NULL && !t->foreign) {
+		own = true;
+		seq = t->seq;
+	} else if (t == NULL && request->handle > bo_track_count && bo_tracks != NULL) {
+		own = true;             /* (never named by a job of this process, nor imported: nothing of ours runs on it) */
+	}
+	if (own && seq <= finished) {
+		wait_bo_answered++;
+		pthread_mutex_unlock(&lock);
+		return 0;
+	}
+	wait_bo_asked++;
+	pthread_mutex_unlock(&lock);
 	do {
 		asked.timeout_ns = left_ns(request->timeout_ns);
 		error = call(DRM_COMMAND_BASE + DRM_PANFROST_WAIT_BO, &asked, sizeof(asked));
 	} while (error == ETIMEDOUT && left_ns(request->timeout_ns) > 0);
+	if (error == 0 && own) {
+		pthread_mutex_lock(&lock);
+		finished = seq > finished ? seq : finished;
+		pthread_mutex_unlock(&lock);
+	}
 	return error;
 }
 

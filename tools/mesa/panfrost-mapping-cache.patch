@@ -29,7 +29,7 @@ released when the BO's last reference goes.
 +init_mapping_cache(void)
 +{
 +   const char *value = getenv("HMC");
-+   mapping_cache_enabled = value != NULL && strcmp(value, "1") == 0;
++   mapping_cache_enabled = value == NULL || strcmp(value, "0") != 0;   /* on unless HMC=0 */
 +}
 +
 +static bool
