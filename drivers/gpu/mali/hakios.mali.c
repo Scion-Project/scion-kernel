@@ -45,6 +45,7 @@
 #include <kern/clock.h>
 #include <kern/locks.h>
 #include <kern/thread.h>
+#include <kern/sched_prim.h>
 #include <libkern/libkern.h>
 #include <mach/mach_time.h>
 #include <sys/kauth.h>
