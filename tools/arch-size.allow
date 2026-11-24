@@ -103,7 +103,7 @@ userland/src/metal_drv_test.m                             7737
 userland/src/metal_stubdev.m                               877
 userland/src/metalvk/NativeBridgeMetalFrontend.mm         2664
 userland/src/metalvk/metal_tri.m                          1361
-userland/src/sbca.c                                       1043
+userland/src/sbca.c                                       1155   # PR 411 (whole boot line, profiler without dladdr); split next
 userland/src/triangle_app.m                               1273
 userland/src/var_store.c                                  1697
 userland/src/vk_test.c                                     956
