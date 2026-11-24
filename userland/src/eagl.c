@@ -242,6 +242,8 @@ struct image {
 	unsigned looked;                /* ... the frame in which that memory was last looked at, */
 	uint64_t sum;                   /* ... and what it added up to */
 	unsigned unchanged;             /* ... and how many looks in a row found it the same (surface_changed()) */
+	bool seedless;                  /* it has changed once with its seed as it was: looked at as often as before */
+	bool sum_unknown;               /* copied again since its memory was last added up (surface_to_texture): sum is stale */
 	GLenum to, internal, format, type;
 	uint32_t plane, seed;
 	GLsizei width, height;
@@ -262,6 +264,8 @@ struct eagl {
 	struct image_counts {           /* what has happened to the table since the last line about it (image_report()) */
 		unsigned made, deleted, released, respecified, evicted, untracked, refills;
 		uint64_t refill_bytes;
+		unsigned looks, seedless;       /* surfaces' memory added up (surface_changed), changes found with no seed moved */
+		uint64_t look_bytes;
 	} image_counts;
 	uint64_t image_said;            /* when that line was written (now_us()) */
 	GLuint framebuffer;             /* the one bound */
@@ -844,15 +848,17 @@ image_report(struct eagl *e)
 	span = e->image_said == 0 ? IMAGE_SWEEP_US : now - e->image_said;
 	e->image_said = now;
 	if (c->made == 0 && c->deleted == 0 && c->released == 0 && c->respecified == 0 && c->evicted == 0 &&
-	    c->untracked == 0 && c->refills == 0) {
+	    c->untracked == 0 && c->refills == 0 && c->looks == 0) {
 		return;
 	}
 	say("hakios-gl: IOSurface textures: %u in use (at most %u, room for %u of %u), %llu MB of surfaces held (of %llu); "
 	    "in %llu s: %u new, %u deleted, %u let go (surface released), %u given other pixels, %u evicted, "
-	    "%u copied once (no room); %u refilled (%llu.%llu a second, %llu KB)\n", e->image_count, e->image_most,
+	    "%u copied once (no room); %u refilled (%llu.%llu a second, %llu KB); %u looks at copied surfaces (%llu MB), "
+	    "%u found changed with no seed moved\n", e->image_count, e->image_most,
 	    e->image_room, images_most, e->image_bytes >> 20, image_bytes_most >> 20, (span + 500000) / 1000000, c->made,
 	    c->deleted, c->released, c->respecified, c->evicted, c->untracked, c->refills,
-	    c->refills * 1000000ull / span, c->refills * 10000000ull / span % 10, c->refill_bytes >> 10);
+	    c->refills * 1000000ull / span, c->refills * 10000000ull / span % 10, c->refill_bytes >> 10, c->looks,
+	    c->look_bytes >> 20, c->seedless);
 	memset(c, 0, sizeof(*c));
 }
 
@@ -1027,6 +1033,8 @@ surface_shared(struct eagl *e, struct image *image)
  */
 #define STILL_LOOKS     120
 #define STILL_EVERY     8
+#define SEEDLESS_LOOKS  4
+#define SEEDLESS_EVERY  16
 static int still_seldom = 1;                    /* boot-arg glstill=0: every surface looked at every frame (for comparing) */
 static bool
 surface_changed(struct eagl *e, struct image *image)
@@ -1040,10 +1048,24 @@ surface_changed(struct eagl *e, struct image *image)
 	if (image->looked == e->frames + 1 || base == NULL || IOSurfaceGetPlaneCount(surface) > 0) {
 		return false;
 	}
-	if (still_seldom && image->unchanged >= STILL_LOOKS && (e->frames + IOSurfaceGetID(surface)) % STILL_EVERY != 0) {
+	if (still_seldom && image->seedless && image->unchanged >= STILL_LOOKS &&
+	    (e->frames + IOSurfaceGetID(surface)) % STILL_EVERY != 0) {
+		return false;
+	}
+	/*
+	 * One that has never changed with its seed as it was is looked at every SEEDLESS_EVERY frames once it has been the same
+	 * SEEDLESS_LOOKS times (a change with a seed is seen at once, by the seed). Round 19: a quarter of the window server's
+	 * drawing thread in these looks, 265 surfaces, and not one of them changed in any five seconds of the run. The first
+	 * change of one with no seed moved shows up to SEEDLESS_EVERY frames late (a quarter of a second), and it is looked at as
+	 * before from then on.
+	 */
+	if (still_seldom && !image->seedless && image->unchanged >= SEEDLESS_LOOKS &&
+	    (e->frames + IOSurfaceGetID(surface)) % SEEDLESS_EVERY != 0) {
 		return false;
 	}
 	image->looked = e->frames + 1;
+	e->image_counts.looks++;
+	e->image_counts.look_bytes += size;
 	/* four independent chains (the multiply's latency hides behind the other three; the one chain of
 	   xor-multiply-shift per word took ~4 ms for a 10 MB surface on a little core), folded at the end */
 	{
@@ -1070,6 +1092,12 @@ surface_changed(struct eagl *e, struct image *image)
 		sum = (sum ^ (sum >> 29) ^ h3) * 0x9e3779b97f4a7c15ull;
 		sum ^= sum >> 29;
 	}
+	if (image->sum_unknown) {
+		/* (copied since the last sum, by its seed: what this adds up to is what the texture holds) */
+		image->sum_unknown = false;
+		image->sum = sum;
+		return false;
+	}
 	if (sum == image->sum) {
 		image->unchanged += image->unchanged < STILL_LOOKS;
 		return false;
@@ -1095,6 +1123,7 @@ surface_to_texture(struct eagl *e, struct image *image)
 	if (image->shared) {
 		return;
 	}
+	image->sum_unknown = true;
 	/*
 	 * The seed is the one the lock sees, before the pixels are read: taken after the copy, as it was,
 	 * a write between the two (a label's text drawn into its layer while it was being copied) moved
@@ -1843,8 +1872,14 @@ my_glBindTexture(void *context, GLenum target, GLuint texture)
 	}
 	if (texture != 0 && e->image_count != 0 && (image = image_of(e, texture)) != NULL) {
 		image->used = e->frames + 1;
-		if (!image->shared && (!image->target ? IOSurfaceGetSeed(image->surface) != image->seed ||
+		bool seed_moved = false;
+
+		if (!image->shared && (!image->target ? (seed_moved = IOSurfaceGetSeed(image->surface) != image->seed) ||
 		    surface_changed(e, image) : image->wrapped && !image->painted && surface_changed(e, image))) {
+			if (!seed_moved && !image->seedless) {
+				image->seedless = true;
+				e->image_counts.seedless++;
+			}
 			surface_to_texture(e, image);
 			e->image_counts.refills++;
 			e->image_counts.refill_bytes += IOSurfaceGetBytesPerRow(image->surface) * (size_t)image->height;
