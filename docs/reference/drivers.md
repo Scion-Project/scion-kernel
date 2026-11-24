@@ -108,6 +108,7 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 | Driver | Files | Requires | Boot arguments | blazer | crownlte | frankel | qemu | redwood | star2lte | starlte | |
 |---|---|---|---|---|---|---|---|---|---|---|
 | **`HAKIOS_EXYNOS_MFC`**<br>the Exynos 9810's hardware video decoder, MFC v10 (mfc=N: 1 a look, 2 the block, 3 the firmware from the phone's VENDOR partition, 4 a test stream decoded at boot and checked against ffmpeg's CRCs, 5 /dev/hakios-mfc). Off by default | `hakios.exynos_mfc.c` | `HAKIOS_EXYNOS_ACPM` | `mfc_fw_part=`, `mfc_int_khz=`, `mfc_irq=`, `mfc_mif_khz=`, `mfc_zc=` |  |  |  |  |  | built | built | |
+| **`HAKIOS_M2M_SCALER`**<br>the memory-to-memory scaler and colour-space converter iOS 27's IOSurfaceAccelerator opens (AppleM2ScalerCSCDriver): 4:2:0 two-plane pictures, 8 and 10 bits, video and full range, crops, scaling, quarter turns and flips, done by the CPU (hakios.m2m_core.h, tested by tools/m2m-scaler-test.sh); its capability dictionary is what it does. Needs the ios-27 fork's IOSurface (SweetSurface); the ios-27 tree builds it from the fork's own file list (profiles/ios-27.copy takes the files in), so it is off here. m2m=0 leaves it unpublished. docs/ios27/M2M-SCALER.md | `hakios.m2m_scaler.cpp` |  | `m2m=` |  |  |  |  |  |  |  | |
 
 ## modem
 

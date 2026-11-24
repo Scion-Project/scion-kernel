@@ -53,3 +53,5 @@ drivers/bluetooth/bcm4361/hakios.bcm_hci.h bsd/dev/hakios.bcm_hci.h
 drivers/bluetooth/bcm4361/hakios.bt_vsc.h bsd/dev/hakios.bt_vsc.h
 drivers/bluetooth/bcm4361/hakios.bt_node.cpp iokit/Kernel/hakios.bt_node.cpp
 drivers/core/hakios.dev_strict.h bsd/dev/hakios.dev_strict.h
+drivers/media/m2m/hakios.m2m_core.h iokit/Kernel/hakios.m2m_core.h
+drivers/media/m2m/hakios.m2m_scaler.cpp iokit/Kernel/hakios.m2m_scaler.cpp

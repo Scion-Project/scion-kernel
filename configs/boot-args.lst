@@ -360,6 +360,7 @@ lga_dpu	k
 lga_kick	k
 loader_platform	l
 loader_return_after	kl
+m2m	k
 m2v_utrace	u
 m3_diag	k
 m3_flush	k

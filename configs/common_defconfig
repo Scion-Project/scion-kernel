@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 782 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 784 symbols in 20 groups; 54 are set, 45 of them drivers built in.
 #
 
 #
@@ -19,7 +19,7 @@
 CONFIG_FIRMWARE="device"
 
 #
-# Drivers built in (59)
+# Drivers built in (60)
 #
 
 # the audio DSP started and linked (adsp=1, adsp_step=N); the battery's state comes through it too. Needs the DSP's ... [hakios.adsp.c]
@@ -105,6 +105,9 @@ CONFIG_HAKIOS_S6SY761=y
 
 # the Exynos 9810's hardware video decoder, MFC v10 (mfc=N: 1 a look, 2 the block, 3 the firmware from the phone's ... [hakios.exynos_mfc.c; requires CONFIG_HAKIOS_EXYNOS_ACPM]
 # CONFIG_HAKIOS_EXYNOS_MFC is not set
+
+# the memory-to-memory scaler and colour-space converter iOS 27's IOSurfaceAccelerator opens (AppleM2ScalerCSCDriver): ... [hakios.m2m_scaler.cpp]
+# CONFIG_HAKIOS_M2M_SCALER is not set
 
 # QMI messages over the IPC router: how the Wi-Fi firmware's service and the modem's are spoken to [hakios.qmi.c]
 CONFIG_HAKIOS_QMI=y
@@ -1696,7 +1699,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_WRITE_GUID is not set
 
 #
-# User space (209)
+# User space (210)
 #
 
 # Star2's primary rear camera (S5K2L3): 2 powers it up at boot as its stream would, reads its ID and revision, powers ...
@@ -2115,6 +2118,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.lga_dpu.c (kernel)
 # CONFIG_LGA_KICK is not set
+
+# read by hakios.m2m_scaler.cpp (kernel)
+# CONFIG_M2M is not set
 
 # Turnip's GPU trace of every render pass (u_trace) into a file, printed during the run
 # CONFIG_M2V_UTRACE is not set

@@ -342,6 +342,7 @@ KSAMPLE_US	arg	ksample_us	Debugging	k	user_exception_trace.c
 LGA_DPU	arg	lga_dpu	User space	k	hakios.lga_dpu.c	
 LGA_KICK	arg	lga_kick	User space	k	hakios.lga_dpu.c	
 LOADER_PLATFORM	arg	loader_platform	Loader	l	loader.c	
+M2M	arg	m2m	User space	k	hakios.m2m_scaler.cpp	
 M2V_UTRACE	arg	m2v_utrace	User space	u	HakiosMetalCA.m	Turnip's GPU trace of every render pass (u_trace) into a file, printed during the run
 M3_DIAG	arg	m3_diag	User space	k	psci_smp.c	
 M3_FLUSH	arg	m3_flush	User space	k	psci_smp.c	
