@@ -35,6 +35,8 @@ display/dpu bsd/dev/hakios.lga_dpu.c
 media/mfc bsd/dev/hakios.exynos_mfc.c
 media/mfc bsd/dev/hakios.exynos_mfc_test.h
 media/mfc bsd/dev/hakios.mfc_check.h
+media/m2m iokit/Kernel/hakios.m2m_core.h
+media/m2m iokit/Kernel/hakios.m2m_scaler.cpp
 display/panel bsd/dev/hakios.s6e3ha8.c
 display/panel bsd/dev/hakios.s6e3ha8_gamma.h
 display/sweetfb iokit/Kernel/arm/hakios.sweetfb_present.h

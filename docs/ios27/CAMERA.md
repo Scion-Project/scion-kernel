@@ -565,6 +565,24 @@ faking hardware, and is not done. Once that service is there, the same phone tes
 source rectangle as above (not 0x0), the stitcher's pixel line lit like the source's, and `IOSurfaceAcceleratorCreate:
 ... accelerator made`.
 
+### The M2M scaler on the port, and the next break (24 November)
+
+The S9 now has the service the stitcher's limit comes from: `AppleM2ScalerCSCDriver`, a CPU scaler and colour-space converter
+for 4:2:0 two-plane pictures with a truthful capability dictionary (M2M-SCALER.md: the interface iOS expects, the design,
+the tests). On phone 1 (all **measured**, M2M-SCALER.md "The phone test"):
+
+- `trace: stitch: IOSurfaceAcceleratorCreate: 0 (0), accelerator made`, and the stitcher's source rectangle is the picture
+  again: 376,282 752x564 (the 2x crop), then 0,0 1504x1128; never 0x0.
+- VideoToolbox's hardware attempt is this service: cameracaptured's transfers 1504x1128 to 828x1106 turned by 90 degrees
+  (transform 4; the front camera's with the mirror, transform 6), about 15 ms each.
+- The picture flows: front camera source Y 112, stitcher output Y 70 (160 of 256 grid points above black: the picture fills
+  1106 of the 1702 rows), the same at every node after it and at the image queue sink.
+- The viewfinder on the screen is still black. The picture is lost after the image queue, on the display side: backboardd
+  makes a `fmt 500` (YCbCr8_420_2P) texture over the sink's surface. That is the next cause.
+- The preview pipeline is built only when cameracaptured has a Metal device: `cam_metal=1` on the line (camera_metal.c).
+  Without it the source node's preview output leads nowhere, scaler or not (the boot with `m2m=0` showed the same).
+- The shutter still fails at once with -16808 (BWUBNode); the scaler changes nothing there.
+
 ### SpringBoard's main-display layout (18 November)
 
 `camera_sbtrace.c` on phone 1 (dylib `-16`, `-17`) shows that SpringBoard does publish its layout: the home screen, the lock

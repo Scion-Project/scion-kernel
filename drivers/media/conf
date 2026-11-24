@@ -1,4 +1,4 @@
-# drivers/media/conf: the Exynos video codec.
+# drivers/media/conf: the Exynos video codec, and the memory-to-memory scaler iOS 27 opens.
 # docs/drivers-config.md says what each word means.
 
 driver EXYNOS_MFC
@@ -7,3 +7,12 @@ driver EXYNOS_MFC
 	default n
 	help    the Exynos 9810's hardware video decoder, MFC v10 (mfc=N: 1 a look, 2 the block, 3 the firmware from the phone's
 	help    VENDOR partition, 4 a test stream decoded at boot and checked against ffmpeg's CRCs, 5 /dev/hakios-mfc). Off by default
+
+driver M2M_SCALER
+	file    iokit/Kernel/hakios.m2m_scaler.cpp iokitcpp
+	default n
+	help    the memory-to-memory scaler and colour-space converter iOS 27's IOSurfaceAccelerator opens (AppleM2ScalerCSCDriver):
+	help    4:2:0 two-plane pictures, 8 and 10 bits, video and full range, crops, scaling, quarter turns and flips, done by the
+	help    CPU (hakios.m2m_core.h, tested by tools/m2m-scaler-test.sh); its capability dictionary is what it does. Needs the
+	help    ios-27 fork's IOSurface (SweetSurface); the ios-27 tree builds it from the fork's own file list (profiles/ios-27.copy
+	help    takes the files in), so it is off here. m2m=0 leaves it unpublished. docs/ios27/M2M-SCALER.md
