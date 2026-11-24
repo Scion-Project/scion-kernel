@@ -45,7 +45,6 @@
 #include <kern/clock.h>
 #include <kern/locks.h>
 #include <kern/thread.h>
-#include <kern/sched_prim.h>
 #include <libkern/libkern.h>
 #include <mach/mach_time.h>
 #include <sys/kauth.h>
@@ -273,6 +272,11 @@ static uint32_t gl_said, gl_middle;
 extern void *cpu_to_processor(int cpu);
 extern void *thread_bind(void *processor);
 extern int thread_block(void *continuation);
+/* the job interrupt's waits (kern/sched_prim.h, whose thread_block and thread_bind are declared otherwise above) */
+extern wait_result_t assert_wait_timeout(event_t event, wait_interrupt_t interruptible, uint32_t interval, uint32_t scale_factor);
+extern kern_return_t clear_wait(thread_t thread, wait_result_t result);
+extern kern_return_t thread_wakeup_prim(event_t event, boolean_t one_thread, wait_result_t result);
+#define thread_wakeup(x) thread_wakeup_prim((x), FALSE, THREAD_AWAKENED)
 extern unsigned int real_ncpus;
 
 static int
@@ -1421,7 +1425,7 @@ wait_job(uint32_t at, uint32_t mask, uint32_t want, uint32_t ms)
 			mali_irq_looked++;
 			return true;
 		}
-		r = thread_block(THREAD_CONTINUE_NULL);
+		r = (wait_result_t)thread_block(NULL);
 		wr(mali, JOB_INT_MASK, 0);
 		if (job_bits(rd(mali, at), mask, want)) {
 			if (r == THREAD_TIMED_OUT) {
