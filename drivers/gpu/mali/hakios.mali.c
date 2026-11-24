@@ -2494,6 +2494,13 @@ hakios_mali_init(void)
 		if (strcmp(platform, "crownlte") == 0) {
 			mali_irq = 1;
 			mali_flushred = 1;
+			/*
+			 * No look before sleeping for the interrupt: the worker's 200 us look at the status took the core from the
+			 * thread that submitted (the window server's drawing thread, woken by nobody, waiting to run inside its
+			 * submission): round 16 timed the submission's own work at 4 to 10 us, and the drawing thread spent a third
+			 * of its time inside the call. Most jobs were found done by that look (150 000 of 175 000 in round 13).
+			 */
+			mali_spin_us = 0;
 		}
 	}
 	(void)PE_parse_boot_argn("mali_irq", &mali_irq, sizeof(mali_irq));
