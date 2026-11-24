@@ -768,6 +768,39 @@ HakiosMaliUserClient::syncBuffer(const struct mali_sync * request)
  * pixels changed, in the queue's order (a reader that saw the seed submits after this chain). A client whose jobs hung
  * too often is answered with no job (`jc` 0, done) and nothing is run (hakios.mali.c).
  */
+/*
+ * Where a submission's time goes, every 10000 submissions a line (round 15 on the Note9: the submissions were a third of
+ * the window server's drawing thread whether one chain or two went in a request, so the time is in here, not in the call):
+ * the list read in, the surfaces looked at, the surfaces' lines cleaned (how many, how many MB), the queue, the buffers
+ * marked, the written surfaces' seeds. Nanoseconds, over all submissions; read and reset under no lock (counts may
+ * be off by one or two).
+ */
+static struct {
+	uint64_t n, handles, copy, look, clean, cleans, clean_bytes, queue, mark, written;
+} gSubmitTimes;
+
+static inline uint64_t
+ns_since(uint64_t then)
+{
+	uint64_t ns;
+
+	absolutetime_to_nanoseconds(mach_absolute_time() - then, &ns);
+	return ns;
+}
+
+static void
+submit_times_say(void)
+{
+	uint64_t n = gSubmitTimes.n ? gSubmitTimes.n : 1;
+
+	printf("HakiosMali: %llu submissions, %llu handles each: per submission %llu ns reading the list, %llu looking at "
+	    "surfaces, %llu cleaning surfaces' lines (%llu surfaces, %llu MB in all), %llu queueing, %llu marking buffers, %llu "
+	    "for written surfaces\n", gSubmitTimes.n, gSubmitTimes.handles / n, gSubmitTimes.copy / n, gSubmitTimes.look / n,
+	    gSubmitTimes.clean / n, gSubmitTimes.cleans, gSubmitTimes.clean_bytes >> 20, gSubmitTimes.queue / n,
+	    gSubmitTimes.mark / n, gSubmitTimes.written / n);
+	bzero(&gSubmitTimes, sizeof(gSubmitTimes));
+}
+
 IOReturn
 HakiosMaliUserClient::submit(struct drm_panfrost_submit * request)
 {
@@ -787,6 +820,8 @@ HakiosMaliUserClient::submit(struct drm_panfrost_submit * request)
 		request->jc = 0;
 		return kIOReturnSuccess;
 	}
+	uint64_t t0 = mach_absolute_time(), t;
+
 	if (count != 0) {
 		handles = (uint32_t *) IOMallocData(count * sizeof(uint32_t));
 		if (handles == NULL) {
@@ -797,8 +832,11 @@ HakiosMaliUserClient::submit(struct drm_panfrost_submit * request)
 			return kIOReturnBadArgument;
 		}
 	}
+	gSubmitTimes.copy += ns_since(t0);
+	gSubmitTimes.handles += count;
 	/* first what the processors wrote into the surfaces it names, out to memory (flushSurface), a few at a time */
 	for (uint32_t i = 0; gMaliFlush && i < count;) {
+		t = mach_absolute_time();
 		IOLockLock(gMaliLock);
 		for (; i < count && cleaned < 16; i++) {
 			uint32_t seed = 0;
@@ -810,19 +848,27 @@ HakiosMaliUserClient::submit(struct drm_panfrost_submit * request)
 			}
 		}
 		IOLockUnlock(gMaliLock);
+		gSubmitTimes.look += ns_since(t);
+		t = mach_absolute_time();
 		for (uint32_t k = 0; k < cleaned; k++) {
+			gSubmitTimes.cleans++;
+			gSubmitTimes.clean_bytes += clean[k]->info.allocSize;
 			flushSurface(clean[k]);
 			MiniIOSurfaceCleaned(clean[k], seeds[k]);
 			MiniIOSurfaceDrop(clean[k]);
 		}
+		gSubmitTimes.clean += ns_since(t);
 		cleaned = 0;
 	}
+	t = mach_absolute_time();
 	IOLockLock(gMaliLock);
 	while ((seq = hakios_mali_enqueue_for(request->jc, request->requirements & PANFROST_JD_REQ_FS, fOwner)) == 0) {
 		IOLockUnlock(gMaliLock);
 		hakios_mali_room();
 		IOLockLock(gMaliLock);
 	}
+	gSubmitTimes.queue += ns_since(t);
+	t = mach_absolute_time();
 	for (uint32_t i = 0; i < count; i++) {
 		b = buffer(handles[i] & ~kMaliSubmitFlags);
 		if (b == NULL) {
@@ -837,9 +883,15 @@ HakiosMaliUserClient::submit(struct drm_panfrost_submit * request)
 		}
 	}
 	IOLockUnlock(gMaliLock);
+	gSubmitTimes.mark += ns_since(t);
+	t = mach_absolute_time();
 	for (uint32_t k = 0; k < wrote; k++) {
 		MiniIOSurfaceWritten(written[k]);
 		MiniIOSurfaceDrop(written[k]);
+	}
+	gSubmitTimes.written += ns_since(t);
+	if (++gSubmitTimes.n >= 10000) {
+		submit_times_say();
 	}
 	if (handles != NULL) {
 		IOFreeData(handles, count * sizeof(uint32_t));
