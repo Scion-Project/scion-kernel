@@ -28,6 +28,11 @@ fi
 xcrun -sdk iphoneos metal -mios-version-min=16.0 -c $M2/YCbCrProbe.metal -o $W/src27/ycc-probe.air || exit 1
 xcrun -sdk iphoneos metallib $W/src27/ycc-probe.air -o $W/src27/ycc-probe.metallib || exit 1
 { echo "static const unsigned char sweet_ycc_probe_metallib[] = {"; xxd -i < $W/src27/ycc-probe.metallib; echo "};"; } > $M2/YCbCrProbe.inc
+# FetchProbe.h includes FetchProbe.inc: tools/ios27/metal2/FetchProbe.metal (framebuffer fetch through a memoryless color attachment,
+# the shape of the camera layer's draw; used only with SWEET_MTL2_FBPROBE=1) compiled the same way
+xcrun -sdk iphoneos metal -mios-version-min=16.0 -c $M2/FetchProbe.metal -o $W/src27/fetch-probe.air || exit 1
+xcrun -sdk iphoneos metallib $W/src27/fetch-probe.air -o $W/src27/fetch-probe.metallib || exit 1
+{ echo "static const unsigned char sweet_fetch_probe_metallib[] = {"; xxd -i < $W/src27/fetch-probe.metallib; echo "};"; } > $M2/FetchProbe.inc
 $CC -x objective-c++ -std=c++17 -fobjc-arc -O2 -g -Wall -Wno-deprecated-declarations -Wno-unused-function -bundle \
 	-o "$B/StarbiteMetal" $M2/HotMetal2.mm $M2/NativeBridgeMetalFrontend.mm -x none "$BRIDGE" \
 	-Wl,-dead_strip -lc++ -framework Foundation -framework Metal -framework IOSurface -framework IOKit \
