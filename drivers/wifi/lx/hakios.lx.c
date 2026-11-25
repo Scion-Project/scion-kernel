@@ -379,14 +379,18 @@ lx_os_option(const char *name)
 	return hakios_wifi_option(name);
 }
 
-/* the screen dark: the panel asleep (hakios.s6e3ha8.c; the stub elsewhere: never) -- the Wi-Fi poller's longer period */
-extern bool hakios_panel_asleep(void);
-bool lx_os_dark(void);
+/*
+ * The screen for the Wi-Fi poller (hakios.s6e3ha8.c; the stubs elsewhere: lit): 0 lit, 1 dark with the savings on (its
+ * longer period), 2 dark in dark_ab's half without them (the fixed period, as before round 25).
+ */
+extern bool hakios_dark_saving(void);
+extern bool hakios_dark_ab_off(void);
+unsigned lx_os_dark(void);
 
-bool
+unsigned
 lx_os_dark(void)
 {
-	return hakios_panel_asleep();
+	return hakios_dark_saving() ? 1 : hakios_dark_ab_off() ? 2 : 0;
 }
 
 int

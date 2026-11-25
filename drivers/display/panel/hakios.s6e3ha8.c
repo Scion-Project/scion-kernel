@@ -635,6 +635,53 @@ hakios_panel_asleep(void)
 {
 	return panel_asleep;
 }
+
+/*
+ * The screen-off savings (the Wi-Fi poller's longer period, the Mali's cores off, the touch screen's and the CPU
+ * governor's longer periods) ask hakios_dark_saving(), not hakios_panel_asleep(). dark_ab=1 (the Note9's default for
+ * now): max77705's minute line flips them, a minute on, a minute off, while the screen is dark, and sums the current of
+ * each half -- the same run, the same temperature, the same radios, for the comparison between rounds that round 25
+ * could not make (its SoC 6 C warmer and Bluetooth on). dark_ab=0: always on.
+ */
+static int dark_ab = -1;
+static volatile bool dark_save_off;
+bool hakios_dark_saving(void);
+bool hakios_dark_ab_off(void);
+bool hakios_dark_ab_flip(void);
+
+bool
+hakios_dark_saving(void)
+{
+	return panel_asleep && !dark_save_off;
+}
+
+/* the screen dark, in dark_ab's half without the savings */
+bool
+hakios_dark_ab_off(void)
+{
+	return panel_asleep && dark_save_off;
+}
+
+/* max77705's minute: the other half from now; true when dark_ab is on */
+bool
+hakios_dark_ab_flip(void)
+{
+	if (dark_ab < 0) {
+		char platform[24] = "";
+		uint32_t value = 0;
+
+		(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+		if (PE_parse_boot_argn("dark_ab", &value, sizeof(value))) {
+			dark_ab = value != 0;
+		} else {
+			dark_ab = strcmp(platform, "crownlte") == 0;
+		}
+	}
+	if (dark_ab) {
+		dark_save_off = !dark_save_off;
+	}
+	return dark_ab != 0;
+}
 SYSCTL_INT(_kern_hakios, OID_AUTO, panel_sleep, CTLFLAG_RW | CTLFLAG_LOCKED, &panel_sleep, 0, "display-off also sleeps the panel");
 
 /*

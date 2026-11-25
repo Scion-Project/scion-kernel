@@ -214,8 +214,8 @@ _lkpi_pci_enable_msi_range(struct pci_dev *pdev, int minvec, int maxvec)
 	return (-ENOTSUP);			/* (none on this root complex: INTx it is) */
 }
 
-/* (drivers/wifi/lx/hakios.lx.c: the panel asleep, the screen dark) */
-bool lx_os_dark(void);
+/* (drivers/wifi/lx/hakios.lx.c: 0 the screen lit, 1 dark, 2 dark without the savings: the fixed period) */
+unsigned lx_os_dark(void);
 
 /*
  * The look is a read of the chip's mailbox over PCIe: each one takes the link out of L1 and wakes the chip's bus core.
@@ -247,13 +247,14 @@ poller(void *argument)
 		} else if (r == IRQ_HANDLED) {
 			lp.handled++;
 		}
-		if (!back) {
-			/* (the fixed period) */
+		if (!back || lx_os_dark() == 2) {
+			ms = base;              /* (the fixed period) */
+			empty = 0;
 		} else if (r == IRQ_HANDLED || r == IRQ_WAKE_THREAD) {
 			ms = base;
 			empty = 0;
 		} else if (++empty >= POLL_IDLE_LOOKS) {
-			unsigned most = lx_os_dark() ? POLL_DARK_MS : POLL_LIT_MS;
+			unsigned most = lx_os_dark() == 1 ? POLL_DARK_MS : POLL_LIT_MS;
 
 			empty = 0;
 			ms = ms * 2 > most ? most : ms * 2;

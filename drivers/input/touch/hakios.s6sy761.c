@@ -90,7 +90,7 @@ static struct hakios_hsi2c bus = {
 
 #define POLL_MS                 4       /* the IRQ pin is polled this often */
 #define DARK_POLL_MS            32      /* ... and this often with the screen dark and no finger down */
-extern bool hakios_panel_asleep(void);  /* hakios.s6e3ha8.c (stubs.c: never) */
+extern bool hakios_dark_saving(void);   /* hakios.s6e3ha8.c: dark, the savings on (stubs.c: never) */
 #define MINUTE_TICKS            (60 * 1000 / POLL_MS)
 
 static vm_offset_t alive;
@@ -634,7 +634,7 @@ touch_thread(void *arg, __unused wait_result_t wr_)
 		 * (the screen dark, no finger down: DARK_POLL_MS -- touches are not passed on then (touch_blank), and 250 looks a
 		 * second kept a core from its sleep for nothing; a finger down when it went dark is followed at POLL_MS to its up)
 		 */
-		delay_for_interval(bad_ticks >= 2 ? 100 : hakios_panel_asleep() && fingers_now() == 0 ? DARK_POLL_MS : POLL_MS,
+		delay_for_interval(bad_ticks >= 2 ? 100 : hakios_dark_saving() && fingers_now() == 0 ? DARK_POLL_MS : POLL_MS,
 		    NSEC_PER_MSEC);
 	}
 	tick_done = 0;                  /* (the watch: nothing to watch) */

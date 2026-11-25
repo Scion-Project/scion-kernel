@@ -1280,6 +1280,7 @@ dev_state_update(uint64_t now)
 #define DARK_WINDOW_MS  200
 static uint32_t dark_window_ms = DARK_WINDOW_MS;
 extern bool hakios_panel_asleep(void);          /* drivers/display/panel/hakios.s6e3ha8.c (stubs.c: never) */
+extern bool hakios_dark_saving(void);           /* ... dark with the screen-off savings on (dark_ab's half) */
 
 /* the window now, in mach_absolute_time units */
 static uint64_t
@@ -1291,7 +1292,7 @@ window_span(uint64_t now)
 	if (gov_policy != 1 && interactive(now)) {
 		ms = BOOST_WINDOW_MS;
 	} else if (dark_window_ms > window_ms && !boost_on(__atomic_load_n(&touch_last, __ATOMIC_ACQUIRE), boost_span, now) &&
-	    hakios_panel_asleep()) {
+	    hakios_dark_saving()) {
 		ms = dark_window_ms;
 	} else {
 		ms = window_ms;

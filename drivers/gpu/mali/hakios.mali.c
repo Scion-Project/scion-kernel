@@ -507,10 +507,10 @@ cores_ensure_on(void)
 	cores_off = false;
 	idle_ons++;
 	if (!gpu_cores_on(&which)) {
-		printf("mali: idle off: %s did not power up again: idle off stops\n", which);
+		say("mali: idle off: %s did not power up again: idle off stops\n", which);
 		mali_idle_off = 0;
 	} else if (idle_ons <= 3 || idle_ons % 100 == 0) {
-		printf("mali: idle off: the cores on again for a job (%u times)\n", idle_ons);
+		say("mali: idle off: the cores on again for a job (%u times)\n", idle_ons);
 	}
 }
 
@@ -542,18 +542,18 @@ cores_power_off(void)
 		}
 	}
 	if (failed != NULL) {
-		printf("mali: idle off: %s did not finish (shader %#x, tiler %#x, L2 %#x ready): all on again, idle off stops\n",
+		say("mali: idle off: %s did not finish (shader %#x, tiler %#x, L2 %#x ready): all on again, idle off stops\n",
 		    failed, rd(mali, SHADER_READY), rd(mali, TILER_READY), rd(mali, L2_READY));
 		mali_idle_off = 0;
 		if (!gpu_cores_on(&which)) {
-			printf("mali: idle off: %s did not power up again\n", which);
+			say("mali: idle off: %s did not power up again\n", which);
 		}
 		return;
 	}
 	cores_off = true;
 	idle_offs++;
 	if (idle_offs <= 3 || idle_offs % 100 == 0) {
-		printf("mali: idle off: the screen dark and no job for %u ms: shader cores, tiler and L2 off (%u times)\n",
+		say("mali: idle off: the screen dark and no job for %u ms: shader cores, tiler and L2 off (%u times)\n",
 		    IDLE_OFF_MS, idle_offs);
 	}
 }
@@ -1887,18 +1887,22 @@ hakios_mali_submit(uint64_t chain, bool fragment)
 }
 
 /* mali_idle_off: once a second, with the screen dark, the cores off after IDLE_OFF_MS without a job (never waits on a job) */
-extern bool hakios_panel_asleep(void);
+extern bool hakios_dark_saving(void);   /* hakios.s6e3ha8.c: the screen dark and dark_ab's half with the savings on */
 static thread_call_t idle_call;
 
+/* (and the cores on again at once when the savings end: the screen lit, or dark_ab's other half) */
 static void
 idle_tick(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
 {
 	uint64_t deadline, span;
+	bool saving = hakios_dark_saving();
 
-	if (mali_idle_off && hakios_panel_asleep() && lck_mtx_try_lock(&mali_job_lock)) {
+	if (mali_idle_off && (saving || cores_off) && lck_mtx_try_lock(&mali_job_lock)) {
 		lck_mtx_lock(&mali_lock);
 		nanoseconds_to_absolutetime((uint64_t)IDLE_OFF_MS * NSEC_PER_MSEC, &span);
-		if (!cores_off && mali_idle_off && mach_absolute_time() - last_job_end >= span) {
+		if (!saving) {
+			cores_ensure_on();
+		} else if (!cores_off && mali_idle_off && mach_absolute_time() - last_job_end >= span) {
 			cores_power_off();
 		}
 		lck_mtx_unlock(&mali_lock);

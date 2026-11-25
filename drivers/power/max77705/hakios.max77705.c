@@ -349,7 +349,11 @@ static struct {
 	unsigned minute_reads, minute_on;
 	int64_t on_ua, off_ua;
 	uint64_t on_reads, off_reads;
+	int64_t save_ua, nosave_ua;             /* dark_ab: the dark readings in each half (hakios.s6e3ha8.c) */
+	uint64_t save_reads, nosave_reads;
 } power;
+extern bool hakios_dark_ab_off(void);
+extern bool hakios_dark_ab_flip(void);
 
 static void
 power_note(const struct hakios_battery_state *b)
@@ -370,6 +374,13 @@ power_note(const struct hakios_battery_state *b)
 	} else {
 		power.off_ua += b->current_ua;
 		power.off_reads++;
+		if (hakios_dark_ab_off()) {
+			power.nosave_ua += b->current_ua;
+			power.nosave_reads++;
+		} else {
+			power.save_ua += b->current_ua;
+			power.save_reads++;
+		}
 	}
 	if (power.minute_reads * (POLL_MS / 1000) >= 60) {
 		say("max77705: a minute: %lld mA drawn on average (the screen on in %u of %u readings), %d.%02d%%, %d mV; since the "
@@ -380,6 +391,13 @@ power_note(const struct hakios_battery_state *b)
 		    power.off_reads ? -power.off_ua / (int64_t)power.off_reads / 1000 : 0);
 		power.minute_ua = 0;
 		power.minute_reads = power.minute_on = 0;
+		if (hakios_dark_ab_flip()) {
+			say("max77705: dark A/B since the start: the savings on %llu s at %lld mA, off %llu s at %lld mA; the next minute "
+			    "%s\n", power.save_reads * (POLL_MS / 1000),
+			    power.save_reads ? -power.save_ua / (int64_t)power.save_reads / 1000 : 0, power.nosave_reads * (POLL_MS / 1000),
+			    power.nosave_reads ? -power.nosave_ua / (int64_t)power.nosave_reads / 1000 : 0,
+			    !hakios_panel_asleep() ? "(the screen on)" : hakios_dark_ab_off() ? "off" : "on");
+		}
 	}
 }
 

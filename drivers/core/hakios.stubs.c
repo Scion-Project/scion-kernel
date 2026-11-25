@@ -241,6 +241,9 @@ void hakios_s6e3ha8_init(void) {}
 bool hakios_s6e3ha8_blank(__unused int (*say)(const char *, ...)) { return false; }      /* "not blanked" */
 bool hakios_panel_touch_blocked(__unused uint32_t type, __unused uint32_t finger) { return false; }
 bool hakios_panel_asleep(void) { return false; }    /* no panel driver: never asleep */
+bool hakios_dark_saving(void) { return false; }     /* ... so no screen-off savings */
+bool hakios_dark_ab_off(void) { return false; }
+bool hakios_dark_ab_flip(void) { return false; }
 int hakios_s6e3ha8_power(bool on);
 int hakios_s6e3ha8_power(__unused bool on) { return ENODEV; }    /* no panel driver: the screen as iOS draws it */
 #endif
