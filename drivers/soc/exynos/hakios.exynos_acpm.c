@@ -770,6 +770,123 @@ bus_mif_step(void)
 	bus_mif_ready = true;
 }
 
+/*
+ * MIF with the screen off, in stages (mif_dark=N; the Note9's default 1 for now; 0 elsewhere). Samsung's kernel lowers
+ * MIF only after it has given the APM's FVP the MIF table (exynos9810_bus_mif.c exynos9810_mif_constraint_parse(): on
+ * the devfreq node's channel, 1 on this phone, each level as {level, kHz, DATA_INIT 5, INT's minimum for it} and then
+ * {levels, initial kHz, DATA_INIT, SET_CONST 1}); this kernel once asked MIF for another rate without that, and the S9+
+ * hung (bus_mif_step(), above). Every step is logged before it is taken.
+ *   1  stage 0, nothing written: the ECT the boot loader left at 0xA0000000 (its header), the APM's MIF levels, MIF's
+ *      rate now (FREQ_GET and PLL_MIF); and stage 1: the table given to FVP as Samsung's kernel gives it, with INT's
+ *      minimum at INT's top (667000) for every level, where INT already is, so nothing moves; MIF's rate read again.
+ * Stage 2 (MIF lowered while the screen is off) is not here yet.
+ */
+#define MIF_DARK_DELAY_S        45      /* the console up and the boot's work done, as bus_mif_delay */
+#define MIF_FVP_CHANNEL         1       /* crownlte.dts devfreq_mif@17000010 acpm-ipc-channel */
+#define MIF_DATA_INIT           5       /* Samsung's exynos-devfreq.h */
+#define MIF_SET_CONST           1
+#define MIF_ECT_PA              0xA0000000ull   /* crownlte.dts ect { parameter_address } */
+#define MIF_INT_TOP             667000  /* INT's top (bus_pins), its rate since the boot */
+extern vm_offset_t phystokv(uint64_t pa);
+extern boolean_t pmap_valid_address(uint64_t addr);
+static uint32_t mif_dark;
+
+static void
+mif_stage0(uint32_t *levels, uint32_t *count)
+{
+	uint32_t khz[24], uv[24], n, now = 0;
+	int e;
+
+	/* the ECT's header: "PARA", a version, the size, the number of headers (Samsung's ect_parser.c struct ect_header) */
+	{
+		vm_offset_t at = pmap_valid_address(MIF_ECT_PA) ? phystokv(MIF_ECT_PA) : ml_io_map(MIF_ECT_PA, 0x1000);
+
+		if (at == 0) {
+			bus_say("bus: MIF dark 0: the ECT at %#llx cannot be mapped\n", MIF_ECT_PA);
+		} else {
+			const volatile uint8_t *b = (const volatile uint8_t *)at;
+			const volatile uint32_t *w = (const volatile uint32_t *)at;
+
+			bus_say("bus: MIF dark 0: the ECT at %#llx (%s): \"%c%c%c%c\" \"%c%c%c%c\", %u bytes, %u headers\n", MIF_ECT_PA,
+			    pmap_valid_address(MIF_ECT_PA) ? "the kernel's memory" : "not the kernel's", b[0] >= 32 && b[0] < 127 ? b[0] : '.',
+			    b[1] >= 32 && b[1] < 127 ? b[1] : '.', b[2] >= 32 && b[2] < 127 ? b[2] : '.', b[3] >= 32 && b[3] < 127 ? b[3] : '.',
+			    b[4] >= 32 && b[4] < 127 ? b[4] : '.', b[5] >= 32 && b[5] < 127 ? b[5] : '.', b[6] >= 32 && b[6] < 127 ? b[6] : '.',
+			    b[7] >= 32 && b[7] < 127 ? b[7] : '.', w[2], w[3]);
+		}
+	}
+	n = hakios_acpm_dvfs_table(0, khz, uv, 24, bus_say);
+	*count = 0;
+	for (uint32_t i = 0; i < n; i++) {
+		bus_say("bus: MIF dark 0: the APM's MIF level %u: %u kHz, %u uV\n", i, khz[i], uv[i]);
+		if (khz[i] >= 208000 && khz[i] <= 2093000 && *count < 24) {   /* (freq_info's min and max) */
+			levels[(*count)++] = khz[i];
+		}
+	}
+	e = hakios_acpm_dvfs_get(0, &now);
+	bus_say("bus: MIF dark 0: MIF now %u kHz (FREQ_GET %d), PLL_MIF %u MHz; %u levels for FVP\n", now, e, bus_mif_pll_mhz(),
+	    *count);
+}
+
+static bool
+mif_stage1(const uint32_t *levels, uint32_t count)
+{
+	uint32_t cmd[4], now = 0, initial;
+	int e;
+
+	if (count == 0) {
+		bus_say("bus: MIF dark 1: no levels: FVP not told\n");
+		return false;
+	}
+	(void)hakios_acpm_dvfs_get(0, &initial);
+	if (initial == 0) {
+		initial = 1794000;      /* (boot_info's, where S-Boot leaves it) */
+	}
+	for (uint32_t i = 0; i < count; i++) {
+		cmd[0] = i;
+		cmd[1] = levels[i];
+		cmd[2] = MIF_DATA_INIT;
+		cmd[3] = MIF_INT_TOP;
+		bus_say("bus: MIF dark 1: FVP: level %u = %u kHz, INT at least %u kHz: asking\n", i, levels[i], MIF_INT_TOP);
+		delay(20000);
+		e = hakios_acpm_request(MIF_FVP_CHANNEL, cmd);
+		bus_say("bus: MIF dark 1: FVP: level %u: %d (answer %#x %#x %#x %#x)\n", i, e, cmd[0], cmd[1], cmd[2], cmd[3]);
+		if (e != 0) {
+			return false;
+		}
+	}
+	cmd[0] = count;
+	cmd[1] = initial;
+	cmd[2] = MIF_DATA_INIT;
+	cmd[3] = MIF_SET_CONST;
+	bus_say("bus: MIF dark 1: FVP: %u levels, initial %u kHz, SET_CONST: asking\n", count, initial);
+	delay(20000);
+	e = hakios_acpm_request(MIF_FVP_CHANNEL, cmd);
+	bus_say("bus: MIF dark 1: FVP: SET_CONST: %d (answer %#x %#x %#x %#x)\n", e, cmd[0], cmd[1], cmd[2], cmd[3]);
+	delay(1000000);
+	(void)hakios_acpm_dvfs_get(0, &now);
+	bus_say("bus: MIF dark 1: done; MIF %u kHz, PLL_MIF %u MHz (no rate asked)\n", now, bus_mif_pll_mhz());
+	return e == 0;
+}
+
+static void
+mif_dark_start(void)
+{
+	uint32_t levels[24], count = 0;
+	char platform[24] = "";
+
+	(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+	if (!PE_parse_boot_argn("mif_dark", &mif_dark, sizeof(mif_dark))) {
+		mif_dark = strcmp(platform, "crownlte") == 0 ? 1 : 0;
+	}
+	if (mif_dark == 0) {
+		return;
+	}
+	bus_say("bus: MIF dark: stage 0 and 1 in %u s (mif_dark=%u)\n", MIF_DARK_DELAY_S, mif_dark);
+	delay((uint64_t)MIF_DARK_DELAY_S * 1000000);
+	mif_stage0(levels, &count);
+	(void)mif_stage1(levels, count);
+}
+
 static void
 bus_thread(__unused void *arg, __unused wait_result_t wr)
 {
@@ -783,6 +900,7 @@ bus_thread(__unused void *arg, __unused wait_result_t wr)
 		delay(BUS_POLL_US);
 	}
 	bus_report();
+	mif_dark_start();
 	if (bus_max == 0) {
 		return;
 	}
