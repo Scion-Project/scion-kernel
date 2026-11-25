@@ -18,6 +18,7 @@
  */
 #include <kern/clock.h>
 #include <kern/thread.h>
+#include <kern/thread_call.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <pexpert/pexpert.h>
@@ -98,6 +99,26 @@ static struct {
 } stats;
 static bool finger_down[FINGERS];
 
+/*
+ * The polling thread watched (watch()): where it is and when it last finished a tick. Round 23 (g6ff4396b): at a touch
+ * on the dark screen, just before the side button woke it, the thread stopped finishing ticks for good -- no minute line,
+ * no finger event after it, a finger counted down for the 14 minutes left, one M3 busy 100% at 1794 MHz with the screen
+ * off (+120 mA). Where it stopped was not in the log; this says it.
+ */
+enum { AT_WAIT, AT_READ, AT_HANDLE, AT_POST, AT_RECOVER };
+static const char *const at_name[] = { "between ticks", "reading the chip", "handling an event", "passing a touch on",
+	                               "setting the bus up again" };
+static volatile uint32_t touch_at;
+static volatile uint64_t tick_done;     /* when the thread last finished a tick; 0: not watching */
+static thread_t poller;
+static thread_call_t watch_call;
+#define WATCH_MS                5000    /* the watch's period */
+#define STALL_MS                3000    /* no tick finished in this long: said, with the thread's stack */
+#define BAD_TICKS_UP            3       /* ticks in a row with a failed transfer: every finger lifted */
+#define BAD_TICKS_RECOVER       8       /* ... and the bus and the chip set up again */
+#define RECOVERIES_MOST         6       /* then the thread stops (nothing spins for good) */
+extern void hakios_thread_say_stack(thread_t thread, int (*say_as)(const char *, ...));  /* osfmk/arm64/machine_routines.c */
+
 static inline uint32_t
 rd(vm_offset_t base, uint32_t off)
 {
@@ -156,7 +177,9 @@ static void
 touch_post_gated(uint32_t type, uint32_t finger, uint32_t x, uint32_t y)
 {
 	if (!hakios_panel_touch_blocked(type, finger)) {
+		touch_at = AT_POST;
 		hakios_touch_post(type, finger, x, y);
+		touch_at = AT_HANDLE;
 	}
 }
 
@@ -166,16 +189,22 @@ SYSCTL_DECL(_kern_hakios);
 SYSCTL_UINT(_kern_hakios, OID_AUTO, touch_events, CTLFLAG_RD | CTLFLAG_LOCKED, &touch_events, 0,
     "finger events read from the S6SY761");
 
-/* tell the CPU governor how many fingers are down: its touch boost is held while any is (gov_policy=2) */
-static void
-fingers_changed(void)
+static uint32_t
+fingers_now(void)
 {
 	uint32_t down = 0;
 
 	for (uint32_t f = 0; f < FINGERS; f++) {
 		down += finger_down[f] ? 1 : 0;
 	}
-	hakios_exynos_cpufreq_fingers(down);
+	return down;
+}
+
+/* tell the CPU governor how many fingers are down: its touch boost is held while any is (gov_policy=2) */
+static void
+fingers_changed(void)
+{
+	hakios_exynos_cpufreq_fingers(fingers_now());
 }
 
 /* lift every finger that is down: for when the chip's event stream was lost or reset */
@@ -196,6 +225,7 @@ handle_event(const uint8_t *e)
 {
 	uint32_t kind = e[0] & 3;
 
+	touch_at = AT_HANDLE;
 	if (kind == 0) {
 		uint32_t id = (e[0] >> 2) & 0xf, state = e[0] >> 6;
 		uint32_t x = (uint32_t)e[1] << 4 | e[3] >> 4, y = (uint32_t)e[2] << 4 | (e[3] & 0xf);
@@ -267,32 +297,38 @@ handle_event(const uint8_t *e)
  * A lost read can be a finger's "up" (seen on the phone: about 3 failed transfers a minute), so each read is
  * tried once more; chip_read() has already retried inside.
  */
-static void
+static bool
 read_events(void)
 {
 	uint8_t one[EVENT_SIZE], rest[EVENT_SIZE * EVENTS_MOST];
 	uint32_t left;
 
-	if ((chip_read(CMD_ONE_EVENT, one, sizeof(one)) != 0 && chip_read(CMD_ONE_EVENT, one, sizeof(one)) != 0) || one[0] == 0) {
-		return;
+	touch_at = AT_READ;
+	if (chip_read(CMD_ONE_EVENT, one, sizeof(one)) != 0 && chip_read(CMD_ONE_EVENT, one, sizeof(one)) != 0) {
+		return false;
+	}
+	if (one[0] == 0) {
+		return true;
 	}
 	handle_event(one);
 	left = one[7] & 0x3f;
 	if (left == 0) {
-		return;
+		return true;
 	}
 	if (left > EVENTS_MOST) {
 		say("s6sy761: %u events waiting, more than %u: the queue emptied, every finger up\n", left, EVENTS_MOST);
 		all_up();
 		(void)chip_write(CMD_CLEAR_EVENTS, NULL, 0);
-		return;
+		return true;
 	}
+	touch_at = AT_READ;
 	if (chip_read(CMD_ALL_EVENTS, rest, left * EVENT_SIZE) != 0 && chip_read(CMD_ALL_EVENTS, rest, left * EVENT_SIZE) != 0) {
-		return;
+		return false;
 	}
 	for (uint32_t i = 0; i < left; i++) {
 		handle_event(rest + i * EVENT_SIZE);
 	}
+	return true;
 }
 
 static bool
@@ -370,6 +406,86 @@ power_cycle(void)
 	delay_for_interval(LDO_DVDD_TO_AVDD_MS, NSEC_PER_MSEC);
 	ok = ldo_set(LDO43_CTRL, true) && ok;
 	return ok;
+}
+
+/* ---- when the bus keeps failing ---- */
+
+static uint32_t fingers_now(void);
+
+/*
+ * Transfers failing tick after tick: the bus's clocks, mode and pins set again and the controller reset; if the chip
+ * still does not answer, its supplies off and on (as at boot); then sensing on again. True: the chip answers.
+ */
+static bool
+recover(uint32_t n)
+{
+	uint8_t answer[1] = { 0 };
+	uint32_t error;
+
+	touch_at = AT_RECOVER;
+	say("s6sy761: transfers failing for %u ticks in a row (%llu of %llu failed, last %x; the IRQ pin %s; %u fingers "
+	    "down): the bus set up again (recovery %u of %u)\n", (unsigned)BAD_TICKS_RECOVER, bus.errors, bus.transfers, bus.last_error,
+	    irq_low() ? "low" : "high", fingers_now(), n, (unsigned)RECOVERIES_MOST);
+	all_up();
+	hakios_hsi2c_power(&bus);
+	hakios_hsi2c_reset(&bus);
+	error = chip_read(CMD_BOOT_STATUS, answer, 1);
+	if ((error != 0 || answer[0] != BOOT_APPLICATION) && ldo_cycles != 0) {
+		say("s6sy761: no answer after the bus reset (%x, status %x): its supplies off and on\n", error, answer[0]);
+		if (power_cycle()) {
+			for (uint32_t probe = 0; probe < 24; probe++) {
+				delay_for_interval(500, NSEC_PER_MSEC);
+				if ((error = chip_read(CMD_BOOT_STATUS, answer, 1)) == 0 && answer[0] == BOOT_APPLICATION) {
+					break;
+				}
+			}
+		}
+	}
+	if (error != 0 || answer[0] != BOOT_APPLICATION) {
+		say("s6sy761: still no answer (%x, status %x)\n", error, answer[0]);
+		return false;
+	}
+	(void)chip_write(CMD_SENSE_ON, NULL, 0);
+	delay_for_interval(10, NSEC_PER_MSEC);
+	(void)chip_write(CMD_CLEAR_EVENTS, NULL, 0);
+	say("s6sy761: the chip answers again: sense on, the event queue emptied\n");
+	return true;
+}
+
+/*
+ * Every WATCH_MS, from a thread call: a polling thread that has not finished a tick in STALL_MS is said, where it is,
+ * and its stack (true only while it waits; a thread running on a core shows where it last waited). Said at the stall's
+ * start and once a minute while it lasts, and when it goes on.
+ */
+static void
+watch(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
+{
+	static uint64_t stall_said;
+	uint64_t now = mach_absolute_time(), done = tick_done, ns = 0, deadline;
+
+	if (done != 0) {
+		absolutetime_to_nanoseconds(now - done, &ns);
+		if (ns / NSEC_PER_MSEC >= STALL_MS) {
+			uint64_t since = 0;
+
+			if (stall_said != 0) {
+				absolutetime_to_nanoseconds(now - stall_said, &since);
+			}
+			if (stall_said == 0 || since >= 60 * NSEC_PER_SEC) {
+				stall_said = now;
+				say("s6sy761: the polling thread has not finished a tick in %llu ms: %s; transfers %llu, %llu failed "
+				    "(last %x); the IRQ pin %s; %u fingers down\n", ns / NSEC_PER_MSEC,
+				    at_name[touch_at < AT_RECOVER + 1 ? touch_at : AT_WAIT], bus.transfers, bus.errors, bus.last_error,
+				    irq_low() ? "low" : "high", fingers_now());
+				hakios_thread_say_stack(poller, say);
+			}
+		} else if (stall_said != 0) {
+			say("s6sy761: the polling thread goes on (%llu failed transfers now)\n", bus.errors);
+			stall_said = 0;
+		}
+	}
+	clock_interval_to_deadline(WATCH_MS, NSEC_PER_MSEC, &deadline);
+	thread_call_enter_delayed(watch_call, deadline);
 }
 
 /* ---- the steps ---- */
@@ -471,10 +587,33 @@ touch_thread(void *arg, __unused wait_result_t wr_)
 
 	say("s6sy761: step 6: watching the IRQ pin every %u ms; the coordinates are 0-%u x 0-%u\n", POLL_MS, res_x - 1,
 	    res_y - 1);
-	/* up to four rounds of reads per tick while the pin is low */
-	for (unsigned tick = 1;; tick++) {
+	/* up to four rounds of reads per tick while the pin is low; a failed one ends the tick's rounds */
+	tick_done = mach_absolute_time();
+	if ((watch_call = thread_call_allocate(watch, NULL)) != NULL) {
+		watch(NULL, NULL);
+	}
+	for (unsigned tick = 1, bad_ticks = 0, recoveries = 0;; tick++) {
+		uint64_t errors_before = bus.errors;
+
 		for (int rounds = 0; rounds < 4 && irq_low(); rounds++) {
-			read_events();
+			if (!read_events()) {
+				break;
+			}
+		}
+		if (bus.errors == errors_before) {
+			bad_ticks = 0;
+		} else if (++bad_ticks == BAD_TICKS_UP && fingers_now() != 0) {
+			say("s6sy761: transfers failing for %u ticks in a row: every finger lifted (an up may be what was lost)\n",
+			    bad_ticks);
+			all_up();
+		} else if (bad_ticks >= BAD_TICKS_RECOVER) {
+			bad_ticks = 0;
+			if (++recoveries > RECOVERIES_MOST) {
+				say("s6sy761: %u recoveries did not last: the touch screen given up\n", (unsigned)RECOVERIES_MOST);
+				all_up();
+				break;
+			}
+			(void)recover(recoveries);
 		}
 		if (tick % MINUTE_TICKS == 0) {
 			say("s6sy761: a minute: %llu touches, %llu events, %llu transfers, %llu failed (last %x)\n", stats.downs,
@@ -486,8 +625,12 @@ touch_thread(void *arg, __unused wait_result_t wr_)
 			all_up();               /* (no finger left down for good) */
 			break;
 		}
-		delay_for_interval(POLL_MS, NSEC_PER_MSEC);
+		touch_at = AT_WAIT;
+		tick_done = mach_absolute_time();
+		/* (two ticks in a row that failed: the next one later, never a core spent on a bus that does not answer) */
+		delay_for_interval(bad_ticks >= 2 ? 100 : POLL_MS, NSEC_PER_MSEC);
 	}
+	tick_done = 0;                  /* (the watch: nothing to watch) */
 out:
 	if (step < 6 && steps < 6) {
 		say("s6sy761: stopping here (s6sy761_steps=%u)\n", steps);
@@ -529,7 +672,7 @@ hakios_s6sy761_init(void)
 		PE_parse_boot_argn("s6sy761_pri", &pri, sizeof(pri));
 		if (kernel_thread_start_priority((thread_continue_t)touch_thread, (void *)(uintptr_t)steps, (integer_t)pri,
 		    &thread) == KERN_SUCCESS) {
-			thread_deallocate(thread);
+			poller = thread;        /* (the reference kept: watch() reads its stack) */
 		}
 	}
 }
