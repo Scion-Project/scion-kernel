@@ -214,23 +214,50 @@ _lkpi_pci_enable_msi_range(struct pci_dev *pdev, int minvec, int maxvec)
 	return (-ENOTSUP);			/* (none on this root complex: INTx it is) */
 }
 
+/* (drivers/wifi/lx/hakios.lx.c: the panel asleep, the screen dark) */
+bool lx_os_dark(void);
+
+/*
+ * The look is a read of the chip's mailbox over PCIe: each one takes the link out of L1 and wakes the chip's bus core.
+ * At 2 ms that is 500 a second with the radio idle and the screen dark (round 23: 320 mA with the processors 3% busy).
+ * So the period backs off while the looks find nothing -- doubled after every POLL_IDLE_LOOKS empty ones, up to
+ * POLL_LIT_MS with the screen on and POLL_DARK_MS with it dark -- and is brcmfmac_poll_ms (2) again at the first look that
+ * finds something. brcmfmac_poll_fixed=1: the fixed period as before.
+ */
+#define POLL_IDLE_LOOKS		8
+#define POLL_LIT_MS		8
+#define POLL_DARK_MS		32
+
 static void
 poller(void *argument)
 {
-	unsigned ms = lx_os_option("brcmfmac_poll_ms");
+	unsigned base = lx_os_option("brcmfmac_poll_ms"), ms, empty = 0;
+	bool back = lx_os_option("brcmfmac_poll_fixed") == 0;
 
-	ms = ms == 0 ? 2 : ms;
+	base = base == 0 ? 2 : base;
+	ms = base;
 	lp.poll_self = lx_os_thread_self();
 	lp.polls = true;
 	while (lp.polling) {
 		irqreturn_t r = lp.handler(LX_PCI_IRQ, lp.argument);
-
 		lp.looks++;
 		if (r == IRQ_WAKE_THREAD && lp.thread != NULL) {
 			lp.handled++;
 			lp.thread(LX_PCI_IRQ, lp.argument);
 		} else if (r == IRQ_HANDLED) {
 			lp.handled++;
+		}
+		if (!back) {
+			/* (the fixed period) */
+		} else if (r == IRQ_HANDLED || r == IRQ_WAKE_THREAD) {
+			ms = base;
+			empty = 0;
+		} else if (++empty >= POLL_IDLE_LOOKS) {
+			unsigned most = lx_os_dark() ? POLL_DARK_MS : POLL_LIT_MS;
+
+			empty = 0;
+			ms = ms * 2 > most ? most : ms * 2;
+			ms = ms < base ? base : ms;
 		}
 		lx_pause_ms(ms);
 	}

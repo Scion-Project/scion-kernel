@@ -379,6 +379,16 @@ lx_os_option(const char *name)
 	return hakios_wifi_option(name);
 }
 
+/* the screen dark: the panel asleep (hakios.s6e3ha8.c; the stub elsewhere: never) -- the Wi-Fi poller's longer period */
+extern bool hakios_panel_asleep(void);
+bool lx_os_dark(void);
+
+bool
+lx_os_dark(void)
+{
+	return hakios_panel_asleep();
+}
+
 int
 lx_os_firmware(const char *name, const void **data, unsigned long *size)
 {

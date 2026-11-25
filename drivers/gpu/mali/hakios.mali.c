@@ -45,6 +45,7 @@
 #include <kern/clock.h>
 #include <kern/locks.h>
 #include <kern/thread.h>
+#include <kern/thread_call.h>
 #include <libkern/libkern.h>
 #include <mach/mach_time.h>
 #include <sys/kauth.h>
@@ -475,6 +476,89 @@ gpu_cores_on(const char **which)
 }
 
 /*
+ * mali_idle_off=1 (the Note9's default; 0 turns it off): with the screen dark and no job for IDLE_OFF_MS, the shader cores,
+ * the tiler and the L2 are powered off -- the caches cleaned and invalidated first, as kbase does before the L2 goes --
+ * and on again (gpu_cores_on()) before the next job or MMU update. Until now they were powered on once at step 7 and
+ * never off: 18 shader cores leaking under BUCK6 all day with the screen dark (round 23's 320 mA floor). The G3D domain
+ * itself stays on (its protection controller's save and restore are only made at a halt). With mali_lock held.
+ */
+#define SHADER_PWROFF       0x1c0
+#define TILER_PWROFF        0x1d0
+#define L2_PWROFF           0x1e0
+#define SHADER_PWRTRANS     0x200
+#define TILER_PWRTRANS      0x210
+#define L2_PWRTRANS         0x220
+#define GPU_CMD_CLEAN_INV   8u
+#define IRQ_CLEAN_DONE      (1u << 17)
+#define IDLE_OFF_MS         2000
+static uint32_t mali_idle_off;
+static bool cores_off;
+static uint64_t last_job_end;
+static uint32_t idle_offs, idle_ons;
+
+static void
+cores_ensure_on(void)
+{
+	const char *which = NULL;
+
+	if (!cores_off) {
+		return;
+	}
+	cores_off = false;
+	idle_ons++;
+	if (!gpu_cores_on(&which)) {
+		printf("mali: idle off: %s did not power up again: idle off stops\n", which);
+		mali_idle_off = 0;
+	} else if (idle_ons <= 3 || idle_ons % 100 == 0) {
+		printf("mali: idle off: the cores on again for a job (%u times)\n", idle_ons);
+	}
+}
+
+static void
+cores_power_off(void)
+{
+	uint32_t tiler = rd(mali, TILER_PRESENT);
+	const char *failed = NULL, *which = NULL;
+
+	wr(mali, GPU_INT_CLEAR, IRQ_CLEAN_DONE);
+	wr(mali, GPU_CMD, GPU_CMD_CLEAN_INV);
+	if (!wait_for(mali, GPU_INT_RAWSTAT, IRQ_CLEAN_DONE, IRQ_CLEAN_DONE, CORES_WAIT_US)) {
+		failed = "the caches' clean";
+	}
+	wr(mali, GPU_INT_CLEAR, IRQ_CLEAN_DONE);
+	if (failed == NULL) {
+		wr(mali, SHADER_PWROFF, shader_mask);
+		wr(mali, TILER_PWROFF, tiler);
+		if (!wait_for(mali, SHADER_READY, shader_mask, 0, CORES_WAIT_US) ||
+		    !wait_for(mali, SHADER_PWRTRANS, shader_mask, 0, CORES_WAIT_US) ||
+		    !wait_for(mali, TILER_READY, tiler, 0, CORES_WAIT_US) || !wait_for(mali, TILER_PWRTRANS, tiler, 0, CORES_WAIT_US)) {
+			failed = "the shader cores or the tiler going off";
+		}
+	}
+	if (failed == NULL) {
+		wr(mali, L2_PWROFF, l2_mask);
+		if (!wait_for(mali, L2_READY, l2_mask, 0, CORES_WAIT_US) || !wait_for(mali, L2_PWRTRANS, l2_mask, 0, CORES_WAIT_US)) {
+			failed = "the L2 going off";
+		}
+	}
+	if (failed != NULL) {
+		printf("mali: idle off: %s did not finish (shader %#x, tiler %#x, L2 %#x ready): all on again, idle off stops\n",
+		    failed, rd(mali, SHADER_READY), rd(mali, TILER_READY), rd(mali, L2_READY));
+		mali_idle_off = 0;
+		if (!gpu_cores_on(&which)) {
+			printf("mali: idle off: %s did not power up again\n", which);
+		}
+		return;
+	}
+	cores_off = true;
+	idle_offs++;
+	if (idle_offs <= 3 || idle_offs % 100 == 0) {
+		printf("mali: idle off: the screen dark and no job for %u ms: shader cores, tiler and L2 off (%u times)\n",
+		    IDLE_OFF_MS, idle_offs);
+	}
+}
+
+/*
  * The smallest job there is, in a page of the kernel's own: a job header that says "write value", and its payload:
  * where to write, what kind of value (a 32-bit immediate), and the value. The target is the same page, 0x800 further
  * on. `gpu` is the address the GPU knows the page by: its physical address in identity mode, or wherever the page
@@ -516,6 +600,7 @@ run_write_job(vm_offset_t page, uint64_t gpu, const char *what)
 static void
 as0_update(uint64_t transtab, uint32_t transcfg)
 {
+	cores_ensure_on();                      /* (mali_idle_off: no MMU command with the L2 off) */
 	(void)wait_for(mali, AS0 + AS_STATUS, AS_ACTIVE, 0, AS_WAIT_US);   /* no command while one runs (panfrost) */
 	wr(mali, AS0 + AS_TRANSTAB_LO, (uint32_t)transtab);
 	wr(mali, AS0 + AS_TRANSTAB_HI, (uint32_t)(transtab >> 32));
@@ -1749,6 +1834,7 @@ hakios_mali_submit(uint64_t chain, bool fragment)
 
 	lck_mtx_lock(&mali_job_lock);
 	lck_mtx_lock(&mali_lock);
+	cores_ensure_on();
 	wr(mali, JOB_INT_CLEAR, (1u << slot) | (1u << (slot + 16)));
 	wr(mali, js + JS_HEAD_NEXT_LO, (uint32_t)chain);
 	wr(mali, js + JS_HEAD_NEXT_HI, (uint32_t)(chain >> 32));
@@ -1794,9 +1880,34 @@ hakios_mali_submit(uint64_t chain, bool fragment)
 		wr(mali, MMU_INT_CLEAR, 0xffffffffu);
 	}
 	wr(mali, JOB_INT_CLEAR, (1u << slot) | (1u << (slot + 16)));
+	last_job_end = mach_absolute_time();
 	lck_mtx_unlock(&mali_lock);
 	lck_mtx_unlock(&mali_job_lock);
 	return status;
+}
+
+/* mali_idle_off: once a second, with the screen dark, the cores off after IDLE_OFF_MS without a job (never waits on a job) */
+extern bool hakios_panel_asleep(void);
+static thread_call_t idle_call;
+
+static void
+idle_tick(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
+{
+	uint64_t deadline, span;
+
+	if (mali_idle_off && hakios_panel_asleep() && lck_mtx_try_lock(&mali_job_lock)) {
+		lck_mtx_lock(&mali_lock);
+		nanoseconds_to_absolutetime((uint64_t)IDLE_OFF_MS * NSEC_PER_MSEC, &span);
+		if (!cores_off && mali_idle_off && mach_absolute_time() - last_job_end >= span) {
+			cores_power_off();
+		}
+		lck_mtx_unlock(&mali_lock);
+		lck_mtx_unlock(&mali_job_lock);
+	}
+	if (mali_idle_off) {
+		clock_interval_to_deadline(1000, NSEC_PER_MSEC, &deadline);
+		thread_call_enter_delayed(idle_call, deadline);
+	}
 }
 
 /*
@@ -2461,6 +2572,12 @@ mali_thread(__unused void *parameter, __unused wait_result_t result)
 		return;
 	}
 	say("mali: came up to step %u of %u: the GPU is there for programs (HakiosMali)\n", reached, STEPS);
+	if (mali_idle_off && (idle_call = thread_call_allocate(idle_tick, NULL)) != NULL) {
+		say("mali: idle off: the shader cores, the tiler and the L2 off after %u ms dark without a job (mali_idle_off=0: "
+		    "never)\n", IDLE_OFF_MS);
+		last_job_end = mach_absolute_time();
+		idle_tick(NULL, NULL);
+	}
 	if (mali_irq) {
 		kern_return_t attached;
 
@@ -2537,6 +2654,9 @@ hakios_mali_init(void)
 		if (strcmp(platform, "crownlte") == 0) {
 			mali_irq = 1;
 			mali_flushred = 1;
+			if (!PE_parse_boot_argn("mali_idle_off", &mali_idle_off, sizeof(mali_idle_off))) {
+				mali_idle_off = 1;
+			}
 			/*
 			 * BUCK6 follows the GPU's level (the APM's voltage for it + mali_dvs_margin, at least mali_dvs_floor) instead of
 			 * 950 mV throughout: a GPU's energy for the same work goes with the square of its voltage, so a lower clock at

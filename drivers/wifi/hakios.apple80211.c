@@ -668,6 +668,28 @@ set(const struct apple80211req *request, char *said, size_t said_size)
 	}
 	case 10:
 		return set_scan(request, said, said_size);
+	case 28:                                /* the locale */
+	case 51: {                              /* the country code */
+		/*
+		 * Taken, and nothing changed: the radio keeps the country of its NVRAM (KR on this phone). Refused, wifid asked
+		 * again every 30 s, and in bursts every second, all day (round 23: "Failed to set locale, retrying KR").
+		 */
+		uint8_t asked[8] = { 0 };
+		int error;
+
+		if (request->req_len > 0 &&
+		    (error = copyin(request->req_data, asked, request->req_len < sizeof(asked) ? request->req_len : sizeof(asked))) != 0) {
+			return error;
+		}
+		if (request->req_type == 51) {
+			snprintf(said, said_size, " (country %c%c: taken, the radio's own kept)",
+			    asked[4] >= 'A' && asked[4] <= 'Z' ? asked[4] : '?', asked[5] >= 'A' && asked[5] <= 'Z' ? asked[5] : '?');
+		} else {
+			snprintf(said, said_size, " (locale %u: taken, the radio's own kept)",
+			    (uint32_t)asked[4] | (uint32_t)asked[5] << 8 | (uint32_t)asked[6] << 16 | (uint32_t)asked[7] << 24);
+		}
+		return 0;
+	}
 	default:
 		return EOPNOTSUPP;
 	}

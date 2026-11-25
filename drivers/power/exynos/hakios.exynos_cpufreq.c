@@ -1272,14 +1272,31 @@ dev_state_update(uint64_t now)
 	dev_state = to;
 }
 
+/*
+ * The window with the screen dark and no boost on: DARK_WINDOW_MS (cpufreq_gov_dark_window=MS, 0: as lit). With the
+ * processors 3% busy and the clusters at their dark floors (round 23), the 40 ms window woke this thread 25 times a
+ * second for nothing; a touch or a frame still wakes it at once (boost_event).
+ */
+#define DARK_WINDOW_MS  200
+static uint32_t dark_window_ms = DARK_WINDOW_MS;
+extern bool hakios_panel_asleep(void);          /* drivers/display/panel/hakios.s6e3ha8.c (stubs.c: never) */
+
 /* the window now, in mach_absolute_time units */
 static uint64_t
 window_span(uint64_t now)
 {
 	uint64_t span;
+	uint32_t ms;
 
-	nanoseconds_to_absolutetime((uint64_t)(gov_policy != 1 && interactive(now) ? BOOST_WINDOW_MS : window_ms) * NSEC_PER_MSEC,
-	    &span);
+	if (gov_policy != 1 && interactive(now)) {
+		ms = BOOST_WINDOW_MS;
+	} else if (dark_window_ms > window_ms && !boost_on(__atomic_load_n(&touch_last, __ATOMIC_ACQUIRE), boost_span, now) &&
+	    hakios_panel_asleep()) {
+		ms = dark_window_ms;
+	} else {
+		ms = window_ms;
+	}
+	nanoseconds_to_absolutetime((uint64_t)ms * NSEC_PER_MSEC, &span);
 	return span;
 }
 
@@ -1970,6 +1987,9 @@ hakios_exynos_cpufreq_gov_start(void)
 	}
 	if (PE_parse_boot_argn("cpufreq_gov_ms", &value, sizeof(value)) && value >= 20 && value <= 200) {
 		window_ms = value;
+	}
+	if (PE_parse_boot_argn("cpufreq_gov_dark_window", &value, sizeof(value)) && value <= 1000) {
+		dark_window_ms = value;
 	}
 	value = 1;
 	if (PE_parse_boot_argn("cpufreq_gov_log", &value, sizeof(value)) && value <= 3600) {
