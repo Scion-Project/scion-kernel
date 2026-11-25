@@ -221,6 +221,7 @@ static struct cluster {
 	uint32_t levels[LEVELS_MOST];   /* the fastest first */
 	uint32_t n;
 	uint32_t floor, ceiling;        /* kHz: boot-args within the device tree's limits */
+	uint32_t floor_dark;            /* kHz: the floor while the screen is off (0: as floor; see cluster_floor()) */
 	uint32_t thermal;               /* the thermal ceiling, a level index (0: none) */
 	uint32_t cur;                   /* kHz, as read back, or as asked when the APM says 0 */
 	bool asked;                     /* cur is the rate asked for: the APM's FREQ_GET said 0 */
@@ -604,6 +605,8 @@ ocp_pmic(void)
 	    on ? "the M3s' limits are Samsung's with OCP" : "not on: the M3s stay at 1794000 at most");
 	return on;
 }
+
+static uint32_t cluster_floor(const struct cluster *c);     /* (below: the floor now, by the screen) */
 
 /* the slowest level at or above khz (the fastest when none is) */
 static uint32_t
@@ -1615,7 +1618,7 @@ decide_scion(struct cluster *c, uint64_t now, uint32_t window)
 		}
 	}
 	max = ceiling_now(c);
-	target = scion_rate(&c->rate, c->levels, c->n, c->cur, c->load, MAX(c->floor, c->boost_floor), max, window);
+	target = scion_rate(&c->rate, c->levels, c->n, c->cur, c->load, MAX(cluster_floor(c), c->boost_floor), max, window);
 	if (target != c->cur) {
 		set_rate(c, target, max);
 	}
@@ -1649,7 +1652,7 @@ decide(struct cluster *c, uint64_t now, uint32_t window)
 		/* no time left over to say how much more it needs: the touch-boost rate at once, then the load's again */
 		want = MAX(want, c->levels[level_at_least(c, c->touch_khz)]);
 	}
-	target = MAX(want, c->floor);
+	target = MAX(want, cluster_floor(c));
 	target = MAX(target, c->boost_floor);
 	target = MIN(target, max);
 	if (target < c->cur && c->cur <= max) {
@@ -1943,6 +1946,18 @@ cluster_setup(struct cluster *c, uint32_t asked_max, uint32_t asked_min, uint32_
 	c->temp_mc = NOT_READ_MC;
 }
 
+/*
+ * The floor now: the A55s' 1053000 holds only while the screen is on. It is there for core 0's UFS service, whose load
+ * the scheduler does not see; with the screen off little is read or written, and on the Note9 the phone drew about
+ * 400 mA asleep (round 20, a day of use) with all eight cores held up. Dark: 598000 (cpufreq_gov_lit_dark=, 0: as lit).
+ */
+extern bool hakios_panel_asleep(void);          /* drivers/display/panel/hakios.s6e3ha8.c (stubs.c: never) */
+static uint32_t
+cluster_floor(const struct cluster *c)
+{
+	return c->floor_dark != 0 && c->floor_dark < c->floor && hakios_panel_asleep() ? c->floor_dark : c->floor;
+}
+
 bool
 hakios_exynos_cpufreq_gov_start(void)
 {
@@ -2073,6 +2088,14 @@ hakios_exynos_cpufreq_gov_start(void)
 		}
 	}
 	cluster_setup(&clusters[0], lit_max, lit_min, 1794000, 1053000);
+	{
+		uint32_t dark = 598000;
+
+		(void)PE_parse_boot_argn("cpufreq_gov_lit_dark", &dark, sizeof(dark));
+		clusters[0].floor_dark = dark != 0 ? MIN(clusters[0].levels[level_at_least(&clusters[0], MAX(dark, clusters[0].dt_min))],
+		    clusters[0].floor) : 0;
+		say("cpufreq_gov: the A55s' floor with the screen off: %u kHz\n", clusters[0].floor_dark);
+	}
 	/* (with OCP: up to the busy-count limits above, or cpufreq_gov_big_oc's) */
 	cluster_setup(&clusters[1], big_max, big_min,
 	    !ocp_on ? 1794000 : big_oc != 0 ? big_oc : MAX(big_single, MAX(big_dual, big_quad)), 650000);

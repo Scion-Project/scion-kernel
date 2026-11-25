@@ -30,7 +30,8 @@
  * is what the status bar's Wi-Fi bars come from.
  *
  * What is not done: more than one network, roaming (brcmfmac's roamoff is set: the firmware does not move to another
- * access point by itself), WPA3 and enterprise networks, protected management frames, power saving.
+ * access point by itself), WPA3 and enterprise networks, protected management frames. Power saving: PM_FAST once
+ * joined (power_save()).
  *
  * On the phone (3 Nov, wifi-d4): a WPA2-PSK network on 5 GHz joined 166 ms after brcmfmac's connect, configd's DHCP,
  * the gateway and the Internet answering the USB console's "wifi ping" (devices/starlte/WIFI.md).
@@ -611,6 +612,22 @@ wait_for(volatile int *what, bool (*done)(void), unsigned ms)
 static bool connect_over(void) { return (c.connected != 0); }
 static bool handshake_over(void) { return (c.connected < 0 || (c.handshake == LX_WPA_KEYS && c.keys != 0)); }
 
+/*
+ * Power saving once joined, as Linux's cfg80211 asks for it (wdev->ps, CONFIG_CFG80211_DEFAULT_PS): brcmfmac's
+ * set_power_mgmt puts the firmware in PM_FAST (the radio sleeps between beacons and wakes for traffic) and sets
+ * pm2_sleep_ret, how long after the last frame it goes back to sleep (200 ms here, the firmware's own). Nothing asked for
+ * it before (the comment at the top said "not done"): the Note9 drew about 400 mA with the screen off (round 20, a day of
+ * use), the radio among what stayed awake.
+ */
+static void
+power_save(void)
+{
+	int error = c.ops->set_power_mgmt != NULL ? c.ops->set_power_mgmt(c.wiphy, c.ndev, true, 200) : -EOPNOTSUPP;
+
+	lx_tell("lx: power save (PM_FAST, back to sleep 200 ms after the last frame): %s (%d)\n", error == 0 ? "on" :
+	    "NOT on", error);
+}
+
 static int
 station_join(const struct hakios_sta_join *what)
 {
@@ -729,6 +746,7 @@ station_join(const struct hakios_sta_join *what)
 	lx_os_net_link(1);
 	lx_tell("lx: THE NETWORK IS JOINED, %llu ms after brcmfmac's connect: frames pass\n", (lx_os_nanoseconds() - began) /
 	    1000000ull);
+	power_save();
 	return (0);
 }
 
