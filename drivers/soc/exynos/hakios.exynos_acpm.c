@@ -791,6 +791,20 @@ extern vm_offset_t phystokv(uint64_t pa);
 extern boolean_t pmap_valid_address(uint64_t addr);
 static uint32_t mif_dark;
 
+/* (bus_say for a caller that takes a printf-like function) */
+static int
+mif_say(const char *format, ...)
+{
+	char line[400];
+	va_list ap;
+
+	va_start(ap, format);
+	vsnprintf(line, sizeof(line), format, ap);
+	va_end(ap);
+	bus_say("%s", line);
+	return 0;
+}
+
 static void
 mif_stage0(uint32_t *levels, uint32_t *count)
 {
@@ -814,7 +828,7 @@ mif_stage0(uint32_t *levels, uint32_t *count)
 			    b[7] >= 32 && b[7] < 127 ? b[7] : '.', w[2], w[3]);
 		}
 	}
-	n = hakios_acpm_dvfs_table(0, khz, uv, 24, bus_say);
+	n = hakios_acpm_dvfs_table(0, khz, uv, 24, mif_say);
 	*count = 0;
 	for (uint32_t i = 0; i < n; i++) {
 		bus_say("bus: MIF dark 0: the APM's MIF level %u: %u kHz, %u uV\n", i, khz[i], uv[i]);
