@@ -306,6 +306,13 @@ int hakios_usb_picture(__unused uintptr_t rgb, __unused uint32_t width, __unused
 int hakios_psci_cpu_on_prepare(int cpu, uint32_t mpidr);
 /* before CPU_ON (psci_smp.c, patch 1508): go ahead, nothing to prepare */
 int hakios_psci_cpu_on_prepare(__unused int cpu, __unused uint32_t mpidr) { return 0; }
+/* before CPU_OFF and after a core came back (psci_smp.c, sleep_cores=): a plain CPU_OFF, nothing to undo */
+uint64_t hakios_psci_cpu_off_prepare(int cpu, uint32_t mpidr);
+uint64_t hakios_psci_cpu_off_prepare(__unused int cpu, __unused uint32_t mpidr) { return 0; }
+void hakios_psci_cpu_back(int cpu, uint32_t mpidr);
+void hakios_psci_cpu_back(__unused int cpu, __unused uint32_t mpidr) {}
+uint32_t hakios_m3_power(void);
+uint32_t hakios_m3_power(void) { return ~0u; }
 #endif
 #ifndef HAKIOS_EXYNOS_USB
 struct hakios_usb_glue;

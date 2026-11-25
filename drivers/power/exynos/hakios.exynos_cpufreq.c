@@ -422,6 +422,7 @@ policy_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused in
 SYSCTL_PROC(_kern_hakios, OID_AUTO, gov_policy, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_KERN, NULL, 0,
     policy_sysctl, "I", "the governor's policy: 1 as first, 3 scion, 2 scion without parking, 4 that with frame pacing (gov_policy=)");
 
+extern uint32_t hakios_cpu_exit_mask;          /* osfmk/arm/cpu_common.c: the cores sleep_cores= took off */
 static uint64_t idle_before[MAX_CPUS];
 static bool ever_idle[MAX_CPUS];
 
@@ -1565,6 +1566,13 @@ measure(uint64_t span)
 			continue;
 		}
 		c->online++;
+		if (i < 32 && (__atomic_load_n(&hakios_cpu_exit_mask, __ATOMIC_RELAXED) & (1u << i)) != 0) {
+			/*
+			 * Taken off (sleep_cores=, GenericARMPE.cpp): no idle time of its own to read, so neither measured nor in the
+			 * load. Still counted online: the M3s' limit stays the four's (1794000), never the two's.
+			 */
+			continue;
+		}
 		c->load = MAX(c->load, (uint32_t)(100 * busy / span));
 		c->sum_now += (uint32_t)(100 * busy / span);
 		if (c == &clusters[1]) {

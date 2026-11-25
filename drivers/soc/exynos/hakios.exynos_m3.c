@@ -118,6 +118,123 @@ static vm_offset_t pmu;
 static uint32_t m3_steps;
 static bool m3_read_args, m3_looked, m3_written;
 
+/*
+ * An M3 taken off while the screen is dark (sleep_cores=, GenericARMPE.cpp, patch 1517; the Note9's default 1) and started
+ * again: what Samsung's kernel does around PSCI CPU_OFF and CPU_ON for a core it hot-unplugs, as Scion-Project/xnu#67
+ * (osfmk/arm64/sweet_m3off.c, the iOS 27 fork, 24 November: 136 cycles on an S9, 0 failures) does it.
+ *   off, on the dying core (exynos-powermode.c cpu_disable -> pmucal_cpu_disable): its CPU_INFORM := C2 (1), its bit in
+ *     the interrupt generator's GRP2 enable, a pending GRP1 bid of it cleared, its bit in the PMU's
+ *     EVENT_INTERRUPT_ENABLE_GRP2; then CPU_OFF with the power-down state 0x10000 (psci.c cpu_psci_cpu_die), which
+ *     psci_smp_cpu_off() passes when this returns it.
+ *   on, on the core coming back (cpu_enable -> pmucal_cpu_enable): CPU_INFORM := 0, the three bits undone, a GRP2 bid
+ *     cleared -- from psci_smp_cpu_running(), before it takes threads.
+ * The mainline S9+ port found that a CPU_ON after a plain CPU_OFF does not bring an M3 back; this is the difference.
+ * Only for a core GenericARMPE is taking off (its bit in hakios_cpu_exit_mask): never at the system's end.
+ */
+#define M3_PMU_WIDE_SIZE        0x8000u
+#define M3_INTR_PA              0x14070000u     /* the interrupt generator (sweet_m3off.c) */
+#define M3_INTR_SIZE            0x1000u
+#define M3_CPU_INFORM(core)     (0x0860u + 4u * (core))         /* physical core: A55 n = n, M3 n = 4 + n */
+#define M3_STATUS(n)            (0x2004u + 8u * (n))            /* CLUSTER1_CPUn_STATUS [3:0]: 0xF on, 0 off */
+#define M3_PMU_EVT_GRP2_EN      0x7f08u
+#define M3_INTR_GRP1_STAT       0x0108u
+#define M3_INTR_GRP1_CLEAR      0x010cu
+#define M3_INTR_GRP2_ENABLE     0x0200u
+#define M3_INTR_GRP2_STAT       0x0208u
+#define M3_INTR_GRP2_CLEAR      0x020cu
+#define PSCI_POWER_DOWN         0x10000ull
+extern uint32_t hakios_cpu_exit_mask;   /* osfmk/arm/cpu_common.c: the cores GenericARMPE is taking off */
+static vm_offset_t m3_wide, m3_intr;
+static uint32_t m3_off_lock;
+static uint32_t m3_off_taken;           /* bit n: M3 n given the off sequence, not yet the on one */
+
+static inline uint32_t
+m3_rd(vm_offset_t base, uint32_t off)
+{
+	return *(volatile uint32_t *)(base + off);
+}
+
+static inline void
+m3_set(vm_offset_t base, uint32_t off, uint32_t bit, bool on)
+{
+	uint32_t v = m3_rd(base, off);
+
+	*(volatile uint32_t *)(base + off) = on ? (v | bit) : (v & ~bit);
+}
+
+static void
+m3_off_take_lock(void)
+{
+	while (!os_atomic_cmpxchg(&m3_off_lock, 0, 1, acquire)) {
+		while (os_atomic_load(&m3_off_lock, relaxed) != 0) {
+			__builtin_arm_yield();
+		}
+	}
+}
+
+uint64_t hakios_psci_cpu_off_prepare(int cpu, uint32_t mpidr);
+void hakios_psci_cpu_back(int cpu, uint32_t mpidr);
+uint32_t hakios_m3_power(void);
+
+/* on the dying core, interrupts off, just before CPU_OFF (psci_smp_cpu_off()): the power_state to pass, 0 for none */
+uint64_t
+hakios_psci_cpu_off_prepare(int cpu, uint32_t mpidr)
+{
+	uint32_t n = mpidr & 3u, bit = 1u << n;
+
+	if ((mpidr & ~3u) != 0x100 || m3_wide == 0 || m3_intr == 0 || cpu < 0 || cpu >= 32 ||
+	    (os_atomic_load(&hakios_cpu_exit_mask, acquire) & (1u << cpu)) == 0) {
+		return 0;
+	}
+	m3_off_take_lock();
+	*(volatile uint32_t *)(m3_wide + M3_CPU_INFORM(4 + n)) = 1;     /* C2 */
+	m3_set(m3_intr, M3_INTR_GRP2_ENABLE, bit, true);
+	if ((m3_rd(m3_intr, M3_INTR_GRP1_STAT) & bit) == bit) {
+		m3_set(m3_intr, M3_INTR_GRP1_CLEAR, bit, true);
+	}
+	m3_set(m3_wide, M3_PMU_EVT_GRP2_EN, bit, true);
+	__builtin_arm_dsb(0xf);           /* DSB SY */
+	os_atomic_store(&m3_off_lock, 0, release);
+	os_atomic_or(&m3_off_taken, bit, release);
+	return PSCI_POWER_DOWN;
+}
+
+/* on a core that has just come up (psci_smp_cpu_running()), before it runs threads */
+void
+hakios_psci_cpu_back(__unused int cpu, uint32_t mpidr)
+{
+	uint32_t n = mpidr & 3u, bit = 1u << n;
+
+	if ((mpidr & ~3u) != 0x100 || m3_wide == 0 || (os_atomic_load(&m3_off_taken, acquire) & bit) == 0) {
+		return;
+	}
+	m3_off_take_lock();
+	*(volatile uint32_t *)(m3_wide + M3_CPU_INFORM(4 + n)) = 0;
+	m3_set(m3_intr, M3_INTR_GRP2_ENABLE, bit, false);
+	if ((m3_rd(m3_intr, M3_INTR_GRP2_STAT) & bit) == bit) {
+		m3_set(m3_intr, M3_INTR_GRP2_CLEAR, bit, true);
+	}
+	m3_set(m3_wide, M3_PMU_EVT_GRP2_EN, bit, false);
+	__builtin_arm_dsb(0xf);           /* DSB SY */
+	os_atomic_store(&m3_off_lock, 0, release);
+	os_atomic_and(&m3_off_taken, ~bit, release);
+}
+
+/* the four M3s' CLUSTER1_CPUn_STATUS [3:0], M3 n in bits 4n..4n+3 (0xF on, 0 off); ~0 when not mapped (GenericARMPE's log) */
+uint32_t
+hakios_m3_power(void)
+{
+	uint32_t v = 0;
+
+	if (m3_wide == 0) {
+		return ~0u;
+	}
+	for (uint32_t n = 0; n < 4; n++) {
+		v |= (m3_rd(m3_wide, M3_STATUS(n)) & 0xfu) << (4 * n);
+	}
+	return v;
+}
+
 static uint32_t
 pmu_rd(uint32_t offset)
 {
@@ -224,6 +341,11 @@ hakios_psci_cpu_on_prepare(int cpu, uint32_t mpidr)
 	}
 	if (m3_steps == 0) {
 		return 0;
+	}
+	if (m3_wide == 0) {
+		/* (here, at boot, in a context that may map: the off sequence runs on a dying core with interrupts off) */
+		m3_wide = ml_io_map(PMU_PA, M3_PMU_WIDE_SIZE);
+		m3_intr = ml_io_map(M3_INTR_PA, M3_INTR_SIZE);
 	}
 	if (pmu == 0) {
 		pmu = ml_io_map(PMU_PA, PMU_SIZE);
