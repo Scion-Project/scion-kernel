@@ -1196,10 +1196,44 @@ ocpg_start(void)
 	thread_deallocate(thread);
 }
 
+/*
+ * Video mode (round 33; cpufreq_video_big=kHz, the Note9's default 1469000, 0: off): while the MFC decodes (a picture in
+ * the last VIDEO_HOLD_MS), the screen is lit and no finger has moved for VIDEO_TOUCH_MS, the M3s at most this. The
+ * pictures are the MFC's work; what is left on the cores is the app and the compositor, and round 25's YouTube minute had
+ * the M3s at 1794 MHz and 85-100% in bursts -- the 9810's M3s spend the most energy for the least work at their top. A
+ * finger lifts the cap at once (the player's controls, the comments).
+ */
+#define VIDEO_HOLD_MS           500
+#define VIDEO_TOUCH_MS          2000
+static uint32_t video_big;
+extern uint64_t hakios_exynos_video_last(void);  /* drivers/soc/exynos/hakios.exynos_acpm.c */
+extern bool hakios_panel_asleep(void);
+static uint64_t video_since, video_time;         /* this file's thread: in video mode since (0: not), and the sum */
+static uint32_t video_entries;
+
+static bool
+video_mode(uint64_t now)
+{
+	uint64_t last, touch, hold, quiet;
+
+	if (video_big == 0) {
+		return false;
+	}
+	last = hakios_exynos_video_last();
+	touch = __atomic_load_n(&touch_last, __ATOMIC_ACQUIRE);
+	nanoseconds_to_absolutetime((uint64_t)VIDEO_HOLD_MS * NSEC_PER_MSEC, &hold);
+	nanoseconds_to_absolutetime((uint64_t)VIDEO_TOUCH_MS * NSEC_PER_MSEC, &quiet);
+	return last != 0 && now - last <= hold && (touch == 0 || now - touch > quiet) && !hakios_panel_asleep();
+}
+
 static uint32_t
 ceiling_now(struct cluster *c)
 {
 	uint32_t max = c->ceiling;
+
+	if (c == &clusters[1] && video_mode(mach_absolute_time())) {
+		max = MIN(max, video_big);
+	}
 
 	if (gov_policy != 1) {
 		if (!temp_fresh(c)) {
@@ -1865,6 +1899,27 @@ summary(uint64_t seconds)
 	snprintf(ml, sizeof(ml), l->measured ? "%u" : "?", l->measured);
 	snprintf(mb, sizeof(mb), b->measured ? "%u" : "?", b->measured);
 	now = mach_absolute_time();
+	{
+		/* video mode's comings and goings (see video_mode()) */
+		bool v = video_mode(now);
+
+		if (v && video_since == 0) {
+			video_since = now;
+			if (video_entries++ < 20) {
+				say("cpufreq_gov: video mode on (the MFC decodes, no finger for %u ms): the M3s at %u kHz at most\n",
+				    VIDEO_TOUCH_MS, video_big);
+			}
+		} else if (!v && video_since != 0) {
+			uint64_t ns;
+
+			absolutetime_to_nanoseconds(now - video_since, &ns);
+			video_time += ns / NSEC_PER_MSEC;
+			video_since = 0;
+			if (video_entries <= 20) {
+				say("cpufreq_gov: video mode off after %llu ms (%llu s in it so far)\n", ns / NSEC_PER_MSEC, video_time / 1000);
+			}
+		}
+	}
 	touched = boost_on(__atomic_load_n(&touch_last, __ATOMIC_ACQUIRE), boost_span, now);
 	framed = boost_on(__atomic_load_n(&frame_last, __ATOMIC_ACQUIRE), frame_span, now);
 	touches = __atomic_exchange_n(&touch_count, 0, __ATOMIC_RELAXED);
@@ -1999,6 +2054,13 @@ hakios_exynos_cpufreq_gov_start(void)
 	}
 	if (PE_parse_boot_argn("cpufreq_gov_dark_window", &value, sizeof(value)) && value <= 1000) {
 		dark_window_ms = value;
+	}
+	{
+		char platform[24] = "";
+
+		(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+		video_big = strcmp(platform, "crownlte") == 0 ? 1469000 : 0;
+		(void)PE_parse_boot_argn("cpufreq_video_big", &video_big, sizeof(video_big));
 	}
 	value = 1;
 	if (PE_parse_boot_argn("cpufreq_gov_log", &value, sizeof(value)) && value <= 3600) {

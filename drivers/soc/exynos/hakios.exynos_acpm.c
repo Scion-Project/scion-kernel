@@ -658,6 +658,26 @@ hakios_exynos_bus_busy(void)
 	__atomic_store_n(&bus_busy_at, mach_absolute_time(), __ATOMIC_RELAXED);
 }
 
+/*
+ * Video mode (round 33): the MFC's last decode (hakios.exynos_mfc.c, HAKIOS_MFC_DECODE), a stamp only, for the CPU governor's
+ * cap and MIF's video rate (mif_dark_loop()). hakios_exynos_bus_busy() above is shown frames too, so not this.
+ */
+static volatile uint64_t video_at;
+void hakios_exynos_video_decoded(void);
+uint64_t hakios_exynos_video_last(void);
+
+void
+hakios_exynos_video_decoded(void)
+{
+	__atomic_store_n(&video_at, mach_absolute_time(), __ATOMIC_RELAXED);
+}
+
+uint64_t
+hakios_exynos_video_last(void)
+{
+	return __atomic_load_n(&video_at, __ATOMIC_RELAXED);
+}
+
 /* PLL_MIF as the CMU has it, MHz (the DRAM's bus at about half); 0 when it cannot be read */
 static uint32_t
 bus_mif_pll_mhz(void)
@@ -1042,6 +1062,7 @@ pd_off_unused(void)
  * stops for the boot.
  */
 #define INT_LIT_KHZ             534000
+#define MIF_VIDEO_KHZ           1352000         /* video mode's MIF (1080p60's decode, the panel and the compositor: a fraction of it) */
 static void
 mif_dark_loop(void)
 {
@@ -1077,16 +1098,23 @@ mif_dark_loop(void)
 			pd_survey("20 s into the dark");
 		}
 
-		if (!dark && (mif_at != MIF_LIT_KHZ || int_at != INT_LIT_KHZ)) {
+		/*
+		 * Lit: MIF at MIF_VIDEO_KHZ while the MFC decodes (a picture in the last second: video mode, round 33), else at
+		 * MIF_LIT_KHZ; INT at its top either way.
+		 */
+		uint64_t vlast = hakios_exynos_video_last();
+		uint32_t mif_lit = vlast != 0 && now - vlast <= second ? MIF_VIDEO_KHZ : MIF_LIT_KHZ;
+
+		if (!dark && (mif_at != mif_lit || int_at != INT_LIT_KHZ)) {
 			bool say_it = ups < 40;
 
 			if (say_it) {
-				bus_say("bus: MIF dark 2: lit: INT %u -> %u, MIF %u -> %u kHz: asking\n", int_at, INT_LIT_KHZ, mif_at,
-				    MIF_LIT_KHZ);
+				bus_say("bus: MIF dark 2: lit%s: INT %u -> %u, MIF %u -> %u kHz: asking\n", mif_lit == MIF_VIDEO_KHZ ?
+				    " (video)" : "", int_at, INT_LIT_KHZ, mif_at, mif_lit);
 			}
 			e = int_at != INT_LIT_KHZ ? hakios_acpm_dvfs_set(1, INT_LIT_KHZ) : 0;
-			if (e == 0 && mif_at != MIF_LIT_KHZ) {
-				e = hakios_acpm_dvfs_set(0, MIF_LIT_KHZ);
+			if (e == 0 && mif_at != mif_lit) {
+				e = hakios_acpm_dvfs_set(0, mif_lit);
 			}
 			if (e != 0) {
 				bus_say("bus: MIF dark 2: the way up REFUSED (%d): both asked again, stage 2 stops\n", e);
@@ -1095,7 +1123,7 @@ mif_dark_loop(void)
 				return;
 			}
 			int_at = INT_LIT_KHZ;
-			mif_at = MIF_LIT_KHZ;
+			mif_at = mif_lit;
 			step = 0;
 			ups++;
 			if (say_it) {
