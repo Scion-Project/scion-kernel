@@ -947,14 +947,19 @@ pd_survey(const char *when)
  * and nothing turned them off. Samsung's kernel does it as exynos-pd.c exynos_pd_power_off(): the DTZPC save through its
  * SiP call (SMC 0x82000410, 0, the domain's need_smc from the device tree) -- the protection controller is inside the
  * domain -- and then pmucal's "off" sequence (flexpmu_cal_local_exynos9810.h: CONFIGURATION [3:0] := 0, STATUS waited to
- * read 0). A child before its parent (DSPS before DSPM). Not here: AUD (sound), DPU and ISPPRE's tree (the display and
+ * read 0). A child before its parent (DSPS before DSPM). Not here: VTS (below), AUD (sound), DPU and ISPPRE's tree (the display and
  * the camera's CSIS), G3D (the GPU), MFC (video), CHUB (the sensors), and DCF/DCPOST/DCRD (Samsung's tree leaves them
  * alone). A save refused or a domain that does not go off: switched on again and left on.
  */
 #define PD_SMC                  0x82000410u     /* SMC_CMD_PREPARE_PD_ONOFF */
 static const struct { const char *name; uint32_t config; uint32_t need_smc; } pd_unused[] = {
 	{ "IVA", 0x060, 0x17010204 }, { "DSPS", 0x030, 0x16f10204 }, { "DSPM", 0x028, 0x16c10204 },
-	{ "G2D", 0x038, 0x17610204 }, { "VTS", 0x070, 0x13810204 },
+	{ "G2D", 0x038, 0x17610204 },
+	/*
+	 * Not VTS: round 30 switched it off too, and 5 s later the battery thread's next transfer on CMGP's HSI2C
+	 * (0x14360000, the MAX77705's bus) ended in a synchronous external abort (ESR 0x96000610, a write to its INT_STAT):
+	 * the AP reaches CMGP through VTS's side of the bus. Samsung's tree marks VTS power-down-ok = <2>, not 1.
+	 */
 };
 
 static uint64_t
