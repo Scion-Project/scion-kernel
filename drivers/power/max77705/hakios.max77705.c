@@ -953,13 +953,73 @@ chg_bits(uint8_t reg, uint8_t mask, uint8_t value, uint8_t *was)
 	return ok;
 }
 
+/*
+ * 15 W from a Samsung fast charger: the AFC 9 V request (max77705_afc=1, the Note9's default from round 30; 0: never), as
+ * Samsung's MUIC driver makes it (drivers/muic/max77705-muic-afc.c) and with the rules of Scion's iOS 27 charger guard
+ * (scion-kernel drivers/power/max77705/hakios.max77705_charge.h, docs/ios27/CHARGING.md: Samsung's own numbers, stricter
+ * where they differ). Asked only on a wall charger (BC_STATUS type 3) seen for two polls, VBUS at 5 V (USBC_STATUS1
+ * [7:4] VBADC 2 or less), the battery at 15-39 C and under 98 %, and not tried yet on this cable: the input to 500 mA
+ * (pre_afc_input_current), the D+/D- switch open (as Samsung leaves it for a TA), then opcode 0x21 with 0x46 (9 V). The
+ * answer (at 0x51: the opcode, the result, VBADC) counts as 9 V only with result 0 and VBADC 5-7 (7.5-10.5 V), read again
+ * from USBC_STATUS1; only then Samsung's 9 V limits, 1650 mA in and 2150 mA into the battery. At every poll at 9 V: the
+ * battery out of 15-39 C, at 98 %, or VBUS out of 7.5-10.5 V -- the input to 500 mA and 5 V asked for (0x08), and no new
+ * request until the cable goes. Anything else: the 5 V limits below.
+ */
+#define AFC_OP                  0x21    /* COMMAND_AFC_RESULT_READ */
+#define AFC_9V                  0x46
+#define AFC_5V                  0x08
+#define AFC_IN_MA               1650
+#define AFC_CC_MA               2150
+#define AFC_PRE_MA              500
+static bool afc_enabled;
+static enum { AFC_IDLE, AFC_ON_9V, AFC_SPENT } afc_state;
+static uint32_t afc_dcp_polls, afc_said;
+
+/* one AFC opcode with its byte; the answer's first three bytes when it comes in 1 s (false: none) */
+static bool
+afc_request(uint8_t byte, uint8_t answer[3])
+{
+	uint8_t w1[3] = { OPCODE_WRITE, AFC_OP, byte }, w2[2] = { OPCODE_WRITE_END, 0 };
+	uint32_t e;
+
+	lck_mtx_lock(bus_lock);
+	e = hakios_hsi2c_message(&bus, MUIC, false, w1, 3, true);
+	if (e == 0) {
+		e = hakios_hsi2c_message(&bus, MUIC, false, w2, 2, true);
+	}
+	lck_mtx_unlock(bus_lock);
+	for (int i = 0; e == 0 && i < 20; i++) {
+		delay_for_interval(50, NSEC_PER_MSEC);
+		if (locked_read(MUIC, OPCODE_READ, answer, 3) == 0 && answer[0] == AFC_OP) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static uint8_t
+afc_vbadc(void)
+{
+	uint8_t st1 = 0;
+
+	return read8(MUIC, MUIC_USBC_STATUS1, &st1) == 0 ? (uint8_t)((st1 >> 4) & 0xf) : 0xff;
+}
+
 static void
 charger_tune(const struct hakios_battery_state *b)
 {
-	uint8_t bc = 0, cnfg00 = 0, in_now = 0, cc_now = 0;
+	uint8_t bc = 0, cnfg00 = 0, in_now = 0, cc_now = 0, vbadc;
 	uint32_t in_ma, cc_ma;
+	bool temp_fast;
 
-	if (!chg_enabled || !b->external) {
+	if (!b->external) {
+		if (afc_state != AFC_IDLE || afc_dcp_polls != 0) {
+			afc_state = AFC_IDLE;           /* (the cable gone: a new one may be asked again) */
+			afc_dcp_polls = 0;
+		}
+		return;
+	}
+	if (!chg_enabled) {
 		return;
 	}
 	if (read8(CHARGER, CHG_CNFG_00, &cnfg00) == 0 && (cnfg00 & 0x10)) {
@@ -973,8 +1033,65 @@ charger_tune(const struct hakios_battery_state *b)
 		}
 		return;
 	}
-	in_ma = CHG_IN_MA;
-	cc_ma = b->temperature_hundredths < 0 || b->temperature_hundredths > 4500 ? CHG_CC_TEMP_MA : CHG_CC_MA;
+	vbadc = afc_vbadc();
+	temp_fast = b->temperature_hundredths > 1500 && b->temperature_hundredths <= 3900;
+	afc_dcp_polls = (bc & 3) == 3 ? afc_dcp_polls + 1 : 0;
+	if (afc_state == AFC_ON_9V && (!temp_fast || b->percent_hundredths >= 9800 || vbadc < 5 || vbadc > 7 ||
+	    (bc & 3) != 3)) {
+		uint8_t answer[3] = { 0, 0, 0 };
+
+		(void)chg_bits(CHG_CNFG_06, 0x0C, 0x0C, NULL);
+		(void)chg_bits(CHG_CNFG_09, 0x7F, (uint8_t)(AFC_PRE_MA / 25 - 1), NULL);
+		bool got = afc_request(AFC_5V, answer);
+		say("max77705: AFC: back to 5 V (battery %d.%02d C, %d.%02d%%, VBADC %u, type %u): the answer %s %x %x %x\n",
+		    b->temperature_hundredths / 100, (b->temperature_hundredths < 0 ? -b->temperature_hundredths : b->temperature_hundredths) % 100,
+		    b->percent_hundredths / 100, b->percent_hundredths % 100, vbadc, bc & 3, got ? "came:" : "did NOT come:",
+		    answer[0], answer[1], answer[2]);
+		afc_state = AFC_SPENT;
+		vbadc = afc_vbadc();
+	} else if (afc_enabled && afc_state == AFC_IDLE && (bc & 3) == 3 && afc_dcp_polls >= 2 && vbadc <= 2 && temp_fast &&
+	    b->percent_hundredths < 9800) {
+		uint8_t answer[3] = { 0, 0, 0 };
+		uint8_t now_vbadc;
+		bool got;
+
+		say("max77705: AFC: a wall charger, the battery at %d.%02d C and %d.%02d%%: the input to %u mA, the switch open, "
+		    "9 V asked for\n", b->temperature_hundredths / 100, b->temperature_hundredths % 100, b->percent_hundredths / 100,
+		    b->percent_hundredths % 100, AFC_PRE_MA);
+		(void)chg_bits(CHG_CNFG_06, 0x0C, 0x0C, NULL);
+		(void)chg_bits(CHG_CNFG_09, 0x7F, (uint8_t)(AFC_PRE_MA / 25 - 1), NULL);
+		(void)usbsw_write(COM_OPEN);
+		delay_for_interval(500, NSEC_PER_MSEC);         /* (Samsung's 500 ms, "Maxim's request") */
+		got = afc_request(AFC_9V, answer);
+		delay_for_interval(200, NSEC_PER_MSEC);
+		now_vbadc = afc_vbadc();
+		if (got && answer[1] == 0 && answer[2] >= 5 && answer[2] <= 7 && now_vbadc >= 5 && now_vbadc <= 7) {
+			afc_state = AFC_ON_9V;
+			say("max77705: AFC: 9 V taken (answer %x %x %x, VBADC %u): %u mA in, %u mA into the battery\n", answer[0],
+			    answer[1], answer[2], now_vbadc, AFC_IN_MA, AFC_CC_MA);
+		} else {
+			afc_state = AFC_SPENT;
+			say("max77705: AFC: no 9 V (the answer %s %x %x %x, VBADC %u): 5 V limits, not asked again on this cable\n",
+			    got ? "came:" : "did NOT come:", answer[0], answer[1], answer[2], now_vbadc);
+			if (now_vbadc > 2) {
+				(void)afc_request(AFC_5V, answer);
+			}
+		}
+		vbadc = now_vbadc;
+	}
+	if (afc_state == AFC_ON_9V) {
+		in_ma = AFC_IN_MA;
+		cc_ma = AFC_CC_MA;
+	} else if (vbadc != 0xff && vbadc > 2) {
+		in_ma = AFC_PRE_MA;             /* (VBUS above 5.5 V outside a 9 V session: held low, as the guard does) */
+		cc_ma = CHG_CC_MA;
+	} else {
+		in_ma = CHG_IN_MA;
+		cc_ma = CHG_CC_MA;
+	}
+	if (b->temperature_hundredths < 0 || b->temperature_hundredths > 4500) {
+		cc_ma = CHG_CC_TEMP_MA;
+	}
 	uint8_t in_code = (uint8_t)(in_ma / 25 - 1), cc_code = (uint8_t)(cc_ma / 50);
 
 	if (read8(CHARGER, CHG_CNFG_09, &in_now) != 0 || read8(CHARGER, CHG_CNFG_02, &cc_now) != 0) {
@@ -986,11 +1103,13 @@ charger_tune(const struct hakios_battery_state *b)
 	bool ok = chg_bits(CHG_CNFG_06, 0x0C, 0x0C, NULL) && chg_bits(CHG_CNFG_09, 0x7F, in_code, NULL) &&
 	    chg_bits(CHG_CNFG_02, 0x3F, cc_code, NULL);
 
-	if (chg_said < 12) {
+	if (chg_said < 12 || afc_said < 8) {
 		chg_said = chg_said < 2 ? 2 : chg_said + 1;
-		say("max77705: charger: type %u: input limit %u -> %u mA, fast charge %u -> %u mA (battery %d.%02d C, watchdog %s): %s\n",
-		    bc & 3, (in_now & 0x7F) <= 3 ? 100 : ((in_now & 0x7F) + 1) * 25, in_ma, (cc_now & 0x3F) <= 2 ? 100 : (cc_now & 0x3F) * 50,
-		    cc_ma, b->temperature_hundredths / 100, (b->temperature_hundredths < 0 ? -b->temperature_hundredths : b->temperature_hundredths) % 100,
+		afc_said++;
+		say("max77705: charger: type %u%s: input limit %u -> %u mA, fast charge %u -> %u mA (battery %d.%02d C, watchdog %s): %s\n",
+		    bc & 3, afc_state == AFC_ON_9V ? " at 9 V" : "", (in_now & 0x7F) <= 3 ? 100 : ((in_now & 0x7F) + 1) * 25, in_ma,
+		    (cc_now & 0x3F) <= 2 ? 100 : (cc_now & 0x3F) * 50, cc_ma, b->temperature_hundredths / 100,
+		    (b->temperature_hundredths < 0 ? -b->temperature_hundredths : b->temperature_hundredths) % 100,
 		    (cnfg00 & 0x10) ? "on, cleared every poll" : "off", ok ? "written" : "NOT TAKEN");
 	}
 }
@@ -1241,6 +1360,16 @@ hakios_max77705_init(void)
 
 		PE_parse_boot_argn("max77705_chg", &chg, sizeof(chg));
 		chg_enabled = chg != 0;
+	}
+	{
+		/* max77705_afc: the 9 V request (above); the Note9's default 1 (its boot line has no room), elsewhere 0 */
+		char platform[24] = "";
+		uint32_t afc = 0;
+
+		(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+		afc = strcmp(platform, "crownlte") == 0;
+		PE_parse_boot_argn("max77705_afc", &afc, sizeof(afc));
+		afc_enabled = afc != 0;
 	}
 	PE_parse_boot_argn("max77705_ipclk", &bus.ipclk_mhz, sizeof(bus.ipclk_mhz));
 	if (steps == 0 || bus.ipclk_mhz < 26 || bus.ipclk_mhz > 400) {
