@@ -941,6 +941,86 @@ pd_survey(const char *when)
 	bus_say("%s; %u on; PLL_MIF %u MHz\n", line, on, bus_mif_pll_mhz());
 }
 
+/*
+ * pd_off=1 (the Note9's default from round 30): the power domains of blocks nothing in this kernel or in iOS uses here,
+ * switched off once, for the rest of the boot. Round 29 read all sixteen on, lit and dark: the boot loader leaves them on
+ * and nothing turned them off. Samsung's kernel does it as exynos-pd.c exynos_pd_power_off(): the DTZPC save through its
+ * SiP call (SMC 0x82000410, 0, the domain's need_smc from the device tree) -- the protection controller is inside the
+ * domain -- and then pmucal's "off" sequence (flexpmu_cal_local_exynos9810.h: CONFIGURATION [3:0] := 0, STATUS waited to
+ * read 0). A child before its parent (DSPS before DSPM). Not here: AUD (sound), DPU and ISPPRE's tree (the display and
+ * the camera's CSIS), G3D (the GPU), MFC (video), CHUB (the sensors), and DCF/DCPOST/DCRD (Samsung's tree leaves them
+ * alone). A save refused or a domain that does not go off: switched on again and left on.
+ */
+#define PD_SMC                  0x82000410u     /* SMC_CMD_PREPARE_PD_ONOFF */
+static const struct { const char *name; uint32_t config; uint32_t need_smc; } pd_unused[] = {
+	{ "IVA", 0x060, 0x17010204 }, { "DSPS", 0x030, 0x16f10204 }, { "DSPM", 0x028, 0x16c10204 },
+	{ "G2D", 0x038, 0x17610204 }, { "VTS", 0x070, 0x13810204 },
+};
+
+static uint64_t
+pd_smc(uint64_t function, uint64_t first, uint64_t second, uint64_t third)
+{
+	register uint64_t x0 __asm__("x0") = function;
+	register uint64_t x1 __asm__("x1") = first;
+	register uint64_t x2 __asm__("x2") = second;
+	register uint64_t x3 __asm__("x3") = third;
+
+	__asm__ volatile ("smc #0" : "+r" (x0), "+r" (x1), "+r" (x2), "+r" (x3) : :
+            "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "memory");
+	return x0;
+}
+
+static void
+pd_off_unused(void)
+{
+	static vm_offset_t pd;
+	char platform[24] = "";
+	uint32_t on = 0, off = 0;
+
+	(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+	if (!PE_parse_boot_argn("pd_off", &on, sizeof(on))) {
+		on = strcmp(platform, "crownlte") == 0;
+	}
+	if (on == 0) {
+		return;
+	}
+	if (pd == 0 && (pd = ml_io_map(PD_PMU_PA, 0x1000)) == 0) {
+		bus_say("bus: pd_off: the PMU cannot be mapped\n");
+		return;
+	}
+	for (uint32_t i = 0; i < sizeof(pd_unused) / sizeof(pd_unused[0]); i++) {
+		uint32_t cfg = pd_unused[i].config, st = cfg + 4, waited = 0;
+		uint64_t answer;
+
+		if ((rd(pd, st) & 0xfu) == 0) {
+			bus_say("bus: pd_off: %s is off already\n", pd_unused[i].name);
+			continue;
+		}
+		bus_say("bus: pd_off: %s: the DTZPC save (SMC %#x, 0, %#x), then off\n", pd_unused[i].name, PD_SMC,
+		    pd_unused[i].need_smc);
+		answer = pd_smc(PD_SMC, 0, pd_unused[i].need_smc, 0);
+		if ((uint32_t)answer != 0) {
+			bus_say("bus: pd_off: %s: the save answered %#llx: left on\n", pd_unused[i].name, answer);
+			continue;
+		}
+		wr(pd, cfg, rd(pd, cfg) & ~0xfu);
+		while ((rd(pd, st) & 0xfu) != 0 && waited < 10000) {
+			delay(10);
+			waited += 10;
+		}
+		if ((rd(pd, st) & 0xfu) != 0) {
+			bus_say("bus: pd_off: %s did not go off (status %x after %u us): on again, left on\n", pd_unused[i].name,
+			    rd(pd, st) & 0xfu, waited);
+			wr(pd, cfg, rd(pd, cfg) | 0xfu);
+			(void)pd_smc(PD_SMC, 1, pd_unused[i].need_smc, 0);     /* (the restore, as a power-on makes it) */
+			continue;
+		}
+		off++;
+		bus_say("bus: pd_off: %s off in %u us\n", pd_unused[i].name, waited);
+	}
+	bus_say("bus: pd_off: %u of %u unused domains switched off\n", off, (uint32_t)(sizeof(pd_unused) / sizeof(pd_unused[0])));
+}
+
 /* stage 2 (see above): this thread's for the rest of the boot; a poll every MIF_DARK_POLL_MS */
 #define MIF_DARK_POLL_MS        200
 #define MIF_LIT_KHZ             1794000
@@ -956,6 +1036,8 @@ mif_dark_loop(void)
 
 	nanoseconds_to_absolutetime(NSEC_PER_SEC, &second);
 	pd_survey("at the start");
+	pd_off_unused();
+	pd_survey("after pd_off");
 	bus_say("bus: MIF dark 2: with the screen dark (and dark_ab's savings on), MIF a level a second to %u kHz; back to %u "
 	    "kHz at once when lit\n", down[2], MIF_LIT_KHZ);
 	for (;;) {
