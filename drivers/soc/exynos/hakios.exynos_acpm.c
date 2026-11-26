@@ -779,7 +779,11 @@ bus_mif_step(void)
  *   1  stage 0, nothing written: the ECT the boot loader left at 0xA0000000 (its header), the APM's MIF levels, MIF's
  *      rate now (FREQ_GET and PLL_MIF); and stage 1: the table given to FVP as Samsung's kernel gives it, with INT's
  *      minimum at INT's top (667000) for every level, where INT already is, so nothing moves; MIF's rate read again.
- * Stage 2 (MIF lowered while the screen is off) is not here yet.
+ *   2  (the Note9's default from round 29) stage 2: with the screen dark and the screen-off savings on
+ *      (hakios_dark_saving(): dark_ab's half, hakios.s6e3ha8.c), MIF down a level a second -- 1539000, 1352000, 1014000,
+ *      Samsung's own suspend rate (freq_info) -- each step said before it is asked and PLL_MIF read after it; with
+ *      the screen lit or the savings off, straight back to 1794000, where S-Boot leaves it. A request refused: back to
+ *      1794000 and stage 2 stops for the boot. Only after stage 1 took, and only with bus_max=0 (the Note9's).
  */
 #define MIF_DARK_DELAY_S        45      /* the console up and the boot's work done, as bus_mif_delay */
 #define MIF_FVP_CHANNEL         1       /* crownlte.dts devfreq_mif@17000010 acpm-ipc-channel */
@@ -790,6 +794,9 @@ bus_mif_step(void)
 extern vm_offset_t phystokv(uint64_t pa);
 extern boolean_t pmap_valid_address(uint64_t addr);
 static uint32_t mif_dark;
+static bool mif_fvp_ok;                 /* stage 1 took */
+extern bool hakios_panel_asleep(void);  /* (stubs.c: never) */
+extern bool hakios_dark_saving(void);   /* hakios.s6e3ha8.c: the screen dark, the savings on (stubs.c: never) */
 
 /* (bus_say for a caller that takes a printf-like function) */
 static int
@@ -890,7 +897,7 @@ mif_dark_start(void)
 
 	(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
 	if (!PE_parse_boot_argn("mif_dark", &mif_dark, sizeof(mif_dark))) {
-		mif_dark = strcmp(platform, "crownlte") == 0 ? 1 : 0;
+		mif_dark = strcmp(platform, "crownlte") == 0 ? 2 : 0;
 	}
 	if (mif_dark == 0) {
 		return;
@@ -898,7 +905,109 @@ mif_dark_start(void)
 	bus_say("bus: MIF dark: stage 0 and 1 in %u s (mif_dark=%u)\n", MIF_DARK_DELAY_S, mif_dark);
 	delay((uint64_t)MIF_DARK_DELAY_S * 1000000);
 	mif_stage0(levels, &count);
-	(void)mif_stage1(levels, count);
+	mif_fvp_ok = mif_stage1(levels, count);
+}
+
+/*
+ * The SoC's power domains as the PMU reads them, read only (round 29): which blocks the boot loader left powered that
+ * nothing here uses, with the screen lit and dark. Samsung's flexpmu_cal_local_exynos9810.h pmucal_pd_list: each
+ * domain's STATUS at PMU + 0x4004 + 8 n, [3:0] 0xF on, 0 off. Also PLL_MIF.
+ */
+#define PD_PMU_PA               0x14064000ull
+static const struct { const char *name; uint32_t status; } pd_list[] = {
+	{ "AUD", 0x004 }, { "DCF", 0x00c }, { "DCPOST", 0x014 }, { "DCRD", 0x01c }, { "DPU", 0x024 }, { "DSPM", 0x02c },
+	{ "DSPS", 0x034 }, { "G2D", 0x03c }, { "G3D", 0x044 }, { "ISPPRE", 0x04c }, { "ISPHQ", 0x054 }, { "ISPLP", 0x05c },
+	{ "IVA", 0x064 }, { "MFC", 0x06c }, { "VTS", 0x07c }, { "CHUB", 0x084 },
+};
+
+static void
+pd_survey(const char *when)
+{
+	static vm_offset_t pd;
+	char line[400];
+	uint32_t n, on = 0;
+
+	if (pd == 0 && (pd = ml_io_map(PD_PMU_PA, 0x1000)) == 0) {
+		bus_say("bus: power domains: the PMU cannot be mapped\n");
+		return;
+	}
+	n = (uint32_t)snprintf(line, sizeof(line), "bus: power domains %s (0xF on, 0 off):", when);
+	for (uint32_t i = 0; i < sizeof(pd_list) / sizeof(pd_list[0]) && n < sizeof(line) - 16; i++) {
+		uint32_t st = rd(pd, pd_list[i].status) & 0xfu;
+
+		on += st == 0xf;
+		n += (uint32_t)snprintf(line + n, sizeof(line) - n, " %s %x", pd_list[i].name, st);
+	}
+	bus_say("%s; %u on; PLL_MIF %u MHz\n", line, on, bus_mif_pll_mhz());
+}
+
+/* stage 2 (see above): this thread's for the rest of the boot; a poll every MIF_DARK_POLL_MS */
+#define MIF_DARK_POLL_MS        200
+#define MIF_LIT_KHZ             1794000
+static void
+mif_dark_loop(void)
+{
+	static const uint32_t down[] = { 1539000, 1352000, 1014000 };
+	uint32_t at = MIF_LIT_KHZ, step = 0, downs = 0, ups = 0;
+	uint64_t last_step = 0, second;
+
+	uint64_t dark_since = 0;
+	bool dark_said = false;
+
+	nanoseconds_to_absolutetime(NSEC_PER_SEC, &second);
+	pd_survey("at the start");
+	bus_say("bus: MIF dark 2: with the screen dark (and dark_ab's savings on), MIF a level a second to %u kHz; back to %u "
+	    "kHz at once when lit\n", down[2], MIF_LIT_KHZ);
+	for (;;) {
+		uint64_t now = mach_absolute_time();
+		bool dark = hakios_dark_saving();
+		uint32_t want = at;
+		int e;
+
+		/* (the power domains once in each dark spell, 20 s into it) */
+		if (!hakios_panel_asleep()) {
+			dark_since = 0;
+			dark_said = false;
+		} else if (dark_since == 0) {
+			dark_since = now;
+		} else if (!dark_said && now - dark_since >= 20 * second) {
+			dark_said = true;
+			pd_survey("20 s into the dark");
+		}
+
+		if (!dark && at != MIF_LIT_KHZ) {
+			want = MIF_LIT_KHZ;
+		} else if (dark && step < sizeof(down) / sizeof(down[0]) && now - last_step >= second) {
+			want = down[step];
+		}
+		if (want != at) {
+			bool up = want == MIF_LIT_KHZ;
+
+			if ((up ? ups : downs) < 40) {
+				bus_say("bus: MIF dark 2: %u -> %u kHz: asking (PLL_MIF %u MHz)\n", at, want, bus_mif_pll_mhz());
+			}
+			e = hakios_acpm_dvfs_set(0, want);
+			if (e != 0) {
+				bus_say("bus: MIF dark 2: %u kHz REFUSED (%d): back to %u kHz, stage 2 stops\n", want, e, MIF_LIT_KHZ);
+				(void)hakios_acpm_dvfs_set(0, MIF_LIT_KHZ);
+				return;
+			}
+			at = want;
+			last_step = now;
+			if (up) {
+				step = 0;
+				ups++;
+			} else {
+				step++;
+				downs++;
+			}
+			if ((up ? ups : downs) <= 40) {
+				bus_say("bus: MIF dark 2: %u kHz taken; PLL_MIF %u MHz (%u down, %u up so far)\n", at, bus_mif_pll_mhz(),
+				    downs, ups);
+			}
+		}
+		delay(MIF_DARK_POLL_MS * 1000);
+	}
 }
 
 static void
@@ -915,6 +1024,10 @@ bus_thread(__unused void *arg, __unused wait_result_t wr)
 	}
 	bus_report();
 	mif_dark_start();
+	if (bus_max == 0 && mif_dark >= 2 && mif_fvp_ok) {
+		mif_dark_loop();
+		return;
+	}
 	if (bus_max == 0) {
 		return;
 	}
