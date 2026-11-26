@@ -313,6 +313,8 @@ void hakios_psci_cpu_back(int cpu, uint32_t mpidr);
 void hakios_psci_cpu_back(__unused int cpu, __unused uint32_t mpidr) {}
 uint32_t hakios_m3_power(void);
 uint32_t hakios_m3_power(void) { return ~0u; }
+bool hakios_psci_cpu_is_off(int cpu, uint32_t mpidr);
+bool hakios_psci_cpu_is_off(__unused int cpu, __unused uint32_t mpidr) { return false; }
 #endif
 #ifndef HAKIOS_EXYNOS_USB
 struct hakios_usb_glue;

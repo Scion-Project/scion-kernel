@@ -175,6 +175,14 @@ m3_off_take_lock(void)
 uint64_t hakios_psci_cpu_off_prepare(int cpu, uint32_t mpidr);
 void hakios_psci_cpu_back(int cpu, uint32_t mpidr);
 uint32_t hakios_m3_power(void);
+bool hakios_psci_cpu_is_off(int cpu, uint32_t mpidr);
+
+/* before a start again (psci_smp_start_cpu()): an M3 the PMU reads off (its EL3's AFFINITY_INFO keeps saying on: round 28) */
+bool
+hakios_psci_cpu_is_off(__unused int cpu, uint32_t mpidr)
+{
+	return (mpidr & ~3u) == 0x100 && m3_wide != 0 && (m3_rd(m3_wide, M3_STATUS(mpidr & 3u)) & 0xfu) == 0;
+}
 
 /* on the dying core, interrupts off, just before CPU_OFF (psci_smp_cpu_off()): the power_state to pass, 0 for none */
 uint64_t
