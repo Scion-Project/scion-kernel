@@ -2439,6 +2439,19 @@ shub_thread(void *param, __unused wait_result_t wr)
 		goto done;
 	}
 	(void)from_step2();
+	if (powered && (strcmp(state, "powered") == 0 || strcmp(state, "loading") == 0)) {
+		/*
+		 * No firmware ran (round 31: none came with the kernel): the chip was left powered in its ROM for the rest of the
+		 * boot, LDO37 on and NSTDBY high, with nothing to do -- a part of the screen-off floor. Standby and its supply off;
+		 * the console's "sensors" powers it again (power_on()).
+		 */
+		uint8_t ldo = 0;
+
+		power_off("no firmware runs in it");
+		(void)hakios_acpm_pmic_update(HAKIOS_ACPM_PMIC_PMIC, LDO37_CTRL, LDO_ON, 0);
+		(void)hakios_acpm_pmic_read(HAKIOS_ACPM_PMIC_PMIC, LDO37_CTRL, &ldo);
+		say("shub: its supply LDO37 off (CTRL %02x)\n", ldo);
+	}
 done:
 	if (keep == 0) {
 		power_off("the steps are done (shub_keep=0)");

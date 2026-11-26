@@ -1309,6 +1309,75 @@ stream_stop(void)
 }
 
 /*
+ * The stream paused while the screen is dark (round 32): step 8 ran RDMA0 and UAIF1 on silence for the whole run, with
+ * SYSPOWER_CTRL's "DRAM on", the ACLK and UAIF1 Q-channels held on and this thread awake every 2 ms -- with nothing
+ * playing, a screen-off phone kept its audio block, its way to DRAM and a core busy. Paused (RDMA0 stopped, UAIF1 off,
+ * SYSPOWER_CTRL and QCHANNEL_DISABLE as they were, the thread at PAUSE_POLL_MS) when the screen is dark with the savings on
+ * (hakios_dark_saving(), dark_ab's half), the amplifiers off, nothing heard for PAUSE_AFTER_US and no recording; going again
+ * (as stream_start() starts it: the Q-channels and SYSPOWER, the ring of silence, UAIF1 then RDMA0) at the first sound,
+ * at the screen's on, or when a recording starts. abox_pause=0: never.
+ */
+#define PAUSE_AFTER_US          10000000ull
+#define PAUSE_POLL_MS           50u
+static uint32_t pause_ok = 1;
+static bool wdma_on;                    /* (the capture's, below) */
+extern bool hakios_dark_saving(void);   /* hakios.s6e3ha8.c (stubs.c: never) */
+static uint32_t pauses, resumes;
+
+/* true: paused; false: left running (RDMA0 would not say it stopped) */
+static bool
+stream_pause(void)
+{
+	if (!dma->stop()) {
+		say("abox: 8: the pause: RDMA0 did not say it stopped: left running, no pause in this run\n");
+		pause_ok = 0;
+		return false;
+	}
+	rdma_on = false;
+	spin_us(FIFO_FLUSH_US);
+	if (uaif_on) {
+		uaif1_enable(false);
+	}
+	if (syspower) {
+		wr(&abox, ABOX_QCHANNEL_DISABLE, (rd(&abox, ABOX_QCHANNEL_DISABLE) & ~(QCHANNEL_ACLK | QCHANNEL_BCLK_UAIF1)) |
+		    (qch_was & (QCHANNEL_ACLK | QCHANNEL_BCLK_UAIF1)));
+		wr(&abox, ABOX_SYSPOWER_CTRL, (rd(&abox, ABOX_SYSPOWER_CTRL) & ~1u) | (syspower_was & 1u));
+	}
+	if (++pauses <= 20) {
+		say("abox: 8: the stream paused (the screen dark, %llu s of silence): RDMA0 and UAIF1 off, DRAM and the clocks free "
+		    "(%u times)\n", PAUSE_AFTER_US / 1000000, pauses);
+	}
+	return true;
+}
+
+/* the stream again after a pause; false: it would not start (what iOS writes is dropped from then on) */
+static bool
+stream_resume(const char *why)
+{
+	if (syspower) {
+		(void)poke_bits(&abox, "SYSPOWER_CTRL (DRAM on)", ABOX_SYSPOWER_CTRL, 1, 1);
+		(void)poke_bits(&abox, "QCHANNEL_DISABLE (ACLK, BCLK_UAIF1)", ABOX_QCHANNEL_DISABLE,
+		    QCHANNEL_ACLK | QCHANNEL_BCLK_UAIF1, QCHANNEL_ACLK | QCHANNEL_BCLK_UAIF1);
+	}
+	for (uint32_t p = 0; p < PERIODS; p++) {
+		fill_period(p, SILENT);
+	}
+	if (!dma->prepare(area_pa, RING_BYTES, PERIOD_BYTES)) {
+		say("abox: 8: the resume: RDMA0 did not take the ring\n");
+		return false;
+	}
+	uaif1_enable(true);
+	if (!dma->start()) {
+		say("abox: 8: the resume: RDMA0 did not start\n");
+		return false;
+	}
+	if (++resumes <= 20) {
+		say("abox: 8: the stream again (%s; %u times)\n", why, resumes);
+	}
+	return true;
+}
+
+/*
  * The feeder: RDMA0's position every 2 ms, and each period it has finished refilled from `source` (step 7: the tone
  * until `tone_until_us`, silence after; step 8: what iOS wrote). Step 7 returns at `until_us`; step 8 never returns.
  */
@@ -1318,7 +1387,7 @@ stream_run(uint64_t tone_until_us, uint64_t until_us)
 	uint64_t start = now_us(), last_report = start, last_volume = 0, clock_from = 0;
 	uint64_t read_bytes = 0, read_at_report = 0, refilled = 0, outside = 0;
 	uint32_t next_fill = 0, last_pos = 0, reports = 0;
-	bool moved = false, by_clock = false, muted = false, said_outside = false;
+	bool moved = false, by_clock = false, muted = false, said_outside = false, paused = false;
 
 	for (;;) {
 		uint64_t now = now_us();
@@ -1326,6 +1395,31 @@ stream_run(uint64_t tone_until_us, uint64_t until_us)
 
 		if (until_us != 0 && now >= until_us) {
 			return true;
+		}
+		if (steps >= 8 && pause_ok) {
+			uint64_t sounded = last_sound_us, since = sounded == 0 ? now : (sounded > now ? 0 : now - sounded);
+			bool dark = hakios_dark_saving();
+
+			if (paused) {
+				follow_input();
+				if (!dark || since < PAUSE_AFTER_US || wdma_on) {
+					if (!stream_resume(!dark ? "the screen lit, or the savings off" : wdma_on ? "a recording" : "a sound")) {
+						return false;
+					}
+					paused = false;
+					start = now;
+					last_pos = 0;
+					next_fill = 0;
+					moved = false;
+					by_clock = false;
+				} else {
+					delay_for_interval(PAUSE_POLL_MS, NSEC_PER_MSEC);
+					continue;
+				}
+			} else if (dark && amp_running == NULL && since >= PAUSE_AFTER_US && !wdma_on && stream_pause()) {
+				paused = true;
+				continue;
+			}
 		}
 		if (!(rd(&abox, R0(RDMA_CTRL0)) & RDMA_ENABLE)) {
 			say("abox: %u: RDMA0's ENABLE reads 0 of itself (CTRL0 %#x, STATUS %#x): the stream stops; whether RDMA0 still "
@@ -2123,6 +2217,7 @@ hakios_exynos_abox_init(void)
 	burst = burst > 15 ? 15 : burst;
 	PE_parse_boot_argn("abox_mmu_off", &mmu_off, sizeof(mmu_off));
 	PE_parse_boot_argn("abox_syspower", &syspower, sizeof(syspower));
+	PE_parse_boot_argn("abox_pause", &pause_ok, sizeof(pause_ok));
 	PE_parse_boot_argn("abox_rdma_fmt", &rdma_fmt, sizeof(rdma_fmt));
 	PE_parse_boot_argn("abox_ring_pa", &ring_pa, sizeof(ring_pa));
 	PE_parse_boot_argn("abox_mic", &mic_for_ios, sizeof(mic_for_ios));

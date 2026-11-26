@@ -131,6 +131,7 @@
  */
 #include <kern/clock.h>
 #include <kern/thread.h>
+#include <kern/thread_call.h>
 #include <libkern/OSAtomic.h>
 #include <libkern/libkern.h>
 #include <mach/mach_time.h>
@@ -1008,6 +1009,13 @@ static struct hci_local_version running;
 static uint8_t own_addr[6];
 static volatile bool resident;          /* the chip powered, patched and answering: the console may use it */
 static volatile SInt32 busy;            /* one user of the UART at a time */
+/* bt_rest (see bt_wake_again()) */
+static uint32_t rest_after_s = 60;
+static volatile uint64_t idle_since;    /* since when nothing of iOS's holds the chip (0: something does) */
+static volatile bool resting;
+static thread_call_t rest_call;
+static bool bt_wake_again(void);
+static void set_own_address(void);
 static bool inquiry_done;
 
 struct seen {
@@ -1414,6 +1422,12 @@ bt_cu_open(dev_t dev, int flag, __unused int devtype, __unused proc_t p)
 			tty_unlock(tp);
 			return EBUSY;
 		}
+		idle_since = 0;
+		if (resting && !bt_wake_again()) {
+			OSCompareAndSwap(1, 0, &busy);
+			tty_unlock(tp);
+			return EIO;
+		}
 		termioschars(&tp->t_termios);
 		tp->t_iflag = 0;
 		tp->t_oflag = 0;
@@ -1444,6 +1458,7 @@ bt_cu_close(__unused dev_t dev, int flag, __unused int mode, __unused proc_t p)
 	(*linesw[tp->t_line].l_close)(tp, flag);
 	(void)ttyclose(tp);
 	tty_unlock(tp);
+	idle_since = mach_absolute_time();
 	OSCompareAndSwap(1, 0, &busy);
 	say("bt: tty: closed\n");
 	return 0;
@@ -1683,6 +1698,56 @@ static size_t kctl_rx_len;
 static uint32_t kctl_bytes_in, kctl_bytes_out;
 static uint32_t kctl_full;               /* times the socket had no room (bt_trace) */
 
+/*
+ * bt_rest=S (default 60; 0: never): with nothing of iOS's on the chip for S seconds -- bluetoothd closes the control when
+ * Bluetooth is switched off in Settings -- the chip off (BT_EN low), and on again, patched and at its rate, when a client
+ * opens the control or the tty (bt_wake_again(), a second or two inside that open). Round 31: the chip stayed powered for
+ * the console with Bluetooth off in iOS, part of the screen-off floor.
+ */
+
+/* with `busy` held: the chip powered, patched, at its rate and with its address again */
+static bool
+bt_wake_again(void)
+{
+	struct hci_local_version v;
+	uint32_t baud = 4000000;
+
+	PE_parse_boot_argn("bt_baud", &baud, sizeof(baud));
+	say("bt: rest: a client: the chip on again, patched, at %u baud\n", baud);
+	(void)uart_set_baud(BAUD);
+	link_baud = BAUD;
+	fifo_reset();
+	if (!power_on() || !identify("w", &v) || !patch() || !identify("w", &running)) {
+		say("bt: rest: the chip did not come back\n");
+		power_off("it did not come back");
+		return false;
+	}
+	if (baud != BAUD && !raise_baud(baud)) {
+		say("bt: rest: %u baud did not take: at %u\n", baud, BAUD);
+	}
+	set_own_address();
+	resting = false;
+	say("bt: rest: the chip back at %u baud\n", link_baud);
+	return true;
+}
+
+static void
+rest_tick(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
+{
+	uint64_t now = mach_absolute_time(), span, deadline, since = idle_since;
+
+	nanoseconds_to_absolutetime((uint64_t)rest_after_s * NSEC_PER_SEC, &span);
+	if (resident && !resting && powered && since != 0 && now - since >= span && OSCompareAndSwap(0, 1, &busy)) {
+		if (idle_since != 0) {
+			power_off("nothing of iOS's has used it for bt_rest's time");
+			resting = true;
+		}
+		OSCompareAndSwap(1, 0, &busy);
+	}
+	clock_interval_to_deadline(10, NSEC_PER_SEC, &deadline);
+	thread_call_enter_delayed(rest_call, deadline);
+}
+
 static errno_t
 kctl_connect(__unused kern_ctl_ref ref, struct sockaddr_ctl *sac, void **unitinfo)
 {
@@ -1696,6 +1761,11 @@ kctl_connect(__unused kern_ctl_ref ref, struct sockaddr_ctl *sac, void **unitinf
 	} else if (!OSCompareAndSwap(0, 1, &busy)) {
 		say("bt: com.apple.uart.bluetooth: refused to pid %d: the UART is in use\n", proc_pid(current_proc()));
 		return EBUSY;
+	}
+	idle_since = 0;
+	if (resting && !bt_wake_again()) {
+		OSCompareAndSwap(1, 0, &busy);
+		return EIO;
 	}
 	kctl_unit = sac->sc_unit;
 	kctl_rx_len = 0;
@@ -1726,6 +1796,7 @@ kctl_disconnect(__unused kern_ctl_ref ref, u_int32_t unit, __unused void *unitin
 {
 	if (unit == kctl_unit && OSCompareAndSwap(1, 0, &kctl_owns)) {
 		kctl_unit = 0;
+		idle_since = mach_absolute_time();
 		OSCompareAndSwap(1, 0, &busy);
 	}
 	say("bt: com.apple.uart.bluetooth: unit %u closed (%u bytes to the chip, %u from it)\n", unit, kctl_bytes_out,
@@ -2120,6 +2191,13 @@ stage7(void)
 		OSCompareAndSwap(1, 0, &busy);
 	}
 	resident = true;
+	PE_parse_boot_argn("bt_rest", &rest_after_s, sizeof(rest_after_s));
+	if (rest_after_s != 0 && (rest_call = thread_call_allocate(rest_tick, NULL)) != NULL) {
+		idle_since = mach_absolute_time();
+		rest_tick(NULL, NULL);
+		say("bt: rest: the chip off after %u s with nothing of iOS's on it, on again at the next open (bt_rest=0: never)\n",
+		    rest_after_s);
+	}
 	if (!PE_parse_boot_argn("bt_tty", &baud, sizeof(baud)) || baud != 0) {
 		bt_tty_publish();
 		HakiosBTNodeStart(own_addr, link_baud);   /* hakios.bt_node.cpp: the "bluetooth" service bluetoothd looks for */

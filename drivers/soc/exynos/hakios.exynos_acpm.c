@@ -791,6 +791,12 @@ bus_mif_step(void)
 #define MIF_SET_CONST           1
 #define MIF_ECT_PA              0xA0000000ull   /* crownlte.dts ect { parameter_address } */
 #define MIF_INT_TOP             667000  /* INT's top (bus_pins), its rate since the boot */
+/*
+ * The INT minimum each MIF level is given in FVP's table (stage 1). Up to round 31 it was MIF_INT_TOP for every level, which
+ * kept INT at its top (534 MHz, 806 mV) all the time: the APM holds INT at least there. From round 32 it is INT's lowest,
+ * so that stage 2 may lower INT itself while the screen is dark; with the screen lit INT is asked for its top, as it was.
+ */
+#define MIF_INT_MIN_FOR_FVP     107000
 extern vm_offset_t phystokv(uint64_t pa);
 extern boolean_t pmap_valid_address(uint64_t addr);
 static uint32_t mif_dark;
@@ -866,8 +872,8 @@ mif_stage1(const uint32_t *levels, uint32_t count)
 		cmd[0] = i;
 		cmd[1] = levels[i];
 		cmd[2] = MIF_DATA_INIT;
-		cmd[3] = MIF_INT_TOP;
-		bus_say("bus: MIF dark 1: FVP: level %u = %u kHz, INT at least %u kHz: asking\n", i, levels[i], MIF_INT_TOP);
+		cmd[3] = MIF_INT_MIN_FOR_FVP;
+		bus_say("bus: MIF dark 1: FVP: level %u = %u kHz, INT at least %u kHz: asking\n", i, levels[i], MIF_INT_MIN_FOR_FVP);
 		delay(20000);
 		e = hakios_acpm_request(MIF_FVP_CHANNEL, cmd);
 		bus_say("bus: MIF dark 1: FVP: level %u: %d (answer %#x %#x %#x %#x)\n", i, e, cmd[0], cmd[1], cmd[2], cmd[3]);
@@ -1029,27 +1035,36 @@ pd_off_unused(void)
 /* stage 2 (see above): this thread's for the rest of the boot; a poll every MIF_DARK_POLL_MS */
 #define MIF_DARK_POLL_MS        200
 #define MIF_LIT_KHZ             1794000
+/*
+ * Down, a step a second, while the screen is dark with the savings on: MIF first (1539000, 1352000, 1014000), then INT, the
+ * SoC's interconnect (DVFS 1: 400000, 267000, 178000 kHz, from 534000 at 806 mV to 581 mV). Up at once when lit or the
+ * savings end: INT to its top first, then MIF (the reverse order). Any request refused: both to their lit rates and stage 2
+ * stops for the boot.
+ */
+#define INT_LIT_KHZ             534000
 static void
 mif_dark_loop(void)
 {
-	static const uint32_t down[] = { 1539000, 1352000, 1014000 };
-	uint32_t at = MIF_LIT_KHZ, step = 0, downs = 0, ups = 0;
+	static const struct { uint32_t domain, khz; } down[] = {
+		{ 0, 1539000 }, { 0, 1352000 }, { 0, 1014000 }, { 1, 400000 }, { 1, 267000 }, { 1, 178000 },
+	};
+	uint32_t mif_at = MIF_LIT_KHZ, int_at = INT_LIT_KHZ, step = 0, downs = 0, ups = 0;
 	uint64_t last_step = 0, second;
-
 	uint64_t dark_since = 0;
 	bool dark_said = false;
+	int e;
 
 	nanoseconds_to_absolutetime(NSEC_PER_SEC, &second);
 	pd_survey("at the start");
 	pd_off_unused();
 	pd_survey("after pd_off");
-	bus_say("bus: MIF dark 2: with the screen dark (and dark_ab's savings on), MIF a level a second to %u kHz; back to %u "
-	    "kHz at once when lit\n", down[2], MIF_LIT_KHZ);
+	e = hakios_acpm_dvfs_set(1, INT_LIT_KHZ);
+	bus_say("bus: MIF dark 2: INT asked for its top, %u kHz, as the lit rate: %d\n", INT_LIT_KHZ, e);
+	bus_say("bus: MIF dark 2: with the screen dark (and dark_ab's savings on), MIF a level a second to 1014000 kHz, then INT "
+	    "to 178000 kHz; back to %u and %u kHz at once when lit\n", MIF_LIT_KHZ, INT_LIT_KHZ);
 	for (;;) {
 		uint64_t now = mach_absolute_time();
 		bool dark = hakios_dark_saving();
-		uint32_t want = at;
-		int e;
 
 		/* (the power domains once in each dark spell, 20 s into it) */
 		if (!hakios_panel_asleep()) {
@@ -1062,35 +1077,56 @@ mif_dark_loop(void)
 			pd_survey("20 s into the dark");
 		}
 
-		if (!dark && at != MIF_LIT_KHZ) {
-			want = MIF_LIT_KHZ;
-		} else if (dark && step < sizeof(down) / sizeof(down[0]) && now - last_step >= second) {
-			want = down[step];
-		}
-		if (want != at) {
-			bool up = want == MIF_LIT_KHZ;
+		if (!dark && (mif_at != MIF_LIT_KHZ || int_at != INT_LIT_KHZ)) {
+			bool say_it = ups < 40;
 
-			if ((up ? ups : downs) < 40) {
-				bus_say("bus: MIF dark 2: %u -> %u kHz: asking (PLL_MIF %u MHz)\n", at, want, bus_mif_pll_mhz());
+			if (say_it) {
+				bus_say("bus: MIF dark 2: lit: INT %u -> %u, MIF %u -> %u kHz: asking\n", int_at, INT_LIT_KHZ, mif_at,
+				    MIF_LIT_KHZ);
 			}
-			e = hakios_acpm_dvfs_set(0, want);
+			e = int_at != INT_LIT_KHZ ? hakios_acpm_dvfs_set(1, INT_LIT_KHZ) : 0;
+			if (e == 0 && mif_at != MIF_LIT_KHZ) {
+				e = hakios_acpm_dvfs_set(0, MIF_LIT_KHZ);
+			}
 			if (e != 0) {
-				bus_say("bus: MIF dark 2: %u kHz REFUSED (%d): back to %u kHz, stage 2 stops\n", want, e, MIF_LIT_KHZ);
+				bus_say("bus: MIF dark 2: the way up REFUSED (%d): both asked again, stage 2 stops\n", e);
+				(void)hakios_acpm_dvfs_set(1, INT_LIT_KHZ);
 				(void)hakios_acpm_dvfs_set(0, MIF_LIT_KHZ);
 				return;
 			}
-			at = want;
-			last_step = now;
-			if (up) {
-				step = 0;
-				ups++;
-			} else {
-				step++;
-				downs++;
-			}
-			if ((up ? ups : downs) <= 40) {
-				bus_say("bus: MIF dark 2: %u kHz taken; PLL_MIF %u MHz (%u down, %u up so far)\n", at, bus_mif_pll_mhz(),
+			int_at = INT_LIT_KHZ;
+			mif_at = MIF_LIT_KHZ;
+			step = 0;
+			ups++;
+			if (say_it) {
+				bus_say("bus: MIF dark 2: lit rates taken; PLL_MIF %u MHz (%u steps down, %u up so far)\n", bus_mif_pll_mhz(),
 				    downs, ups);
+			}
+		} else if (dark && step < sizeof(down) / sizeof(down[0]) && now - last_step >= second) {
+			uint32_t d = down[step].domain, khz = down[step].khz, from = d == 0 ? mif_at : int_at;
+
+			if (downs < 60) {
+				bus_say("bus: MIF dark 2: %s %u -> %u kHz: asking (PLL_MIF %u MHz)\n", d == 0 ? "MIF" : "INT", from, khz,
+				    bus_mif_pll_mhz());
+			}
+			e = hakios_acpm_dvfs_set(d, khz);
+			if (e != 0) {
+				bus_say("bus: MIF dark 2: %s %u kHz REFUSED (%d): back to the lit rates, stage 2 stops\n",
+				    d == 0 ? "MIF" : "INT", khz, e);
+				(void)hakios_acpm_dvfs_set(1, INT_LIT_KHZ);
+				(void)hakios_acpm_dvfs_set(0, MIF_LIT_KHZ);
+				return;
+			}
+			if (d == 0) {
+				mif_at = khz;
+			} else {
+				int_at = khz;
+			}
+			last_step = now;
+			step++;
+			downs++;
+			if (downs <= 60) {
+				bus_say("bus: MIF dark 2: %s %u kHz taken; PLL_MIF %u MHz\n", d == 0 ? "MIF" : "INT", khz, bus_mif_pll_mhz());
 			}
 		}
 		delay(MIF_DARK_POLL_MS * 1000);

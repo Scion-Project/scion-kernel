@@ -76,6 +76,7 @@ static struct hakios_hsi2c bus = {
  * X = b1 << 4 | b3 >> 4, Y = b2 << 4 | b3 & 15. Byte 7 [5:0]: how many more events are waiting.
  */
 #define CMD_SENSE_ON            0x10
+#define CMD_SENSE_OFF           0x11            /* (Linux s6sy761.c S6SY761_SENSE_OFF) */
 #define CMD_FW_CHECK            0x21
 #define CMD_PANEL_INFO          0x23
 #define CMD_READ_ID             0x52
@@ -626,6 +627,32 @@ touch_thread(void *arg, __unused wait_result_t wr_)
 			say("s6sy761: more than half of %llu transfers have failed: giving up\n", bus.transfers);
 			all_up();               /* (no finger left down for good) */
 			break;
+		}
+		/*
+		 * The screen dark with the savings on and no finger down: the chip's sensing off (it scanned the panel at its full
+		 * rate all the time; touches are not passed on while dark, touch_blank). On again, its queue emptied, at the
+		 * screen's on. A recovery or the chip's own restart turns it on: it is turned off again here at the next tick.
+		 */
+		{
+			static bool sensing_off;
+			static uint32_t sense_said;
+			bool want_off = hakios_dark_saving() && fingers_now() == 0;
+
+			if (want_off != sensing_off) {
+				uint32_t e = chip_write(want_off ? CMD_SENSE_OFF : CMD_SENSE_ON, NULL, 0);
+
+				if (!want_off) {
+					delay_for_interval(10, NSEC_PER_MSEC);
+					(void)chip_write(CMD_CLEAR_EVENTS, NULL, 0);
+				}
+				if (e == 0) {
+					sensing_off = want_off;
+				}
+				if (sense_said++ < 12) {
+					say("s6sy761: sensing %s (%x): the screen %s\n", want_off ? "off" : "on again", e,
+					    want_off ? "dark" : "lit, or the savings off");
+				}
+			}
 		}
 		touch_at = AT_WAIT;
 		tick_done = mach_absolute_time();
