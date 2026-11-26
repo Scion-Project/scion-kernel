@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 784 symbols in 20 groups; 54 are set, 45 of them drivers built in.
+# 786 symbols in 20 groups; 55 are set, 46 of them drivers built in.
 #
 
 #
@@ -19,7 +19,7 @@
 CONFIG_FIRMWARE="device"
 
 #
-# Drivers built in (60)
+# Drivers built in (61)
 #
 
 # the audio DSP started and linked (adsp=1, adsp_step=N); the battery's state comes through it too. Needs the DSP's ... [hakios.adsp.c]
@@ -172,6 +172,9 @@ CONFIG_HAKIOS_EXYNOS_ACPM=y
 # the phone's UFS flash: a block device for each GPT partition (ufs=1, ufs=2), and the UFS host controller driven from ... [hakios.ufs.c, hakios.ufshc.c, hakios.ext4.c]
 CONFIG_HAKIOS_UFS=y
 
+# the Galaxy S9's microSD slot (dwmmc2), read only, off by default (sdcard=1 a look, nothing written; sdcard=2 the ... [hakios.exynos_sd.c, hakios.sdmedia.cpp]
+CONFIG_HAKIOS_EXYNOS_SD=y
+
 # a USB device link for phones with a DesignWare DWC3: the kernel's log streamed to a host over a CDC-ACM serial port ... [hakios.dwc3.c]
 # CONFIG_HAKIOS_USB_GADGET is not set
 
@@ -279,7 +282,7 @@ CONFIG_HAKIOS_BRCMFMAC=y
 # CONFIG_SYSSLEEP is not set
 
 #
-# Storage and APFS (57)
+# Storage and APFS (58)
 #
 
 # the phone's storage: 1 a survey, read only; 2 the loader's block service, through which the kernel reads it (the ...
@@ -380,6 +383,9 @@ CONFIG_UFS=2
 
 # the file in it, by path from the volume's root
 # CONFIG_APFS_WRITE_PATH is not set
+
+# the microSD slot looked at (1) or read, read only (2); off by default
+# CONFIG_SDCARD is not set
 
 # what one request through the loader costs, by size
 # CONFIG_UFS_BENCH is not set

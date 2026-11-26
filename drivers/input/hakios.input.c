@@ -343,6 +343,11 @@ hakios_input_init(void)
 		hakios_shannon_init();
 	}
 	hakios_ufs_init();
+	{
+		/* boot-arg sdcard=N on the Galaxy S9: its microSD slot, read only (drivers/storage/sd/hakios.exynos_sd.c) */
+		extern void hakios_exynos_sd_init(void);
+		hakios_exynos_sd_init();
+	}
 	hakios_net_init();
 	hakios_adreno_init();
 	hakios_mali_init();

@@ -1,10 +1,13 @@
 /*
  * The microSD card as an external disk in IOKit (A, 2026-11-21; docs/devices/x1slte/lifs-loader.md).
+ * From Jesvi-iOS (jesvi-eulah, APSL-2.0, iokit/Kernel/RedwoodSDMedia.cpp at 0b6bce9); on Scion the Galaxy S9's card,
+ * read only (drivers/storage/sd/hakios.exynos_sd.c, sdcard=2; docs/devices/starlte-microsd.md).
  *
- * userfsd (Files' external drives, with Apple's lifs.kext loaded by bsd/dev/redwood_kextload.c) matches an IOMedia under
+ * userfsd (Files' external drives; on Jesvi-iOS with Apple's lifs.kext loaded by its redwood_kextload.c, not on Scion yet)
+ * matches an IOMedia under
  * an IOBlockStorageDevice whose "Protocol Characteristics" say External (its launchd plist), then reads "BSD Name" and
  * opens /dev/<name>. This kernel has no IOStorage family, so these are minimal classes with those names, carrying the
- * properties userfsd reads; the reads themselves are bsd/dev/redwood_sdcard.c's character devices.
+ * properties userfsd reads; the reads themselves are bsd/dev/hakios.exynos_sd.c's character devices.
  *
  *   IOResources
  *    +- IOBlockStorageDevice ("SD Card", External, removable)
@@ -78,10 +81,10 @@ media(IOService *parent, const char *bsd, unsigned unit, int major, int minor, u
 
 extern "C" {
 /* 0 when published; called once, from the SD driver's probe thread */
-int redwood_sdmedia_publish(unsigned unit, int major, uint64_t whole_blocks, uint64_t part_start, uint64_t part_blocks,
+int hakios_sdmedia_publish(unsigned unit, int major, uint64_t whole_blocks, uint64_t part_start, uint64_t part_blocks,
     unsigned part_type, int writable);
 int
-redwood_sdmedia_publish(unsigned unit, int major, uint64_t whole_blocks, uint64_t part_start, uint64_t part_blocks,
+hakios_sdmedia_publish(unsigned unit, int major, uint64_t whole_blocks, uint64_t part_start, uint64_t part_blocks,
     unsigned part_type, int writable)
 {
 	IOBlockStorageDevice *dev = new IOBlockStorageDevice;

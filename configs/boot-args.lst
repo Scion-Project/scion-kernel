@@ -526,6 +526,7 @@ scgpu.addr	k
 scgpu.size	k
 scsnd.addr	k
 scsnd.size	k
+sdcard	k
 security	k
 serial	l
 shub	k

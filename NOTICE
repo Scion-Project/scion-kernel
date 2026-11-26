@@ -13,6 +13,13 @@ Where this tree comes from:
 
 In the repository:
 
+- Jesvi-iOS (github.com/jesvi-eulah/Jesvi-iOS, iOS 16.5 on the Galaxy S20 on the HakiOS base, by jesvi-eulah): its kernel
+  files (xnu/hakios.patch, xnu/files/) are under the Apple Public Source License 2.0, the rest under MIT (its LICENSE). Scion
+  takes from it with its owner's approval (26 November 2026), its authors' names kept on the commits that carry its work and
+  each source commit named. drivers/storage/sd/hakios.exynos_sd.c and hakios.sdmedia.cpp are its microSD driver
+  (xnu/files/bsd/dev/redwood_sdcard.c at b35cfdc, xnu/files/iokit/Kernel/RedwoodSDMedia.cpp at 0b6bce9), APSL-2.0, moved
+  to the Galaxy S9 and made read only (docs/devices/starlte-microsd.md).
+
 - XNU (Apple): the kernel sources are fetched by xnu/apply.sh from github.com/apple-oss-distributions/xnu;
   our patch and files are a derivative work under the Apple Public Source License 2.0 (LICENSE.APSL).
 - ios-on-pixel-10 (TheAndersMadsen; Scion-Project/scion-blazer): devices/blazer/carried/ holds kernel-side files that are its

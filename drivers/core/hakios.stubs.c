@@ -122,6 +122,10 @@ void hakios_exynos_keys_init(void) {}
 #ifndef HAKIOS_S6SY761
 void hakios_s6sy761_init(void) {}
 #endif
+#ifndef HAKIOS_EXYNOS_SD
+void hakios_exynos_sd_init(void);
+void hakios_exynos_sd_init(void) {}
+#endif
 #ifndef HAKIOS_MAX77705
 void hakios_max77705_init(void) {}
 void hakios_max77705_usb_console(const char *arg);

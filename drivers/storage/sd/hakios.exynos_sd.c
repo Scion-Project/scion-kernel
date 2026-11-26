@@ -1,17 +1,33 @@
 /*
- * The S20's microSD slot (A, 2026-11-20; docs/devices/x1slte/sdcard.md): Synopsys DesignWare MMC 2.70a ("dwmmc2" at
- * 0x132E0000 in HSI1, the block of the embedded UFS and the Wi-Fi PCIe, so always powered while iOS runs).
+ * The Galaxy S9's microSD slot (Exynos 9810: dwmmc2, a Synopsys DesignWare MSHC 2.70a at 0x11500000 in FSYS1), read
+ * only, behind boot-arg sdcard= (off by default). docs/devices/starlte-microsd.md is its guide.
  *
- * S-Boot leaves the slot initialised: card powered (PWREN 1), clocked (CLKENA 1), 4-bit bus (CTYPE 1), the card in
- * the "tran" state after its own CMD17. The driver keeps that state and uses SDHC/SDXC block addressing.
- * It reads by PIO through the FIFO at +0x200 and uses CMD24 for writes on the first partition.
- * sd_write=0 makes the slot read-only, and sd=0 disables the driver.
+ * Jesvi-iOS's S20 driver (bsd/dev/redwood_sdcard.c by jesvi-eulah, APSL-2.0, at b35cfdc; the commit before this one
+ * carries it unchanged), moved to the S9 with the facts of Scion's docs/ios27/XNU-MICROSD.md and Samsung's device tree
+ * (exynos9810-starlte_eur_open_26.dts: dwmmc2@11500000, fifo-depth 64, card-detect gpa1-5, bus-width 4). Like the S20's,
+ * it does not bring the card up itself: it uses the slot only when it finds it as a boot loader leaves an SD card it has
+ * initialised (powered, clocked, 4-bit, the 64-bit FIFO; then the card is in "tran" and SDHC/SDXC block addressing
+ * reads it with CMD17/CMD18). The card's own bring-up (the S2MPS18 rails through ACPM, CMD0/8/ACMD41/2/3/7/ACMD6) is
+ * XNU-MICROSD.md's section 2.3 and a later step.
  *
- *   /dev/rsdcard   raw, read-only; its size: the end of the last partition in the card's MBR (the card's own size,
- *                  CSD, needs its RCA, which only a re-identification gives -- next step)
- *   kern.redwood.sdcard   a line of state
+ *   sdcard=N  the microSD slot looked at (1) or read, read only (2); off by default:
+ *   sdcard=0  (the default) nothing
+ *   sdcard=1  a look, nothing written: the card-detect pin (GPA1-5 of ALIVE, 0x14050044 bit 5, low = a card), the
+ *             three clock gates of the card (CMU top 0x1a242070, FSYS1 0x11402030 / 0x11402034), and, only when both FSYS1
+ *             gates read forced on (bits 20 and 21), the controller's VERID, HCON, PWREN, CLKENA, CTYPE, CLKSEL, STATUS
+ *             and RESP0: whether the slot was left initialised
+ *   sdcard=2  as 1, the three gates forced on if they are not (bit 20 manual, bit 21 on, each read back: the only
+ *             writes outside the controller; XNU-MICROSD.md 2.3 step 2), then, if a card is in and the slot is as a
+ *             loader leaves it, the card's MBR read 6 s after start and published read only:
+ *               /dev/disk9, rdisk9    the card up to the end of its last MBR partition
+ *               /dev/disk9s1, rdisk9s1  its first MBR partition
+ *               IOKit: an external IOBlockStorageDevice "SD Card" -> IOMedia disk9 -> IOMedia disk9s1, Writable no
+ *                      (hakios.sdmedia.cpp), what userfsd (Files' external drives) looks for
+ *             Never written: the card (no write command exists in this file), the PMIC, the pins, the CMU dividers.
+ *   kern.hakios.sdcard (a line of state), sdcard_reads, sdcard_errors, sdcard_dbg, sdcard_last_int
  */
 
+#include <stdbool.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
@@ -29,9 +45,16 @@
 
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 
-#define SD_PHYS         0x132e0000
+#define SD_PHYS         0x11500000      /* dwmmc2 (DT reg 0x11500000 + 0x2000) */
+#define CMU_TOP_PAGE    0x1a242000      /* GATE_CLKCMU_FSYS1_MMC_CARD at +0x070 */
+#define CMU_FSYS1_PAGE  0x11402000      /* MMC_CARD ACLK +0x030, SDCLKIN +0x034 */
+#define ALIVE_GPIO_PA   0x14050000      /* GPA1 at +0x040: CON +0, DAT +4 */
+#define GPA1_DAT        0x044
+#define CD_PIN          5               /* gpa1-5, the card-detect, low with a card in */
+#define GATE_MANUAL_ON  ((1u << 20) | (1u << 21))
 #define R_CTRL          0x00
 #define R_PWREN         0x04
+#define R_CLKDIV        0x08
 #define R_CLKENA        0x10
 #define R_TMOUT         0x14
 #define R_CTYPE         0x18
@@ -43,6 +66,8 @@ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 #define R_RINTSTS       0x44
 #define R_STATUS        0x48
 #define R_VERID         0x6c
+#define R_HCON          0x70
+#define R_CLKSEL64      0xa8
 #define R_FIFO          0x200
 
 #define INT_CD          (1u << 2)       /* command done */
@@ -68,8 +93,7 @@ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 #define SD_MAX_BLOCKS   128             /* 64 KB per command */
 
 static volatile uint8_t *sd;
-static uint32_t sd_mode = 1;            /* sd=0 disables the driver */
-static uint32_t sd_write_enabled = 1;  /* sd_write=0 disables partition writes */
+static uint32_t sd_mode;                /* sdcard=: 0 nothing (the default), 1 a look, 2 the card read only */
 static int sd_ready;
 static uint64_t sd_blocks;              /* 512-byte blocks exposed (minor 0: the card up to its last partition) */
 static uint64_t sd_part_start, sd_part_blocks;  /* minor 1: the first MBR partition */
@@ -78,7 +102,7 @@ static int sd_cmaj = -1;
 #define SD_UNIT 9                       /* /dev/disk9, disk9s1: well clear of the internal storage's names */
 static uint32_t sd_reads, sd_errors, sd_last_int;
 static char sd_dbg[200];
-LCK_GRP_DECLARE(sd_lck_grp, "redwood-sdcard");
+LCK_GRP_DECLARE(sd_lck_grp, "hakios-sdcard");
 LCK_MTX_DECLARE(sd_lock, &sd_lck_grp);
 
 static inline uint32_t
@@ -162,71 +186,13 @@ sd_read_blocks(uint64_t lba, uint32_t count, uint8_t *out)
 	return 0;
 }
 
-static int
-sd_wait_not_busy(void)
-{
-	for (unsigned i = 0; i < 1000; i++) {
-		if (!(rd(R_STATUS) & STATUS_DATA_BUSY)) {
-			return 0;
-		}
-		IOSleep(1);
-	}
-	return ETIMEDOUT;
-}
-
-/* Send one SDHC block with CMD24. Caller holds sd_lock. */
-static int
-sd_write_sector(uint64_t lba, const uint64_t *data)
-{
-	uint32_t status = 0;
-	unsigned sent = 0;
-
-	if (lba > UINT32_MAX) {
-		return EINVAL;
-	}
-	int error = sd_wait_not_busy();
-	if (error != 0) {
-		return error;
-	}
-	wr(R_RINTSTS, UINT32_MAX);
-	wr(R_BLKSIZ, 512);
-	wr(R_BYTCNT, 512);
-	wr(R_CMDARG, (uint32_t)lba);
-	wr(R_CMD, CMD_START | CMD_HOLD | CMD_WAIT_PREV | CMD_WRITE | CMD_DATA | CMD_CRC | CMD_RESP | 24u);
-
-	error = ETIMEDOUT;
-	for (unsigned i = 0; i < 10000; i++) {
-		status = rd(R_RINTSTS);
-		if ((status & INT_ERR) || ((status & INT_CD) && (rd(R_RESP0) & SD_R1_ERRORS))) {
-			error = EIO;
-			break;
-		}
-		while (sent < 64 && !(rd(R_STATUS) & STATUS_FIFO_FULL)) {
-			*(volatile uint64_t *)(sd + R_FIFO) = data[sent++];
-		}
-		if (status & INT_TXDR) {
-			wr(R_RINTSTS, INT_TXDR);
-		}
-		if ((status & (INT_CD | INT_DTO)) == (INT_CD | INT_DTO)) {
-			error = sent == 64 ? sd_wait_not_busy() : EIO;
-			break;
-		}
-		delay(10);
-	}
-	sd_last_int = status;
-	wr(R_RINTSTS, UINT32_MAX);
-	if (error != 0) {
-		sd_errors++;
-	}
-	return error;
-}
-
 static int sd_probe(void);
 
 static int
 sd_copen(dev_t dev, int flags, __unused int devtype, __unused struct proc *p)
 {
-	/* UVFS opens the partition O_RDWR before querying DKIOCISWRITABLE. */
+	/* UVFS opens the partition O_RDWR before it asks DKIOCISWRITABLE (Jesvi-iOS): the open is let through for the
+	 * partition, every write then refused */
 	if (minor(dev) != 1 && (flags & FWRITE)) {
 		return EROFS;
 	}
@@ -284,48 +250,9 @@ sd_cread(dev_t dev, struct uio *uio, __unused int ioflag)
 }
 
 static int
-sd_cwrite(dev_t dev, struct uio *uio, __unused int ioflag)
+sd_cwrite(__unused dev_t dev, __unused struct uio *uio, __unused int ioflag)
 {
-	/* Samsung disables the unconnected write-protect pin for dwmmc2. */
-	if (minor(dev) != 1 || !sd_write_enabled) {
-		return EROFS;
-	}
-	if (!sd_ready) {
-		return ENXIO;
-	}
-	off_t offset = uio_offset(uio);
-	user_ssize_t count = uio_resid(uio);
-	uint64_t size = sd_part_blocks * 512;
-	if (offset < 0 || offset % 512 != 0 || count < 0 || count % 512 != 0 ||
-	    (uint64_t)offset > size || (uint64_t)count > size - (uint64_t)offset) {
-		return EINVAL;
-	}
-	if (count == 0) {
-		return 0;
-	}
-
-	uio_t input = uio_duplicate(uio);
-	if (input == NULL) {
-		return ENOMEM;
-	}
-	uint64_t data[64];
-	int error = 0;
-	while (uio_resid(input) > 0) {
-		uint64_t lba = sd_part_start + (uint64_t)uio_offset(input) / 512;
-		error = uiomove((caddr_t)data, sizeof(data), input);
-		if (error != 0) {
-			break;
-		}
-		lck_mtx_lock(&sd_lock);
-		error = sd_write_sector(lba, data);
-		lck_mtx_unlock(&sd_lock);
-		if (error != 0) {
-			break;
-		}
-		uio_update(uio, sizeof(data));
-	}
-	uio_free(input);
-	return error;
+	return EROFS;                   /* read only: this driver has no write command */
 }
 
 static int
@@ -340,17 +267,15 @@ sd_ioctl(dev_t dev, u_long cmd, caddr_t data, __unused int flag, __unused struct
 		*(uint64_t *)data = minor(dev) == 1 ? sd_part_blocks : sd_blocks;
 		return 0;
 	case DKIOCGETMAXBLOCKCOUNTREAD:
-	case DKIOCGETMAXBLOCKCOUNTWRITE:
 		*(uint64_t *)data = SD_MAX_BLOCKS;
 		return 0;
-	case DKIOCSYNCHRONIZECACHE: {
-		lck_mtx_lock(&sd_lock);
-		int error = sd_write_enabled ? sd_wait_not_busy() : 0;
-		lck_mtx_unlock(&sd_lock);
-		return error;
-	}
+	case DKIOCGETMAXBLOCKCOUNTWRITE:
+		*(uint64_t *)data = 0;
+		return 0;
+	case DKIOCSYNCHRONIZECACHE:
+		return 0;
 	case DKIOCISWRITABLE:
-		*(uint32_t *)data = minor(dev) == 1 && sd_write_enabled;
+		*(uint32_t *)data = 0;
 		return 0;
 	default:
 		return ENOTTY;
@@ -374,13 +299,13 @@ static const struct cdevsw sd_cdevsw = {
 	.d_type       = D_DISK,
 };
 
-static char sd_state[160] = "off (boot-arg sd=0)";
-SYSCTL_DECL(_kern_redwood);
-SYSCTL_STRING(_kern_redwood, OID_AUTO, sdcard, CTLFLAG_RD | CTLFLAG_LOCKED, sd_state, 0, "the microSD slot");
-SYSCTL_UINT(_kern_redwood, OID_AUTO, sdcard_reads, CTLFLAG_RD | CTLFLAG_LOCKED, &sd_reads, 0, "reads done");
-SYSCTL_UINT(_kern_redwood, OID_AUTO, sdcard_errors, CTLFLAG_RD | CTLFLAG_LOCKED, &sd_errors, 0, "reads failed");
-SYSCTL_STRING(_kern_redwood, OID_AUTO, sdcard_dbg, CTLFLAG_RD | CTLFLAG_LOCKED, sd_dbg, 0, "the last transfer, in detail");
-SYSCTL_UINT(_kern_redwood, OID_AUTO, sdcard_last_int, CTLFLAG_RD | CTLFLAG_LOCKED, &sd_last_int, 0, "last RINTSTS");
+static char sd_state[200] = "off (boot-arg sdcard=0)";
+SYSCTL_DECL(_kern_hakios);
+SYSCTL_STRING(_kern_hakios, OID_AUTO, sdcard, CTLFLAG_RD | CTLFLAG_LOCKED, sd_state, 0, "the microSD slot");
+SYSCTL_UINT(_kern_hakios, OID_AUTO, sdcard_reads, CTLFLAG_RD | CTLFLAG_LOCKED, &sd_reads, 0, "reads done");
+SYSCTL_UINT(_kern_hakios, OID_AUTO, sdcard_errors, CTLFLAG_RD | CTLFLAG_LOCKED, &sd_errors, 0, "reads failed");
+SYSCTL_STRING(_kern_hakios, OID_AUTO, sdcard_dbg, CTLFLAG_RD | CTLFLAG_LOCKED, sd_dbg, 0, "the last transfer, in detail");
+SYSCTL_UINT(_kern_hakios, OID_AUTO, sdcard_last_int, CTLFLAG_RD | CTLFLAG_LOCKED, &sd_last_int, 0, "last RINTSTS");
 
 static uint32_t sd_verid;
 
@@ -425,19 +350,19 @@ sd_probe(void)
 		return ENXIO;
 	}
 	sd_ready = 1;
-	snprintf(sd_state, sizeof(sd_state), "ready: %llu MB (to the last partition), DW MMC %#x, 4-bit, S-Boot's setup",
+	snprintf(sd_state, sizeof(sd_state), "ready: %llu MB (to the last partition), DW MMC %#x, 4-bit, the loader's setup",
 	    sd_blocks / 2048, sd_verid);
 	printf("sdcard: %s\n", sd_state);
 	return 0;
 }
 
-extern int redwood_sdmedia_publish(unsigned unit, int major, uint64_t whole_blocks, uint64_t part_start, uint64_t part_blocks,
+extern int hakios_sdmedia_publish(unsigned unit, int major, uint64_t whole_blocks, uint64_t part_start, uint64_t part_blocks,
     unsigned part_type, int writable);
 
 /*
  * At boot (2026-11-21): the card read once IOKit and devfs are up, then /dev/disk9 + rdisk9 (the card) and disk9s1 +
- * rdisk9s1 (its first partition) and the IOKit disk userfsd matches (iokit/Kernel/RedwoodSDMedia.cpp). Character
- * devices. The file-system service requests a descriptor from Apple's privileged userfs_helper.
+ * rdisk9s1 (its first partition) and the IOKit disk userfsd matches (iokit/Kernel/hakios.sdmedia.cpp). Character
+ * devices, read only.
  */
 static void
 sd_boot_thread(__unused void *arg, __unused wait_result_t wr)
@@ -456,23 +381,62 @@ sd_boot_thread(__unused void *arg, __unused wait_result_t wr)
 	(void)devfs_make_node(makedev(sd_cmaj, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0644, "rdisk%d", SD_UNIT);
 	(void)devfs_make_node(makedev(sd_cmaj, 1), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0644, "disk%ds1", SD_UNIT);
 	(void)devfs_make_node(makedev(sd_cmaj, 1), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0644, "rdisk%ds1", SD_UNIT);
-	error = redwood_sdmedia_publish(SD_UNIT, sd_cmaj, sd_blocks, sd_part_start, sd_part_blocks, sd_part_type, sd_write_enabled);
-	snprintf(sd_state, sizeof(sd_state), "ready: disk%d %llu MB, disk%ds1 type %#x at %llu, %llu MB (%s); IOKit %s",
+	error = hakios_sdmedia_publish(SD_UNIT, sd_cmaj, sd_blocks, sd_part_start, sd_part_blocks, sd_part_type, 0);
+	snprintf(sd_state, sizeof(sd_state), "ready: disk%d %llu MB, disk%ds1 type %#x at %llu, %llu MB (read only); IOKit %s",
 	    SD_UNIT, sd_blocks / 2048, SD_UNIT, sd_part_type, sd_part_start, sd_part_blocks / 2048,
-	    sd_write_enabled ? "read-write" : "read-only", error == 0 ? "published" : "FAILED");
+	    error == 0 ? "published" : "FAILED");
 	printf("sdcard: %s\n", sd_state);
 }
 
-void redwood_sdcard_init(void);
-void
-redwood_sdcard_init(void)
+/* one CMU gate register: read, and with force forced on (manual, on) and read back; the value as it is in the end */
+static uint32_t
+sd_gate(vm_offset_t page, unsigned off, bool force)
 {
+	volatile uint32_t *g = (volatile uint32_t *)(page + off);
+	uint32_t v = *g;
+
+	if (force && (v & GATE_MANUAL_ON) != GATE_MANUAL_ON) {
+		*g = v | GATE_MANUAL_ON;
+		v = *g;
+	}
+	return v;
+}
+
+void hakios_exynos_sd_init(void);
+void
+hakios_exynos_sd_init(void)
+{
+	vm_offset_t top, fsys1, alive;
+	uint32_t g_top, g_aclk, g_sdclk, cd, pwren, clkena, ctype, hcon;
+	bool card, gates_on;
 	int cmaj;
 	thread_t t;
 
-	(void)PE_parse_boot_argn("sd", &sd_mode, sizeof(sd_mode));
-	(void)PE_parse_boot_argn("sd_write", &sd_write_enabled, sizeof(sd_write_enabled));
+	(void)PE_parse_boot_argn("sdcard", &sd_mode, sizeof(sd_mode));
 	if (sd_mode == 0) {
+		return;
+	}
+	top = ml_io_map(CMU_TOP_PAGE, 0x1000);
+	fsys1 = ml_io_map(CMU_FSYS1_PAGE, 0x1000);
+	alive = ml_io_map(ALIVE_GPIO_PA, 0x1000);
+	if (top == 0 || fsys1 == 0 || alive == 0) {
+		snprintf(sd_state, sizeof(sd_state), "no mapping");
+		printf("sdcard: %s\n", sd_state);
+		return;
+	}
+	cd = *(volatile uint32_t *)(alive + GPA1_DAT);
+	card = ((cd >> CD_PIN) & 1u) == 0;
+	g_top = sd_gate(top, 0x070, sd_mode >= 2);
+	g_aclk = sd_gate(fsys1, 0x030, sd_mode >= 2);
+	g_sdclk = sd_gate(fsys1, 0x034, sd_mode >= 2);
+	gates_on = (g_aclk & GATE_MANUAL_ON) == GATE_MANUAL_ON && (g_sdclk & GATE_MANUAL_ON) == GATE_MANUAL_ON;
+	printf("sdcard: sdcard=%u: card detect GPA1 DAT %#x (%s); gates top %#x, FSYS1 ACLK %#x SDCLKIN %#x%s\n", sd_mode, cd,
+	    card ? "a card" : "no card", g_top, g_aclk, g_sdclk, sd_mode >= 2 ? " (forced on where they were not)" : "");
+	if (!gates_on) {
+		/* a read of an IP whose clock is off can stop the bus: the controller is not touched */
+		snprintf(sd_state, sizeof(sd_state), "the controller's clocks are not on (ACLK %#x SDCLKIN %#x): not touched",
+		    g_aclk, g_sdclk);
+		printf("sdcard: %s\n", sd_state);
 		return;
 	}
 	sd = (volatile uint8_t *)ml_io_map(SD_PHYS, 0x1000);
@@ -481,9 +445,23 @@ redwood_sdcard_init(void)
 		return;
 	}
 	sd_verid = rd(R_VERID);
-	if ((sd_verid & 0xffff0000) != 0x53420000 || rd(R_PWREN) != 1 || rd(R_CLKENA) != 1) {
-		snprintf(sd_state, sizeof(sd_state), "not as S-Boot leaves it: VERID %#x PWREN %u CLKENA %u", sd_verid,
-		    rd(R_PWREN), rd(R_CLKENA));
+	hcon = rd(R_HCON);
+	pwren = rd(R_PWREN);
+	clkena = rd(R_CLKENA);
+	ctype = rd(R_CTYPE);
+	printf("sdcard: dwmmc2: VERID %#x HCON %#x (data width %u) PWREN %#x CLKENA %#x CLKDIV %#x CTYPE %#x CLKSEL %#x STATUS %#x "
+	    "CMD %#x RESP0 %#x\n", sd_verid, hcon, (hcon >> 7) & 7u, pwren, clkena, rd(R_CLKDIV), ctype, rd(R_CLKSEL64),
+	    rd(R_STATUS), rd(R_CMD), rd(R_RESP0));
+	/* as a loader leaves an initialised SD card: DW MSHC 2.70a, the 64-bit FIFO this driver reads, powered, clocked, 4-bit */
+	if ((sd_verid & 0xffffu) != 0x270au || ((hcon >> 7) & 7u) != 2u || !(pwren & 1u) || !(clkena & 1u) || ctype != 1u) {
+		snprintf(sd_state, sizeof(sd_state), "the slot is not as a loader leaves an initialised card (VERID %#x HCON %#x "
+		    "PWREN %#x CLKENA %#x CTYPE %#x): not used", sd_verid, hcon, pwren, clkena, ctype);
+		printf("sdcard: %s\n", sd_state);
+		return;
+	}
+	if (sd_mode < 2 || !card) {
+		snprintf(sd_state, sizeof(sd_state), "slot initialised (DW MMC %#x, 4-bit), %s; %s", sd_verid,
+		    card ? "a card in" : "no card", sd_mode < 2 ? "sdcard=1: only looked" : "nothing to read");
 		printf("sdcard: %s\n", sd_state);
 		return;
 	}
@@ -497,6 +475,6 @@ redwood_sdcard_init(void)
 	if (kernel_thread_start(sd_boot_thread, NULL, &t) == KERN_SUCCESS) {
 		thread_deallocate(t);
 	}
-	snprintf(sd_state, sizeof(sd_state), "slot found (DW MMC %#x); the card is read on the first open of /dev/rsdcard", sd_verid);
+	snprintf(sd_state, sizeof(sd_state), "slot found (DW MMC %#x); the card's MBR is read 6 s after start", sd_verid);
 	printf("sdcard: %s\n", sd_state);
 }
