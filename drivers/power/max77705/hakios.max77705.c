@@ -971,7 +971,20 @@ chg_bits(uint8_t reg, uint8_t mask, uint8_t value, uint8_t *was)
 #define AFC_IN_MA               1650
 #define AFC_CC_MA               2150
 #define AFC_PRE_MA              500
+/*
+ * A USB-C source's own current advertisement (its Rp), for a PD charger with a C-to-C cable, which may show no BC 1.2 type
+ * at all: CC_STATUS0 (MUIC 0x0A) [5:4] CCIStat (0 none, 1 default USB, 2 1.5 A, 3 3.0 A) with [2:0] CCStat 1, attached
+ * as a sink (include/linux/ccic/max77705.h; upstream read 0xb1 from a 3 A port). Samsung's kernel charges such a source as
+ * "PDIC" at up to 3000 mA in (the S9's tree); here 3.0 A: 3000 mA in, 1.5 A: 1500 mA in, both at most 2150 mA into the
+ * battery (AFC's): 15 W at 5 V, the same battery current as 9 V. No PD contract is asked for (the source stays at 5 V).
+ */
+#define MUIC_CC_STATUS0         0x0A
+#define RP3A_IN_MA              3000
+#define RP15_IN_MA              1500
+#define RP_CC_MA                2150
+#define CHG_CC_WARM_MA          1000            /* the battery over 41 C (Samsung stops at 41; this slows) */
 static bool afc_enabled;
+static uint8_t cc_said_for = 0xff;                   /* the CC_STATUS0 last said (0xff: none since the cable came) */
 static enum { AFC_IDLE, AFC_ON_9V, AFC_SPENT } afc_state;
 static uint32_t afc_dcp_polls, afc_said;
 
@@ -1012,11 +1025,15 @@ charger_tune(const struct hakios_battery_state *b)
 	uint32_t in_ma, cc_ma;
 	bool temp_fast;
 
+	uint8_t cc0 = 0;
+	uint32_t rp_ma = 0;
+
 	if (!b->external) {
 		if (afc_state != AFC_IDLE || afc_dcp_polls != 0) {
 			afc_state = AFC_IDLE;           /* (the cable gone: a new one may be asked again) */
 			afc_dcp_polls = 0;
 		}
+		cc_said_for = 0xff;
 		return;
 	}
 	if (!chg_enabled) {
@@ -1026,10 +1043,21 @@ charger_tune(const struct hakios_battery_state *b)
 		(void)chg_bits(CHG_CNFG_06, 0x0C, 0x0C, NULL);
 		(void)chg_bits(CHG_CNFG_06, 0x03, 0x01, NULL);  /* the watchdog's clear (self-clearing) */
 	}
-	if (read8(MUIC, MUIC_BC_STATUS, &bc) != 0 || ((bc & 3) != 2 && (bc & 3) != 3)) {
+	(void)read8(MUIC, MUIC_BC_STATUS, &bc);
+	if (read8(MUIC, MUIC_CC_STATUS0, &cc0) == 0 && (cc0 & 7) == 1) {
+		rp_ma = ((cc0 >> 4) & 3) == 3 ? RP3A_IN_MA : ((cc0 >> 4) & 3) == 2 ? RP15_IN_MA : 0;
+	}
+	if (cc0 != cc_said_for) {
+		cc_said_for = cc0;
+		say("max77705: charger: BC_STATUS %#x (type %u), CC_STATUS0 %#x (the source offers %s), USBC_STATUS1 VBADC %u\n", bc,
+		    bc & 3, cc0, rp_ma == RP3A_IN_MA ? "3.0 A" : rp_ma == RP15_IN_MA ? "1.5 A" : "no more than USB's default",
+		    afc_vbadc());
+	}
+	if ((bc & 3) != 2 && (bc & 3) != 3 && rp_ma == 0) {
 		if (chg_said == 0) {
 			chg_said = 1;
-			say("max77705: charger: the input's type %u (BC_STATUS %#x): its currents left as they are\n", bc & 3, bc);
+			say("max77705: charger: the input's type %u (BC_STATUS %#x), no USB-C current offered: its currents left as they are\n",
+			    bc & 3, bc);
 		}
 		return;
 	}
@@ -1085,12 +1113,17 @@ charger_tune(const struct hakios_battery_state *b)
 	} else if (vbadc != 0xff && vbadc > 2) {
 		in_ma = AFC_PRE_MA;             /* (VBUS above 5.5 V outside a 9 V session: held low, as the guard does) */
 		cc_ma = CHG_CC_MA;
+	} else if (rp_ma > CHG_IN_MA || (rp_ma != 0 && (bc & 3) != 2 && (bc & 3) != 3)) {
+		in_ma = rp_ma;                  /* (a USB-C source's 1.5 or 3.0 A, above: 5 V) */
+		cc_ma = rp_ma < RP_CC_MA ? rp_ma : RP_CC_MA;
 	} else {
 		in_ma = CHG_IN_MA;
 		cc_ma = CHG_CC_MA;
 	}
 	if (b->temperature_hundredths < 0 || b->temperature_hundredths > 4500) {
 		cc_ma = CHG_CC_TEMP_MA;
+	} else if (b->temperature_hundredths > 4100) {
+		cc_ma = cc_ma < CHG_CC_WARM_MA ? cc_ma : CHG_CC_WARM_MA;
 	}
 	uint8_t in_code = (uint8_t)(in_ma / 25 - 1), cc_code = (uint8_t)(cc_ma / 50);
 
@@ -1106,8 +1139,9 @@ charger_tune(const struct hakios_battery_state *b)
 	if (chg_said < 12 || afc_said < 8) {
 		chg_said = chg_said < 2 ? 2 : chg_said + 1;
 		afc_said++;
-		say("max77705: charger: type %u%s: input limit %u -> %u mA, fast charge %u -> %u mA (battery %d.%02d C, watchdog %s): %s\n",
-		    bc & 3, afc_state == AFC_ON_9V ? " at 9 V" : "", (in_now & 0x7F) <= 3 ? 100 : ((in_now & 0x7F) + 1) * 25, in_ma,
+		say("max77705: charger: type %u%s%s: input limit %u -> %u mA, fast charge %u -> %u mA (battery %d.%02d C, watchdog %s): %s\n",
+		    bc & 3, afc_state == AFC_ON_9V ? " at 9 V" : "", afc_state != AFC_ON_9V && in_ma == rp_ma ? " (USB-C current)" : "",
+		    (in_now & 0x7F) <= 3 ? 100 : ((in_now & 0x7F) + 1) * 25, in_ma,
 		    (cc_now & 0x3F) <= 2 ? 100 : (cc_now & 0x3F) * 50, cc_ma, b->temperature_hundredths / 100,
 		    (b->temperature_hundredths < 0 ? -b->temperature_hundredths : b->temperature_hundredths) % 100,
 		    (cnfg00 & 0x10) ? "on, cleared every poll" : "off", ok ? "written" : "NOT TAKEN");
