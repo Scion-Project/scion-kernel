@@ -485,4 +485,51 @@ chg_readback_ok(uint8_t wrote, uint8_t read, uint8_t mask)
 	return (wrote & mask) == (read & mask);
 }
 
+/* ---- the limits on top of the rules (iOS 16.5's guard, hakios.max77705.c max77705_chg=) -------------------------- */
+
+/*
+ * SIOP, Samsung's "phone in use" limit (exynos9810-starlte_eur_open_26.dts: battery,siop_input_limit_current 1200,
+ * siop_charging_limit_current 1000, siop_hv_input_limit_current 500, siop_hv_charging_limit_current 1000). Samsung applies
+ * it when its thermal service lowers siop_level below 100; the iOS 16.5 guard applies it while the panel is lit, which
+ * is at least as often. It only lowers: never above what chg_step() gave.
+ * The idea of carrying SIOP over is Jesvi-iOS's (docs/devices/x1slte/charging-samsung.md, jesvi-eulah, fc07d1b); the
+ * numbers are the S9's own, not the S20's.
+ */
+#define CHG_SIOP_INPUT_MA       1200u
+#define CHG_SIOP_CHARGE_MA      1000u
+#define CHG_SIOP_HV_INPUT_MA    500u
+#define CHG_SIOP_HV_CHARGE_MA   1000u
+
+static inline void
+chg_siop_cap(struct chg_out *o, enum chg_type type)
+{
+	uint32_t in_max = type == CHG_AFC_9V ? CHG_SIOP_HV_INPUT_MA : CHG_SIOP_INPUT_MA;
+	uint32_t cc_max = type == CHG_AFC_9V ? CHG_SIOP_HV_CHARGE_MA : CHG_SIOP_CHARGE_MA;
+
+	if (o->input_ma > in_max) {
+		o->input_ma = in_max;
+	}
+	if (o->charge_ma > cc_max) {
+		o->charge_ma = cc_max;
+	}
+}
+
+/*
+ * A computer on the USB link (the gadget configured by a host) is a computer whatever the MUIC called the port: a Mac's
+ * port was seen detected as a wall charger, and a Mac cut the port, power and data both, when the phone drew 1.7-2.0 A
+ * (Jesvi-iOS on the S20, jesvi-eulah, 3a4db07 and fb882cf; no 9 V with a computer on the link, a57b321). So: the
+ * input and the charge current at most the CDP's (Samsung's 1500/1500 mA for the S9) and no 9 V request. Only lowers.
+ */
+static inline void
+chg_host_cap(struct chg_out *o)
+{
+	if (o->input_ma > chg_limits[CHG_CDP].input_ma) {
+		o->input_ma = chg_limits[CHG_CDP].input_ma;
+	}
+	if (o->charge_ma > chg_limits[CHG_CDP].charge_ma) {
+		o->charge_ma = chg_limits[CHG_CDP].charge_ma;
+	}
+	o->ask_9v = false;
+}
+
 #endif /* HAKIOS_MAX77705_CHARGE_H */

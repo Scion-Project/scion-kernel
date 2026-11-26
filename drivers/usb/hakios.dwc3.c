@@ -2095,6 +2095,10 @@ hakios_usb_gadget_vbus(bool present)
 	os_atomic_store(&vbus_report, present ? 1 : 0, release);
 }
 
+/* a host configured the link: a computer on the cable, whatever the MUIC says (the charger guard, max77705_chg=) */
+bool hakios_usb_gadget_host(void);
+bool hakios_usb_gadget_host(void) { return strcmp(usb_state, "configured") == 0; }
+
 /* From the cable and the link's state, decide whether to stop or restart the link. Runs in the poll. */
 static void
 link_watch(void)

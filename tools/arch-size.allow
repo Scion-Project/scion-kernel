@@ -39,7 +39,7 @@ drivers/modem/hakios.qmi.c                                 963
 drivers/modem/hakios.shannon.c                            2927
 drivers/net/hakios.net.c                                  1485
 drivers/power/exynos/hakios.exynos_cpufreq.c              2120  # 1531 today, and the growth of open pull request #337
-drivers/power/max77705/hakios.max77705.c                  1125
+drivers/power/max77705/hakios.max77705.c                  1130  # +5: the charger guard's hooks (max77705_chg=); the guard itself is hakios.max77705_guard.h
 drivers/soc/exynos/hakios.exynos_acpm.c                    881
 drivers/soc/exynos/hakios.exynos_m3.c                      907
 drivers/soc/exynos/hakios.exynos_tee.c                    1232
@@ -47,7 +47,7 @@ drivers/storage/hakios.apfs_check.c                       1872
 drivers/storage/ufs/hakios.ufs.c                          3755
 drivers/storage/ufs/hakios.ufshc.c                        3741
 drivers/storage/ufs/hakios.ufshc.lga.h                     817
-drivers/usb/hakios.dwc3.c                                 2298
+drivers/usb/hakios.dwc3.c                                 2302  # +4: hakios_usb_gadget_host() for the charger guard (a computer on the link)
 drivers/virtio/hakios.virtio.c                            1032
 drivers/wifi/brcmfmac/hakios.exynos_pcie.c                 999
 drivers/wifi/hakios.apple80211.c                           844
