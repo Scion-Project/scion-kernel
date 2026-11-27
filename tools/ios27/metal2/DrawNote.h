@@ -6,10 +6,14 @@
 // fb<slot> <bytes> B: FLOATS | vb<slot> +<offset>: FLOATS | vbytes<slot> ...`. A pipeline is its fragment function's name, its
 // color attachments (format, blending on or off with the factors and operations, write mask) and its sample count; a sampler its
 // filters (min, mag, mip), address modes (s, t), whether its coordinates are normalized, and its level clamps. Reading only.
+// SWEET_MTL2_DRAWNOTE=2: also every draw of the passes FetchProbe.h marks (`fb draw`), with QuartzCore's fc_framebuffer_fetch constant;
+// =3: the state of CoreAnimation's luma boost draws (`luma note`); SWEET_MTL2_FBPROBE=3: the steady camera draw and color 0 after it.
+#include "FetchProbe.h" // the framebuffer-fetch probes, which the draw-note modes 2 and 3 serve
+#include <objc/message.h>
 static int gDrawNote=-1;
 static bool sweetDrawNoteOn() {
- if(gDrawNote<0){const char *e=getenv("SWEET_MTL2_DRAWNOTE");gDrawNote=(e && e[0]=='1')?1:0;}
- return gDrawNote==1;
+ if(gDrawNote<0){const char *e=getenv("SWEET_MTL2_DRAWNOTE");gDrawNote=(e && e[0]>='1' && e[0]<='3')?e[0]-'0':0;}
+ return gDrawNote>=1;
 }
 static char gDrawNoteKey;
 static NSMutableDictionary *sweetDrawNotes(id encoder) {
@@ -29,6 +33,13 @@ static NSString *sweetDrawNoteSampler(MTLSamplerDescriptor *d) {
 }
 static NSString *sweetDrawNotePipeline(MTLRenderPipelineDescriptor *d) {
  NSMutableString *s=[NSMutableString stringWithFormat:@"frag %@ vert %@ samples %lu",d.fragmentFunction.name,d.vertexFunction.name,(unsigned long)d.rasterSampleCount];
+ // SWEET_MTL2_DRAWNOTE=2: the fragment function's framebuffer-fetch constants (QuartzCore's fc_framebuffer_fetch) too
+ if(gDrawNote>=2 && [(id)d.fragmentFunction respondsToSelector:@selector(constantsText)]) {
+  typedef std::string (*Text)(id,SEL);   // the frontend's NBFunction keeps them as text (name:type:hex, filled when the note is on)
+  const std::string text=((Text)objc_msgSend)((id)d.fragmentFunction,@selector(constantsText));
+  NSString *k=@(text.c_str());
+  for(NSString *one in [k componentsSeparatedByString:@" "])if([one rangeOfString:@"fetch"].location!=NSNotFound)[s appendFormat:@" [%@]",one];
+ }
  for(unsigned i=0;i<8;i++) {
   MTLRenderPipelineColorAttachmentDescriptor *a=d.colorAttachments[i];
   if(a.pixelFormat==MTLPixelFormatInvalid)continue;
@@ -81,22 +92,91 @@ static void sweetDrawNotePipelineBound(id encoder,id pipeline) {
  sweetDrawNotes(encoder)[@"p"]=v?v:@"(unknown pipeline)";
 }
 // At a draw: when a fragment slot holds a texture of formats 500 to 510, say the state (once a pipeline, 24 a process).
-static void sweetDrawNoteDraw(id encoder,const char *how,NSUInteger count) {
- if(!sweetDrawNoteOn())return;
+static bool sweetDrawNoteDraw(id encoder,const char *how,NSUInteger count) {
+ if(!sweetDrawNoteOn())return false;
  NSMutableDictionary *d=objc_getAssociatedObject(encoder,&gDrawNoteKey);
- if(!d)return;
+ if(!d)return false;
+ if(sweetFetchDrawProbeOn()) {
+  NSString *pl=d[@"p"];
+  if(pl && [pl rangeOfString:@"frag TimgA3Xhf_Ixrg"].location!=NSNotFound) {
+   static std::atomic<uint64_t> last{0};static std::atomic<unsigned> asked{0};
+   const uint64_t now=clock_gettime_nsec_np(CLOCK_UPTIME_RAW)/1000;uint64_t l=last.load();
+   if(now-l>=1000000 && last.compare_exchange_strong(l,now) && asked.load()<30) {
+    const unsigned k=1000+(asked.fetch_add(1)+1);
+    Ivar iv=class_getInstanceVariable(object_getClass(encoder),"_commandBuffer");
+    id cb=iv?object_getIvar(encoder,iv):nil;id<MTLTexture> c0=objc_getAssociatedObject(encoder,&gFetchC0Key);
+    if(cb && c0)objc_setAssociatedObject(cb,&gFetchProbeKey,@[c0,@(k)],OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSMutableString *t=[NSMutableString stringWithFormat:@"native-metal: camera draw %u: %s %lu cb %s | %@ |",k,how,(unsigned long)count,cb&&c0?"probed":"NOT probed",pl];
+    for(NSString *key in [d.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+     id v=d[key];
+     if([key hasPrefix:@"t"] && [v isKindOfClass:[NSString class]])[t appendFormat:@" %@ %@ |",key,v];
+     else if([key hasPrefix:@"fb"] && [v isKindOfClass:[NSString class]])[t appendFormat:@" %@ %@ |",key,v];
+     else if([key isEqualToString:@"vb1"] && [v isKindOfClass:[NSArray class]]) {
+      id<MTLBuffer> b=((NSArray *)v)[0];const NSUInteger off=[((NSArray *)v)[1] unsignedIntegerValue];const uint8_t *c=(const uint8_t *)b.contents;
+      if(c && off+64<=b.length)[t appendFormat:@" vb1 +%lu: %@ |",(unsigned long)off,sweetDrawNoteFloats(c+off,64)];
+     }
+    }
+    const char *line=t.UTF8String;
+    for(size_t at=0,n=strlen(line);at<n;at+=900){char piece[920];snprintf(piece,sizeof piece,"%s%.900s",at?"native-metal: camera draw ... ":"",line+at);sm2_logs(piece);}
+   }
+  }
+ }
+ // SWEET_MTL2_DRAWNOTE=3: the whole state of the first 10 draws of CoreAnimation's luma boost (luma_boost_lph, the EDR pass that
+ // reads its color attachment), each time; with SWEET_MTL2_SKIPLUMA=1 too (a diagnostic only) those draws are not drawn.
+ if(gDrawNote==3) {
+  NSString *pl=d[@"p"];
+  if(pl && [pl rangeOfString:@"luma_boost"].location!=NSNotFound) {
+   static std::atomic<unsigned> said{0};
+   if(said.fetch_add(1)<10) {
+    NSMutableString *s=[NSMutableString stringWithFormat:@"native-metal: luma note: %s %lu | %@ |",how,(unsigned long)count,pl];
+    for(NSString *key in [d.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+     if([key isEqualToString:@"p"] || [key isEqualToString:@"#"])continue;
+     id v=d[key];
+     if([v isKindOfClass:[NSArray class]]) {
+      id<MTLBuffer> b=((NSArray *)v)[0];const NSUInteger off=[((NSArray *)v)[1] unsignedIntegerValue];const uint8_t *c=(const uint8_t *)b.contents;
+      if(c && off+16<=b.length)[s appendFormat:@" %@ +%lu: %@ |",key,(unsigned long)off,sweetDrawNoteFloats(c+off,MIN((NSUInteger)64,b.length-off))];
+     } else [s appendFormat:@" %@ %@ |",key,v];
+    }
+    const char *line=s.UTF8String;
+    for(size_t at=0,n=strlen(line);at<n;at+=900){char piece[920];snprintf(piece,sizeof piece,"%s%.900s",at?"native-metal: luma note ... ":"",line+at);sm2_logs(piece);}
+   }
+   static int skip=-1;if(skip<0){const char *e=getenv("SWEET_MTL2_SKIPLUMA");skip=(e && e[0]=='1')?1:0;}
+   if(skip==1)return true;
+  }
+ }
+ // SWEET_MTL2_DRAWNOTE=2 (with SWEET_MTL2_FBPROBE=2): every draw of the shadow passes of probes 2, 5 and 8, one short line each:
+ // `native-metal: fb draw PASS.K: HOW COUNT | PIPELINE | t<slot> <format> ... | vb1 +<offset>: the first 8 floats`.
+ if(gDrawNote==2) {
+  const unsigned pass=sweetFetchEncoderPass(encoder);
+  if(pass!=2 && pass!=5 && pass!=8)return false;
+  static std::atomic<unsigned> lines{0};
+  NSNumber *k=d[@"#"];const unsigned draw=k?k.unsignedIntValue+1:1;d[@"#"]=@(draw);
+  if(lines.fetch_add(1)>=400)return false;
+  NSMutableString *s=[NSMutableString stringWithFormat:@"native-metal: fb draw %u.%u: %s %lu | %@ |",pass,draw,how,(unsigned long)count,d[@"p"]?:@"(no pipeline)"];
+  for(NSString *key in [d.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+   id v=d[key];
+   if([key hasPrefix:@"t"] && [v isKindOfClass:[NSString class]] && [key length]<=3)[s appendFormat:@" %@ %@ |",key,v];
+   else if([key isEqualToString:@"vb1"] && [v isKindOfClass:[NSArray class]]) {
+    id<MTLBuffer> b=((NSArray *)v)[0];const NSUInteger off=[((NSArray *)v)[1] unsignedIntegerValue];const uint8_t *c=(const uint8_t *)b.contents;
+    if(c && off+32<=b.length)[s appendFormat:@" vb1 +%lu: %@ |",(unsigned long)off,sweetDrawNoteFloats(c+off,32)];
+   }
+  }
+  const char *line=s.UTF8String;
+  for(size_t at=0,n=strlen(line);at<n;at+=900){char piece[920];snprintf(piece,sizeof piece,"%s%.900s",at?"native-metal: fb draw ... ":"",line+at);sm2_logs(piece);}
+  return false;
+ }
  bool ycc=false;
  for(NSString *key in d) {
   if(![key hasPrefix:@"t"])continue;
   const long f=[(NSString *)d[key] integerValue];ycc=ycc || (f>=500 && f<=510);
  }
- if(!ycc)return;
+ if(!ycc)return false;
  static std::mutex lock;static NSMutableSet *said;static unsigned lines;
  NSString *pipeline=d[@"p"]?:@"(no pipeline)";
  {
   std::lock_guard<std::mutex> hold(lock);
   if(!said)said=[NSMutableSet set];
-  if(lines>=24 || [said containsObject:pipeline])return;
+  if(lines>=24 || [said containsObject:pipeline])return false;
   [said addObject:pipeline];lines++;
  }
  NSMutableString *s=[NSMutableString stringWithFormat:@"native-metal: draw note %u: %s %lu | %@ |",lines,how,(unsigned long)count,pipeline];
@@ -114,6 +194,7 @@ static void sweetDrawNoteDraw(id encoder,const char *how,NSUInteger count) {
  for(size_t at=0,n=strlen(line);at<n;at+=900) {   // the console takes long lines in pieces
   char piece[920];snprintf(piece,sizeof piece,"%s%.900s",at?"native-metal: draw note ... ":"",line+at);sm2_logs(piece);
  }
+ return false;
 }
 // The pipeline side, wrapped at load (the frontend's own methods, always; the wrappers do nothing more unless the note is on):
 // a pipeline made keeps its summary, a pipeline set is noted on the encoder.
@@ -149,13 +230,13 @@ Class base=NSClassFromString(@"NBEncoder");
  const SEL draw=@selector(drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:);
  if(Method m=encoder?class_getInstanceMethod(encoder,draw):nullptr) {
   typedef void (*F)(id,SEL,MTLPrimitiveType,NSUInteger,NSUInteger,NSUInteger,NSUInteger);const F old=(F)method_getImplementation(m);
-  method_setImplementation(m,imp_implementationWithBlock(^(id self,MTLPrimitiveType t,NSUInteger s,NSUInteger n,NSUInteger i,NSUInteger b){sweetDrawNoteDraw(self,"draw",n);old(self,draw,t,s,n,i,b);}));
+  method_setImplementation(m,imp_implementationWithBlock(^(id self,MTLPrimitiveType t,NSUInteger s,NSUInteger n,NSUInteger i,NSUInteger b){if(!sweetDrawNoteDraw(self,"draw",n))old(self,draw,t,s,n,i,b);}));
  }
  const SEL indexed=@selector(drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:);
  if(Method m=encoder?class_getInstanceMethod(encoder,indexed):nullptr) {
   typedef void (*F)(id,SEL,MTLPrimitiveType,NSUInteger,MTLIndexType,id,NSUInteger,NSUInteger,NSInteger,NSUInteger);const F old=(F)method_getImplementation(m);
   method_setImplementation(m,imp_implementationWithBlock(^(id self,MTLPrimitiveType t,NSUInteger n,MTLIndexType k,id b,NSUInteger o,NSUInteger i,NSInteger v,NSUInteger bi){
-   sweetDrawNoteDraw(self,"indexed",n);old(self,indexed,t,n,k,b,o,i,v,bi);}));
+   if(!sweetDrawNoteDraw(self,"indexed",n))old(self,indexed,t,n,k,b,o,i,v,bi);}));
  }
  if(Method m=encoder?class_getInstanceMethod(encoder,set):nullptr) {
   typedef void (*Set)(id,SEL,id);

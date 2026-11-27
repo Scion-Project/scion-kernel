@@ -632,7 +632,7 @@ static std::string quartzCoreCallers();
   }
  }
  std::string text;
- if(!gJournalPath.empty()) {
+ if(!gJournalPath.empty() || sweetDrawNoteOn()) {
   for(const NmbConstant &c:constants) {
    char head[32];if(!c.name)snprintf(head,sizeof head,"#%llu",(unsigned long long)c.index);
    text+=text.empty()?"":" ";text+=c.name?c.name:head;snprintf(head,sizeof head,":%llu:",(unsigned long long)c.type);text+=head;
@@ -938,7 +938,7 @@ static void waitForResource(id resource) {
   if(!u || (u&MTLTextureUsageShaderWrite))[_commandBuffer.writtenSurfaces addObject:t];
   if(sweetYCbCrFormat(t.descriptor.format)) {
    sweetYCbCrBound(object_getClassName(self),stage,index,t.descriptor.format,t.surface,t.surfacePlane);
-   sweetYCbCrProbe(texture,t.surface,object_getClassName(self),stage,index,t.descriptor.format);
+   sweetYCbCrProbe(texture,t.surface,object_getClassName(self),stage,index,t.descriptor.format);sweetFetchSawYcc(t.descriptor.format);
   }
   if(stage==2 && sweetYCbCrFormat(t.descriptor.format))
    if(id<MTLTexture> flat=sweetYCbCrFlat(texture,t.surface,t.descriptor.format,_commandBuffer)){texture=flat;[_commandBuffer.resourceOwners addObject:flat];}

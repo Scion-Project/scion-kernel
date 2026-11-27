@@ -617,6 +617,39 @@ with the diagnostics below (`YCbCrProbe.h`, `DrawNote.h`, all off unless set in 
 - **Also seen once, not explained:** both boots of D6, where the BGRA8 copy waited on the caller's thread for its own command
   buffer, stopped backboardd after its first textures (SpringBoard never drawn); D7, without the wait, booted normally.
 
+### The display side, part two: not the memoryless attachment; the picture reaches backboardd's framebuffer (24 November, evening)
+
+Phone 1, the same kernel and line as above (`cam_trace=1 cam_metal=1`), root as handed back plus a StarbiteMetal with
+`FetchProbe.h` / `FetchProbe.metal` and more draw-note modes (all off unless set in `/var/local/mtl2-env`). Boots F1 to F5.
+
+- **Measured: framebuffer fetch through a memoryless color attachment works on PanVK** (`SWEET_MTL2_FBPROBE=1`, F1). In
+  backboardd, on its own queue, 64 x 64 passes of the camera layer's shape: color 0 BGRA8 stored, color 1 a memoryless
+  `RGBA16Float` (load and store don't care), color 2 a memoryless `R32Float`. A draw that writes only color 1 (color 0 masked off)
+  and then a draw that reads color 1 by `[[color(1)]]` and writes color 0 leave exactly the value written (B G R 191 128 64). The
+  same with color 1 private and stored, with only colors 0 and 1, with color 1 cleared by the load action, and a read of color 0
+  itself, all right; a pixel no draw wrote reads 0. metal2vulkan reads such attachments as input attachments with
+  `VK_EXT_rasterization_order_attachment_access` (on this PanVK for v6 through `mesa26-panvk-ios.patch`), and PanVK lowers the
+  read to `LD_TILE` from the tile buffer; the Bifrost scheduler orders it after earlier fragments (the clause waits on the
+  eldest-colour slot). No render-pass split, input-attachment copy or barrier is involved.
+- **Measured: on steady frames the main pass's color 1 holds nothing** (`SWEET_MTL2_FBPROBE=2`, F3): with color 1 of the 828 x 1702
+  main pass made a stored private texture for the camera session, 20 reads of it over 60 s gave 0 0 0 0 everywhere. The draws that
+  write color 1 (`TimgA3S1Xhfu_Ixrg` and the other `S1` functions) belong to the flip animation's blur, not to steady frames.
+  QuartzCore's functions are specialized with `fc_framebuffer_fetch=1`; their `_Isup` input is a sampled backdrop texture
+  (`RGBA16Float` 192 x 192 at slots 3 and 4), not color 1 (`SWEET_MTL2_DRAWNOTE=2`).
+- **Measured: the steady preview draw is direct, and it puts the picture into the framebuffer** (`SWEET_MTL2_FBPROBE=3`, F5).
+  `TimgA3Xhf_Ixrg` samples the format 500 texture over the sink's surfaces into color 0 (x 0 to 828, y from 178, v from 0.1046),
+  at least once a second. The processor's read of that pass's color 0 surface when its command buffer completed gave, over the
+  viewfinder, RGB means 16 to 21 with 10 to 17 of 64 points lit, where the image queue sink's sample 300 had luma mean 21 with 109
+  of 256 above black (front camera, a dim room). At the same moment the screen (the kernel's `shot`) is exactly 0 over the
+  viewfinder. Skipping CoreAnimation's `luma_boost_lph` (a diagnostic, `SWEET_MTL2_SKIPLUMA=1`) did not change the black.
+- **Measured: backboardd hands the preview to the display as a layer of its own.** The kernel's framebuffer said
+  `SWEET FB: layer 2 surface 284 at 0,0 828x1702 (swap 512)`: surface 284 is one of the sink's `420f` surfaces. SwapEnd in the
+  fork's `iokit/Kernel/arm/SweetFramebuffer.cpp` copies layer 0 and blends upper layers as premultiplied BGRA (made for the
+  pointer); a two-plane `420f` layer is not converted there (read in the code, not measured).
+- **So the black viewfinder is not in the Metal layer.** The next piece is the display path: what SwapEnd gets for the preview's
+  layer (its rectangles, and which surface layer 0 is then) and a YCbCr layer in SwapEnd (colour conversion into the panel), or a
+  display that tells QuartzCore truthfully which layer formats it scans out. The black app-switcher cards were not looked at.
+
 ### SpringBoard's main-display layout (18 November)
 
 `camera_sbtrace.c` on phone 1 (dylib `-16`, `-17`) shows that SpringBoard does publish its layout: the home screen, the lock
