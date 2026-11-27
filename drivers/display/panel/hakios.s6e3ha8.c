@@ -638,7 +638,7 @@ hakios_panel_asleep(void)
 
 /*
  * The screen-off savings (the Wi-Fi poller's longer period, the Mali's cores off, the touch screen's and the CPU
- * governor's longer periods) ask hakios_dark_saving(), not hakios_panel_asleep(). dark_ab=1 (the Note9's default for
+ * governor's longer periods) ask hakios_dark_saving(), not hakios_panel_asleep(). dark_ab=1 (off by default since round 33's measurement; it was the Note9's default for
  * now): max77705's minute line flips them, a minute on, a minute off, while the screen is dark, and sums the current of
  * each half -- the same run, the same temperature, the same radios, for the comparison between rounds that round 25
  * could not make (its SoC 6 C warmer and Bluetooth on). dark_ab=0: always on.
@@ -674,7 +674,7 @@ hakios_dark_ab_flip(void)
 		if (PE_parse_boot_argn("dark_ab", &value, sizeof(value))) {
 			dark_ab = value != 0;
 		} else {
-			dark_ab = strcmp(platform, "crownlte") == 0;
+			dark_ab = 0;    /* (round 33: measured -- 326 against 380 mA dark -- so the savings stay on; dark_ab=1 for an A/B) */
 		}
 	}
 	if (dark_ab) {

@@ -71,6 +71,14 @@ hakios_platform_init(void)
 STARTUP(EARLY_BOOT, STARTUP_RANK_LAST, hakios_platform_init);
 
 
+/*
+ * (In an interrupt handler with interrupts off -- the end of a run that another processor asked for, psci_smp_stop_here()
+ * -> loader_return() -> the drivers' quiesce -- printf's console panics: "Console I/O from interrupt-disabled context",
+ * at every five-finger exit up to round 33. The line still goes to the loader's log there.)
+ */
+extern boolean_t ml_get_interrupts_enabled(void);
+extern boolean_t ml_at_interrupt_context(void);
+
 int
 hakios_say(const char *format, ...)
 {
@@ -81,5 +89,8 @@ hakios_say(const char *format, ...)
 	vsnprintf(line, sizeof(line), format, list);
 	va_end(list);
 	loader_log_line(line);
+	if (!ml_get_interrupts_enabled() && ml_at_interrupt_context()) {
+		return (int)strlen(line);
+	}
 	return printf("%s", line);
 }
