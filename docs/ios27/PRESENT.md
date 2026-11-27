@@ -380,3 +380,6 @@ swipes as the measurement above; the console should show `sweetfb_frameinfo=1: f
 selector 74, `backboardd notifications type 3 on`, `frame info mask 0x1`, then `frame info for swap N: ...` (the first three
 and every thousandth). Read the CoreAnimation swap period's median with the `FBT:` parser: 33.4 ms today; a move toward
 16.7 is the result wanted. The same kernel without the argument is today's behaviour.
+
+What the display takes as a layer (YCbCr, several layers) and why the camera preview is composited rather than handed
+to the display: [DISPLAY-LAYERS.md](DISPLAY-LAYERS.md).
