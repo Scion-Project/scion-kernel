@@ -24,6 +24,8 @@ storage/ufs bsd/dev/hakios.ufshc.h
 storage/ufs bsd/dev/hakios.ufshc_upiu.h
 storage/ufs bsd/dev/hakios.ufshc.lga.h
 storage  bsd/dev/hakios.ext4.c
+storage/sd bsd/dev/hakios.exynos_sd.c
+storage/sd iokit/Kernel/hakios.sdmedia.cpp
 storage  bsd/dev/hakios.sparse.c
 storage  bsd/dev/hakios.image.c
 storage  bsd/dev/hakios.apfs_check.c

@@ -26,3 +26,10 @@ driver UFS
 	help    (USERDATA only, with ufs_write=1; never EFS, RADIO, BOOT, the GPTs, LBA 0-5, a boot unit); ufs_native_ro=1 all read only.
 	help    And a file of one of its ext4 partitions, read only (hakios.ext4.c: the S9's
 	help    VENDOR, where its Wi-Fi and Bluetooth firmware is, read at run time; tools/ext4-test.py)
+
+driver EXYNOS_SD
+	file    bsd/dev/hakios.exynos_sd.c
+	file    iokit/Kernel/hakios.sdmedia.cpp iokitcpp
+	help    the Galaxy S9's microSD slot (dwmmc2), read only, off by default (sdcard=1 a look, nothing written; sdcard=2 the
+	help    card's MBR and /dev/disk9, disk9s1 and an external IOMedia for them, only when a loader left the card
+	help    initialised); Jesvi-iOS's S20 driver moved to the S9 (docs/devices/starlte-microsd.md)

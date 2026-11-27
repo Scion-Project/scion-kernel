@@ -502,6 +502,7 @@ SCGPU_ADDR	arg	scgpu.addr	User space	k	hakios.vgpu3d_xnu.c
 SCGPU_SIZE	arg	scgpu.size	User space	k	hakios.vgpu3d_xnu.c	
 SCSND_ADDR	arg	scsnd.addr	User space	k	hakios.scsnd.c	
 SCSND_SIZE	arg	scsnd.size	User space	k	hakios.scsnd.c	
+SDCARD	arg	sdcard	Storage and APFS	k	hakios.exynos_sd.c	the microSD slot looked at (1) or read, read only (2); off by default
 SECURITY	arg	security	Security stand-ins	k	kern_minimac.c	
 SERIAL	arg	serial	Loader	l	loader.c	
 SHUB	arg	shub	Sensors	k	hakios.ssp.c	
