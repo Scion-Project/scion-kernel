@@ -13,6 +13,13 @@ Where this tree comes from:
 
 In the repository:
 
+- Jesvi-iOS (github.com/jesvi-eulah/Jesvi-iOS, iOS 16.5 on the Galaxy S20 on the HakiOS base, by jesvi-eulah): its kernel
+  files (xnu/hakios.patch, xnu/files/) are under the Apple Public Source License 2.0, the rest under MIT (its LICENSE). Scion
+  takes from it with its owner's approval (26 November 2026), its authors' names kept on the commits that carry its work and
+  each source commit named. The MAX77705 charger guard's "in use" (SIOP) and "a computer on the link" limits
+  (docs/devices/starlte-charging.md) follow its docs/devices/x1slte/charging-samsung.md (fc07d1b) and its charger commits
+  3a4db07, fb882cf and a57b321; no code of it is copied there, and the values are the S9's own.
+
 - XNU (Apple): the kernel sources are fetched by xnu/apply.sh from github.com/apple-oss-distributions/xnu;
   our patch and files are a derivative work under the Apple Public Source License 2.0 (LICENSE.APSL).
 - ios-on-pixel-10 (TheAndersMadsen; Scion-Project/scion-blazer): devices/blazer/carried/ holds kernel-side files that are its

@@ -35,6 +35,7 @@
 extern "C" {
 int hakios_panel_register(const char * name, int (*set)(int level));
 int hakios_panel_brightness(int level);
+int hakios_panel_level(void);
 void hakios_backlight_publish(IOService * display);
 }
 
@@ -75,6 +76,14 @@ hakios_panel_brightness(int level)
 		gPanelLevel = level;
 	}
 	return error;
+}
+
+/* the level last taken by the panel, 0-255, or -1 when none has been (no panel driver, or nothing asked yet): for the
+ * charger's "in use" limit (hakios.max77705.c, max77705_chg=) */
+int
+hakios_panel_level(void)
+{
+	return gPanelLevel;
 }
 
 class AppleARMBacklight : public IOService
