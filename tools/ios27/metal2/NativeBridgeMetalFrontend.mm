@@ -75,6 +75,8 @@ static void noteFormat(uint32_t format,bool made) {
  if(gFormatCount<8)gFormats[gFormatCount++]=format;
 }
 #include "YCbCrTrace.h"
+#include "YCbCrProbe.h"
+#include "DrawNote.h"
 static NSError *nbError(NSString *why) {
  return [NSError errorWithDomain:@"org.blu-sharky.native-metal" code:-1 userInfo:@{NSLocalizedDescriptionKey:why?:@"refused"}];
 }
@@ -928,12 +930,18 @@ static void waitForResource(id resource) {
  if(_refused)return;
  if(texture && ![(id)texture isKindOfClass:[NBTexture class]]){[_commandBuffer refuse:@"foreign texture"];return;}
  if(texture)[_commandBuffer.resourceOwners addObject:texture];
+ sweetDrawNoteTexture(self,stage,index,texture);
  if(texture && [(NBTexture *)texture surface]) {
   NBTexture *t=(NBTexture *)texture;
   [_commandBuffer.surfaces addObject:t];
   const MTLTextureUsage u=t.usage;
   if(!u || (u&MTLTextureUsageShaderWrite))[_commandBuffer.writtenSurfaces addObject:t];
-  if(sweetYCbCrFormat(t.descriptor.format))sweetYCbCrBound(object_getClassName(self),stage,index,t.descriptor.format,t.surface,t.surfacePlane);
+  if(sweetYCbCrFormat(t.descriptor.format)) {
+   sweetYCbCrBound(object_getClassName(self),stage,index,t.descriptor.format,t.surface,t.surfacePlane);
+   sweetYCbCrProbe(texture,t.surface,object_getClassName(self),stage,index,t.descriptor.format);
+  }
+  if(stage==2 && sweetYCbCrFormat(t.descriptor.format))
+   if(id<MTLTexture> flat=sweetYCbCrFlat(texture,t.surface,t.descriptor.format,_commandBuffer)){texture=flat;[_commandBuffer.resourceOwners addObject:flat];}
  }
  [self check:nmb_encoder_set_texture(_handle,stage,texture?[(NBTexture *)texture handle]:nullptr,(uint32_t)index) what:"setTexture"];
 }
@@ -2380,7 +2388,9 @@ static uint64_t askAnswer(SEL cmd,NSUInteger arg);
      (uint64_t)d.borderColor,(uint64_t)d.normalizedCoordinates,d.maxAnisotropy,(uint64_t)d.compareFunction,(uint64_t)d.lodAverage,d.lodMinClamp,d.lodMaxClamp};
  NmbSampler *handle=nmb_sampler_new(gDevice,&s);
  if(!handle){NBLOG(@"native-metal: sampler refused: %@",lastError());return nil;}
- NBSampler *sampler=[NBSampler new];sampler.handle=handle;return (id<MTLSamplerState>)sampler;
+ NBSampler *sampler=[NBSampler new];sampler.handle=handle;
+ if(sweetDrawNoteOn())sweetDrawNoteSummary(sampler,sweetDrawNoteSampler(d));
+ return (id<MTLSamplerState>)sampler;
 }
 - (id<MTLDepthStencilState>)newDepthStencilStateWithDescriptor:(MTLDepthStencilDescriptor *)d {
  auto face=[](MTLStencilDescriptor *s)->NmbStencil {

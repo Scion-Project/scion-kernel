@@ -14,7 +14,7 @@ rm -rf "$B" && mkdir -p "$B" $W/sym $W/stage
 # the frontend and HotMetal2 are built from a copy with patches/frontend-dexr.diff, hotmetal2-diag.diff, frontend-flush.diff and
 # frontend-turned.diff, frontend-dexr-surfaces.diff, frontend-nocopy-diag.diff, frontend-passlog.diff and frontend-nocopy-readonly.diff applied, in that order (NOPATCH=1: as they are in tools/ios27/metal2)
 rm -rf $W/src27 && mkdir -p $W/src27/tools/ios27 && cp -R tools/ios27/metal2 $W/src27/tools/ios27/
-[ -n "${NOPATCH:-}" ] || for p in frontend-dexr hotmetal2-diag frontend-flush frontend-turned frontend-dexr-surfaces frontend-nocopy-diag frontend-passlog frontend-nocopy-readonly; do patch -s -p1 -d $W/src27 < tools/ios27/metal/patches/$p.diff || exit 1; done
+[ -n "${NOPATCH:-}" ] || for p in frontend-dexr hotmetal2-diag frontend-flush frontend-turned frontend-dexr-surfaces frontend-nocopy-diag frontend-passlog frontend-nocopy-readonly frontend-async-compile hotmetal2-shared-cache; do patch -s -p1 -d $W/src27 < tools/ios27/metal/patches/$p.diff || exit 1; done
 M2=$W/src27/tools/ios27/metal2
 # frontend-turned.diff includes TurnShaders.inc: tools/ios27/metal2/TurnShaders.metal (the pass that writes a turned texture into its
 # surface) compiled by the same Xcode's Metal compiler and held as bytes
@@ -23,6 +23,11 @@ if [ -z "${NOPATCH:-}" ]; then
 	xcrun -sdk iphoneos metallib $W/src27/turn.air -o $W/src27/turn.metallib || exit 1
 	{ echo "static const unsigned char sweet_turn_metallib[] = {"; xxd -i < $W/src27/turn.metallib; echo "};"; } > $M2/TurnShaders.inc
 fi
+# YCbCrProbe.h includes YCbCrProbe.inc: tools/ios27/metal2/YCbCrProbe.metal (the GPU's read of a two-plane YCbCr texture, the camera
+# preview's display side; used only with SWEET_MTL2_YCCPROBE=1) compiled the same way
+xcrun -sdk iphoneos metal -mios-version-min=16.0 -c $M2/YCbCrProbe.metal -o $W/src27/ycc-probe.air || exit 1
+xcrun -sdk iphoneos metallib $W/src27/ycc-probe.air -o $W/src27/ycc-probe.metallib || exit 1
+{ echo "static const unsigned char sweet_ycc_probe_metallib[] = {"; xxd -i < $W/src27/ycc-probe.metallib; echo "};"; } > $M2/YCbCrProbe.inc
 $CC -x objective-c++ -std=c++17 -fobjc-arc -O2 -g -Wall -Wno-deprecated-declarations -Wno-unused-function -bundle \
 	-o "$B/StarbiteMetal" $M2/HotMetal2.mm $M2/NativeBridgeMetalFrontend.mm -x none "$BRIDGE" \
 	-Wl,-dead_strip -lc++ -framework Foundation -framework Metal -framework IOSurface -framework IOKit \

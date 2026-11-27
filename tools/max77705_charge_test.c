@@ -22,6 +22,8 @@
  *     (5 V asked, 500 mA) when the battery or the charger's thermistor leaves the band, VBUS leaves 7.5-10.5 V, or a fault;
  *     after a drop or a bad answer not asked again on that cable; asked again after the cable goes and comes;
  *   - the read-back check;
+ *   - the iOS 16.5 guard's limits on top (max77705_chg=2): SIOP (1200/1000 mA, 500/1000 at 9 V) and a computer on the link
+ *     (the CDP's 1500/1500 mA, no 9 V) only ever lower, for every input and charge current;
  *   - a grid over every input that matters: the input limit never above the type's in force, never above 500 mA with
  *     VBUS above 5.5 V outside a 9 V session, 9 V never asked outside every one of its conditions.
  */
@@ -590,6 +592,45 @@ grid(void)
 	printf("max77705_charge_test: grid of %lu states\n", combos);
 }
 
+/* SIOP and a computer on the link (iOS 16.5's guard): only ever lower, at Samsung's S9 numbers, and no 9 V with a host */
+static void
+caps(void)
+{
+	for (int t = CHG_SDP; t < CHG_TYPES; t++) {
+		for (uint32_t in_ma = 0; in_ma <= 3200; in_ma += 25) {
+			for (uint32_t cc_ma = 0; cc_ma <= 3150; cc_ma += 50) {
+				struct chg_out o = { .enable = true, .input_ma = in_ma, .charge_ma = cc_ma, .ask_9v = true };
+				struct chg_out h = o;
+
+				chg_siop_cap(&o, (enum chg_type)t);
+				CHECK(o.input_ma <= in_ma && o.charge_ma <= cc_ma, "SIOP raised a limit");
+				CHECK(o.input_ma <= (t == CHG_AFC_9V ? 500u : 1200u) && o.charge_ma <= 1000u,
+				    "SIOP type %d: %u/%u", t, o.input_ma, o.charge_ma);
+				CHECK(o.input_ma == (in_ma < (t == CHG_AFC_9V ? 500u : 1200u) ? in_ma : (t == CHG_AFC_9V ? 500u : 1200u)),
+				    "SIOP lowered more than asked");
+				chg_host_cap(&h);
+				CHECK(h.input_ma <= 1500 && h.charge_ma <= 1500 && !h.ask_9v, "host cap: %u/%u", h.input_ma, h.charge_ma);
+				CHECK(h.input_ma <= in_ma && h.charge_ma <= cc_ma, "host cap raised a limit");
+			}
+		}
+	}
+	{
+		/* a DCP at 25 C: Samsung's 1800/2100 mA; in use 1200/1000; a computer on the link 1500/1500 */
+		struct chg_state s;
+		struct chg_in in = healthy(BC_DCP, 100);
+		struct chg_out o;
+
+		chg_state_reset(&s, 100);
+		o = chg_step(&s, &in);
+		CHECK(o.enable && o.input_ma == 1800 && o.charge_ma == 2100, "DCP %u/%u", o.input_ma, o.charge_ma);
+		chg_siop_cap(&o, s.type);
+		CHECK(o.input_ma == 1200 && o.charge_ma == 1000, "DCP in use %u/%u", o.input_ma, o.charge_ma);
+		o = chg_step(&s, &in);
+		chg_host_cap(&o);
+		CHECK(o.input_ma == 1500 && o.charge_ma == 1500, "DCP with a host %u/%u", o.input_ma, o.charge_ma);
+	}
+}
+
 int
 main(void)
 {
@@ -601,6 +642,7 @@ main(void)
 	full();
 	afc();
 	grid();
+	caps();
 	printf("max77705_charge_test: %lu checks, %lu failures\n", checks, failures);
 	return failures != 0;
 }

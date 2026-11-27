@@ -288,6 +288,9 @@ int hakios_scanout_planes(__unused uint64_t upper, __unused uint32_t upper_rowby
 void hakios_usb_gadget_quiesce(void) {}
 void hakios_usb_gadget_vbus(bool present);
 void hakios_usb_gadget_vbus(__unused bool present) {}
+/* the charger guard asks whether a computer configured the link: no USB link here, so it cannot know (no) */
+bool hakios_usb_gadget_host(void);
+bool hakios_usb_gadget_host(void) { return false; }
 /* a picture for the USB console (hakios.exynos_camera.c's camshot): no USB link here */
 int hakios_usb_picture(uintptr_t rgb, uint32_t width, uint32_t height, const char *what);
 int hakios_usb_picture(__unused uintptr_t rgb, __unused uint32_t width, __unused uint32_t height, __unused const char *what) { return -1; }

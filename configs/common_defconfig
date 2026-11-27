@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 786 symbols in 20 groups; 55 are set, 46 of them drivers built in.
+# 788 symbols in 20 groups; 55 are set, 46 of them drivers built in.
 #
 
 #
@@ -142,7 +142,7 @@ CONFIG_HAKIOS_BATTGUARD=y
 # the Galaxy S9's CPU frequency governor (cpufreq_gov=1): both clusters' rates moved with the load through ACPM's ... [hakios.exynos_cpufreq.c, hakios.scion_gov.c; requires CONFIG_HAKIOS_EXYNOS_ACPM]
 # CONFIG_HAKIOS_EXYNOS_CPUFREQ is not set
 
-# the Galaxy S9's battery: the fuel gauge and charger of its MAX77705, read (never written) over CMGP's HSI2C and ... [hakios.max77705.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C, CONFIG_HAKIOS_BATTERY]
+# the Galaxy S9's battery: the fuel gauge and charger of its MAX77705, read over CMGP's HSI2C and handed to ... [hakios.max77705.c; requires CONFIG_HAKIOS_EXYNOS_HSI2C, CONFIG_HAKIOS_BATTERY]
 CONFIG_HAKIOS_MAX77705=y
 
 # the Galaxy S9's temperatures: the Exynos 9810's TMU (BIG, LITTLE, G3D, ISP), read with each sensor's fuses (tmu=1), ... [hakios.exynos_tmu.c; requires CONFIG_HAKIOS_EXYNOS_POWEROFF]
@@ -867,7 +867,7 @@ CONFIG_GPU=y
 # CONFIG_VBLUR is not set
 
 #
-# Audio and battery (67)
+# Audio and battery (69)
 #
 
 # the audio DSP; the battery level in the UI and charging state come through it [needs fw-audio/ from the phone]
@@ -996,6 +996,9 @@ CONFIG_SOUND=4
 # read by hakios.max77705.c (kernel)
 # CONFIG_MAX77705 is not set
 
+# read by hakios.max77705_guard.h (kernel)
+# CONFIG_MAX77705_CHG is not set
+
 # read by hakios.max77705.c (kernel)
 # CONFIG_MAX77705_DIAG is not set
 
@@ -1007,6 +1010,9 @@ CONFIG_SOUND=4
 
 # read by hakios.max77705.c (kernel)
 # CONFIG_MAX77705_IPCLK is not set
+
+# the guard's in-use limit (SIOP) off; it is on with the guard unless this says 0
+# CONFIG_MAX77705_SIOP is not set
 
 # read by hakios.max77705.c (kernel)
 # CONFIG_MAX77705_STEPS is not set

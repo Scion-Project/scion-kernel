@@ -5,8 +5,8 @@
  * hakios_battery_report() (drivers/power/hakios.battery.c). Only with boot-arg max77705=1: every address below belongs
  * to this phone.
  *
- * THIS DRIVER ONLY READS THE CHIP, with one exception that is off by default (max77705_wdt=1, below). The MAX77705 is the
- * phone's charger: a wrong write there changes how the battery is charged. Nothing else is written to it, not even the latches its interrupt handler would clear on Android (the interrupt
+ * THIS DRIVER ONLY READS THE CHIP, with two exceptions that are off by default (max77705_wdt=1, below, and the charger
+ * guard, max77705_chg=2, hakios.max77705_guard.h). The MAX77705 is the phone's charger: a wrong write there changes how the battery is charged. Nothing else is written to it, not even the latches its interrupt handler would clear on Android (the interrupt
  * registers are not read at all: reading them clears them). What is written is the bus's own: the clock gates of
  * CMGP's USI03, its mode word, the controller (drivers/soc/exynos/hakios.exynos_hsi2c.c).
  *
@@ -923,6 +923,8 @@ chg_wdt_kick(void)
 	}
 }
 
+#include "hakios.max77705_guard.h"     /* max77705_chg=: the charger guard (after charger_write, chg_wdt_kick) */
+
 /* max77705_fg_s=S: the gauge's short line (only reads) */
 static void
 fg_short_say(void)
@@ -947,7 +949,7 @@ static void
 battery_thread(void *arg, __unused wait_result_t result)
 {
 	uint32_t steps = (uint32_t)(uintptr_t)arg, step = 0, failed = 0;
-	struct hakios_battery_state b;
+	struct hakios_battery_state b = { 0 };
 	thread_t thread;
 	uint8_t rev;
 
@@ -1042,6 +1044,7 @@ battery_thread(void *arg, __unused wait_result_t result)
 		if (fg_ticks != 0) {
 			say("max77705: fg: a short gauge line every %u s (max77705_fg_s)\n", fg_ticks * (POLL_MS / 1000));
 		}
+		chg_guard_start();
 	}
 	for (unsigned tick = 0;; tick++) {
 		if (chg_wdt && tick % WDT_KICK_POLLS == 0) {
@@ -1058,6 +1061,7 @@ battery_thread(void *arg, __unused wait_result_t result)
 				if (chg_wdt) {
 					say("max77705: wdt: %u kicks, %u with the watchdog off, %u failed\n", wdt_kicks, wdt_skipped, wdt_failed);
 				}
+				chg_guard_say();
 			}
 			if (fg_ticks != 0 && tick % fg_ticks == 0) {
 				fg_short_say();
@@ -1065,6 +1069,7 @@ battery_thread(void *arg, __unused wait_result_t result)
 		} else if (++failed == 10) {
 			say("max77705: 10 reads in a row have failed (%x); still trying\n", bus.last_error);
 		}
+		chg_guard(&b, failed == 0);     /* max77705_chg=: nothing without it; nothing written after a failed read */
 		delay_for_interval(POLL_MS, NSEC_PER_MSEC);
 	}
 out:

@@ -19,6 +19,9 @@ In the repository:
   each source commit named. drivers/storage/sd/hakios.exynos_sd.c and hakios.sdmedia.cpp are its microSD driver
   (xnu/files/bsd/dev/redwood_sdcard.c at b35cfdc, xnu/files/iokit/Kernel/RedwoodSDMedia.cpp at 0b6bce9), APSL-2.0, moved
   to the Galaxy S9 and made read only (docs/devices/starlte-microsd.md).
+  The MAX77705 charger guard's "in use" (SIOP) and "a computer on the link" limits
+  (docs/devices/starlte-charging.md) follow its docs/devices/x1slte/charging-samsung.md (fc07d1b) and its charger commits
+  3a4db07, fb882cf and a57b321; no code of it is copied there, and the values are the S9's own.
 
 - XNU (Apple): the kernel sources are fetched by xnu/apply.sh from github.com/apple-oss-distributions/xnu;
   our patch and files are a derivative work under the Apple Public Source License 2.0 (LICENSE.APSL).

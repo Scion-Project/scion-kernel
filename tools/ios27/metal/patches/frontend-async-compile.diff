@@ -1,0 +1,260 @@
+--- a/tools/ios27/metal2/NativeBridgeMetalFrontend.mm	2026-11-20 10:47:54
++++ b/tools/ios27/metal2/NativeBridgeMetalFrontend.mm	2026-11-20 10:51:01
+@@ -13,6 +13,10 @@
+ #import <objc/message.h>
+ #include <algorithm>
+ #include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <functional>
++#include <memory>
+ #include <initializer_list>
+ #include <mutex>
+ #include <set>
+@@ -28,6 +32,7 @@
+ #include "bridge/NativeMetalObjects.h"
+ #include "NativeBridgeMetalFrontend.h"
+ #include "PassLog.h"
++#include "CompileQueue.h"
+ 
+ extern "C" void sys_dcache_flush(void *start, size_t length);
+ 
+@@ -2203,22 +2208,85 @@
+  if(error)*error=nil;return YES;
+ }
+ @end
++
++
++// ---- where pipeline compiles run (the rules, and their host test, are in CompileQueue.h) ------------------------------------
++// PanVK compiles a pipeline's shaders on the thread that asks for it: one of iOS 27's compute shaders is 24 522 NIR instructions
++// (25 s of a Mali-G72's CPU) and a Preferences fragment shader never ended. #396 moved every compile to a worker and timed the
++// synchronous callers out after 5 s; on phone 2 (19 Nov) that refused backboardd's first render pipelines on a cold cache and
++// QuartzCore aborted on the refusal (launchd rebooted after three). So now:
++//  - the synchronous creation calls compile on the calling thread, every time, and return the pipeline or the compile's own
++//    error (gCompiler.sync): no timeout, no slot, no negative cache. A compile that would never end is ended by PanVK's compile
++//    budget (STARBITE_PANVK_COMPILE_BUDGET_MS of the compiling thread's CPU time), as a real compile error;
++//  - the completion-handler calls return at once and compile on a worker (gCompiler.async, at most 3 at a time, FIFO); the
++//    handler is called once, on the worker, with what the synchronous call would have returned. The worker queue has no QoS of
++//    its own, so a compile runs at the QoS of the thread that asked for it (on this kernel utility/background run on the A55s).
++//    An asynchronous compile that failed after more than 10 s is not started again for 10 minutes (the handler gets that error).
++// What makes a pipeline cheap is the shader cache (one per user, warmed by fullroot/steps.d/81-m2v-cache.sh), not a timer.
++static dispatch_queue_t compileQueue() {
++ static dispatch_queue_t queue;static dispatch_once_t once;
++ dispatch_once(&once,^{queue=dispatch_queue_create("starbite.m2v.compile",DISPATCH_QUEUE_CONCURRENT);});
++ return queue;
++}
++static sbcompile::Compiler gCompiler(3,[](std::function<void()> task) {
++ dispatch_async_f(compileQueue(),new std::function<void()>(std::move(task)),[](void *p){auto *f=(std::function<void()> *)p;(*f)();delete f;});
++},[]{return nowUs();});
++// What a completion-handler compile hands back: the state the synchronous method made (or nil) and its error, as the handler wants them.
++struct AsyncPipelineResult {
++ __strong id state=nil;__strong NSError *error=nil;__strong id reflection=nil;
++};
++static std::string errorText(NSError *error) {
++ const char *t=error.localizedDescription.UTF8String;
++ return t&&*t?t:"the pipeline could not be made";
++}
++static uint64_t mixKey(uint64_t h,uint64_t v) {return (h^v)*1099511628211ull;}
++static uint64_t functionKey(id function) {
++ uint64_t h=1469598103934665603ull;
++ if(![function isKindOfClass:[NBFunction class]])return mixKey(h,(uintptr_t)function);
++ uint64_t a,b;memcpy(&a,((NBFunction *)function)->_bitCodeHash,8);memcpy(&b,((NBFunction *)function)->_bitCodeHash+8,8);
++ return mixKey(mixKey(h,a),b);
++}
++static uint64_t renderKey(MTLRenderPipelineDescriptor *d,MTLPipelineOption options) {
++ uint64_t h=mixKey(functionKey(d.vertexFunction),functionKey(d.fragmentFunction));
++ for(NSUInteger i=0;i<8;++i) {
++  MTLRenderPipelineColorAttachmentDescriptor *c=d.colorAttachments[i];
++  h=mixKey(h,c.pixelFormat);h=mixKey(h,(c.writeMask<<1)|(c.blendingEnabled?1:0));
++  h=mixKey(h,(c.sourceRGBBlendFactor<<16)|(c.destinationRGBBlendFactor<<8)|c.rgbBlendOperation);
++  h=mixKey(h,(c.sourceAlphaBlendFactor<<16)|(c.destinationAlphaBlendFactor<<8)|c.alphaBlendOperation);
++ }
++ h=mixKey(h,d.depthAttachmentPixelFormat);h=mixKey(h,d.stencilAttachmentPixelFormat);h=mixKey(h,d.rasterSampleCount);
++ h=mixKey(h,d.alphaToCoverageEnabled);h=mixKey(h,d.alphaToOneEnabled);h=mixKey(h,options);
++ return h;
++}
++static id nbFailed(NSError **error,NSString *what,const std::string &why) {
++ NSString *text=[NSString stringWithFormat:@"%@: %s",what,why.c_str()];
++ noteProblem(text);if(error)*error=nbError(text);
++ return nil;
++}
+ 
+ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &archives,NSError **error);
+ // A render pipeline of `d`, its colors in `keep` (bit i, color i) as the descriptor asks and the others through dexr().
+ // A pipeline that dexr() changed keeps a copy of the descriptor for sweetExactPipeline.
+ static NBRenderPipeline *sweetRenderPipeline(MTLRenderPipelineDescriptor *d,MTLPipelineOption options,unsigned keep,NSError **error) {
+- auto *b=new BuiltRenderDescriptor();unsigned held=0;
+- if(!renderDescriptor(d,b,error,keep,&held)){delete b;return nil;}
++ auto b=std::make_shared<BuiltRenderDescriptor>();unsigned held=0;
++ if(!renderDescriptor(d,b.get(),error,keep,&held))return nil;
+  std::vector<NmbBinaryArchive *> archives;
+- if(!pipelineArchives(d.binaryArchives,archives,error)){delete b;return nil;}
+- const NmbPipelineOptions creation={(uint64_t)options,archives.data(),archives.size()};
++ if(!pipelineArchives(d.binaryArchives,archives,error))return nil;
+  const uint64_t pipelineBegan=nowUs();
+  const bool logJournal=!gJournalPath.empty();
+  const NBCost costBegan=logJournal?NBCost::now():NBCost{};
+- NmbRenderPipeline *handle=nmb_render_pipeline_new_with_options(gDevice,&b->raw,&creation);delete b;gTimePipeline.add(pipelineBegan);
+- if(logJournal)journalRenderPipeline(d,pipelineBegan,handle?nullptr:nmb_last_error(),NBCost::now().since(costBegan));
+- if(!handle)return failWith<NBRenderPipeline *>(error,@"render pipeline",nil);
++ NSArray *archiveObjects=[d.binaryArchives copy];   // kept by the compile (it may outlive this call)
++ id vertexFunction=d.vertexFunction,fragmentFunction=d.fragmentFunction;   // and the functions
++ std::string why;
++ NmbRenderPipeline *handle=(NmbRenderPipeline *)gCompiler.sync([b,archives,archiveObjects,vertexFunction,fragmentFunction,options](std::string &err)->void * {
++  (void)archiveObjects;(void)vertexFunction;(void)fragmentFunction;
++  const NmbPipelineOptions creation={(uint64_t)options,archives.data(),archives.size()};
++  NmbRenderPipeline *made=nmb_render_pipeline_new_with_options(gDevice,&b->raw,&creation);   // on the caller's thread
++  if(!made)err=nmb_last_error();
++  return made;
++ },why);gTimePipeline.add(pipelineBegan);
++ if(logJournal)journalRenderPipeline(d,pipelineBegan,handle?nullptr:why.c_str(),NBCost::now().since(costBegan));
++ if(!handle){NBLOG(@"native-metal: render pipeline refused: %s",why.c_str());return (NBRenderPipeline *)nbFailed(error,@"render pipeline",why);}
+  NBRenderPipeline *state=[NBRenderPipeline new];state.handle=handle;gPipelines++;if(error)*error=nil;
+  state.passName=d.fragmentFunction.name?:(d.label?:@"-");
+  if(held){state.dexrColors=held;state.dexrDescriptor=[d copy];state.dexrOptions=options;}
+@@ -2688,10 +2756,15 @@
+                                                          reflection:(MTLAutoreleasedComputePipelineReflection *)reflection error:(NSError **)error {
+  if(reflection)*reflection=nil;
+  if(![(id)function isKindOfClass:[NBFunction class]]){if(error)*error=nbError(@"foreign function");return nil;}
+- const NmbPipelineOptions creation={(uint64_t)options,nullptr,0};
+  const uint64_t pipelineBegan=nowUs();
+- NmbComputePipeline *handle=nmb_compute_pipeline_new_with_options(gDevice,[(NBFunction *)function handle],&creation);gTimePipeline.add(pipelineBegan);
+- if(!handle){NBLOG(@"native-metal: compute pipeline (%@) refused: %@",[(NBFunction *)function name],lastError());return failWith<id<MTLComputePipelineState>>(error,@"compute pipeline",nil);}
++ NBFunction *fn=(NBFunction *)function;std::string why;
++ NmbComputePipeline *handle=(NmbComputePipeline *)gCompiler.sync([fn,options](std::string &err)->void * {
++  const NmbPipelineOptions creation={(uint64_t)options,nullptr,0};
++  NmbComputePipeline *made=nmb_compute_pipeline_new_with_options(gDevice,[fn handle],&creation);
++  if(!made)err=nmb_last_error();
++  return made;
++ },why);gTimePipeline.add(pipelineBegan);
++ if(!handle){NBLOG(@"native-metal: compute pipeline (%@) refused: %s",[fn name],why.c_str());return nbFailed(error,@"compute pipeline",why);}
+  NBComputePipeline *state=[NBComputePipeline new];state.handle=handle;state.passName=[(NBFunction *)function name];gPipelines++;if(error)*error=nil;
+  return (id<MTLComputePipelineState>)state;
+ }
+@@ -2701,45 +2774,107 @@
+ - (id<MTLComputePipelineState>)newComputePipelineStateWithDescriptor:(MTLComputePipelineDescriptor *)d options:(MTLPipelineOption)options
+                                                        reflection:(MTLAutoreleasedComputePipelineReflection *)reflection error:(NSError **)error {
+  if(reflection)*reflection=nil;
+- BuiltComputeDescriptor b;if(!computeDescriptor(d,&b,error))return nil;
++ auto b=std::make_shared<BuiltComputeDescriptor>();if(!computeDescriptor(d,b.get(),error))return nil;
+  std::vector<NmbBinaryArchive *> archives;
+  if(!pipelineArchives(d.binaryArchives,archives,error))return nil;
+- const NmbPipelineOptions creation={(uint64_t)options,archives.data(),archives.size()};
+  const uint64_t pipelineBegan=nowUs();
+- NmbComputePipeline *handle=nmb_compute_pipeline_new_with_descriptor(gDevice,&b.raw,&creation);gTimePipeline.add(pipelineBegan);
+- if(!handle){NBLOG(@"native-metal: compute pipeline (%@) refused: %@",[(NBFunction *)d.computeFunction name],lastError());return failWith<id<MTLComputePipelineState>>(error,@"compute pipeline",nil);}
++ NSArray *archiveObjects=[d.binaryArchives copy];   // kept by the compile (it may outlive this call)
++ NBFunction *fn=(NBFunction *)d.computeFunction;std::string why;
++ NmbComputePipeline *handle=(NmbComputePipeline *)gCompiler.sync([b,archives,archiveObjects,fn,options](std::string &err)->void * {
++  (void)archiveObjects;(void)fn;
++  const NmbPipelineOptions creation={(uint64_t)options,archives.data(),archives.size()};
++  NmbComputePipeline *made=nmb_compute_pipeline_new_with_descriptor(gDevice,&b->raw,&creation);
++  if(!made)err=nmb_last_error();
++  return made;
++ },why);gTimePipeline.add(pipelineBegan);
++ if(!handle){NBLOG(@"native-metal: compute pipeline (%@) refused: %s",[fn name],why.c_str());return nbFailed(error,@"compute pipeline",why);}
+  NBComputePipeline *state=[NBComputePipeline new];state.handle=handle;state.label=d.label;state.passName=d.computeFunction.name?:d.label;gPipelines++;
+  if(error)*error=nil;return (id<MTLComputePipelineState>)state;
+ }
+ - (void)newComputePipelineStateWithFunction:(id<MTLFunction>)function completionHandler:(void (^)(id<MTLComputePipelineState>,NSError *))completionHandler {
+- NSError *error=nil;id<MTLComputePipelineState> state=[(id<MTLDevice>)self newComputePipelineStateWithFunction:function error:&error];
+- if(completionHandler)dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{completionHandler(state,error);});
++ auto box=std::make_shared<AsyncPipelineResult>();
++ gCompiler.async(mixKey(functionKey(function),0x5c),[=](std::string &why)->void * {
++  NSError *error=nil;
++  box->state=[(id<MTLDevice>)self newComputePipelineStateWithFunction:function error:&error];
++  box->error=error;
++  if(!box->state)why=errorText(error);
++  return box->state?(__bridge void *)box->state:nullptr;
++ },[=](void *,const std::string &why) {
++  if(!box->state && !box->error)box->error=nbError(@(why.c_str()));   // refused from the negative cache: no compile ran
++  if(completionHandler)completionHandler(box->state,box->error);
++ });
+ }
+ - (void)newComputePipelineStateWithFunction:(id<MTLFunction>)function options:(MTLPipelineOption)options completionHandler:(void (^)(id<MTLComputePipelineState>,MTLComputePipelineReflection *,NSError *))completionHandler {
+- NSError *error=nil;MTLComputePipelineReflection *reflection=nil;
+- id<MTLComputePipelineState> state=[(id<MTLDevice>)self newComputePipelineStateWithFunction:function options:options reflection:&reflection error:&error];
+- if(completionHandler)dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{completionHandler(state,reflection,error);});
++ auto box=std::make_shared<AsyncPipelineResult>();
++ gCompiler.async(mixKey(mixKey(functionKey(function),options),0x5d),[=](std::string &why)->void * {
++  NSError *error=nil;MTLComputePipelineReflection *reflection=nil;
++  box->state=[(id<MTLDevice>)self newComputePipelineStateWithFunction:function options:options reflection:&reflection error:&error];
++  box->error=error;box->reflection=reflection;
++  if(!box->state)why=errorText(error);
++  return box->state?(__bridge void *)box->state:nullptr;
++ },[=](void *,const std::string &why) {
++  if(!box->state && !box->error)box->error=nbError(@(why.c_str()));   // refused from the negative cache: no compile ran
++  if(completionHandler)completionHandler(box->state,box->reflection,box->error);
++ });
+ }
+ - (void)newComputePipelineStateWithDescriptor:(MTLComputePipelineDescriptor *)d completionHandler:(void (^)(id<MTLComputePipelineState>,NSError *))completionHandler {
+- NSError *error=nil;id<MTLComputePipelineState> state=[self newComputePipelineStateWithDescriptor:d error:&error];
+- if(completionHandler)dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{completionHandler(state,error);});
++ MTLComputePipelineDescriptor *copy=[d copy];   // the caller may change its descriptor as soon as this returns
++ auto box=std::make_shared<AsyncPipelineResult>();
++ gCompiler.async(mixKey(mixKey(functionKey(copy.computeFunction),copy.maxTotalThreadsPerThreadgroup),0x5e),[=](std::string &why)->void * {
++  NSError *error=nil;
++  box->state=[self newComputePipelineStateWithDescriptor:copy error:&error];
++  box->error=error;
++  if(!box->state)why=errorText(error);
++  return box->state?(__bridge void *)box->state:nullptr;
++ },[=](void *,const std::string &why) {
++  if(!box->state && !box->error)box->error=nbError(@(why.c_str()));   // refused from the negative cache: no compile ran
++  if(completionHandler)completionHandler(box->state,box->error);
++ });
+ }
+ - (void)newComputePipelineStateWithDescriptor:(MTLComputePipelineDescriptor *)d options:(MTLPipelineOption)options completionHandler:(void (^)(id<MTLComputePipelineState>,MTLComputePipelineReflection *,NSError *))completionHandler {
+- NSError *error=nil;MTLComputePipelineReflection *reflection=nil;
+- id<MTLComputePipelineState> state=[(id<MTLDevice>)self newComputePipelineStateWithDescriptor:d options:options reflection:&reflection error:&error];
+- if(completionHandler)dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{completionHandler(state,reflection,error);});
++ MTLComputePipelineDescriptor *copy=[d copy];
++ auto box=std::make_shared<AsyncPipelineResult>();
++ gCompiler.async(mixKey(mixKey(mixKey(functionKey(copy.computeFunction),options),copy.maxTotalThreadsPerThreadgroup),0x5f),[=](std::string &why)->void * {
++  NSError *error=nil;MTLComputePipelineReflection *reflection=nil;
++  box->state=[(id<MTLDevice>)self newComputePipelineStateWithDescriptor:copy options:options reflection:&reflection error:&error];
++  box->error=error;box->reflection=reflection;
++  if(!box->state)why=errorText(error);
++  return box->state?(__bridge void *)box->state:nullptr;
++ },[=](void *,const std::string &why) {
++  if(!box->state && !box->error)box->error=nbError(@(why.c_str()));   // refused from the negative cache: no compile ran
++  if(completionHandler)completionHandler(box->state,box->reflection,box->error);
++ });
+ }
+ - (id<MTLRenderPipelineState>)newRenderPipelineStateWithDescriptor:(MTLRenderPipelineDescriptor *)d error:(NSError **)error {
+  return [(id<MTLDevice>)self newRenderPipelineStateWithDescriptor:d options:MTLPipelineOptionNone reflection:nil error:error];
+ }
+ - (void)newRenderPipelineStateWithDescriptor:(MTLRenderPipelineDescriptor *)d completionHandler:(void (^)(id<MTLRenderPipelineState>,NSError *))completionHandler {
+- NSError *error=nil;id<MTLRenderPipelineState> state=[(id<MTLDevice>)self newRenderPipelineStateWithDescriptor:d error:&error];
+- if(completionHandler)dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{completionHandler(state,error);});
++ MTLRenderPipelineDescriptor *copy=[d copy];   // the caller may change its descriptor as soon as this returns
++ auto box=std::make_shared<AsyncPipelineResult>();
++ gCompiler.async(mixKey(renderKey(copy,MTLPipelineOptionNone),0x60),[=](std::string &why)->void * {
++  NSError *error=nil;
++  box->state=[(id<MTLDevice>)self newRenderPipelineStateWithDescriptor:copy error:&error];
++  box->error=error;
++  if(!box->state)why=errorText(error);
++  return box->state?(__bridge void *)box->state:nullptr;
++ },[=](void *,const std::string &why) {
++  if(!box->state && !box->error)box->error=nbError(@(why.c_str()));   // refused from the negative cache: no compile ran
++  if(completionHandler)completionHandler(box->state,box->error);
++ });
+ }
+ - (void)newRenderPipelineStateWithDescriptor:(MTLRenderPipelineDescriptor *)d options:(MTLPipelineOption)options completionHandler:(void (^)(id<MTLRenderPipelineState>,MTLRenderPipelineReflection *,NSError *))completionHandler {
+- NSError *error=nil;MTLRenderPipelineReflection *reflection=nil;
+- id<MTLRenderPipelineState> state=[(id<MTLDevice>)self newRenderPipelineStateWithDescriptor:d options:options reflection:&reflection error:&error];
+- if(completionHandler)dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{completionHandler(state,reflection,error);});
++ MTLRenderPipelineDescriptor *copy=[d copy];
++ auto box=std::make_shared<AsyncPipelineResult>();
++ gCompiler.async(mixKey(renderKey(copy,options),0x61),[=](std::string &why)->void * {
++  NSError *error=nil;MTLRenderPipelineReflection *reflection=nil;
++  box->state=[(id<MTLDevice>)self newRenderPipelineStateWithDescriptor:copy options:options reflection:&reflection error:&error];
++  box->error=error;box->reflection=reflection;
++  if(!box->state)why=errorText(error);
++  return box->state?(__bridge void *)box->state:nullptr;
++ },[=](void *,const std::string &why) {
++  if(!box->state && !box->error)box->error=nbError(@(why.c_str()));   // refused from the negative cache: no compile ran
++  if(completionHandler)completionHandler(box->state,box->reflection,box->error);
++ });
+ }
+ - (id<MTLRenderPipelineState>)newRenderPipelineStateWithDescriptor:(MTLRenderPipelineDescriptor *)d options:(MTLPipelineOption)options
+                                                         reflection:(MTLAutoreleasedRenderPipelineReflection *)reflection error:(NSError **)error {
