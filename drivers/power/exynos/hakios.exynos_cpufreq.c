@@ -1355,6 +1355,14 @@ boost_floor(struct cluster *c, uint64_t now)
 		return khz == 0 ? 0 : MIN(c->levels[level_at_least(c, khz)], ceiling_now(c));
 	}
 
+	/*
+	 * (policy 1 too, from round 35: a finger coming down puts the M3s at their ceiling for BURST_MS, as the scion policies
+	 * did. Round 32's log had the M3s reach it 34-133 ms after a gesture began -- two to eight frames at 60 a second --
+	 * while the load law climbed from the touch floor.)
+	 */
+	if (c->burst && boost_on(__atomic_load_n(&finger_edge, __ATOMIC_ACQUIRE), burst_span, now)) {
+		return ceiling_now(c);
+	}
 	if (boost_on(__atomic_load_n(&touch_last, __ATOMIC_ACQUIRE), boost_span, now)) {
 		khz = MAX(khz, c->touch_khz);
 	}
@@ -2089,6 +2097,13 @@ hakios_exynos_cpufreq_gov_start(void)
 		gov_policy = value;
 	}
 	(void)PE_parse_boot_argn("gov_stat", &gov_stat, sizeof(gov_stat));
+	{
+		/* gov_wake: the Note9's default 1 from round 35 (the GPU's frame floor at the finger, not at the first late frame) */
+		char platform[24] = "";
+
+		(void)PE_parse_boot_arg_str("loader_platform", platform, sizeof(platform));
+		gov_wake = strcmp(platform, "crownlte") == 0;
+	}
 	(void)PE_parse_boot_argn("gov_wake", &gov_wake, sizeof(gov_wake));
 	(void)PE_parse_boot_argn("ocp_guard", &ocpg_mode, sizeof(ocpg_mode));
 	(void)PE_parse_boot_argn("ocp_guard_flags", &ocpg_flags, sizeof(ocpg_flags));

@@ -428,7 +428,11 @@ wait_answer(uint32_t ms)
 		for (;;) {
 			uint32_t answer;
 
-			assert_wait_timeout((event_t)&irq_answer, THREAD_UNINT, 10, NSEC_PER_MSEC);
+			/*
+			 * (1 ms, from round 35: SPI 356 never came on the Note9 -- "interrupts so far: 0" -- so each command's answer was
+			 * seen at the 10 ms look below, and a YouTube seek's dozen commands (a new session each) cost ~120 ms)
+			 */
+			assert_wait_timeout((event_t)&irq_answer, THREAD_UNINT, 1, NSEC_PER_MSEC);
 			if (irq_answer != 0) {
 				clear_wait(current_thread(), THREAD_AWAKENED);
 			} else {

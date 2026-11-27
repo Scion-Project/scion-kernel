@@ -1408,6 +1408,8 @@ hc_wait(struct hc_slot *s, const char *what, bool count)
  * HC_WIN seconds, and the time from the doorbell to the request seen done, over the run.
  */
 #define HC_WIN 32
+#define HC_SLOW_US 100000
+#define HC_SLOW_SAID 40
 static struct {
 	uint64_t sec, rd, wr, nwr, wr_us, busy_us;     /* bytes read, written; writes, their doorbell-to-done, every request's */
 } hc_win[HC_WIN];
@@ -1459,6 +1461,19 @@ hc_speed_add(struct hc_slot *s, bool write, uint64_t bytes)
 		}
 	}
 	lck_mtx_unlock(&hc_lock);
+	/*
+	 * A request over HC_SLOW_US from its doorbell to seen done, said (the first HC_SLOW_SAID): rounds 27-34 had the longest at
+	 * 0.3 to 4.6 s against a 0.2-0.3 ms average -- app and widget loads stall on these. What it was, to find why.
+	 */
+	if (us >= HC_SLOW_US) {
+		static uint32_t slow_said;
+
+		if (slow_said < HC_SLOW_SAID) {
+			slow_said++;
+			hc_say("ufs: slow request: a %s of %llu KB took %llu ms (slot %u; %llu requests so far, average %llu us)\n",
+			    write ? "write" : "read", bytes / 1024, us / 1000, s->number, hc_lat_n, hc_lat_n ? hc_lat_sum_us / hc_lat_n : 0);
+		}
+	}
 }
 
 /*
