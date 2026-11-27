@@ -583,6 +583,40 @@ the tests). On phone 1 (all **measured**, M2M-SCALER.md "The phone test"):
   Without it the source node's preview output leads nowhere, scaler or not (the boot with `m2m=0` showed the same).
 - The shutter still fails at once with -16808 (BWUBNode); the scaler changes nothing there.
 
+### The display side: the picture reaches backboardd's GPU, CoreAnimation's draw of it is lost (24 November)
+
+Phone 1, kernel built from main 72c0b593 and the fork 4285c9c8 (`cam_trace=1 cam_metal=1`), root as found plus a StarbiteMetal
+with the diagnostics below (`YCbCrProbe.h`, `DrawNote.h`, all off unless set in `/var/local/mtl2-env`). Seven boots, D1 to D7.
+
+- **Measured: the texture is right.** backboardd makes a `YCBCR8_420_2P` (500) texture over each of the image queue sink's
+  surfaces and binds it in its main pass (render encoder, fragment slot 3). The probe (`SWEET_MTL2_YCCPROBE=1`) reads it on
+  backboardd's own GPU: with the front camera, `read()`, a linear and a nearest sample in a compute function, and linear and
+  nearest half-precision samples from fragment slot 3, all give RGB about 59 60 59 with 40 of 64 points lit, where the
+  processor reads luma 59 with 40 of 64 lit. The 4:2:0 conversion, the surface's bytes as backboardd's GPU sees them, and
+  sampling in either stage are right.
+- **Measured: replacing the texture changes nothing.** With `SWEET_MTL2_YCCFLAT=1` every fragment binding of such a texture
+  gets a BGRA8 copy of it instead (made by a compute pass on the caller's queue, committed just before the caller's command
+  buffer). The viewfinder is still black. So the black does not come from the two-plane texture.
+- **Measured: which draws show the camera** (pass log `SWEET_MTL2_PASSLOG`, draw notes `SWEET_MTL2_DRAWNOTE=1`). The first frame
+  draws it with `TimgA3Xhf_Ixrg` straight into the framebuffer. Every later frame draws it with `TimgA3S1Xhfu_Ixrg` (four draws)
+  into color 1, the pass's memoryless `RGBA16Float` attachment (load and store don't care), with the framebuffer's color 0
+  masked off. `TimgBbcmA3Xhf_Isup` (twice) and `TbdsA3Xhf_Isup_Isrc` then write color 0. Samplers are clamped and normalized
+  (nearest for the first draw, linear for the rest); texture coordinates are normalized (v from 178/1702). The camera's control
+  blur also samples it (`TimgA2Xhfu_Ixrg` into 22 x 22 and 208 x 144, `downsample_4_frag_lph`). No refusal from backboardd while
+  the viewfinder was up.
+- **Inferred, not verified: where it is lost.** In the `S1` path the picture only reaches the screen through color 1, a
+  memoryless attachment read back by a later draw of the same pass (framebuffer fetch). That is the next place to measure:
+  what metal2vulkan does with that attachment and that fetch on PanVK (its rasterization-order and interlock features), and
+  whether the pass is split into instances there. With the bridge's telemetry on (`touch /var/local/mtl2-telemetry`) through a
+  camera session: no `new_instance_<reason>` count (the pass is not split), no degradation notice and no refusal from backboardd.
+  So the next measurement is inside PanVK: how it keeps the memoryless color and serves its fetch.
+- **Also measured:** with the camera open, backboardd runs at 495 to 498 of its 514 MiB GPU cap. The kernel refused it a
+  24 MiB buffer after the photo (D5), and 13 times with the BGRA8 copies on (D7), where `mtl2.log` also has `OutOfMemory(Device)`
+  refusals of textures and of two command buffers. Each converted 828 x 1702 texture keeps an `RGBA16Float` image of about
+  11 MiB. Such refusals reach the console only while the process's console line budget lasts.
+- **Also seen once, not explained:** both boots of D6, where the BGRA8 copy waited on the caller's thread for its own command
+  buffer, stopped backboardd after its first textures (SpringBoard never drawn); D7, without the wait, booted normally.
+
 ### SpringBoard's main-display layout (18 November)
 
 `camera_sbtrace.c` on phone 1 (dylib `-16`, `-17`) shows that SpringBoard does publish its layout: the home screen, the lock

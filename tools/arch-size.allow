@@ -69,7 +69,7 @@ tools/ios27/fullroot/pipeline/cache/aot/fp16_stub.py      1424
 tools/ios27/fullroot/pipeline/cache/aot/rewrite-grow.py   1047
 tools/ios27/lse/lse-rewrite.py                             826
 tools/ios27/mesa-ios/starbite-drm/starbite_drm.c           985
-tools/ios27/metal2/NativeBridgeMetalFrontend.mm           2767
+tools/ios27/metal2/NativeBridgeMetalFrontend.mm           2777
 tools/ios27/metal2/bridge/NativeMetalObjects.rs           2440
 tools/mesa/air/air_intrinsics.c                           2716
 tools/mesa/air/air_metal.c                                7072
