@@ -95,15 +95,15 @@ userland/src/gnssd.m                                      1936
 userland/src/gnsstool.c                                   1104
 userland/src/gps_app.m                                    1073
 userland/src/hakiosmetal_air.m                            6337
-userland/src/init.c                                       1872  # upstream sync 22 Nov (HakiOS 341c9eaf, 3df45a05; PR open)
+userland/src/init.c                                       1851  # upstream sync 22 Nov (HakiOS 341c9eaf, 3df45a05; PR open)
 userland/src/inject.c                                     2018
 userland/src/inject_media.c                                1084
-userland/src/inject_sb.c                                  4024  # upstream sync 22 Nov (HakiOS dc1b071c, 6f56ed92; PR open)
+userland/src/inject_sb.c                                  3924  # upstream sync 22 Nov (HakiOS dc1b071c, 6f56ed92; PR open)
 userland/src/metal_drv_test.m                             7737
 userland/src/metal_stubdev.m                               877
 userland/src/metalvk/NativeBridgeMetalFrontend.mm         2664
 userland/src/metalvk/metal_tri.m                          1361
 userland/src/sbca.c                                       1098   # PR 411 grew it; its boot-line reader went to scion_bootline.h (24 Nov); split next
 userland/src/triangle_app.m                               1273
-userland/src/var_store.c                                  1781  # upstream sync 22 Nov (HakiOS var_store fixes; PR open)
+userland/src/var_store.c                                  1742  # upstream sync 22 Nov (HakiOS var_store fixes; PR open)
 userland/src/vk_test.c                                     956
