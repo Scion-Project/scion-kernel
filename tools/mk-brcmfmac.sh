@@ -25,6 +25,14 @@
 #
 # usage: tools/mk-brcmfmac.sh [fetch]      "fetch" stops when the driver's sources are there
 set -e
+# macOS's own sha256sum (Darwin 1.0) takes no GNU options (--quiet): shasum, which every Mac has, in its place
+# (a command on PATH, so that every program this runs finds it too)
+if ! sha256sum --version 2>/dev/null | grep -q GNU; then
+	_shabin=$(mktemp -d "${TMPDIR:-/tmp}/sha256sum.XXXXXX")
+	printf '%s\n' '#!/bin/sh' 'if [ "$1" = -c ]; then shift; [ "$1" != --quiet ] || shift; exec shasum -a 256 -c -s "$@"; fi' \
+		'exec shasum -a 256 "$@"' > "$_shabin/sha256sum"
+	chmod +x "$_shabin/sha256sum"; export PATH="$_shabin:$PATH"
+fi
 VERSION=7.0.14
 SHA256=de9999b784d2293f00d39c62d8f92a08ab8a54bc4e80ffd250a0c09cb07a0f98
 FREEBSD=15.1
@@ -112,6 +120,8 @@ OURS="$W/src/lx_base.c $W/src/lx_wpa.c"	# (lx_wpa.c: the four-way handshake, the
 for f in "$W"/brcmfmac/*.c; do [ ! -f "$f" ] || OURS="$OURS $f"; done
 CC="clang -target arm64-apple-ios16.5"
 LD=$ROOT/xnu-deps/host/bin/ld64
+# the ios-27 profile's builder (dxb-ios) uses Xcode's own tools and never lays out xnu-deps/host: Xcode's linker then
+[ -x "$LD" ] || [ "$(uname)" != Darwin ] || LD="xcrun ld"
 CFLAGS="-mkernel -mgeneral-regs-only -fno-builtin -fno-common -ffreestanding -fno-strict-aliasing
 	-funsigned-char -nostdinc -std=gnu17 -O2 -g -w
 	-D__FreeBSD__=15 -D_KERNEL -DKLD_MODULE -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
