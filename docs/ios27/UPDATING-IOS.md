@@ -7,8 +7,8 @@ new restore image can answer, and the steps of a move, with who does each and th
 2026, first from public sources only. Later that day the owner's own 24B156 restore image was on the Mac mini, and the
 section "24B156: what was found" was read from it. There was no phone: **nothing on this page has been run on 24B156.**
 
-The tools now take the build from one place (`tools/ios27/builds/`, below); the build they use is still 24A446 and what
-they make for it is unchanged.
+The tools take the build from one place (`tools/ios27/builds/`, below). **Since 28 November 2026 the default is 24B156**: a
+root of it was built with `build-root.sh` on 18 November and has run on both test phones since; this page is the record of the move.
 
 ## The short version
 
@@ -38,7 +38,7 @@ they make for it is unchanged.
 
 | File | What it is |
 |---|---|
-| `DEFAULT` | One line: the build every tool uses when nothing says otherwise. Today `24A446`. |
+| `DEFAULT` | One line: the build every tool uses when nothing says otherwise. `24B156` since 28 November 2026 (it was `24A446`). |
 | `24A446.conf` | What the tools need to know of 24A446: version, product, device class (`n104ap`), the restore image's name and size, Apple's kernel version, the three images' names (`build-full-root.sh`'s defaults), the patch list (`s9/patches-24A446.txt`), `STATUS=supported`. `KEY=VALUE` lines, read and never executed. |
 | `24B156.conf` | The same for 24B156, `STATUS=candidate`: the image names from its manifest, the kernel read from its kernelcache, and its patch list (`s9/patches-24B156.txt`, the five words). |
 | `24A446-sbca.txt`, `24B156-sbca.txt` | sbca's QuartzCore numbers for each build, each with its anchor symbol and how it was verified. `tools/ios27/ca-gpu/sbca_table.py sync` writes `userland/src/sbca-qc/<BUILD>.h` from them; `verify BUILD CACHE --symbols LIST` checks a table against a cache; `sbca_table_test.py` (CI) checks the tables, the headers and the checker. |
