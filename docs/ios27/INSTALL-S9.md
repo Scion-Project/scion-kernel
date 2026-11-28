@@ -21,7 +21,7 @@ from a fresh clone of the public repositories ("clean run") or is written down f
 | Mac | Apple silicon. The build machine ran macOS 27.0.1 with 8 cores and 16 GB. About **110 GB free**: the restore image (9 GB), its three unpacked images (20 GB), the kernel build (4 GB), the root build (wants 62 GB free when it starts). |
 | Xcode | **Xcode 16.4**, from Apple's developer downloads (`Xcode_16.4.xip`). It need not be the selected one: the commands take `DEVELOPER_DIR`. |
 | Kernel Debug Kit | **Kernel Debug Kit 26.5, build 25F71** (`Kernel_Debug_Kit_26.5_build_25F71.dmg`), from Apple's developer downloads (a free account is enough). Unpack it with `pkgutil --expand-full` and point `KDKROOT` at the `.kdk` directory. |
-| Restore image | The **iPhone 11** image **iPhone12,1, iOS 27.0.1, build 24A446**, from Apple's own servers (Finder saves it, or `ipsw download ipsw --device iPhone12,1 --build 24A446`, which reads Apple's catalogue and downloads from Apple). No other build works: the tools check addresses inside this one. Do not use an image from anywhere else. |
+| Restore image | The **iPhone 11** image **iPhone12,1, iOS 27.2.1, build 24B156** (`iPhone12,1_27.2.1_24B156_Restore.ipsw`, 10 977 415 204 bytes), from Apple's own servers (Finder saves it, or `ipsw download ipsw --device iPhone12,1 --build 24B156`, which reads Apple's catalogue and downloads from Apple). It is the build the test phones run and the tools' default (`tools/ios27/builds/DEFAULT`) since 28 November 2026. The earlier 27.0.1 (24A446) still builds with `IOS27_BUILD=24A446` on every command (and on `sudo`'s line); no other build works: the tools check addresses inside these two. Do not use an image from anywhere else. |
 | Tools | `jq`, `gum`, `xcodes`, `cmake`, `ninja` (Homebrew has all five), `git`, Android's `adb` (platform-tools), blacktop's [`ipsw`](https://github.com/blacktop/ipsw) (3.1.743 was used), and a Python 3 environment with `numpy` and `ziglang` (`python3 -m venv venv && venv/bin/pip install numpy ziglang`). |
 | A USB cable | The phone's console is a serial port over USB-C. It is how you see the log and how you ask the phone to go back to TWRP. |
 
@@ -51,7 +51,7 @@ was built that day.
 
 ## 2. Your inputs from the restore image (about 15 minutes; all but the decryption was a clean run)
 
-    tools/ios27/s9/fetch-apple-inputs.sh ~/Downloads/iPhone12,1_27.0.1_24A446_Restore.ipsw inputs
+    tools/ios27/s9/fetch-apple-inputs.sh ~/Downloads/iPhone12,1_27.2.1_24B156_Restore.ipsw inputs
 
 It reads the image's manifest, checks the build, and writes `inputs/os.dmg`, `inputs/systemos.dmg`, `inputs/appos.dmg` and
 `inputs/n104ap.adt` (the iPhone 11's device tree). Two of the three images are Apple Encrypted Archives; the key for each is the
@@ -141,7 +141,7 @@ but nothing is drawn after the boot console.
 iPhone software since iOS 17 is built for processors the S9 does not have (pointer authentication, and instructions newer than
 its ARMv8.0 big cores). The kernel emulates what traps; to make the phone usable the build rewrites those instructions ahead of
 time in a copy of your system's shared library cache and in every program of the root (`docs/ios27/AOT-REWRITE.md`,
-`docs/ios27/TEXT-DATA.md`). It also applies five one-word changes to that cache (`tools/ios27/s9/patches-24A446.txt`, each
+`docs/ios27/TEXT-DATA.md`). It also applies five one-word changes to that cache (`tools/ios27/s9/patches-24B156.txt`, each
 checked against your cache first), removes the launchd jobs for hardware the port does not drive, marks Setup as done, and
 installs `overlay/`. The result is a raw HFS+ volume image, 32 GiB sparse with about 20 GiB used.
 
@@ -338,9 +338,9 @@ On one S9 boot, wired memory was 709 MiB with it on and 916 MiB without. That is
   Centre's volume slider does not move, and Settings' Wi-Fi row shows no network name. See [VOLUME.md](VOLUME.md).
 - **No crash reports** are written (ReportCrash is not in the root's job set); the console's `CRASH` lines are the record,
   and `tools/ios27/crashlog-symbolicate.py` symbolicates them. [CONTROL-CENTRE.md](CONTROL-CENTRE.md) has the details.
-- The command line and the patches are for build 24A446 only. Another restore image is refused. The build the tools use is
-  set in `tools/ios27/builds/` (`DEFAULT` and one `.conf` per build); what moving to a newer iOS involves, and why it has not
-  been done yet, is in [UPDATING-IOS.md](UPDATING-IOS.md).
+- The patches and tables are for builds 24B156 (27.2.1, the default) and 24A446 (27.0.1) only. Another restore image is
+  refused. The build the tools use is set in `tools/ios27/builds/` (`DEFAULT` and one `.conf` per build); what a move to
+  another iOS build involves is in [UPDATING-IOS.md](UPDATING-IOS.md).
 
 ## Who made what
 
