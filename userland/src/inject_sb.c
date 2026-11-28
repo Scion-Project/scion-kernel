@@ -1446,6 +1446,103 @@ plain_vibrancy(void)
 }
 
 /*
+ * Round 37, fewer blur passes (Note9 default; boot-arg blur_half=0 turns it off, blur_half=1 turns it on elsewhere):
+ * every CABackdropLayer of SpringBoard (the dock, folders, widgets' platters, the App Library, Control Center) captures
+ * what is behind it at half its asked scale, not below 1/16. CoreAnimation's OpenGL ES renderer makes a blur from that
+ * capture by halving it level by level and then blurring it pass by pass, as many as the radius needs in the capture's
+ * pixels: at half the scale every pass has a quarter of the pixels and the radius is half as many pixels, so a level
+ * and passes go. Heavy frames (~120 render passes, ~250 GPU chains) are bound by the CPU cost of each pass (round 13),
+ * and the M3s are pinned at 1794 MHz in them (round 36). The blur is a strong one anyway, so the coarser capture hardly
+ * shows. The scale is set through -setScale: or through -setValue:forKey: with "scale"; both are caught.
+ */
+static double blur_half_floor = 1.0 / 16;
+static unsigned blur_halved;
+static void (*original_backdrop_set_scale)(id, SEL, double);
+static void (*original_backdrop_set_value)(id, SEL, id, id);
+static __thread int blur_in_set_value;   /* CALayer's -setValue:forKey: may call -setScale: itself: halve once */
+
+static double
+blur_half_of(double scale)
+{
+	double half = scale * 0.5;
+
+	if (!(scale > 0) || scale <= blur_half_floor) {
+		return scale;
+	}
+	half = half < blur_half_floor ? blur_half_floor : half;
+	if (blur_halved++ < 4) {
+		say("hakios: blur_half: a backdrop's scale %g taken as %g (%u so far)\n", scale, half, blur_halved);
+	}
+	return half;
+}
+
+static void
+backdrop_set_scale(id self, SEL _cmd, double scale)
+{
+	original_backdrop_set_scale(self, _cmd, blur_in_set_value ? scale : blur_half_of(scale));
+}
+
+static void
+backdrop_set_value(id self, SEL _cmd, id value, id key)
+{
+	if (key != nil && value != nil && CFGetTypeID((CFTypeRef)key) == CFStringGetTypeID() &&
+	    CFEqual((CFTypeRef)key, CFSTR("scale")) && CFGetTypeID((CFTypeRef)value) == CFNumberGetTypeID()) {
+		double scale = 0;
+
+		CFNumberGetValue((CFNumberRef)value, kCFNumberDoubleType, &scale);
+		double half = blur_half_of(scale);
+
+		if (half != scale) {
+			CFNumberRef n = CFNumberCreate(NULL, kCFNumberDoubleType, &half);
+
+			if (n != NULL) {
+				blur_in_set_value++;
+				original_backdrop_set_value(self, _cmd, (id)n, key);
+				blur_in_set_value--;
+				CFRelease(n);
+				return;
+			}
+		}
+	}
+	original_backdrop_set_value(self, _cmd, value, key);
+}
+
+static void
+blur_half(const char *arguments)
+{
+	const char *arg = strstr(arguments, "blur_half=");
+	Class cls = objc_getClass("CABackdropLayer");
+	Method m;
+	bool on;
+
+	while (arg != NULL && arg != arguments && arg[-1] != ' ') {
+		arg = strstr(arg + 1, "blur_half=");
+	}
+	on = arg != NULL ? atoi(arg + 10) != 0 : strstr(arguments, "loader_platform=crownlte") != NULL;
+	if (!on || cls == Nil) {
+		say("hakios: blur_half: %s\n", cls == Nil ? "no CABackdropLayer" : "off");
+		return;
+	}
+	m = class_getInstanceMethod(cls, sel_registerName("setScale:"));
+	if (m != NULL) {
+		/* its own accessor, or CALayer's: added to CABackdropLayer itself either way, so only it is changed */
+		original_backdrop_set_scale = (void (*)(id, SEL, double))method_getImplementation(m);
+		if (!class_addMethod(cls, sel_registerName("setScale:"), (IMP)backdrop_set_scale, method_getTypeEncoding(m))) {
+			method_setImplementation(m, (IMP)backdrop_set_scale);
+		}
+	}
+	m = class_getInstanceMethod(cls, sel_registerName("setValue:forKey:"));
+	if (m != NULL) {
+		original_backdrop_set_value = (void (*)(id, SEL, id, id))method_getImplementation(m);
+		if (!class_addMethod(cls, sel_registerName("setValue:forKey:"), (IMP)backdrop_set_value, method_getTypeEncoding(m))) {
+			method_setImplementation(m, (IMP)backdrop_set_value);
+		}
+	}
+	say("hakios: blur_half: on (setScale: %s, setValue:forKey: %s; floor 1/16)\n", original_backdrop_set_scale ? "caught" : "MISSING",
+	    original_backdrop_set_value ? "caught" : "MISSING");
+}
+
+/*
  * Boot-arg ui_lite=1: the system's own "Reduce Transparency" and "Reduce Motion" (Settings, Accessibility), for this
  * boot and, through var_store, the next. CoreAnimation then draws the dock, folders and widgets' platters in plain
  * colours instead of blurring what is behind them every frame, and opens and closes applications with a fade instead
@@ -4408,6 +4505,14 @@ hakios_springboard_init(void)
 	    0x1f1c91480UL, (IMP)snapshot_output_format);
 	plain_vibrancy();
 	ui_lite();
+	{
+		char blur_arguments[1024] = "";
+		size_t blur_size = sizeof(blur_arguments) - 1;
+
+		if (sysctlbyname("kern.bootargs", blur_arguments, &blur_size, NULL, 0) == 0) {
+			blur_half(blur_arguments);
+		}
+	}
 	wallpaper_cache();
 	status_bar_fallback_is_split();
 	wallpaper_freeze();
