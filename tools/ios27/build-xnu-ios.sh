@@ -63,7 +63,8 @@ if [ "${NOWIFI:-0}" = 1 ]; then
 	LX=/nonexistent
 elif [ ! -f "$LX" ] && [ "${MACHINE_CONFIG:-}" = STARLTE ]; then
 	echo "build-xnu-ios: no $LX: making it (tools/mk-brcmfmac.sh)"
-	"$ROOT/tools/mk-brcmfmac.sh" || dxb_die "tools/mk-brcmfmac.sh failed: a STARLTE kernel without brcmfmac has no Wi-Fi (NOWIFI=1 builds one on purpose)"
+	# its LinuxKPI layer includes this kernel's bsd/sys/hakios.lx.h: the tree applied here, not the 16.5 profile's
+	XNU_SRC="$DXB/xnu" "$ROOT/tools/mk-brcmfmac.sh" || dxb_die "tools/mk-brcmfmac.sh failed: a STARLTE kernel without brcmfmac has no Wi-Fi (NOWIFI=1 builds one on purpose)"
 	[ -f "$LX" ] || dxb_die "tools/mk-brcmfmac.sh made no $LX (NOWIFI=1 builds a kernel without Wi-Fi on purpose)"
 fi
 lx_now=none
