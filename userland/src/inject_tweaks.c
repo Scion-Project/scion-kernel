@@ -362,6 +362,15 @@ kept_sizes(long long *data_cap, long long *data_free, long long *sys_cap, long l
 	*data_free = (long long)var.f_bavail * var.f_bsize;
 	*sys_cap = (long long)root.f_blocks * root.f_bsize;
 	*sys_free = (long long)root.f_bavail * root.f_bsize;
+	/*
+	 * round 37: the root volume's own answer already counts both (29907952 blocks = the system's 3950 MB used + the
+	 * kept volume, its free = the kept volume's): adding the kept volume again gave 229705 MB, Settings' "241 GB".
+	 * Then the system part is only the difference, with nothing free of its own.
+	 */
+	if (*sys_cap >= *data_cap) {
+		*sys_cap -= *data_cap;
+		*sys_free = 0;
+	}
 	return 1;
 }
 
@@ -559,6 +568,10 @@ fix_root(const char *what, struct statfs *sf)
 	if (statfs("/private/var", &var) != 0 || strcmp(var.f_fstypename, "hfs") != 0 || sf->f_bsize == 0) {
 		return;
 	}
+	if ((unsigned long long)sf->f_blocks * sf->f_bsize >= (unsigned long long)var.f_blocks * var.f_bsize) {
+		/* round 37: the root's answer already counts the kept volume (see kept_sizes): left as it is */
+		return;
+	}
 	unsigned long long var_blocks = (unsigned long long)var.f_blocks * var.f_bsize / sf->f_bsize;
 	unsigned long long var_free = (unsigned long long)var.f_bavail * var.f_bsize / sf->f_bsize;
 
@@ -647,7 +660,6 @@ fix_attrs(const char *what, int on_root, struct attrlist *al, void *buf, size_t 
 {
 	static uint32_t said_masks[16];
 	static int nsaid;
-	struct statfs var, root;
 	uint8_t *p = buf, *end = (uint8_t *)buf + size;
 	uint32_t vol, cmn;
 	int known = 1;
@@ -689,11 +701,12 @@ fix_attrs(const char *what, int on_root, struct attrlist *al, void *buf, size_t 
 		say("hakios: tweaks: Settings asks volume attributes %#x (common %#x) of the root volume through %s%s\n", al->volattr,
 		    al->commonattr, what, known ? "" : ": a layout not handled, left as it is");
 	}
-	if (!known || statfs("/private/var", &var) != 0 || strcmp(var.f_fstypename, "hfs") != 0 || statfs("/", &root) != 0) {
+	long long data_cap, data_free, sys_cap, sys_free;
+
+	if (!known || !kept_sizes(&data_cap, &data_free, &sys_cap, &sys_free)) {
 		return;
 	}
-	long long data_cap = (long long)var.f_blocks * var.f_bsize, data_free = (long long)var.f_bavail * var.f_bsize;
-	long long sys_cap = (long long)root.f_blocks * root.f_bsize, sys_used = sys_cap - (long long)root.f_bfree * root.f_bsize;
+	long long sys_used = sys_cap - sys_free;
 
 	for (uint32_t bit = 1; bit != 0; bit <<= 1) {
 		int n;
