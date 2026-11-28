@@ -73,13 +73,11 @@ before there is a root. `make-boot-image.sh` does that by default: it fetches th
 build does (section 5, "The S9's firmware"), and stops if a file is missing or wrong. `--firmware none` makes an image
 without it, and then there are no sensors and no rotation.
 
-**The panel's own shape.** By default iOS draws the iPhone 11's 828 x 1792 screen, which is not the panel's shape, and the
-kernel scales it to the panel. The test phones draw 828 x 1702, the panel's shape exactly
-(`docs/ios27/PRESENT.md`): `--canvas 828x1702` puts that canvas in the device tree (`mkadt_starlte.py --canvas`), and the
-line must then give the kernel the same size (`--cmdline 'sbgl=0 sweetspeed=408782847 sweetfb_lh=1702'`; the width 828 is
-built in). The script refuses a canvas the line does not match. Checked offline only: without `--canvas` the image is made
-as before (the same bytes but the device tree's random seed and the header's checksum); with it the tree's display
-properties are those of the 828 x 1702 tree the test phones boot. A boot image made with `--canvas` has not been booted.
+**The panel's own shape.** iOS draws 828 x 1702, the panel's shape exactly (`docs/ios27/PRESENT.md`), as every test phone
+does: since 28 November 2026 that is `make-boot-image.sh`'s default canvas (`mkadt_starlte.py --canvas 828x1702`), and the
+default line (`tools/ios27/cmdline/starlte-rc.txt`) gives the kernel the same size (`sweetfb_lh=1702`; the width 828 is built
+in). The script refuses a canvas the line does not match, so a `--cmdline` of your own must carry `sweetfb_lh=1702` too.
+`--canvas iphone11` makes the earlier image instead: the iPhone 11's own 828 x 1792 screen, scaled by the kernel to the panel.
 
 **Make the boot image again after the root (section 5).** The root build leaves beside the root image a record of the
 libraries it installed for the kernel to insert into programs (`tools/ios27/fullroot/out/root-full.img.inject`: the
@@ -93,7 +91,8 @@ made exactly as before.
 
 The boot image is an Android boot image whose "kernel" is the loader; the loader carries the XNU kernel, the S9's device tree in
 Apple's format (made from your iPhone 11 tree and the S9's own memory map) and a short command line (`sbgl=0
-sweetspeed=408782847` and the time the image was made, `sweetepoch=`; everything else is built into the kernel). The copy of your recovery partition is only a template: its
+sweetspeed=442337279 sweetfb_lh=1702`, the libraries of the root's record, `sweetinject=`, and the time the image was made,
+`sweetepoch=`; everything else is built into the kernel, `osfmk/arm/arm_init.c` of the fork). The copy of your recovery partition is only a template: its
 header and Samsung's device-tree block are kept so that the phone's boot loader accepts the image.
 
 Clean run: the loader built this way is byte for byte the one in the test phones' boot image, and the script given the test
@@ -297,7 +296,7 @@ job interrupt (`sgu_irq=1`, measured on a phone on 17 November), the reading of 
 now 851 of the command line's 1024 bytes: when the loader's line leaves no room the last ones are left out, and the
 boot log names them (`STARLTE BOOTARGS: WARNING`).
 
-- To turn one off for a run, name it on the command line with 0: `--cmdline 'sbgl=0 sweetspeed=408782847 cp=0 bt=0'`.
+- To turn one off for a run, name it on the command line with 0: `--cmdline 'sbgl=0 sweetspeed=442337279 sweetfb_lh=1702 cp=0 bt=0'`.
 - The kernel side is on; what iOS needs on top of it (the sensors' library, the Wi-Fi firmware and wifid, the audio and
   Bluetooth pieces, the cellular daemon and the status bar's library) the root build of section 5 puts on the root
   ("The S9's features in the root"), with the firmware fetched and checked by the build itself. Without its step a feature
