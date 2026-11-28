@@ -62,6 +62,7 @@ decryption of the two archives was not repeated (no room for a second copy of th
 
 ## 3. The loader and the boot image (under a minute; clean run)
 
+    python3 tools/hakios-device.py sync starlte                        # once: devices/starlte, the S9's repository (the firmware's sums)
     tools/ios27/s9/build-loader.sh                                     # zig as the cross compiler: no Linux VM
     tools/ios27/s9/flash.sh $SERIAL pull-template inputs/recovery.img  # the phone in TWRP: a copy of ITS recovery partition
     tools/ios27/s9/flash.sh $SERIAL backup-boot  inputs/android-boot.img   # keep this file: it is how Android boots
