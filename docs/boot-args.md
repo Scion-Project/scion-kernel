@@ -324,7 +324,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `speaker_probe` | K | `hakios.speaker.c` | `CONFIG_SPEAKER_PROBE` |  |
 | `virtio_sound` | K | `hakios.virtio_sound.c` | `CONFIG_VIRTIO_SOUND` |  |
 
-## Cameras (41)
+## Cameras (42)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -352,6 +352,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_s9_mmu_probe` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_MMU_PROBE` |  |
 | `cam_s9_pack12` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_PACK12` |  |
 | `cam_s9_probe` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_PROBE` |  |
+| `cam_s9_rear_turn` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_TURN` |  |
 | `cam_s9_sat` | K | `hakios.exynos_camera.c`, `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_SAT` |  |
 | `cam_s9_selfread` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD` |  |
 | `cam_s9_selfread_focus` | K | `hakios.exynos_camera.c` | `CONFIG_CAM_S9_SELFREAD_FOCUS` |  |
@@ -606,7 +607,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 | `ufs_write_guid` | L | `loader.c` | `CONFIG_UFS_WRITE_GUID` |  |
 
-## User space (210)
+## User space (209)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -670,7 +671,6 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_s9_rear_ispdiv` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_ISPDIV` |  |
 | `cam_s9_rear_probe` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_PROBE` |  |
 | `cam_s9_rear_tp` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_TP` |  |
-| `cam_s9_rear_turn` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_REAR_TURN` |  |
 | `cam_s9_tele` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE` |  |
 | `cam_s9_tele_bayer` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE_BAYER` |  |
 | `cam_s9_tele_exp` | K | `hakios.exynos_camera_star2.c` | `CONFIG_CAM_S9_TELE_EXP` |  |

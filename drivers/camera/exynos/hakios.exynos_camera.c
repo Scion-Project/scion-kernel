@@ -175,6 +175,8 @@
  *                      SBGGR10 buffers). Without it the WDMA writes each RAW10 pixel in 16 bits, little-endian, the
  *                      value in [9:0] (the phone, 3 November): camshot's debayer reads only that)
  *   cam_s9_bayer=N     camshot's Bayer order: 0 RGGB, 1 GRBG (the default, the sensor's), 2 GBRG, 3 BGGR
+ *   cam_s9_rear_turn=0 the rear camera's frames as the sensor sends them; by default (1, since 28 November 2026) read()
+ *                      turns them half a turn, as it does the front camera's, so that iOS's preview is the right way up
  *   cam_s9_stride=B    camshot's bytes a line of the frame (default 3264: the WDMA's RAW10 is a pixel in 16 bits)
  *   cam_s9_ispdiv=D    CLKCMU_ISPPRE_BUS (CSIS1's and its WDMA's clock) = SHARED1_DIV4, 466 MHz, / (D + 1); default
  *                      1, 233 MHz (Android's own is 466 MHz, D = 0). The boot leaves it at about 50 MHz, too slow:
@@ -894,6 +896,7 @@ static uint32_t dma_mux_found;
 static bool dma_mux_mine;
 static bool sensor_hold = true;                 /* the sensor takes the grouped parameter hold (0x0104) */
 static bool frame_turn = true;                  /* read() turns the frame half a turn (the front sensor's mounting) */
+static uint32_t cam_rear_turn = 1;              /* the rear camera's frames turned too (cam_s9_rear_turn=0: as the sensor sends them) */
 static const char *csis_name = "CSIS1", *cam_name = "the front camera";
 #define PMU_DPHY_ISO_CSIS1      iso_off         /* (CSIS1 and CSIS3's M0S4S2: 0x730; CSIS0's M4S4, the display's too: 0x70C) */
 #define PMU_DPU_STATUS          EXYNOS_CAM_PMU_DPU_STATUS          /* pd-dpu, pd-isppre's parent */
@@ -3837,7 +3840,12 @@ rear_side(void)
 	mode_margin = 0x30;
 	line_ns = 815;
 	sensor_hold = false;
-	frame_turn = false;
+	/*
+	 * Turned half a turn as well: with 0x0101 = 3 (mirrored and flipped, as Android has it) the rear picture reaches iOS's
+	 * preview upside down, as the front one did before it was turned (the owner, phone 1, 28 November 2026: "camera looks
+	 * good, still upside down"). cam_s9_rear_turn=0 gives the frames as the sensor sends them.
+	 */
+	frame_turn = cam_rear_turn != 0;
 	csis_name = "CSIS0";
 	cam_name = "the rear camera";
 	asked_sensor = 1;
@@ -3947,6 +3955,7 @@ hakios_exynos_camera_init(void)
 		cam_switch = 0;
 	}
 	cam_switch = cam_switch != 0;
+	PE_parse_boot_argn("cam_s9_rear_turn", &cam_rear_turn, sizeof(cam_rear_turn));      /* before rear_side() reads it */
 	cam_rear = hakios_s9rear_setup(ipclk, say, cam_switch);
 	if (cam_rear) {
 		sbus = hakios_s9rear_bus(&sensor_addr);
