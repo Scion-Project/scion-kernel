@@ -24,9 +24,11 @@
 #                   FIRMWARE_OFFLINE=1, FIRMWARE_DIR=DIR as there), and a file missing or wrong stops this; none: a tree
 #                   without it (shub=4 and up then find no image: no sensors, no rotation). The image then carries
 #                   Broadcom's and Samsung's file: it is private anyway (below).
-#   [--canvas WxH]  the screen iOS draws (the device tree's /arm-io/disp0 canvas, mkadt_starlte.py --canvas). Default: the
-#                   iPhone 11's own 828x1792. The S9's panel shape is 828x1702 (docs/ios27/PRESENT.md): with it the line must
-#                   say the same (sweetfb_lw=828 sweetfb_lh=1702), and this refuses a line whose sweetfb_lw/sweetfb_lh differ.
+#   [--canvas WxH|iphone11]  the screen iOS draws (the device tree's /arm-io/disp0 canvas, mkadt_starlte.py --canvas).
+#                   Default (since 28 November 2026, the first gold master): 828x1702, the S9 panel's own shape
+#                   (docs/ios27/PRESENT.md), which every test phone boots; the default line says the same (sweetfb_lh=1702;
+#                   sweetfb_lw=828 is built in). This refuses a line whose sweetfb_lw/sweetfb_lh differ from the canvas.
+#                   iphone11: the iPhone 11's own 828x1792, no --canvas to mkadt_starlte.py (the default before 28 November).
 #   [--loader I]    default xnuloader/sboot/out/xnu_boot.Image (tools/ios27/s9/build-loader.sh)
 #   [--out O]       default out/xnu-boot-ios27.img (out/ is not in git; the image holds your IPSW's device identity: never share it)
 #   [--loader-kind sboot|scion]   sboot (the default, unchanged): the loader above with the payload appended. scion: the
@@ -55,7 +57,7 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd); T27=$ROOT/tools/ios27
 PY=${PY:-python3}
 KERNEL= DONOR= TEMPLATE= LINE= OUT=$ROOT/out/xnu-boot-ios27.img LOADER=$ROOT/xnuloader/sboot/out/xnu_boot.Image
 LINEFILE=$T27/cmdline/starlte-rc.txt
-RECORD=default CAMERA_NODE=auto FIRMWARE=auto CANVAS=
+RECORD=default CAMERA_NODE=auto FIRMWARE=auto CANVAS=828x1702
 LOADER_KIND=sboot SCION_BOOT= SCION_CHAIN=0 SCION_ENTRIES=() PAYLOAD=
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -98,8 +100,10 @@ scion)
 	[ "$SCION_CHAIN" = 0 ] || [ -f "$LOADER" ] || die "--scion-chain-sboot: no loader at $LOADER (tools/ios27/s9/build-loader.sh)" ;;
 *) die "--loader-kind sboot or scion (got '$LOADER_KIND')" ;;
 esac
-case "$CANVAS" in '' | [1-9]*x[1-9]*) ;; *) die "--canvas WxH (got '$CANVAS')" ;; esac
-case "$CANVAS" in *[!0-9x]* | *x*x*) die "--canvas WxH (got '$CANVAS')" ;; esac
+[ "$CANVAS" != iphone11 ] || CANVAS=
+[ -z "$PAYLOAD" ] || CANVAS=   # --payload: the payload's own tree, as it stands
+case "$CANVAS" in '' | [1-9]*x[1-9]*) ;; *) die "--canvas WxH or iphone11 (got '$CANVAS')" ;; esac
+case "$CANVAS" in *[!0-9x]* | *x*x*) die "--canvas WxH or iphone11 (got '$CANVAS')" ;; esac
 mkdir -p "$(dirname "$OUT")"
 W=$(mktemp -d "${TMPDIR:-/tmp}/bootimg.XXXXXX"); trap 'rm -rf "$W"' EXIT
 if [ -n "$PAYLOAD" ]; then
