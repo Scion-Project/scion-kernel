@@ -35,6 +35,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
@@ -399,6 +400,38 @@ disk_answer(CFStringRef key, CFTypeRef real)
 	}
 	if (CFEqual(key, CFSTR("DiskUsage")) && real != NULL && CFGetTypeID(real) == CFDictionaryGetTypeID()) {
 		CFMutableDictionaryRef d = CFDictionaryCreateMutableCopy(NULL, 0, real);
+		{
+			/* (round 36: the real dictionary, once: every key and number) */
+			static int dsaid;
+
+			if (dsaid++ == 0) {
+				CFIndex n = CFDictionaryGetCount(real);
+				const void **keys = calloc((size_t)(n > 0 ? n : 1), sizeof(void *));
+				const void **vals = calloc((size_t)(n > 0 ? n : 1), sizeof(void *));
+
+				if (keys == NULL || vals == NULL) {
+					n = 0;
+				} else {
+					CFDictionaryGetKeysAndValues(real, keys, vals);
+				}
+				for (CFIndex i = 0; i < n; i++) {
+					char kn[64] = "";
+					long long num = 0;
+
+					if (CFGetTypeID(keys[i]) == CFStringGetTypeID()) {
+						CFStringGetCString(keys[i], kn, sizeof(kn), kCFStringEncodingUTF8);
+					}
+					if (CFGetTypeID(vals[i]) == CFNumberGetTypeID()) {
+						CFNumberGetValue(vals[i], kCFNumberLongLongType, &num);
+					}
+					say("hakios: tweaks: DiskUsage real: %s = %lld MB\n", kn, num >> 20);
+				}
+				say("hakios: tweaks: DiskUsage given: data %lld MB (%lld free), system %lld MB (%lld free), disk %lld MB\n",
+				    dc >> 20, df >> 20, sc >> 20, sf >> 20, (dc + sc) >> 20);
+				free(keys);
+				free(vals);
+			}
+		}
 
 		if (d == NULL) {
 			return NULL;
@@ -529,6 +562,17 @@ fix_root(const char *what, struct statfs *sf)
 	unsigned long long var_blocks = (unsigned long long)var.f_blocks * var.f_bsize / sf->f_bsize;
 	unsigned long long var_free = (unsigned long long)var.f_bavail * var.f_bsize / sf->f_bsize;
 
+	{
+		/* (round 36: the values themselves, the first 12 times: Settings showed "241 GB used of 127.7") */
+		static int vsaid;
+
+		if (vsaid++ < 12) {
+			say("hakios: tweaks: %s on /: real %llu blocks of %u, %llu free, %llu avail; given %llu, %llu, %llu (MB: %llu of %llu "
+			    "free)\n", what != NULL ? what : "?", (unsigned long long)sf->f_blocks, (unsigned)sf->f_bsize,
+			    (unsigned long long)sf->f_bfree, (unsigned long long)sf->f_bavail, (unsigned long long)sf->f_blocks + var_blocks,
+			    var_free, var_free, var_free * sf->f_bsize >> 20, ((unsigned long long)sf->f_blocks + var_blocks) * sf->f_bsize >> 20);
+		}
+	}
 	sf->f_blocks += var_blocks;
 	sf->f_bfree = var_free;
 	sf->f_bavail = var_free;
@@ -673,6 +717,15 @@ fix_attrs(const char *what, int on_root, struct attrlist *al, void *buf, size_t 
 			v = bit == ATTR_VOL_SIZE ? data_cap + sys_cap : (bit == ATTR_VOL_SPACEFREE || bit == ATTR_VOL_SPACEAVAIL) ?
 			    data_free : data_cap + sys_cap - data_free;
 			(void)sys_used;
+			{
+				static int asaid;
+				long long was;
+
+				memcpy(&was, p, 8);
+				if (asaid++ < 24) {
+					say("hakios: tweaks: %s on /: attribute %#x real %lld MB, given %lld MB\n", what, bit, was >> 20, v >> 20);
+				}
+			}
 			memcpy(p, &v, 8);
 		}
 		p += n;

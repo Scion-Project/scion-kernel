@@ -1470,7 +1470,8 @@ hc_speed_add(struct hc_slot *s, bool write, uint64_t bytes)
 
 		if (slow_said < HC_SLOW_SAID) {
 			slow_said++;
-			hc_say("ufs: slow request: a %s of %llu KB took %llu ms (slot %u; %llu requests so far, average %llu us)\n",
+			/* (hc_say_late: straight into the loader's log -- hc_say's kept lines were not, round 35) */
+			hc_say_late("ufs: slow request: a %s of %llu KB took %llu ms (slot %u; %llu requests so far, average %llu us)\n",
 			    write ? "write" : "read", bytes / 1024, us / 1000, s->number, hc_lat_n, hc_lat_n ? hc_lat_sum_us / hc_lat_n : 0);
 		}
 	}
