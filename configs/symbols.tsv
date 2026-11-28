@@ -163,7 +163,7 @@ CAM_S9_REAR_BAYER	arg	cam_s9_rear_bayer	User space	k	hakios.exynos_camera_star2.
 CAM_S9_REAR_EXP	arg	cam_s9_rear_exp	User space	k	hakios.exynos_camera_star2.c	the rear stream's first exposure in lines of 815 ns (default 30000, about 24 ms; its gain starts at 4x)
 CAM_S9_REAR_ISPDIV	arg	cam_s9_rear_ispdiv	User space	k	hakios.exynos_camera_star2.c	the ISPPRE bus clock for the rear stream, 466 MHz / (D + 1); default 0, Android's rate
 CAM_S9_REAR_TP	arg	cam_s9_rear_tp	User space	k	hakios.exynos_camera_star2.c	the rear sensor's MIPI CCS test pattern (0x0600: 1 solid colour, 2 colour bars) for its picture
-CAM_S9_REAR_TURN	arg	cam_s9_rear_turn	User space	k	hakios.exynos_camera_star2.c	the rear frames turned half round for user space (default 0: the sensor flips itself)
+CAM_S9_REAR_TURN	arg	cam_s9_rear_turn	Cameras	k	hakios.exynos_camera.c,hakios.exynos_camera_star2.c	the rear frames turned half round for user space (default 0: the sensor flips itself)
 CAM_S9_SAT	arg	cam_s9_sat	Cameras	k	hakios.exynos_camera.c,hakios.exynos_camera_star2.c	camshot's colour saturation in per cent (default 140; 100: none; at most 300)
 CAM_S9_SELFREAD	arg	cam_s9_selfread	Cameras	k	hakios.exynos_camera.c	
 CAM_S9_SELFREAD_FOCUS	arg	cam_s9_selfread_focus	Cameras	k	hakios.exynos_camera.c	the reader also writes HAKIOS_CAMERA_FOCUS, as a capture device would (cam_af=4): after its
