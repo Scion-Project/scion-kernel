@@ -10,6 +10,13 @@ Where this tree comes from:
   From 22 November 2026 also commits of hakios-xnu-kernel's branch `common` (shimoku74 and the other HakiOS authors), ported
   one by one under their authors' names: in hakios-metal/ (MIT, its LICENSE) and tools/apfs/ (MIT, as the NOTICE.md of
   `common` sets for its tools/). docs/UPSTREAM-SYNC-2026-11-22.md lists them and what was left out.
+  And the 23 commits of `common` (head 62e09f85) that docs/UPSTREAM-SYNC-2026-11-22.md lists under "Ported, waiting"
+  (b2c01c92 ... e1afe9aa, 17-19 November 2026; scion-kernel PR 406), ported under their authors' names: their changed lines
+  are under the Apple Public Source License 2.0 (LICENSE.APSL), as `common`'s NOTICE.md sets for userland/ and the loader
+  (Scion's owner's decision of 28 November 2026: accept them as APSL-2.0). The Wi-Fi layer's lines are treated the same,
+  though that NOTICE.md does not name kernel/lx/. These files are therefore MIXED: MIT (LICENSE) for the rest of each file,
+  APSL-2.0 for the lines of those commits: userland/src/init.c, var_store.c, inject_app.c, inject_sb.c, inject_tweaks.c,
+  eagl.c, camera_device.c, camera_isp.c; xnuloader/ufs_service.c; wifi/lx/src/lx_base.c, lx_bus.c, lx_80211.c.
 
 In the repository:
 

@@ -224,8 +224,18 @@ linux_rcu_read_unlock(unsigned type)
 void
 linux_synchronize_rcu(unsigned type)
 {
-	for (unsigned ms = 0; rcu_readers != 0 && ms < 1000; ms++) {
+	static unsigned said;
+	unsigned ms;
+
+	/*
+	 * (bounded: every reader is counted, those that came after too, so one that is always looking would hold this for good;
+	 * the time it gave up is said -- what the caller frees then may still be read)
+	 */
+	for (ms = 0; rcu_readers != 0 && ms < 1000; ms++) {
 		lx_pause_ms(1);
+	}
+	if (rcu_readers != 0 && said++ < 4) {
+		printf("lx: synchronize_rcu: %d readers still look after %u ms: what is freed now may still be read\n", rcu_readers, ms);
 	}
 }
 
@@ -241,6 +251,9 @@ ticks_to_ns(unsigned long ticks)
 }
 
 static struct timer_list *armed[16];
+static struct timer_list *firing;		/* the timer whose function the ticker runs now (timer_delete_sync() waits for it) */
+static void *ticker_self;			/* lx_os_thread_self() of the ticker */
+static bool queue_work_locked(struct workqueue_struct *wq, struct work_struct *work);
 static struct {
 	struct delayed_work *work;		/* to be queued on ... */
 	struct workqueue_struct *queue;		/* ... when the ticks have reached ... */
@@ -252,6 +265,7 @@ ticker(void *argument)
 {
 	unsigned long long began = lx_os_nanoseconds();
 
+	ticker_self = lx_os_thread_self();
 	for (;;) {
 		struct timer_list *due = NULL;
 		struct delayed_work *work = NULL;
@@ -273,13 +287,24 @@ ticker(void *argument)
 				later[i].work = NULL;
 			}
 		}
+		/*
+		 * (the work whose time has come queued before the lock is let go of: a cancel_delayed_work_sync() in between
+		 * would otherwise find it neither waiting for its time, nor queued, nor running -- and it would run after it)
+		 */
+		if (work != NULL && !queue_work_locked(queue, &work->work)) {
+			printf("lx: work whose time has come finds its queue full: it will not be done\n");
+		}
+		firing = due;
 		lx_os_unlock();
 		/* (a timer that a part of the driver not built yet would have given its function has none) */
 		if (due != NULL && due->function_415 != NULL) {
 			due->function_415(due);
 		}
-		if (work != NULL) {
-			linux_queue_work_on(0, queue, &work->work);
+		if (due != NULL) {
+			lx_os_lock();
+			firing = NULL;
+			lx_os_wakeup(&firing);
+			lx_os_unlock();
 		}
 	}
 }
@@ -339,13 +364,17 @@ linux_cancel_delayed_work(struct delayed_work *dwork)
 	return (waited);
 }
 
-/* (A timer's function that is running on the ticker's thread at this moment is not waited for.) */
+/* Not armed any more; and if its function runs on the ticker's thread, until it has ended (as Linux's does). */
 int
 timer_delete_sync(struct timer_list *timer)
 {
 	int was = 0;
 
 	lx_os_lock();
+	while (firing == timer && lx_os_thread_self() != ticker_self) {
+		lx_os_sleep(&firing, SLICE_NS);
+	}
+	/* (after the wait: a function that armed its timer again is disarmed too) */
 	for (unsigned i = 0; i < nitems(armed); i++) {
 		if (armed[i] == timer) {
 			armed[i] = NULL;
@@ -632,27 +661,56 @@ linux_create_workqueue_common(const char *name, int cpus)
 	return (&queue->shown);
 }
 
+/*
+ * Its work done first, as Linux's does: what was queued and what runs has ended when this returns (the memory it works
+ * on is freed right after: linuxkpi_wiphy_free()). Its thread stays, asleep: queues are made once here.
+ */
 void
 linux_destroy_workqueue(struct workqueue_struct *wq)
 {
-	/* (its thread stays, asleep: queues are made once here and never given up while the kernel runs) */
+	struct lx_workqueue *queue = __containerof(wq, struct lx_workqueue, shown);
+
+	lx_os_lock();
+	while ((queue->count != 0 || queue->running != NULL) && queue->thread != lx_os_thread_self()) {
+		lx_os_sleep(&queue->running, SLICE_NS);
+	}
+	lx_os_unlock();
+}
+
+/* With lx_os_lock() held. */
+static bool
+queue_work_locked(struct workqueue_struct *wq, struct work_struct *work)
+{
+	struct lx_workqueue *queue = __containerof(wq, struct lx_workqueue, shown);
+
+	if (atomic_read(&work->state) != WORK_IDLE) {
+		return (true);                          /* (queued already: it will run, as Linux's answer means) */
+	}
+	if (queue->count >= nitems(queue->waiting)) {
+		return (false);
+	}
+	atomic_set(&work->state, WORK_QUEUED);
+	work->work_queue = wq;
+	queue->waiting[(queue->first + queue->count++) % nitems(queue->waiting)] = work;
+	lx_os_wakeup(queue);
+	return (true);
 }
 
 bool
 linux_queue_work_on(int cpu, struct workqueue_struct *wq, struct work_struct *work)
 {
 	struct lx_workqueue *queue = __containerof(wq, struct lx_workqueue, shown);
-	bool queued = false;
+	bool queued = false, full = false;
 
 	lx_os_lock();
-	if (atomic_read(&work->state) == WORK_IDLE && queue->count < nitems(queue->waiting)) {
-		atomic_set(&work->state, WORK_QUEUED);
-		work->work_queue = wq;
-		queue->waiting[(queue->first + queue->count++) % nitems(queue->waiting)] = work;
-		lx_os_wakeup(queue);
-		queued = true;
+	if (atomic_read(&work->state) == WORK_IDLE) {
+		queued = queue_work_locked(wq, work);
+		full = !queued;
 	}
 	lx_os_unlock();
+	if (full) {
+		printf("lx: the queue %s is full: a piece of work will not be done\n", queue->name);
+	}
 	return (queued);
 }
 
@@ -807,13 +865,17 @@ linux_dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle
 
 	size = roundup2(size, 64);
 	lx_os_lock();
-	at = pool.rings_used;
+	/*
+	 * (as Linux gives it: a piece of a page or more starts on a page -- what the firmware is handed whole, the QMI target
+	 * memory's chunks, may need it -- and a smaller one on 64 bytes)
+	 */
+	at = size >= 4096 ? roundup2(pool.rings_used, 4096) : pool.rings_used;
 	if (pool.memory == NULL || at + size > POOL_RINGS) {
 		lx_os_unlock();
 		printf("lx: no room for %zu more bytes of rings\n", size);
 		return (NULL);
 	}
-	pool.rings_used += size;
+	pool.rings_used = at + size;
 	lx_os_unlock();
 	bzero(pool.memory + at, size);
 	*dma_handle = pool.address + at;

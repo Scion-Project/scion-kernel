@@ -1023,7 +1023,8 @@ frame_metadata(const struct isp *isp, const struct hakios_camera_frame *f, const
 	return m;
 }
 
-static void
+/* True: a picture went to the output (no buffer free, or one of a shape this does not draw: false) */
+static bool
 deliver(struct stream *s, struct output *out, const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw,
     CFDictionaryRef metadata)
 {
@@ -1032,7 +1033,7 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 
 	(void)s;
 	if (pb == NULL) {
-		return;
+		return false;
 	}
 	pf = CVPixelBufferGetPixelFormatType(pb);
 	width = (uint32_t)CVPixelBufferGetWidth(pb);
@@ -1052,7 +1053,7 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 			    pf >> 8 & 255, pf & 255);
 		}
 		CVPixelBufferRelease(pb);
-		return;
+		return false;
 	}
 	CVPixelBufferLockBaseAddress(pb, 0);
 	CVPixelBufferLockBaseAddress(draw, 0);
@@ -1116,6 +1117,7 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 		say("%s: the first picture given (%ux%u %c%c%c%c)", out->name, width, height, pf >> 24, pf >> 16 & 255,
 		    pf >> 8 & 255, pf & 255);
 	}
+	return true;
 }
 
 /*
@@ -1461,8 +1463,17 @@ worker(void *context)
 				}
 				continue;
 			}
-			bytes = sizeof(head) + (size_t)head.stride * head.height;
+			if (head.header_bytes < sizeof(head) || head.header_bytes > 4096 || head.height == 0 || head.width == 0 ||
+			    head.stride < head.width || (uint64_t)head.stride * head.height > (64u << 20)) {
+				failures++;
+				continue;               /* (a header that no buffer is to be sized from) */
+			}
+			bytes = head.header_bytes + (size_t)head.stride * head.height;
 			buffer = malloc(bytes);
+			if (buffer == NULL) {
+				say("no memory for a frame of %zu bytes", bytes);
+				break;
+			}
 			say("frames of %ux%u from the kernel (the %s)", head.width, head.height, s->camera->name);
 			continue;
 		}
@@ -1505,6 +1516,18 @@ worker(void *context)
 			switched = false;
 			af.state = AF_STEADY;
 			af.now = true;
+			continue;
+		}
+
+		/*
+		 * (each frame the shape the buffer was sized for: a sensor or mode changed meanwhile -- another opener's
+		 * HAKIOS_CAMERA_SENSOR -- would have the ISP read past the buffer's end. Back to the header, sized anew)
+		 */
+		if (f->header_bytes != head.header_bytes || f->sensor != head.sensor || f->width != head.width ||
+		    f->height != head.height || f->stride != head.stride) {
+			say("the kernel's frames changed shape (%ux%u, camera %u): sized again", f->width, f->height, f->sensor);
+			free(buffer);
+			buffer = NULL;
 			continue;
 		}
 
@@ -1579,7 +1602,10 @@ worker(void *context)
 			if (still && s->stills_wanted == 0) {
 				continue;
 			}
-			deliver(s, out, &isp, f, raw, metadata);
+			/* (a photograph is given only when it went: one asked for and dropped -- no buffer free -- is asked for still) */
+			if (!deliver(s, out, &isp, f, raw, metadata)) {
+				still = false;
+			}
 			if (still) {
 				s->stills_wanted--;
 				say("the photograph is given (%llu so far)", (unsigned long long)++s->stills_given);
@@ -1762,6 +1788,12 @@ stream_finalize(CMBaseObjectRef o)
 	}
 	pthread_mutex_unlock(&all_streams_lock);
 	(void)stream_stop(o);
+	/* (out of the streams' list: the other stream's next start would look at this one after it is freed) */
+	for (int i = 0; i < 2; i++) {
+		if (all_streams[i] == o) {
+			all_streams[i] = NULL;
+		}
+	}
 	for (int i = 0; i < OUTPUTS; i++) {
 		if (s->out[i].config) {
 			CFRelease(s->out[i].config);

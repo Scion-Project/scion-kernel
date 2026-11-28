@@ -726,6 +726,7 @@ lx_start(void)
 	int ret;
 
 	bus.how = lx_os_option("wifi_lx");
+	bus.closed = false;     /* (a start opens what an earlier stop -- of a driver that was never up, say -- closed) */
 	if (lx_prepare() != 0) {
 		lx_tell("lx: no thread, or no memory the radio can be given\n");
 		return (ENOMEM);
@@ -792,11 +793,13 @@ lx_start(void)
 	/*
 	 * The rest happens on the driver's own threads, until core.c has been through its start (it
 	 * says so with the flag below, whether that went well or not) or the exchange has failed.
-	 * It went well if the bus is still up: core.c stops it where it gives up.
+	 * It went well if the bus is still up: core.c stops it where it gives up. A run that ends
+	 * meanwhile ("wifi_ending", board/wifi.c) does not wait for it: what was started is wound
+	 * down below, before the DSP under it is shut down.
 	 */
 	began = lx_os_nanoseconds();
 	while (!test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags) && !test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags) &&
-	    lx_os_nanoseconds() - began < 60000000000ull) {
+	    lx_os_nanoseconds() - began < 60000000000ull && !lx_os_option("wifi_ending")) {
 		lx_pause_ms(10);
 	}
 	up = test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags) && bus.looks;
@@ -806,12 +809,25 @@ lx_start(void)
 	    ab->dev_flags);
 	if (!up) {
 		lx_pause_ms(600);		/* (for core.c to have wound down: the mode "off") */
+		/*
+		 * (core.c may have started the bus -- mission mode asked for -- and left the rings' thread at the copy engines: it
+		 * is stopped, and the registers closed, before the DSP is shut down under them: a register of a radio without its
+		 * DSP does not answer, and the phone resets without a word)
+		 */
+		bus_quiet();
+		bus.closed = true;
 		ath11k_qmi_deinit_service(ab);
 		return (test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags) ? ETIMEDOUT : EIO);
 	}
 	lx_pause_ms(1000);			/* (for what the firmware says unasked once it is ready) */
 	say_radio(ab);
 
+	if (lx_os_option("wifi_ending")) {
+		/* (the run has ended meanwhile: the driver is not taken up but goes down again at once, before its DSP does) */
+		ath11k_core_deinit(ab);
+		lx_tell("lx: the run ends: the driver is down again\n");
+		return (EIO);
+	}
 	driver = ab;
 	if (lx_os_option("wifi_station")) {
 		/* whoever wants a network asks the kernel, and the kernel asks the station: the driver stays up until lx_stop() */
@@ -847,6 +863,10 @@ lx_stop(void)
 	struct ath11k_base *ab = driver;
 
 	if (ab == NULL) {
+		/* (a start still on its way, or one that gave up: whatever of the bus it started is stopped, and the registers
+		 * closed, before the DSP is shut down) */
+		bus_quiet();
+		bus.closed = true;
 		return;
 	}
 	driver = NULL;
