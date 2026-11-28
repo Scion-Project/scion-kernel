@@ -20,7 +20,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 T27 = os.path.dirname(HERE)
 LIB = os.path.join(HERE, 'build-conf.sh')
-KEYS = {'BUILD', 'VERSION', 'PRODUCT', 'DEVICE_CLASS', 'IPSW_NAME', 'IPSW_SIZE', 'KERNEL', 'OS_DMG', 'SYSTEMOS_DMG',
+KEYS = {'BUILD', 'VERSION', 'PRODUCT', 'DEVICE_CLASS', 'IPSW_NAME', 'IPSW_SIZE', 'IPSW_SHA256', 'KERNEL', 'OS_DMG', 'SYSTEMOS_DMG',
         'APPOS_DMG', 'PATCHES', 'STATUS'}
 fails = 0
 
@@ -60,6 +60,7 @@ for b in builds:
     check(c.get('BUILD') == b, '%s.conf: BUILD is its file name' % b)
     check(c.get('STATUS') in ('supported', 'candidate'), '%s.conf: STATUS supported or candidate' % b)
     check(re.fullmatch(r'\d+', c.get('IPSW_SIZE', '')) is not None, '%s.conf: IPSW_SIZE is a number of bytes' % b)
+    check(re.fullmatch(r'[0-9a-f]{64}', c.get('IPSW_SHA256', '')) is not None, '%s.conf: IPSW_SHA256 is a SHA-256' % b)
     check(c.get('IPSW_NAME') == '%s_%s_%s_Restore.ipsw' % (c.get('PRODUCT'), c.get('VERSION'), b), '%s.conf: IPSW_NAME is Apple\'s name' % b)
     p = os.path.join(T27, c.get('PATCHES', ''))
     if c.get('STATUS') == 'supported':
